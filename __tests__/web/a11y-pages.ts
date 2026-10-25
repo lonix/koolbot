@@ -275,6 +275,43 @@ const UNAVAILABLE_PERMISSION_NOTICE: PermissionNotice = {
   missing: [],
 };
 
+/** The Quotes and Notices pages' notice (#1489): a missing permission in the bot-managed channel, and a check that could not run. */
+const channelNotice = (
+  id: string,
+  area: string,
+  feature: string,
+  channel: string,
+): PermissionNotice => ({
+  unavailable: null,
+  stale: true,
+  unchecked: [],
+  missing: [
+    {
+      feature: {
+        id,
+        area,
+        feature,
+        effect: `Messages in the ${area} channel are not handled.`,
+        fix: "",
+      },
+      permissions: ["Send Messages", "Manage Messages"],
+      target: { kind: "channel", id: "c1", name: channel },
+    },
+  ],
+});
+const QUOTES_MISSING_PERMISSION_NOTICE = channelNotice(
+  "quotes-post",
+  "Quotes",
+  "Posting quotes",
+  "quotes",
+);
+const NOTICES_MISSING_PERMISSION_NOTICE = channelNotice(
+  "notices-post",
+  "Notices",
+  "Posting notices",
+  "rules",
+);
+
 /** The bot's reaction-role messages as the welcome roles picker lists them (#1433). */
 const WELCOME_MESSAGES = {
   options: [
@@ -3641,6 +3678,74 @@ export function adminPages(): A11yPage[] {
         settingRows: [],
         groups: [],
         categoryOptions: [],
+      }),
+    },
+    {
+      name: "Quotes (missing bot permission notice)",
+      html: renderQuotesPage({
+        ...COMMON,
+        enabled: true,
+        channel: { name: "quotes", id: "c1", type: ChannelType.GuildText },
+        headerMessageId: "",
+        headerEnabled: true,
+        settingRows: [],
+        maxLength: 1000,
+        rows: [],
+        total: 0,
+        page: 1,
+        pageSize: 25,
+        search: "",
+        permissionNotice: QUOTES_MISSING_PERMISSION_NOTICE,
+      }),
+    },
+    {
+      name: "Quotes (bot permission check unavailable)",
+      html: renderQuotesPage({
+        ...COMMON,
+        enabled: true,
+        channel: { name: "quotes", id: "c1", type: ChannelType.GuildText },
+        headerMessageId: "",
+        headerEnabled: true,
+        settingRows: [],
+        maxLength: 1000,
+        rows: [],
+        total: 0,
+        page: 1,
+        pageSize: 25,
+        search: "",
+        permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
+      }),
+    },
+    {
+      name: "Notices (missing bot permission notice)",
+      html: renderNoticesPage({
+        ...COMMON,
+        enabled: true,
+        channel: { name: "rules", id: "c1", type: ChannelType.GuildText },
+        total: 0,
+        headerMessageId: "",
+        headerEnabled: true,
+        textChannels: [],
+        settingRows: [],
+        groups: [],
+        categoryOptions: [],
+        permissionNotice: NOTICES_MISSING_PERMISSION_NOTICE,
+      }),
+    },
+    {
+      name: "Notices (bot permission check unavailable)",
+      html: renderNoticesPage({
+        ...COMMON,
+        enabled: true,
+        channel: { name: "rules", id: "c1", type: ChannelType.GuildText },
+        total: 0,
+        headerMessageId: "",
+        headerEnabled: true,
+        textChannels: [],
+        settingRows: [],
+        groups: [],
+        categoryOptions: [],
+        permissionNotice: UNAVAILABLE_PERMISSION_NOTICE,
       }),
     },
     {

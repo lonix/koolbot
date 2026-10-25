@@ -16,6 +16,8 @@ import {
 import {
   renderVoiceChannelsPage,
   renderEventsPage,
+  renderQuotesPage,
+  renderNoticesPage,
 } from "../../src/web/admin-views.js";
 import {
   buildPermissionNotice,
@@ -450,5 +452,136 @@ describe("Voice Channels page", () => {
     const html = renderVoiceChannelsPage({ ...props } as never);
     expect(html).not.toContain("data-permission-notice");
     expect(html).not.toMatch(/\n{3}<div class="card">\n {2}<h2>Cleanup/);
+  });
+});
+
+const COMMON_QN = { csrfToken: "tok", remainingMs: 60_000 };
+
+describe("admin Quotes and Notices pages (#1489)", () => {
+  const checkFor = (id: string, over: Partial<FeatureCheck>): FeatureCheck =>
+    ({
+      feature: ref(id),
+      kind: "permission",
+      enabled: true,
+      outcome: "missing",
+      target: { kind: "channel", id: "c1", name: "the-channel" },
+      missing: ["Send Messages"],
+      ...over,
+    }) as FeatureCheck;
+  const reportOf = (checks: FeatureCheck[]): BotPermissionReport =>
+    ({
+      available: true,
+      reason: null,
+      fresh: true,
+      problems: [],
+      unknown: [],
+      quiet: [],
+      okFeatures: [],
+      notes: [],
+      checks,
+    }) as BotPermissionReport;
+
+  it("the registry has the ids the pages rely on, in the right area", () => {
+    const ids = (area: string): string[] =>
+      FEATURE_REQUIREMENTS.filter((f) => f.area === area).map((f) => f.id);
+    expect(ids("Quotes").sort()).toEqual([
+      "quotes-cleanup",
+      "quotes-pin",
+      "quotes-post",
+      "quotes-votes",
+    ]);
+    expect(ids("Notices").sort()).toEqual([
+      "notices-cleanup",
+      "notices-pin",
+      "notices-post",
+    ]);
+  });
+
+  const quotes = {
+    ...COMMON_QN,
+    enabled: true,
+    channel: { name: "q", id: "c1", type: ChannelType.GuildText },
+    headerMessageId: "",
+    settingRows: [],
+    maxLength: 1000,
+    rows: [],
+    total: 0,
+    page: 1,
+    pageSize: 25,
+    search: "",
+  };
+  const notices = {
+    ...COMMON_QN,
+    enabled: true,
+    channel: { name: "n", id: "c1", type: ChannelType.GuildText },
+    total: 0,
+    headerMessageId: "",
+    textChannels: [],
+    settingRows: [],
+    groups: [],
+    categoryOptions: [],
+  };
+  const render = {
+    Quotes: (n: PermissionNotice | null): string =>
+      renderQuotesPage({ ...quotes, permissionNotice: n } as never),
+    Notices: (n: PermissionNotice | null): string =>
+      renderNoticesPage({ ...notices, permissionNotice: n } as never),
+  };
+
+  describe.each([
+    ["Quotes", "quotes-post", "quotes-pin"],
+    ["Notices", "notices-post", "notices-pin"],
+  ] as const)("%s", (area, postId, pinId) => {
+    const noticeOf = (r: BotPermissionReport): PermissionNotice | null =>
+      buildPermissionNotice(r, { enabled: true, filter: inAreas(area) });
+
+    it("shows the missing permission and channel after the status line, with the link", () => {
+      const html = render[area](noticeOf(reportOf([checkFor(postId, {})])));
+      expect(html).toContain("data-permission-notice");
+      expect(html).toContain("<strong>Send Messages</strong>");
+      expect(html).toContain("in the channel “the-channel”");
+      expect(html).toContain('href="/admin/bot-permissions"');
+      expect(html.indexOf("kb-status")).toBeLessThan(
+        html.indexOf("data-permission-notice"),
+      );
+    });
+
+    it("names the cache when the read is stale", () => {
+      const r = { ...reportOf([checkFor(postId, {})]), fresh: false };
+      expect(render[area](noticeOf(r))).toContain("may be out of date");
+    });
+
+    it("says the check could not run, with the reason", () => {
+      const r = {
+        ...reportOf([]),
+        available: false,
+        reason: "The bot is not connected.",
+      };
+      const html = render[area](noticeOf(r));
+      expect(html).toContain("Bot permissions could not be checked");
+      expect(html).toContain("The bot is not connected.");
+    });
+
+    it("leaves out a sub-feature that is off (the pin check)", () => {
+      const html = render[area](
+        noticeOf(
+          reportOf([
+            checkFor(pinId, { enabled: false, missing: ["Pin Messages"] }),
+          ]),
+        ),
+      );
+      expect(html).not.toContain("data-permission-notice");
+    });
+
+    it("leaves out a feature of another area", () => {
+      const other = area === "Quotes" ? "notices-post" : "quotes-post";
+      const html = render[area](noticeOf(reportOf([checkFor(other, {})])));
+      expect(html).not.toContain("data-permission-notice");
+    });
+
+    it("shows nothing without a notice", () => {
+      const html = render[area](null);
+      expect(html).not.toContain("data-permission-notice");
+    });
   });
 });
