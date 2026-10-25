@@ -1532,8 +1532,16 @@ stop the page from saying everything is in place. The matrix lists it as _(off)_
   main channel's category, else its own category, else `events.category_id`), and does not repeat the
   group channel or clan tag warnings the panel already shows; a host who is not an admin gets
   "ask a server admin" instead of the link, since this page is admin-only. The other features
-  (reaction roles, leaderboard roles, the other logging channels and so on) are not
-  wired to the notice yet. The Moderation page names only the anti-raid alert channel and the moderation and moderation case review log channels.
+  (reaction roles, leaderboard roles and so on) are not
+  wired to the notice yet. The **Moderation** page names only the anti-raid alert channel and the moderation and moderation case review log channels
+  (those log channels also show in the **Core** section of All settings, below).
+- **On All settings (#1487).** Celebrations, welcome messages, looking for group, the weekly voice
+  stats announcements and the Discord log channels have no page of their own, so **All settings**
+  shows the same notice at the top of their sections, before the form: **Celebrations**, **Welcome**,
+  **LFG**, **Voice tracking** (the weekly announcement sections) and **Core** (the log channels). It
+  follows the rules above, with one check for the whole page, and a log channel whose own switch or
+  producing feature is off shows nothing. The table that maps a section to the registry areas it shows
+  is `SETTINGS_NOTICE_AREAS` in `src/web/settings-permission-notices.ts`; no other section shows a notice.
 - **Not built yet.** A "Re-authorise" invite link (it is not verified that Discord
   applies new permission bits to the bot's existing role) and a "Show all Discord
   permissions" toggle. Channel names are plain; Discord-style channel-type labels come with

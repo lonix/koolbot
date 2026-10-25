@@ -1301,6 +1301,52 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The bot-permission notice at the top of two sections (#1487): welcome
+      // messages with a missing permission, the log channels with a check that
+      // could not run.
+      name: "Settings (permission notice: missing, unavailable)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: [
+          {
+            category: "welcome",
+            rows: [
+              {
+                key: "welcome.enabled",
+                label: "Enable welcome messages",
+                current: true,
+                defaultValue: false,
+                type: "boolean",
+                description: "Greet new members in the welcome channel.",
+                category: "welcome",
+              },
+            ],
+          },
+          {
+            category: "core",
+            rows: [
+              {
+                key: "core.errors.enabled",
+                label: "Post errors to a channel",
+                current: true,
+                defaultValue: false,
+                type: "boolean",
+                description: "Post errors in the log channel.",
+                category: "core",
+              },
+            ],
+          },
+        ],
+        permissionNotices: {
+          welcome: MISSING_PERMISSION_NOTICE,
+          core: UNAVAILABLE_PERMISSION_NOTICE,
+        },
+        guildId: "g1",
+        guildName: "Test Guild",
+      }),
+    },
+    {
       name: "Settings (nested dependents, segmented control, reset)",
       html: renderSettingsPage({
         ...COMMON,
