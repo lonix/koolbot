@@ -449,6 +449,17 @@ a.kb-chip--warn:hover { text-decoration: underline; }
    and is fixed at the trigger's position, set by the script as --kb-picker-x / --kb-picker-y. Rows the search hides stay out of the layout. */
 .kb-picker__pop--floating { --kb-picker-x: 0px; --kb-picker-y: 0px; --kb-picker-list-h: 16rem; position: fixed; left: var(--kb-picker-x); top: var(--kb-picker-y); z-index: 1000; max-width: calc(100vw - 1rem); box-sizing: border-box; }
 .kb-picker__pop--floating [hidden] { display: none; }
+/* Multi-select (#1473): the chosen items are Mention chips above the trigger, each with an icon-only remove button; the trigger reads "Add". */
+.kb-picker__chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); min-width: 0; }
+.kb-picker__chip { display: inline-flex; align-items: center; gap: 0.1rem; min-width: 0; max-width: 100%; }
+.kb-picker__chip > .kb-mention { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding-right: 0.1rem; border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.kb-picker__chip-remove { display: inline-flex; align-items: center; justify-content: center; min-width: 1.5rem; min-height: 1.5rem; padding: 0; border: 0; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: var(--selected); color: var(--info-text); cursor: pointer; }
+.kb-picker__chip-remove:hover { background: var(--chrome); color: var(--text); }
+.kb-picker__chip-remove:focus-visible, .kb-picker__more:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.kb-picker__chip-remove:disabled { opacity: 0.5; cursor: not-allowed; }
+.kb-picker__none { font-size: var(--type-description-size); color: var(--muted); }
+.kb-picker__more { padding: 0 0.5rem; min-height: 1.5rem; border: 1px solid var(--control); border-radius: var(--radius-sm); background: var(--bg); color: var(--text-secondary); font: inherit; font-size: var(--type-description-size); cursor: pointer; }
+.kb-picker__add { color: var(--text-secondary); }
 .kb-picker__pop--floating .kb-picker__list { max-height: min(16rem, var(--kb-picker-list-h)); }
 .kb-picker--enhanced .kb-picker__trigger:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .kb-picker--enhanced .kb-picker__trigger[aria-invalid="true"] { outline: 2px solid var(--danger); outline-offset: 1px; }

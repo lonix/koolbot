@@ -1016,7 +1016,7 @@ function renderSelectionSummary(
     return opt ? optionText(opt) : missingText(id);
   });
   return (
-    `<div class="settings-selected muted" style="margin-top:.4rem;font-size:.85em">` +
+    `<div class="settings-selected muted" data-picker-summary style="margin-top:.4rem;font-size:.85em">` +
     `Selected: ${escapeHtml(tokens.join(", "))}` +
     `</div>`
   );
@@ -1269,10 +1269,16 @@ function renderControlInput(
         .map((v) => v.trim())
         .filter((v) => v !== ""),
     );
+    // The same `span.kb-picker` as the single pickers (#1473): the script
+    // turns the multiple select into chips plus a toggling popover. Without
+    // JavaScript it is the native list and the "Selected:" summary below.
+    const meta: PickerMeta[] = [];
+    const optionsHtml = buildOptionsHtml(options, selected, false, meta);
     return (
+      `<span class="kb-picker" data-picker data-picker-meta="${escapeHtml(JSON.stringify(meta))}">` +
       `<select${a11yAttr} name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}"${lockAttr}>` +
-      buildOptionsHtml(options, selected, false) +
-      `</select>` +
+      optionsHtml +
+      `</select></span>` +
       renderSelectionSummary(options, selected)
     );
   }

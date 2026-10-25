@@ -177,7 +177,7 @@ and services follow *Brand icons*, and every icon enters the repo as *Pulling ic
 
 Interface icons: `check`, `circle-check`, `triangle-alert`, `circle-x`, `info`, `chevron-right` (disclosures, links out of a row), `chevron-down`
 (*More*), `external-link`, `user`, `log-out`, `clock`, `bell`, `hash` (text channel), `volume-2` (voice channel), `crown` (team leader), `tag`,
-`settings` (a feature's settings section), `shuffle` (Randomise), `arrow-right-left` (move people), `lock`, `lock-open`, `plus`, `trash-2`,
+`settings` (a feature's settings section), `shuffle` (Randomise), `arrow-right-left` (move people), `lock`, `lock-open`, `plus`, `x` (remove a chip), `trash-2`,
 `shield-half` (staff scope), `grip-vertical` (drag handle), `ellipsis` (a row's menu), `refresh-cw` (check again), `zap` (test a connection),
 `wrench` (maintenance), `server` (servers).
 

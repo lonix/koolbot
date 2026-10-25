@@ -119,3 +119,29 @@ describe("channel picker accessibility (axe)", () => {
     expect(await axe(document.body, OPTIONS)).toHaveNoViolations();
   });
 });
+
+describe("multi-select channel picker accessibility (axe, #1473)", () => {
+  const MULTI = (): void => {
+    document.body.innerHTML =
+      `<main><h1>Settings</h1><label for="f">Channels</label>` +
+      `<span class="kb-picker" data-picker data-picker-meta="${META}"><select id="f" name="v" multiple>` +
+      `<optgroup label="Text channels"><option value="1" selected>x</option></optgroup>` +
+      `<optgroup label="Voice channels"><option value="3" selected>x</option></optgroup>` +
+      `<optgroup label="Roles"><option value="9">x</option></optgroup>` +
+      `</select></span></main>`;
+    document.documentElement.setAttribute("lang", "en");
+    document.title = "Picker";
+    (0, eval)(CHANNEL_PICKER_SCRIPT);
+  };
+
+  it("closed, with chips", async () => {
+    MULTI();
+    expect(await axe(document.body, OPTIONS)).toHaveNoViolations();
+  });
+
+  it("open", async () => {
+    MULTI();
+    trigger().click();
+    expect(await axe(document.body, OPTIONS)).toHaveNoViolations();
+  });
+});

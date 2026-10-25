@@ -132,6 +132,7 @@ export const TIMEZONE_SELECT_SCRIPT =
 // ---------- Channel, category and role picker (#1394) ----------
 
 const PICKER_CHEVRON = `<svg class="kb-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS["chevron-down"]}</svg>`;
+const PICKER_X = `<svg class="kb-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS.x}</svg>`;
 const PICKER_CHECK = `<svg class="kb-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS.check}</svg>`;
 
 /**
@@ -161,7 +162,7 @@ const PICKER_CHECK = `<svg class="kb-icon" viewBox="0 0 24 24" aria-hidden="true
  */
 export const CHANNEL_PICKER_SCRIPT =
   "(function(){" +
-  `var ICONS=${JSON.stringify(channelKindIcons())},CHEVRON=${JSON.stringify(PICKER_CHEVRON)},CHECK=${JSON.stringify(PICKER_CHECK)};` +
+  `var ICONS=${JSON.stringify(channelKindIcons())},CHEVRON=${JSON.stringify(PICKER_CHEVRON)},CHECK=${JSON.stringify(PICKER_CHECK)},XICON=${JSON.stringify(PICKER_X)};` +
   "var KINDS={text:{text:1,announcement:1,forum:1,thread:1},voice:{voice:1,stage:1},role:{role:1}},uid=0;" +
   "function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}" +
   "function svg(h){var s=document.createElement('span');s.innerHTML=h;return s.firstChild}" +
@@ -181,7 +182,7 @@ export const CHANNEL_PICKER_SCRIPT =
   "function init(box){var sel=box.querySelector('select');if(!sel||box.hasAttribute('data-ready'))return;box.setAttribute('data-ready','');" +
   "var meta=[];try{meta=JSON.parse(box.getAttribute('data-picker-meta')||'[]')||[]}catch(err){}" +
   "var n=++uid,items=read(sel,meta),rows=[],heads=[],vis=[],act=-1,open=false,i,lastGroup=null;" +
-  "var tid='kb-picker-'+n,lid=tid+'-list',labels=[],ids=[];" +
+  "var multi=sel.multiple,expanded=false,tid='kb-picker-'+n,lid=tid+'-list',labels=[],ids=[];" +
   "for(i=0;sel.labels&&i<sel.labels.length;i++){if(!sel.labels[i].id)sel.labels[i].id=tid+'-label'+i;labels.push(sel.labels[i].textContent.trim());ids.push(sel.labels[i].id)}" +
   "var name=labels.join(' ')||sel.getAttribute('aria-label')||'Choose';" +
   "var trig=el('button','kb-picker__trigger');trig.type='button';trig.id=tid;trig.setAttribute('aria-haspopup','listbox');trig.setAttribute('aria-expanded','false');" +
@@ -191,7 +192,7 @@ export const CHANNEL_PICKER_SCRIPT =
   "var lab=el('label','kb-picker__search'),inp=el('input');inp.type='search';inp.setAttribute('form','none');inp.autocomplete='off';inp.id=tid+'-search';" +
   "inp.setAttribute('role','combobox');inp.setAttribute('aria-autocomplete','list');inp.setAttribute('aria-controls',lid);inp.setAttribute('aria-expanded','true');" +
   "inp.setAttribute('aria-label','Search '+name);inp.placeholder='Search';lab.appendChild(inp);" +
-  "var ul=el('ul','kb-picker__list');ul.id=lid;ul.setAttribute('role','listbox');ul.setAttribute('aria-label',name);" +
+  "var ul=el('ul','kb-picker__list');ul.id=lid;ul.setAttribute('role','listbox');if(multi)ul.setAttribute('aria-multiselectable','true');ul.setAttribute('aria-label',name);" +
   "var st=el('p','kb-picker__hint');st.setAttribute('role','status');st.hidden=true;" +
   "var hint=el('p','kb-picker__hint'),kinds={};for(i=0;i<items.length;i++)kinds[items[i].kind]=1;" +
   "var parts=['Arrow keys move, Enter chooses, Esc closes.'];" +
@@ -213,12 +214,35 @@ export const CHANNEL_PICKER_SCRIPT =
   "trig.disabled=sel.disabled}" +
   "sel.addEventListener('focus',function(){attrs();trig.focus()});" +
   "if(window.MutationObserver)new MutationObserver(attrs).observe(sel,{attributes:true,attributeFilter:['aria-invalid','aria-describedby','disabled']});" +
-  "box.classList.add('kb-picker--enhanced');box.appendChild(trig);box.appendChild(pop);" +
+  "box.classList.add('kb-picker--enhanced');" +
+  // A multiple select shows its chips above the trigger (a button cannot hold
+  // the chips' own remove buttons), and the no-JavaScript "Selected:" line
+  // after the box becomes redundant.
+  "var chips=null;if(multi){chips=el('div','kb-picker__chips');box.appendChild(chips);" +
+  // Focusable by script only: it takes focus when a repaint leaves no button to
+  // take it (a disabled select expanding "+N more"), and is named for that.
+  "chips.tabIndex=-1;chips.setAttribute('role','group');" +
+  "if(labels.length||sel.getAttribute('aria-label'))chips.setAttribute('aria-label','Selected '+name);" +
+  "var nx=box.nextElementSibling;if(nx&&nx.hasAttribute('data-picker-summary'))nx.hidden=true}" +
+  "box.appendChild(trig);box.appendChild(pop);" +
+  "function isOn(k){return multi?sel.options[k].selected:k===sel.selectedIndex}" +
+  "function chipLabel(it){return(it.kind==='role'?'@':(ICONS[it.kind]&&it.kind!=='category')?'#':'')+(it.kind==='missing'?it.text:it.name)}" +
+  "function paintChips(){var sels=[],k,lim,c,b;for(k=0;k<items.length;k++)if(isOn(k))sels.push(k);" +
+  "chips.textContent='';if(!sels.length)chips.appendChild(el('span','kb-picker__none','None selected'));" +
+  "lim=expanded?sels.length:Math.min(sels.length,12);" +
+  "for(k=0;k<lim;k++){c=el('span','kb-picker__chip');c.appendChild(mention(items[sels[k]]));" +
+  "b=el('button','kb-picker__chip-remove');b.type='button';b.setAttribute('data-rm',String(sels[k]));" +
+  "b.setAttribute('aria-label','Remove '+chipLabel(items[sels[k]]));b.disabled=sel.disabled;b.appendChild(svg(XICON));c.appendChild(b);chips.appendChild(c)}" +
+  "if(sels.length>lim){b=el('button','kb-picker__more','+'+(sels.length-lim)+' more');b.type='button';b.setAttribute('data-more','');" +
+  "b.setAttribute('aria-label','Show '+(sels.length-lim)+' more selected');chips.appendChild(b)}}" +
   "function paint(){var cur=items[sel.selectedIndex]||items[0];trig.textContent='';" +
-  "if(cur)trig.appendChild(mention(cur));trig.appendChild(svg(CHEVRON));attrs();" +
-  "for(var k=0;k<rows.length;k++){var on=k===sel.selectedIndex,c=rows[k].querySelector('svg[data-check]');" +
+  "if(multi){paintChips();trig.appendChild(el('span','kb-picker__add','Add'))}else if(cur)trig.appendChild(mention(cur));trig.appendChild(svg(CHEVRON));attrs();" +
+  "for(var k=0;k<rows.length;k++){var on=isOn(k),c=rows[k].querySelector('svg[data-check]');" +
   "rows[k].setAttribute('aria-selected',on?'true':'false');" +
-  "if(on&&!c){c=svg(CHECK);c.setAttribute('data-check','');rows[k].appendChild(c)}else if(!on&&c)rows[k].removeChild(c)}}" +
+  "if(on&&!c){c=svg(CHECK);c.setAttribute('data-check','');rows[k].appendChild(c)}else if(!on&&c)rows[k].removeChild(c)}" +
+  // The chips may have wrapped onto another row, which moves the Add trigger the
+  // open menu hangs from: place it again (a closed menu is placed when it opens).
+  "if(open)place()}" +
   "function setActive(k){if(act>=0&&rows[act])rows[act].classList.remove('is-active');act=k;" +
   "if(k<0||!rows[k]){inp.removeAttribute('aria-activedescendant');return}" +
   "rows[k].classList.add('is-active');inp.setAttribute('aria-activedescendant',rows[k].id);" +
@@ -230,7 +254,7 @@ export const CHANNEL_PICKER_SCRIPT =
   "function filter(){var p=parse(inp.value),k,shown={};vis=[];" +
   "for(k=0;k<items.length;k++){var ok=hit(items[k],p);rows[k].hidden=!ok;if(ok){vis.push(k);shown[items[k].group]=1}}" +
   "for(k=0;k<heads.length;k++)heads[k].el.hidden=!shown[heads[k].group];" +
-  "var on=vis.indexOf(sel.selectedIndex);setActive(vis.length?(on>=0?vis[on]:vis[0]):-1);" +
+  "var on=-1,f0;for(f0=0;f0<vis.length&&on<0;f0++)if(isOn(vis[f0]))on=f0;setActive(vis.length?(on>=0?vis[on]:vis[0]):-1);" +
   "var q=inp.value.trim();st.hidden=!q;st.textContent=q?(vis.length?vis.length+(vis.length===1?' match':' matches'):'No matches'):'';" +
   // The menu's height follows the rows and the status line, so its place does too.
   "if(open)place()}" +
@@ -258,22 +282,49 @@ export const CHANNEL_PICKER_SCRIPT =
   "function show(){if(open||sel.disabled)return;open=true;(box.closest('main')||document.body).appendChild(pop);pop.hidden=false;" +
   "window.addEventListener('scroll',onScroll,true);window.addEventListener('resize',place);" +
   "trig.setAttribute('aria-expanded','true');inp.value='';filter();inp.focus()}" +
-  "function choose(k){if(k<0||!items[k])return;if(sel.selectedIndex!==k){sel.selectedIndex=k;" +
-  "sel.dispatchEvent(new Event('input',{bubbles:true}));sel.dispatchEvent(new Event('change',{bubbles:true}))}paint();close(true)}" +
+  "function fireBoth(){sel.dispatchEvent(new Event('input',{bubbles:true}));sel.dispatchEvent(new Event('change',{bubbles:true}))}" +
+  // A multiple select toggles the row and stays open, so several can be picked
+  // in a row; Escape, Tab or a click outside closes it.
+  // A click makes its row the active one, as Enter does, so the placement that
+  // `paint()` runs while open scrolls to the row just toggled and not back to the
+  // row that was active before.
+  "function choose(k){if(k<0||!items[k])return;if(multi){setActive(k);sel.options[k].selected=!sel.options[k].selected;fireBoth();paint();return}" +
+  "if(sel.selectedIndex!==k){sel.selectedIndex=k;fireBoth()}paint();close(true)}" +
+  "function drop(k){if(!sel.options[k]||!sel.options[k].selected||sel.disabled)return;sel.options[k].selected=false;fireBoth();paint()}" +
+  "function lastOn(){for(var k=items.length-1;k>=0;k--)if(sel.options[k].selected)return k;return -1}" +
+  "if(chips)chips.addEventListener('click',function(e){var t=e.target&&e.target.closest?e.target.closest('button'):null;if(!t)return;" +
+  // `paint()` replaces the focused "+N more" button: hand focus to the first
+  // remove button it revealed (the ones before it were already shown), or to the
+  // chip group when the select is disabled and every remove button is too.
+  "if(t.hasAttribute('data-more')){var seen=chips.querySelectorAll('[data-rm]').length;expanded=true;paint();" +
+  "var nb=chips.querySelectorAll('[data-rm]')[seen];(nb&&!nb.disabled?nb:chips).focus();return}" +
+  "if(t.hasAttribute('data-rm')){drop(Number(t.getAttribute('data-rm')));if(!trig.disabled)trig.focus()}});" +
   "function move(by){if(!vis.length)return;var at=vis.indexOf(act),to=at<0?0:Math.min(vis.length-1,Math.max(0,at+by));setActive(vis[to])}" +
   "trig.addEventListener('click',function(){if(open)close(true);else show()});" +
-  "trig.addEventListener('keydown',function(e){if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();show()}});" +
+  // Already open (focus came back to the trigger after a chip was removed): the
+  // arrows go back to the search box instead of doing nothing.
+  "trig.addEventListener('keydown',function(e){if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();if(open)inp.focus();else show()}});" +
   "inp.addEventListener('input',filter);" +
   "inp.addEventListener('keydown',function(e){var m=e.key;" +
   // An input method is composing (Enter confirms the composition, Escape cancels it): leave every key to it.
   "if(e.isComposing||e.keyCode===229)return;" +
   "if(m==='ArrowDown'){e.preventDefault();move(1)}else if(m==='ArrowUp'){e.preventDefault();move(-1)}" +
   "else if(m==='Home'&&vis.length){e.preventDefault();setActive(vis[0])}else if(m==='End'&&vis.length){e.preventDefault();setActive(vis[vis.length-1])}" +
-  "else if(m==='Enter'){e.preventDefault();choose(act)}else if(m==='Escape'){e.preventDefault();e.stopPropagation();close(true)}else if(m==='Tab')close(true)});" +
+  "else if(m==='Backspace'&&multi&&!inp.value){e.preventDefault();drop(lastOn())}else if(m==='Enter'){e.preventDefault();choose(act)}else if(m==='Tab')close(true)});" +
+  // Escape closes from anywhere in the picker while it is open (the search box,
+  // the trigger, a chip's remove button, "+N more"), not only from the search
+  // box: a repaint moves focus off the box, and the open popover lives outside
+  // the wrapper, so both listen. Closed, Escape is left to the page (a dialog).
+  "function esc(e){if(!open||e.key!=='Escape'||e.isComposing||e.keyCode===229)return;e.preventDefault();e.stopPropagation();close(true)}" +
+  "box.addEventListener('keydown',esc);pop.addEventListener('keydown',esc);" +
   "ul.addEventListener('mousedown',function(e){e.preventDefault()});" +
   "ul.addEventListener('click',function(e){var r=e.target&&e.target.closest?e.target.closest('[data-i]'):null;if(r)choose(Number(r.getAttribute('data-i')))});" +
   "function inside(t){return box.contains(t)||pop.contains(t)}" +
-  "document.addEventListener('click',function(e){if(open&&!inside(e.target))close(false)});" +
+  // A handler on the way up may have repainted and removed the clicked node (a
+  // chip's remove button, "+N more", the check on a chosen row), so it no longer
+  // sits in the picker: ask the path the event took, which was fixed at dispatch.
+  "document.addEventListener('click',function(e){if(!open)return;var p=e.composedPath?e.composedPath():[];" +
+  "if(p.indexOf(box)<0&&p.indexOf(pop)<0&&!inside(e.target))close(false)});" +
   "function leave(e){if(open&&e.relatedTarget&&!inside(e.relatedTarget))close(false)}" +
   "box.addEventListener('focusout',leave);pop.addEventListener('focusout',leave);" +
   "sel.addEventListener('change',paint);" +
