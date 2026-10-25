@@ -256,9 +256,8 @@ describe("GET /me/events/new bot permission notice (#1478)", () => {
     mockCheck.mockResolvedValue(lacking);
     const html = await (await harness.get("")).text();
     expect(html).toContain('data-permission-inline="event-channels"');
-    expect(html).toContain(
-      "Bot lacks Manage Channels in the category “Events”",
-    );
+    expect(html).toContain("Bot lacks Manage Channels");
+    expect(html).toContain("In the category “Events”.");
     expect(html).toContain("Create Events");
     expect(html).toContain("Ask a server admin");
     expect(html).not.toContain("/admin/bot-permissions");

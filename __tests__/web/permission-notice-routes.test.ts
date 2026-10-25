@@ -159,7 +159,8 @@ describe.each([
     const html = await (await harness.get(path)).text();
     expect(html).toContain(marker);
     expect(html).toContain(featureName);
-    expect(html).toContain(`in the category “${category}”`);
+    // The inline form starts the sentence with it.
+    expect(html).toMatch(new RegExp(`in the category “${category}”`, "i"));
     expect(html).toContain('href="/admin/bot-permissions"');
   });
 

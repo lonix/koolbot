@@ -377,7 +377,7 @@ describe("admin Events page", () => {
     const html = renderEventsPage({ ...props, permissionNotice: noticeFor() });
     expect(html).not.toContain("data-permission-notice");
     expect(html).toContain('data-permission-inline="event-channels"');
-    expect(html).toContain("in the category “Events”");
+    expect(html).toContain("In the category “Events”.");
     expect(html.indexOf("groups-enabled-help")).toBeLessThan(
       html.indexOf("data-permission-inline"),
     );

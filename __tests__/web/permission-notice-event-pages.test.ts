@@ -174,9 +174,8 @@ describe("renderInlinePermissionNotice", () => {
     expect(html).toContain(
       'class="kb-chip kb-chip--warn" href="/admin/bot-permissions"',
     );
-    expect(html).toContain(
-      "Bot lacks Manage Channels in the category “Events”",
-    );
+    expect(html).toContain("Bot lacks Manage Channels");
+    expect(html).toContain("In the category “Events”.");
     expect(html).toContain("are not created, deleted or put in order");
     expect(html).not.toContain("Ask a server admin");
   });
@@ -197,7 +196,8 @@ describe("renderInlinePermissionNotice", () => {
       }),
       { canLinkToPage: true },
     );
-    expect(html).toContain("Bot lacks Manage Nicknames server-wide");
+    expect(html).toContain("Bot lacks Manage Nicknames");
+    expect(html).toContain("Server-wide.");
   });
 
   it("says a permission could not be checked, with the reason, and never that all is well", () => {

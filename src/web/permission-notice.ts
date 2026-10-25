@@ -144,6 +144,9 @@ function where(target: PermissionTarget): string {
   return `in the ${target.kind} “${target.name}”`;
 }
 
+const capitalise = (text: string): string =>
+  text.charAt(0).toUpperCase() + text.slice(1);
+
 function callout(
   tone: "warn" | "",
   title: string,
@@ -278,9 +281,9 @@ export function partitionNotice<S extends string>(
  * The slice of a notice that belongs to one field, as a chip and a help line
  * right under it (components.md, "Missing permission next to the setting it
  * breaks"). Empty string for null. It is the same finding as the block form
- * (`renderPermissionNotice`), at the field: the chip says what is missing and
- * where, the line says what stops working. A stale read is labelled on the
- * slice itself, since a slice is read on its own.
+ * (`renderPermissionNotice`), at the field: the chip says what is missing (short,
+ * as a chip does not wrap), the line says where and what stops working. A stale
+ * read is labelled on the slice itself, since a slice is read on its own.
  */
 export function renderInlinePermissionNotice(
   notice: PermissionNotice | null,
@@ -301,7 +304,7 @@ export function renderInlinePermissionNotice(
   const lines: string[] = [];
   for (const m of notice.missing) {
     lines.push(
-      `<p class="kb-help" data-permission-inline="${escapeHtml(m.feature.id)}">${chip(`Bot lacks ${m.permissions.join(", ")} ${where(m.target)}`, true)} ${escapeHtml(m.feature.effect)}${escapeHtml(askAdmin)}${escapeHtml(stale)}</p>`,
+      `<p class="kb-help" data-permission-inline="${escapeHtml(m.feature.id)}">${chip(`Bot lacks ${m.permissions.join(", ")}`, true)} ${escapeHtml(capitalise(where(m.target)))}. ${escapeHtml(m.feature.effect)}${escapeHtml(askAdmin)}${escapeHtml(stale)}</p>`,
     );
   }
   for (const u of notice.unchecked) {
