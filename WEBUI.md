@@ -1467,12 +1467,35 @@ channel); the page does not check that, as it does not check lock-down permissio
 failure is never silent: the member is told something went wrong, and a close that cannot lock
 the channel is refused. Without a ticket category the channels are created at the top of the
 channel list, which needs Manage Channels server-wide; that case is shown as _Not checked_ for
-the category row, with a note. The channels of scheduled announcements and polls are
-stored on each schedule, not in a setting, so they are not checked here. Four of the posting
+the category row, with a note. Four of the posting
 channels are optional: the event announcement channel, the leaderboard announcement channel,
 the celebrations channel and the LFG channel (empty means the channel `/lfg` was run in, which
 cannot be checked). Left empty, the feature is treated as not in use: no note, and it does not
 stop the page from saying everything is in place. The matrix lists it as _(off)_ then.
+
+Scheduled announcements and polls are checked too (#1481). Their channel is stored on each
+schedule, not in a setting, so the page reads the enabled schedules of the server (one read per
+kind, kept for the same 30 seconds as the Discord read, and only while announcements or polls
+are switched on) and checks every channel they use, in that channel, with overwrites. A channel
+shared by several schedules is checked once. Both need a plain text channel. Scheduled
+announcements need View Channel and Send Messages. Embed Links is checked only in the channels
+of announcements that have an embed, and Mention @everyone, @here and All Roles only in the
+channels of announcements whose text pings `@everyone`, `@here` or a role that members cannot
+mention themselves (a role that is mentionable needs nothing). Scheduled polls need View
+Channel, Send Messages and Send Polls, and Mention @everyone, @here and All Roles only when
+the role to ping is not mentionable. Without View Channel, Send Messages, Send Polls or, for
+an announcement with an embed, Embed Links, the post fails: as a line in the bot's log for a
+scheduled run (a poll's last run is then not updated and nothing retries until the next
+time), and as an error on the Announcements page for Post now and Send once. Without the ping
+permission the message is still posted, but nobody is notified, and nothing says so. These
+effects are read from the code and Discord's documented permission model, not tried live. When no
+enabled schedule uses a permission, its entry is treated as not in use: no note, it does not
+stop the page from saying everything is in place, and the matrix lists it as _(off)_. A
+channel that is gone, is not a plain text channel (a voice, announcement or forum channel,
+or a thread) or whose pinged role cannot be found (when the bot lacks the ping permission and
+nothing else in that channel definitely needs it) is _Not checked_, never fine, and so is a
+schedule list that cannot be read from the database. Schedules that are switched off are not
+checked, and a placeholder that expands to a mention is not seen.
 
 - **Effective permissions.** A category or channel is checked with the bot's
   permissions _in that channel_, so an overwrite that denies a permission the bot's
@@ -1493,9 +1516,8 @@ stop the page from saying everything is in place. The matrix lists it as _(off)_
 - **All Discord permissions.** A folded card at the bottom of the page lists every Discord
   permission with whether the bot's role holds it (the managed role's own server-wide list, without
   channel overwrites, and not widened by Administrator) and what KoolBot does with it:
-  _checked in the table above_, _used, not checked on this page_ (moderation actions, the
-  channels of scheduled announcements and polls, and the overwrite permissions of read-only channels,
-  each with what for), or _only needed if a Role group grants it_
+  _checked in the table above_, _used, not checked on this page_ (moderation actions and the
+  overwrite permissions of read-only channels, each with what for), or _only needed if a Role group grants it_
   (KoolBot does not use it itself, but the bot can only hand out permissions it holds, so no permission is ever
   labelled plainly unused). A permission that is not classified yet (a flag Discord added later) is shown as
   such, never as safe to remove. Administrator is not required for the bot's own features, but without it a
