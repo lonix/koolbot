@@ -1175,6 +1175,11 @@ Its **Settings** card edits every `birthdays.*` key in place, with
 `birthdays.enabled` as the cascade master. Saving a new `birthdays.cron` or
 flipping the feature re-arms the birthday job straight away.
 
+Below the status line, the **Birthdays** page shows the bot-permission notice (#1491) when the bot lacks
+View Channel or Send Messages in the birthday channel. It follows the rules in **Bot permissions** (only
+while birthdays are on and the channel is set, "could not be checked" with the reason, a cached read
+labelled as possibly out of date) and never says that all is well.
+
 **Setting rows (#1318).** The Settings page and every feature card lay each key
 out as a row: the name and a one-line description on the left, the control on
 the right, and the rest of a long description plus the dotted key behind a
@@ -1564,8 +1569,10 @@ checked, and a placeholder that expands to a mention is not seen.
   main channel's category, else its own category, else `events.category_id`), and does not repeat the
   group channel or clan tag warnings the panel already shows; a host who is not an admin gets
   "ask a server admin" instead of the link, since this page is admin-only. The **Quotes** and
-  **Notices** pages (#1489) show the notice for their own channel only. The reaction roles, role groups, leaderboard roles, Birthdays and Rules
-  pages are not wired to the notice yet. The **Moderation** page names only the anti-raid alert channel and the moderation and moderation case review log channels
+  **Notices** pages (#1489) show the notice for their own channel only. The **Birthdays** and **Rules** pages (#1491) do the same for the birthday
+  channel, the rules channel, the Manage Roles permission and the position of the acceptance role (an unreadable position is listed as
+  "could not be checked" with its note). The reaction roles, role groups and leaderboard roles pages are not wired to the notice yet.
+  The **Moderation** page names only the anti-raid alert channel and the moderation and moderation case review log channels
   (those log channels also show in the **Core** section of All settings, below).
 - **On All settings (#1487).** Celebrations, welcome messages, looking for group, the weekly voice
   stats announcements and the Discord log channels have no page of their own, so **All settings**
@@ -1829,6 +1836,12 @@ optional rules / terms acceptance gate. It is off by default (`rules.enabled`) a
 case where KoolBot gives a role to everyone: a role that means "has accepted the rules". The
 settings (`rules.channel_id`, `rules.role_id`, `rules.message`, `rules.button_label`) live on
 **Settings** and in the Setup Wizard; this page does the work around them.
+
+Under the **Status** card, the page shows the bot-permission notice (#1491) when the bot lacks View Channel,
+Send Messages or Read Message History in the rules channel, Manage Roles for the acceptance role, or sits at or below
+that role in the role list. It follows the rules in **Bot permissions** (only while rules acceptance is on and the
+channel or role is set, "could not be checked" with the reason, a cached read labelled as possibly out of date)
+and never says that all is well. The page shows no role-position warning of its own, so nothing is left out as a duplicate.
 
 - **Post the rules message.** KoolBot posts the text with an **Accept** button in the rules
   channel (and edits that same message when you change the text). Make the channel read-only for

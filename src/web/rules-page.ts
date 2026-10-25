@@ -25,6 +25,10 @@ import {
   type FlashMessage,
 } from "./admin-views.js";
 import { renderAdoptionDiff } from "./adoption-diff.js";
+import {
+  renderPermissionNotice,
+  type PermissionNotice,
+} from "./permission-notice.js";
 
 /**
  * Rules acceptance admin page (#1024). Settings live on the Settings page; this
@@ -126,6 +130,8 @@ export async function loadRulesPage(
 }
 
 export interface RulesPageProps extends RulesPageData {
+  /** What the bot lacks for the rules channel and the acceptance role (#1491). Null: nothing to say. */
+  permissionNotice?: PermissionNotice | null;
   csrfToken: string;
   remainingMs: number;
   navFeatureStatus?: NavFeatureStatus;
@@ -287,7 +293,7 @@ export function renderRulesPage(props: RulesPageProps): string {
 ${renderFlash(props.flash)}
 ${job}
 ${renderNotices(props)}
-${renderStatus(props, csrf)}
+${renderStatus(props, csrf)}${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
 ${renderRepost(props, csrf)}
 ${renderRollout(props, csrf)}
 ${props.jobId ? `${scriptTag(JOB_SCRIPT(props.jobId))}` : ""}
