@@ -106,9 +106,12 @@ import {
   type EventGroupPreset,
 } from "../content/event-group-presets.js";
 import {
-  MARKER_COLOURS,
   deriveTagScript,
+  groupBuilderScript,
   groupRowsScript,
+  groupSetRowScript,
+  markerColoursScript,
+  renderGroupBuilder,
 } from "./event-group-form.js";
 import type { GroupFormPrefill } from "../services/event-last-setup-service.js";
 import {
@@ -3225,17 +3228,7 @@ export function renderGroupsSection(
         <p class="kb-label" id="groups-size-quick-label">Max per group</p>
         <div class="kb-segmented" role="radiogroup" aria-labelledby="groups-size-quick-label">${sizeChoices}</div>
       </div>
-      <div class="kb-field" data-group-builder hidden>
-        <p class="kb-label" id="groups-build-label">Build groups</p>
-        <div class="kb-row" role="group" aria-labelledby="groups-build-label">
-          <input type="number" class="kb-input kb-input--sm kb-input--num" data-build-count${detached} min="1" max="${limits.maxCount}" value="${Math.min(4, limits.maxCount)}" aria-label="Number of groups">
-          <span class="kb-unit">groups of</span>
-          <input type="number" class="kb-input kb-input--sm kb-input--num" data-build-size${detached} min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" value="5" aria-label="Members in each group (empty = no limit)">
-          <div class="kb-segmented" role="radiogroup" aria-label="Names for the groups"><label><input type="radio" name="groups_build_names"${detached} value="colours" checked><span>Colours</span></label><label><input type="radio" name="groups_build_names"${detached} value="numbers"><span>Numbered</span></label></div>
-          <button type="button" class="kb-btn kb-btn--sm" data-build>Generate</button>
-        </div>
-        <p class="kb-help">Fills in the rows below. Colours name the groups Red, Blue, Green… with a matching marker; you can change anything afterwards.</p>
-      </div>
+      ${renderGroupBuilder(limits.maxCount)}
       <div data-group-editor class="kb-stack">
       ${GROUP_ROWS_HEAD}
       <div data-group-rows data-max="${limits.maxCount}" class="kb-grouprows">
@@ -3292,9 +3285,7 @@ export function renderGroupsSection(
 // back with the error. Everything storage-related is wrapped in try/catch: it
 // is a convenience only.
 function eventGroupsScript(): string {
-  const colours = JSON.stringify(
-    MARKER_COLOURS.map((c) => [c.emoji, c.colour]),
-  );
+  const colours = markerColoursScript();
   return (
     "(function(){" +
     "var form=document.querySelector('form[data-event-form]');" +
@@ -3366,10 +3357,7 @@ function eventGroupsScript(): string {
     "form.addEventListener('invalid',function(e){var el=e.target;if(!el||!el.closest||!body.contains(el))return;" +
     "for(var a=el.parentElement;a&&a!==form;a=a.parentElement){if(a===editor){if(editor.hidden)setEditor(true)}" +
     "else{if(a.hidden)a.hidden=false;if(a.tagName==='DETAILS')a.open=true}}},true);" +
-    "function setRow(i,g){while(rows().length<=i){if(!addRow())return}" +
-    "f(i,'name').value=g.name||'';f(i,'kind').value=g.kind||'team';" +
-    "f(i,'size').value=g.size==null?'':g.size;f(i,'tag').value=g.tag||'';f(i,'marker').value=g.marker||'';" +
-    "['size','tag','marker'].forEach(function(k){f(i,k).removeAttribute('data-auto');f(i,k).removeAttribute('data-manual')})}" +
+    groupSetRowScript() +
     // The tag follows the name (Red -> RED) while clan tags are on, until it is edited.
     deriveTagScript("MAXTAG") +
     "function deriveTags(){if(!tagsOn())return;Array.prototype.forEach.call(rows(),function(r,i){" +
@@ -3429,18 +3417,10 @@ function eventGroupsScript(): string {
     "enabled.checked=true;show();deriveTags();if(kr())kr().syncAll();lobby();validity();summarise();compact(true)}" +
     "Array.prototype.forEach.call(form.querySelectorAll('input[type=radio][name=groups_preset]'),function(r){r.addEventListener('change',onPreset)});" +
     // The quick builder: N groups of S, named by colour or number, one marker each.
-    "var build=form.querySelector('[data-build]');" +
-    "if(build)build.addEventListener('click',function(){var cnt=form.querySelector('[data-build-count]'),sz=form.querySelector('[data-build-size]');" +
-    "var l=form.elements['groups_captains_lobby'];var room=max-(l&&l.checked&&!l.disabled?1:0);" +
-    "var n=Math.max(1,Math.min(parseInt(cnt.value,10)||1,room));cnt.value=n;" +
-    "var s=parseInt(sz.value,10);var size=s>=MINSIZE&&s<=MAXSIZE?String(s):'';" +
-    "var byColour=form.querySelector('input[name=groups_build_names]:checked').value==='colours'&&n<=COLOURS.length;" +
-    "var word=val('groups_label')||'Team';" +
-    "var total=Math.max(rows().length,n);" +
-    "for(var i=0;i<total;i++){if(i<n){var c=COLOURS[i%COLOURS.length];" +
-    "setRow(i,{name:byColour?c[1]:word+' '+(i+1),kind:'team',size:size,tag:'',marker:c[0]});" +
-    "if(size)f(i,'size').setAttribute('data-auto','1');f(i,'marker').setAttribute('data-auto','1')}else setRow(i,{})}" +
-    "enabled.checked=true;show();deriveTags();if(kr())kr().syncAll();custom();compact(true);summarise();validity()});" +
+    groupBuilderScript(
+      "enabled.checked=true;show();deriveTags();if(kr())kr().syncAll();custom();compact(true);summarise();validity()",
+    ) +
+    ";" +
     "function check(){var errs=[],seen=Object.create(null),leads=0,filled=0;" +
     "Array.prototype.forEach.call(rows(),function(r,i){var p=i+1;" +
     "var name=val('group_'+i+'_name').replace(/\\s+/g,' '),size=val('group_'+i+'_size'),tag=val('group_'+i+'_tag'),mk=val('group_'+i+'_marker');" +

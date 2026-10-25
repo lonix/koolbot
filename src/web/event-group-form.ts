@@ -7,7 +7,11 @@
  * the host panel, so the list and the picker live here once.
  */
 
-import { GROUP_MARKER_MAX_CHARS } from "../services/event-groups.js";
+import {
+  GROUP_MARKER_MAX_CHARS,
+  GROUP_SIZE_MAX,
+  GROUP_SIZE_MIN,
+} from "../services/event-groups.js";
 
 export interface MarkerChoice {
   /** The emoji, as it goes into the group's voice channel name. */
@@ -175,5 +179,98 @@ export function groupRowsScript(): string {
     "window.koolGroupRows={enhance:enhance,syncAll:syncAll,closePicker:function(){closePop(false)}};" +
     "syncAll();" +
     "})();"
+  );
+}
+
+/** The generated-group colours as a JS array literal: `[[emoji, colour], ...]`. */
+export function markerColoursScript(): string {
+  return JSON.stringify(MARKER_COLOURS.map((c) => [c.emoji, c.colour]));
+}
+
+/**
+ * The quick builder's controls (#1299): N groups of S, named by colour or
+ * number, with a Generate button. The event form and both preset editors render
+ * this one block, so they offer the same builder. It ships `hidden` and the page
+ * script shows it. Its fields belong to no form (`form="none"`): they are
+ * neither posted nor saved in a draft, they only drive the script.
+ */
+export function renderGroupBuilder(maxCount: number): string {
+  const detached = ' form="none"';
+  // `hidden` sits on a wrapper with no styles of its own: `.kb-field` sets
+  // `display`, which would beat the browser's [hidden] and show the builder (and
+  // a Generate button that does nothing) to a visitor without scripts.
+  return `<div data-group-builder hidden>
+      <div class="kb-field">
+        <p class="kb-label" id="groups-build-label">Build groups</p>
+        <div class="kb-row" role="group" aria-labelledby="groups-build-label">
+          <input type="number" class="kb-input kb-input--sm kb-input--num" data-build-count${detached} min="1" max="${maxCount}" value="${Math.min(4, maxCount)}" aria-label="Number of groups">
+          <span class="kb-unit">groups of</span>
+          <input type="number" class="kb-input kb-input--sm kb-input--num" data-build-size${detached} min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" value="5" aria-label="Members in each group (empty = no limit)">
+          <div class="kb-segmented" role="radiogroup" aria-label="Names for the groups"><label><input type="radio" name="groups_build_names"${detached} value="colours" checked><span>Colours</span></label><label><input type="radio" name="groups_build_names"${detached} value="numbers"><span>Numbered</span></label></div>
+          <button type="button" class="kb-btn kb-btn--sm" data-build>Generate</button>
+        </div>
+        <p class="kb-help" role="status" data-build-note hidden></p>
+        <p class="kb-help">Fills in the rows below. Colours name the groups Red, Blue, Green… with a matching marker; you can change anything afterwards.</p>
+      </div>
+    </div>`;
+}
+
+/**
+ * The JavaScript for `setRow(i, group)`: puts one group into row `i` (allocating
+ * the row through `addRow()`, which stops at the cap, so a row past the cap is
+ * never made) and forgets which of its values were automatic. Pasted into the
+ * event form's and both preset editors' scripts. It needs `rows`, `addRow` and
+ * `f` (a row's field) in scope.
+ */
+export function groupSetRowScript(): string {
+  return (
+    "function setRow(i,g){while(rows().length<=i){if(!addRow())return}" +
+    "f(i,'name').value=g.name||'';f(i,'kind').value=g.kind||'team';" +
+    "f(i,'size').value=g.size==null?'':g.size;f(i,'tag').value=g.tag||'';f(i,'marker').value=g.marker||'';" +
+    "['size','tag','marker'].forEach(function(k){f(i,k).removeAttribute('data-auto');f(i,k).removeAttribute('data-manual')})}"
+  );
+}
+
+/**
+ * The JavaScript that wires the Generate button: N groups of S, named by colour
+ * or by number, one marker each. The one copy for the event form and both preset
+ * editors, so the rules cannot drift apart:
+ *
+ * - the count is clamped to the room the cap leaves (the Captains lobby, while
+ *   ticked and not disabled, is a channel and takes one place); with no room left
+ *   (a cap of 1 and the lobby ticked) nothing is changed and the note next to the
+ *   button says what to do, because even one group would put the form over the cap;
+ * - rows past the count are emptied, however many a restore or an over-cap
+ *   preset left, and no row is allocated past the cap (`setRow` allocates only
+ *   through `addRow()`, which refuses at the cap);
+ * - generated sizes and markers are marked automatic, and the tag is left empty
+ *   for `deriveTags` to derive while clan tags are on.
+ *
+ * A change anywhere in the form (the lobby tick, say) clears the note.
+ *
+ * `afterBuild` is the page's own JavaScript to run once the rows are set (derive
+ * tags, resync the pickers and the button, fold or summarise). Needs `form`,
+ * `max`, `rows`, `val`, `f`, `setRow`, `COLOURS`, `MINSIZE` and `MAXSIZE` in
+ * scope. The result is one statement without a trailing semicolon.
+ */
+export function groupBuilderScript(afterBuild: string): string {
+  return (
+    "var build=form.querySelector('[data-build]');" +
+    "if(build)build.addEventListener('click',function(){var cnt=form.querySelector('[data-build-count]'),sz=form.querySelector('[data-build-size]');" +
+    "var l=form.elements['groups_captains_lobby'];var room=max-(l&&l.checked&&!l.disabled?1:0);" +
+    "var note=form.querySelector('[data-build-note]');" +
+    "if(note){note.hidden=true;note.textContent=''}" +
+    "if(room<1){if(note){note.textContent='The Captains lobby takes the only place the limit allows ('+max+'). Untick Captains lobby to generate groups, or raise the limit.';note.hidden=false}return}" +
+    "var n=Math.max(1,Math.min(parseInt(cnt.value,10)||1,room));cnt.value=n;" +
+    "var s=parseInt(sz.value,10);var size=s>=MINSIZE&&s<=MAXSIZE?String(s):'';" +
+    "var byColour=form.querySelector('input[name=groups_build_names]:checked').value==='colours'&&n<=COLOURS.length;" +
+    "var word=val('groups_label')||'Team';" +
+    "var total=Math.max(rows().length,n);" +
+    "for(var i=0;i<total;i++){if(i<n){var c=COLOURS[i%COLOURS.length];" +
+    "setRow(i,{name:byColour?c[1]:word+' '+(i+1),kind:'team',size:size,tag:'',marker:c[0]});" +
+    "if(size)f(i,'size').setAttribute('data-auto','1');f(i,'marker').setAttribute('data-auto','1')}else setRow(i,{})}" +
+    afterBuild +
+    "});" +
+    "form.addEventListener('change',function(){var n=form.querySelector('[data-build-note]');if(n){n.hidden=true;n.textContent=''}})"
   );
 }
