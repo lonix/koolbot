@@ -29,6 +29,7 @@ import {
 import { renderBotPermissionsPage } from "./bot-permissions-view.js";
 import { checkBotPermissions } from "../services/bot-permission-check.js";
 import { inAreas, loadPermissionNotice } from "./permission-notice.js";
+import { loadSettingsPermissionNotices } from "./settings-permission-notices.js";
 import {
   catalogNotice,
   enabledPresets,
@@ -1352,10 +1353,21 @@ export function createReadOnlyRouter(
         logger.debug("settings guild fetch failed", err);
       }
 
+      // One check for the whole page, split per section (#1487). Not while the
+      // stored config cannot be read: the forms are replaced by a notice then.
+      const permissionNotices = settingsUnavailable
+        ? undefined
+        : await loadSettingsPermissionNotices({
+            client,
+            guildId: common.guildId,
+            groups,
+          });
+
       res.type("text/html").send(
         renderSettingsPage({
           ...common,
           settingsUnavailable,
+          permissionNotices,
           groups,
           textChannels,
           voiceChannels,
