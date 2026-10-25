@@ -1545,8 +1545,9 @@ stop the page from saying everything is in place. The matrix lists it as _(off)_
     that is said once. A cached read is labelled on each finding. **New event** checks the
     server's configured category, as no event exists yet, and a host who is not an admin gets
     "Ask a server admin". **Edit event** names only what saving changes: the Events list card
-    (not for an adopted event or a detached one) and the announcement post, and nothing for a
-    finished event. **Adopt Discord Events** names what adopting sets up: the announcement post
+    (not for an adopted event or a detached one) and the announcement post (only when the event has
+    one, checked in the channel it was posted in, not the one the setting names now), and nothing
+    for a finished event. **Adopt Discord Events** names what adopting sets up: the announcement post
     and the temporary voice channel. Ending an event has no page of its own: its form sits in the
     host panel (and in the Events list), which already carry the notice for the event's channels
     and moves.

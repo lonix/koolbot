@@ -180,6 +180,42 @@ describe("renderInlinePermissionNotice", () => {
     expect(html).not.toContain("Ask a server admin");
   });
 
+  // One short chip per missing permission, so a list of them wraps between
+  // chips on a narrow form instead of running off it (a chip never wraps).
+  it.each([
+    [["Manage Channels"]],
+    [["Manage Roles", "Move Members"]],
+    [
+      [
+        "View Channel",
+        "Manage Channels",
+        "Manage Roles",
+        "Connect",
+        "Move Members",
+      ],
+    ],
+  ] as Array<[string[]]>)(
+    "renders %j as one chip each, separated by spaces",
+    (permissions) => {
+      const html = renderInlinePermissionNotice(
+        notice({ missing: [missing("event-leads-channel", permissions)] }),
+        { canLinkToPage: true },
+      );
+      const chips = html.match(
+        /<a class="kb-chip kb-chip--warn"[^>]*>.*?<\/a>/g,
+      );
+      expect(chips).toHaveLength(permissions.length);
+      permissions.forEach((p, i) => {
+        expect(chips?.[i]).toContain(`Bot lacks ${p}<`);
+        // No chip carries a list.
+        expect(chips?.[i]).not.toContain(",");
+      });
+      // Chips are separated by a plain space, which is where a line may break.
+      expect(html).not.toMatch(/<\/a><a /);
+      expect(html.split("</a> <a ").length - 1).toBe(permissions.length - 1);
+    },
+  );
+
   it("gives a host who is not an admin no link", () => {
     const html = renderInlinePermissionNotice(channels, {
       canLinkToPage: false,
@@ -277,29 +313,47 @@ describe("hostEditPermissionFeatures", () => {
     ...over,
   });
 
+  // Columns: case, event, has a stored announcement post, entries.
   it.each([
-    ["an open event", {}, ["event-native", "events-announce"]],
+    ["an open event", {}, true, ["event-native", "events-announce"]],
     [
       "a running event",
       { state: "active" },
+      true,
       ["event-native", "events-announce"],
+    ],
+    [
+      "an event with no announcement post: nothing to update there",
+      {},
+      false,
+      ["event-native"],
     ],
     [
       "an adopted event: no Events list card of KoolBot's own",
       { adopted: true },
+      true,
       ["events-announce"],
     ],
     [
       "an open event whose Discord event was detached",
       { nativeDetached: true },
+      true,
       ["events-announce"],
     ],
-    ["an ended event: nothing left to change", { state: "ended" }, []],
-    ["a cancelled event", { state: "cancelled" }, []],
-  ] as Array<[string, Partial<HostPanelEvent>, string[]]>)(
+    [
+      "an adopted event with no announcement post",
+      { adopted: true },
+      false,
+      [],
+    ],
+    ["an ended event: nothing left to change", { state: "ended" }, true, []],
+    ["a cancelled event", { state: "cancelled" }, true, []],
+  ] as Array<[string, Partial<HostPanelEvent>, boolean, string[]]>)(
     "%s",
-    (_name, over, expected) => {
-      expect(hostEditPermissionFeatures(event(over))).toEqual(expected);
+    (_name, over, announced, expected) => {
+      expect(hostEditPermissionFeatures(event(over), announced)).toEqual(
+        expected,
+      );
     },
   );
 });

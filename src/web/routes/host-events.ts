@@ -1568,7 +1568,10 @@ async function hostPermissionNotice(
   client: Client,
   guildId: string,
   panelEvent: HostPanelEvent,
-  event: Pick<IEvent, "categoryId">,
+  event: Pick<
+    IEvent,
+    "categoryId" | "announcementChannelId" | "announcementMessageId"
+  >,
   /** The registry entries the page uses; the panel's own choice by default. */
   featuresOf: (
     e: HostPanelEvent,
@@ -1591,6 +1594,9 @@ async function hostPermissionNotice(
     eventPlacement: {
       mainChannelId: recorded?.main ?? null,
       categoryId: event.categoryId,
+      // Where the post really is (an edit updates it there), not where the
+      // setting points now.
+      announcementChannelId: event.announcementChannelId ?? null,
       channelIds: [
         ...(recorded?.groups ?? []),
         ...(recorded?.lobby ?? []),
@@ -1684,7 +1690,11 @@ function registerEditRoutes(router: Router, client: Client): void {
         event.guildId,
         toPanelEvent(client, event),
         event,
-        hostEditPermissionFeatures,
+        (e) =>
+          hostEditPermissionFeatures(
+            e,
+            !!event.announcementChannelId && !!event.announcementMessageId,
+          ),
       );
       res
         .set("Cache-Control", "no-store")

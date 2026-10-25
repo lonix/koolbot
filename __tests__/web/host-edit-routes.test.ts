@@ -629,6 +629,30 @@ describe("the bot permission notice (#1478)", () => {
     });
   });
 
+  it("checks the announcement in the channel its post is stored in, not the setting's (#1478)", async () => {
+    events[EVENT_ID] = makeEvent({ announcementChannelId: "ann-old" });
+    mockCheck.mockResolvedValue(permissionReport("events-announce", "ok"));
+    await call(EDIT);
+    expect(mockCheck.mock.calls[0][2]).toMatchObject({
+      eventPlacement: { announcementChannelId: "ann-old" },
+    });
+  });
+
+  it("shows the announcement finding only for an event that has a post", async () => {
+    mockCheck.mockResolvedValue(permissionReport("events-announce", "missing"));
+    expect((await call(EDIT)).text).toContain("data-permission-notice");
+    // No stored post (never announced, or the message is gone): an edit
+    // updates nothing there, so a finding about it would be noise.
+    for (const over of [
+      { announcementChannelId: null, announcementMessageId: null },
+      { announcementMessageId: null },
+    ]) {
+      events[EVENT_ID] = makeEvent(over);
+      const r = await call(EDIT);
+      expect(r.text).not.toContain("data-permission-notice");
+    }
+  });
+
   it("leaves out a finding for an entry the edit does not use (the channels)", async () => {
     mockCheck.mockResolvedValue(permissionReport("event-channels", "missing"));
     const r = await call(EDIT);
