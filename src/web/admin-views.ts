@@ -1968,11 +1968,12 @@ export function renderPermissionsPage(props: PermissionsProps): string {
       const cells = [...props.roleIds, ...usedGroupRefs]
         .map(
           (rid) =>
-            // Each cell's whole content was "✓" or "—" (#855): the glyph stays
-            // for sighted users (aria-hidden) and hidden text says what it means.
+            // A state never rests on colour or a glyph alone (#855, #1545): an
+            // allowed cell has the check icon and the word, a disallowed one a
+            // quiet dash with hidden text.
             `<td>${
               allowed.has(rid)
-                ? '<span class="tag tag-on"><span aria-hidden="true">✓</span><span class="visually-hidden">Allowed</span></span>'
+                ? `<span class="kb-perm kb-perm--has">${icon("check")}Allowed</span>`
                 : '<span class="muted" aria-hidden="true">—</span><span class="visually-hidden">Not allowed</span>'
             }</td>`,
         )
@@ -6831,14 +6832,27 @@ function errorRateTag(rate: number): string {
   return `<span class="tag tag-on">0%</span>`;
 }
 
+/** The time-window choice as a labelled `kb-tabs` strip; the current one has `aria-current` (#1545). */
+function renderWindowTabs(
+  path: string,
+  windows: readonly number[],
+  current: number,
+): string {
+  const links = windows
+    .map(
+      (w) =>
+        `<a href="${path}?window=${w}"${w === current ? ' aria-current="true"' : ""}>${w} days</a>`,
+    )
+    .join("");
+  return `<nav class="kb-tabs" aria-label="Time window">${links}</nav>`;
+}
+
 export function renderCommandMetricsPage(props: CommandMetricsProps): string {
-  const windowToggle = [7, 30]
-    .map((w) => {
-      const active = w === props.windowDays;
-      const cls = active ? "btn btn-sm btn-primary" : "btn btn-sm";
-      return `<a class="${cls}" href="/admin/metrics?window=${w}">${w}d</a>`;
-    })
-    .join(" ");
+  const windowToggle = renderWindowTabs(
+    "/admin/metrics",
+    [7, 30],
+    props.windowDays,
+  );
 
   const usageRowsHtml =
     props.rows.length === 0
@@ -6901,21 +6915,23 @@ export function renderCommandMetricsPage(props: CommandMetricsProps): string {
     (max, d) => Math.max(max, d.usageCount),
     0,
   );
+  const peakIndex =
+    maxDaily > 0
+      ? props.dailyTotals.findIndex((d) => d.usageCount === maxDaily)
+      : -1;
   const trendHtml =
     props.dailyTotals.length === 0
       ? `<div class="empty">No data yet.</div>`
-      : props.dailyTotals
-          .map((d) => {
+      : `<div class="kb-bars">${props.dailyTotals
+          .map((d, i) => {
             const pct = maxDaily > 0 ? (d.usageCount / maxDaily) * 100 : 0;
-            return `<div class="field-row" style="align-items:center;gap:.75rem">
-<span class="muted mono" style="min-width:6rem">${escapeHtml(d.date)}</span>
-<span style="flex:1;background:var(--heat-empty);border-radius:4px;overflow:hidden">
-  <span style="display:block;height:1rem;width:${pct.toFixed(1)}%;background:var(--embed-brand)"></span>
-</span>
-<span class="mono" style="min-width:3rem;text-align:right">${d.usageCount}</span>
-</div>`;
+            return `<div class="kb-bars__row${i === peakIndex ? " is-peak" : ""}"><span title="${escapeHtml(d.date)}">${escapeHtml(d.date.slice(5))}</span><span class="kb-bars__track"><span class="kb-bars__fill" style="width:${pct.toFixed(1)}%"></span></span><span class="kb-bars__val">${d.usageCount}</span></div>`;
           })
-          .join("");
+          .join("")}</div>${
+          peakIndex >= 0
+            ? `<p class="muted">Busiest day: ${escapeHtml(props.dailyTotals[peakIndex].date)}, ${countOf(maxDaily, "invocation")}.</p>`
+            : ""
+        }`;
 
   const body = `
 <h1>Command metrics</h1>
@@ -6939,7 +6955,7 @@ ${props.enabled ? "" : `<p class="muted">Enable <code>monitoring.metrics_persist
 
 <div class="card">
   <h2>Commands by usage</h2>
-  <p class="inline-form"><span class="muted">Window</span> ${windowToggle}</p>
+  ${windowToggle}
   ${usageRowsHtml}
 </div>
 
@@ -7003,13 +7019,11 @@ function heatMinutes(minutes: number): string {
 
 export function renderAnalyticsPage(props: AnalyticsProps): string {
   const { heatmap } = props;
-  const windowToggle = [7, 30, 90]
-    .map((w) => {
-      const active = w === props.windowDays;
-      const cls = active ? "btn btn-sm btn-primary" : "btn btn-sm";
-      return `<a class="${cls}" href="/admin/analytics?window=${w}">${w}d</a>`;
-    })
-    .join(" ");
+  const windowToggle = renderWindowTabs(
+    "/admin/analytics",
+    [7, 30, 90],
+    props.windowDays,
+  );
 
   const disabledNotice = props.enabled
     ? ""
@@ -7094,8 +7108,8 @@ export function renderAnalyticsPage(props: AnalyticsProps): string {
 ${disabledNotice}
 <div class="card">
   <h2>Overview</h2>
+  ${windowToggle}
   <dl class="kv">
-    <dt>Window</dt><dd>${props.windowDays} days &nbsp; ${windowToggle}</dd>
     <dt>Timezone</dt><dd class="mono">${escapeHtml(heatmap.timeZone)}</dd>
     <dt>Total voice time</dt><dd>${escapeHtml(heatMinutes(heatmap.totalMinutes))}</dd>
     ${peakLine}

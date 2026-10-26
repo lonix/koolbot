@@ -3636,7 +3636,11 @@ export function adminPages(): A11yPage[] {
             lastUsedAt: null,
           },
         ],
-        dailyTotals: [{ date: "2026-01-09", usageCount: 20, errorCount: 1 }],
+        dailyTotals: [
+          { date: "2026-01-08", usageCount: 8, errorCount: 0 },
+          { date: "2026-01-09", usageCount: 20, errorCount: 1 },
+          { date: "2026-01-10", usageCount: 0, errorCount: 0 },
+        ],
       }),
     },
     {
