@@ -200,11 +200,24 @@ async function handlePrivacy(
       ViewChannel: false,
     });
 
-    // Ensure owner has access
-    await channel.permissionOverwrites.create(ownerId, {
-      Connect: true,
-      ViewChannel: true,
-    });
+    // Ensure owner has access. The @everyone deny above is already in place,
+    // so a failure here is a half-finished toggle: never advise a retry (once
+    // the deny is cached, the next click takes the make-public branch and
+    // reopens the room). Say what state it is in and what to check.
+    try {
+      await channel.permissionOverwrites.create(ownerId, {
+        Connect: true,
+        ViewChannel: true,
+      });
+    } catch (error) {
+      logger.error("Error giving the owner access to a private room:", error);
+      await updateControlPanel(interaction, channel, ownerId);
+      await replyWithError(interaction, {
+        title: "Your room is private, but I couldn't confirm your access",
+        next: "Check the room's permissions in Discord before using the privacy button again. The details are in the bot's log.",
+      });
+      return;
+    }
 
     await safeReply(interaction, {
       content:
@@ -316,7 +329,7 @@ async function handleWaitingRoom(
     } else {
       await replyWithError(interaction, {
         title: "Couldn't create the waiting room",
-        next: "Try again in a minute. If it keeps happening, tell an admin.",
+        next: "Check your channel list for a waiting room before trying again. If it keeps happening, tell an admin.",
       });
       return;
     }

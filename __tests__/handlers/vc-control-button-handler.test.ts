@@ -304,6 +304,51 @@ describe("VCControlButtonHandler", () => {
       expect(mockInteraction.reply).not.toHaveBeenCalled();
     });
 
+    it("makes no retry promise when the owner overwrite fails after the @everyone deny", async () => {
+      (mockGuild as any).roles = { everyone: { id: "everyone-role-id" } };
+      const create = (mockChannel.permissionOverwrites as any)
+        .create as jest.Mock;
+      create
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("Missing Permissions"));
+      mockInteraction.customId = "vc_control_privacy_channel-id_owner-id";
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(create).toHaveBeenCalledTimes(2);
+      const sent = (mockInteraction.editReply as jest.Mock).mock.calls
+        .map(
+          (c) =>
+            (
+              c[0] as {
+                embeds?: { data: { title: string; description: string } }[];
+              }
+            ).embeds?.[0]?.data,
+        )
+        .filter(Boolean);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.title).toMatch(/private/i);
+      expect(sent[0]!.description).toMatch(/check the room's permissions/i);
+      expect(`${sent[0]!.title} ${sent[0]!.description}`).not.toMatch(
+        /try again/i,
+      );
+    });
+
+    it("keeps the generic reply when the first privacy write fails (nothing changed)", async () => {
+      (mockGuild as any).roles = { everyone: { id: "everyone-role-id" } };
+      const create = (mockChannel.permissionOverwrites as any)
+        .create as jest.Mock;
+      create.mockRejectedValueOnce(new Error("Missing Permissions"));
+      mockInteraction.customId = "vc_control_privacy_channel-id_owner-id";
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        unexpectedErrorPayload(),
+      );
+    });
+
     it("answers an unknown action as out of date, not as an internal state", async () => {
       mockInteraction.customId = "vc_control_bogus_channel-id_owner-id";
 
