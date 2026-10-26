@@ -1273,17 +1273,19 @@ describe("renderPermissionsPage with role groups (#1023)", () => {
   it("offers each group and 'and above' next to the roles", () => {
     const html = renderPermissionsPage(base);
     expect(html).toContain('<optgroup label="Role groups">');
-    expect(html).toContain('<option value="group:g1">Mods (group)</option>');
+    expect(html).toContain('<option value="group:g1">@Mods (group)</option>');
     expect(html).toContain(
-      '<option value="group:g1+">Mods and above (group)</option>',
+      '<option value="group:g1+">@Mods and above (group)</option>',
     );
     expect(html).toContain('<optgroup label="Roles">');
+    expect(html).toContain("data-picker");
   });
 
-  it("keeps the plain role picker when there are no groups", () => {
+  it("lists only the roles when there are no groups", () => {
     const html = renderPermissionsPage({ ...base, groups: [] });
-    expect(html).not.toContain("optgroup");
-    expect(html).toContain(">Admins</option>");
+    expect(html).not.toContain('<optgroup label="Role groups">');
+    expect(html).toContain('<optgroup label="Roles">');
+    expect(html).toContain(">@Admins</option>");
   });
 
   it("selects and shows the groups a command names in the matrix", () => {
@@ -1292,7 +1294,7 @@ describe("renderPermissionsPage with role groups (#1023)", () => {
       groupRefsPerCommand: new Map([["quote", ["group:g1+"]]]),
     });
     expect(html).toContain(
-      '<option value="group:g1+" selected>Mods and above (group)</option>',
+      '<option value="group:g1+" selected>@Mods and above (group)</option>',
     );
     expect(html).toContain("Mods and above");
     expect(html).toContain('class="tag tag-warn">restricted');
@@ -1305,8 +1307,19 @@ describe("renderPermissionsPage with role groups (#1023)", () => {
       groupRefsPerCommand: new Map([["quote", ["group:gone"]]]),
     });
     expect(html).toContain(
-      '<option value="group:gone" selected>gone (missing)</option>',
+      '<option value="group:gone" selected>⚠ group:gone (unavailable)</option>',
     );
+    expect(html).toContain(
+      "[&quot;missing&quot;,&quot;group:gone&quot;,&quot;&quot;]",
+    );
+  });
+
+  it("does not offer a stored role that the guild no longer has (posting is unchanged)", () => {
+    const html = renderPermissionsPage({
+      ...base,
+      perCommand: new Map([["quote", ["r-gone"]]]),
+    });
+    expect(html).not.toContain('value="r-gone"');
   });
 
   it("shows the moderation commands as staff only in the matrix too, not open", () => {
@@ -1460,7 +1473,7 @@ describe("renderPermissionsPage", () => {
     expect(html).toContain('name="command" value="dbtrunk"');
     expect(html).toContain('value="r1"');
     expect(html).toContain('value="r2"');
-    expect(html).toContain(">Members<");
+    expect(html).toContain(">@Members<");
     // The currently-restricted role must be pre-selected.
     expect(html).toMatch(/value="r1"\s+selected/);
     // Non-restricted role must NOT be pre-selected.
@@ -5872,10 +5885,44 @@ describe("Permissions page accessibility (#854)", () => {
     expect(html).toContain(
       '<label class="visually-hidden" for="perm-roles-ping">Allowed roles for /ping</label>',
     );
-    expect(html).toContain(
-      '<select id="perm-roles-ping" name="roleIds" multiple size="3" style="min-width:14rem" aria-describedby="perm-hint-ping">',
+    expect(html).toMatch(
+      /<span class="kb-picker" data-picker data-picker-meta="[^"]*"><select class="kb-select" id="perm-roles-ping" name="roleIds" multiple size="\d+">/,
     );
-    expect(html).toContain('<span class="muted" id="perm-hint-ping"');
+    expect(html).not.toContain("perm-hint-ping");
+  });
+
+  it("renders the role list as the Picker, without the Ctrl/⌘ hint (#1547)", () => {
+    const html = renderPermissionsPage({
+      ...COMMON,
+      commands: ["ping", "quote"],
+      roleIds: ["r1"],
+      allRoleIds: ["r1", "r2"],
+      roleNames: new Map([
+        ["r1", "Admin"],
+        ["r2", "Member"],
+      ]),
+      perCommand: new Map([["quote", ["r1"]]]),
+    });
+    expect((html.match(/data-picker data-picker-meta=/g) ?? []).length).toBe(2);
+    expect(html).not.toContain("Hold Ctrl");
+    expect(html).not.toContain("for multiple");
+    expect(html).toContain('<optgroup label="Roles">');
+    expect(html).toContain('<option value="r1" selected>@Admin</option>');
+    expect(html).toContain('<option value="r2">@Member</option>');
+    expect(html).toContain("[&quot;role&quot;,&quot;Admin&quot;,&quot;&quot;]");
+  });
+
+  it("says so when the guild has no roles, without a Picker (#1547)", () => {
+    const html = renderPermissionsPage({
+      ...COMMON,
+      commands: ["ping"],
+      roleIds: [],
+      allRoleIds: [],
+      roleNames: new Map(),
+      perCommand: new Map(),
+    });
+    expect(html).toContain("No roles available in this guild");
+    expect(html).not.toContain("data-picker");
   });
 });
 
