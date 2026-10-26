@@ -20,9 +20,8 @@ function pageShell(
     '<meta name="viewport" content="width=device-width,initial-scale=1">',
     designStylesheetLinks(product === "Koolbot" ? "/me" : "/admin"),
     "<style>",
-    // kb.css is linked above; this shell never set border-box, line-height or a colour-scheme,
-    // so keep it that way until it moves to the kb- classes (#1314).
-    ":root{color-scheme:normal;}",
+    // kb.css is linked above; this shell never set border-box or line-height, so keep it that way
+    // until it moves to the kb- classes (#1314). The colour scheme is kb.css's `dark` (#1507).
     // Dark palette shared with the authenticated admin UI (issue #569) so the
     // pre-auth sign-in / sign-out / invalid-link pages don't flash light mode.
     `body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:48rem;margin:0 auto;padding:2rem;background:var(--bg);color:var(--text);line-height:normal;box-sizing:content-box;}`,

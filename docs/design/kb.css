@@ -519,6 +519,8 @@ a.kb-chip--warn:hover { text-decoration: underline; }
 .kb-emoji-wrap { position: relative; display: flex; }
 .kb-emoji-wrap .kb-emoji-pop { position: absolute; top: 100%; left: 0; z-index: 5; margin-top: var(--space-1); }
 .kb-input--num { width: 5.5ch; min-width: 4rem; }
+/* The group form is one topic: inside a panel its fieldset draws no box of its own (legacy `form.stack fieldset` still outranks this on the admin Events form). */
+fieldset[data-groups-section] { border: 0; margin: 0; padding: 0; min-width: 0; }
 /* Anything the group form folds or only shows with scripts: `display` on a container or a button would otherwise beat the browser's [hidden]. */
 [data-groups-section] [hidden], .kb-grouprows__item [hidden], .kb-grouprows__item [data-marker-input][hidden], .kb-grouprows__head[hidden], .kb-emoji-pop[hidden] { display: none; }
 .kb-groupopt { display: flex; flex-direction: column; gap: 0.2rem; }
