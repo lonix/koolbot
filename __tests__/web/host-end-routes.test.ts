@@ -416,9 +416,7 @@ describe("the end section", () => {
     ) as string;
     expect(form).toBeDefined();
     expect(form).toContain('name="_csrf"');
-    expect(form).toMatch(
-      /<input type="checkbox" name="confirm" value="1" required>/,
-    );
+    expect(form).toMatch(/<input type="checkbox" required>/);
     expect(form).not.toContain('name="pullBack"');
     expect(form).toContain("moved back to the main channel first");
     expect(form).toContain("This cannot be undone");
@@ -490,6 +488,37 @@ describe("the end section", () => {
 });
 
 describe("End event now", () => {
+  it("a no-script submission (ticked box and the button) sends one confirm=1 and ends the event (#1518)", async () => {
+    const page = await call(PANEL);
+    const form = (page.text.match(/<form[\s\S]*?<\/form>/g) ?? []).find((f) =>
+      f.includes(`action="${PANEL}/end"`),
+    ) as string;
+    // What a browser posts: every named control of the form that is checked or a button.
+    const fields = new globalThis.URLSearchParams();
+    for (const m of form.matchAll(/<(?:input|button)\b[^>]*>/g)) {
+      const tag = m[0];
+      const name = tag.match(/\bname="([^"]*)"/)?.[1];
+      if (!name) continue;
+      const value = (tag.match(/\bvalue="([^"]*)"/)?.[1] ?? "")
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, "&");
+      fields.append(name, name === "_csrf" ? csrf() : value);
+    }
+    expect(fields.getAll("confirm")).toEqual(["1"]);
+    const res = await fetch(`${base}${PANEL}/end`, {
+      method: "POST",
+      headers: {
+        cookie: cookie(sessionUser),
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: fields.toString(),
+      redirect: "manual",
+    });
+    expect(res.status).toBe(303);
+    expect(flashOf(res.headers.get("location")).type).toBe("ok");
+    expect(events[EVENT_ID]?.state).toBe("ended");
+  });
+
   it("without the confirmation nothing happens and the host is told", async () => {
     const r = await end({});
     expect(r.status).toBe(303);

@@ -228,7 +228,10 @@ describe("the groups fold", () => {
     expect(fold).toContain("its channel is not created yet");
     expect(fold).toContain("Clan tags");
     expect(fold).toContain("Members");
-    expect(fold).toContain('<table class="kb-table">');
+    expect(fold).toContain(
+      '<div class="kb-panel__body--flush"><table class="kb-table">',
+    );
+    expect(fold).toContain("</table></div>");
     expect(html).not.toContain('section class="card" id="host-groups"');
   });
 
@@ -300,12 +303,18 @@ describe("End the event", () => {
   it("keeps a deliberate confirmation without JavaScript: a required checkbox inside noscript", () => {
     const form = endHtml();
     expect(form).toMatch(
-      /<noscript>[\s\S]*<input type="checkbox" name="confirm" value="1" required>[\s\S]*<\/noscript>/,
+      /<noscript>[\s\S]*<input type="checkbox" required>[\s\S]*<\/noscript>/,
     );
     // The consequences are readable there too, since no dialog will show them.
     expect(form.match(/<noscript>[\s\S]*<\/noscript>/)?.[0]).toContain(
       "This cannot be undone",
     );
+  });
+
+  it("has exactly one control named confirm: the button, so a ticked box never doubles it", () => {
+    const form = endHtml();
+    expect(form.match(/name="confirm"/g)).toHaveLength(1);
+    expect(form).toMatch(/<button[^>]*name="confirm"/);
   });
 
   it("lists today's consequences in the dialog", () => {

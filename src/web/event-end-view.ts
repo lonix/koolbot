@@ -78,8 +78,9 @@ export function endEventItems(
  * (`data-confirm`, `CONFIRM_SCRIPT`), which lists `endEventItems`; the submit
  * button carries `confirm=1`, so confirming in the Dialog posts what the server
  * checks. Without JavaScript there is no Dialog, so a `noscript` block shows the
- * same consequences and a required checkbox (`confirm=1`) that must be ticked
- * before the form can be posted; the server's check stays either way.
+ * same consequences and a required checkbox that must be ticked
+ * before the form can be posted (the box has no name, so only the button sends
+ * `confirm=1`; two values would reach the server as an array and be refused); the server's check stays either way.
  */
 export function renderEndSection(opts: {
   state: string;
@@ -95,7 +96,7 @@ export function renderEndSection(opts: {
   return `<p class="kb-muted">Ends the event for everyone and tidies up its channels. You are asked to confirm first.</p>
 <form method="POST" action="${escapeHtml(opts.actionPath)}" class="end-event-form" data-confirm="End this event now?"${confirmListAttr(items)}>
 <input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">
-<noscript><p>Ending the event does this:</p><ul>${items.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ul><p><label><input type="checkbox" name="${END_CONFIRM_FIELD}" value="1" required> I want to end this event now</label></p></noscript>
+<noscript><p>Ending the event does this:</p><ul>${items.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ul><p><label><input type="checkbox" required> I want to end this event now</label></p></noscript>
 <button type="submit" class="kb-btn kb-btn--danger" name="${END_CONFIRM_FIELD}" value="1">End event now</button>
 </form>`;
 }

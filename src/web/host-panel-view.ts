@@ -253,7 +253,7 @@ function renderGroupsFold(e: HostPanelEvent): string {
       : `${escapeHtml(e.channelLeadMinutes)} minutes before the start`;
   const inner = `<p class="kb-muted">Set up when the event was created. Channels are created ${lead}.</p>
 ${renderTags(e)}
-${e.groups.length > 0 ? `<table class="kb-table"><thead><tr><th scope="col">${escapeHtml(label)}</th><th scope="col">Who</th><th scope="col">Size</th><th scope="col">Tag</th><th scope="col">Channel</th><th scope="col">People</th>${e.captainsEnabled ? `<th scope="col">${escapeHtml(e.leaderLabel || "Leader")}</th>` : ""}</tr></thead><tbody>${body}</tbody></table>` : ""}
+${e.groups.length > 0 ? `<div class="kb-panel__body--flush"><table class="kb-table"><thead><tr><th scope="col">${escapeHtml(label)}</th><th scope="col">Who</th><th scope="col">Size</th><th scope="col">Tag</th><th scope="col">Channel</th><th scope="col">People</th>${e.captainsEnabled ? `<th scope="col">${escapeHtml(e.leaderLabel || "Leader")}</th>` : ""}</tr></thead><tbody>${body}</tbody></table></div>` : ""}
 ${renderLobbyLine(e)}`;
   return fold("host-groups", "Group details", groupsFoldHint(e), false, inner);
 }
