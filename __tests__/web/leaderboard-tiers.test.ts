@@ -8,6 +8,7 @@ import {
   tierRoleIssue,
   tierRoleProblem,
   validateTierRows,
+  checkTierRows,
 } from "../../src/web/leaderboard-tiers.js";
 
 describe("parseTierConfig (#985)", () => {
@@ -217,5 +218,60 @@ describe("tier roles with powerful permissions (#1145)", () => {
     expect(tierRoleIssue({ ...admin, managed: true }, "guild-1", 5)).toBe(
       "managed",
     );
+  });
+});
+
+describe("checkTierRows (#1523)", () => {
+  it.each([
+    [["", "1"], ["111", "222"], [[0, "topN", "Enter a Top N."]]],
+    [["1", "2"], ["111", ""], [[1, "roleId", "Pick a role."]]],
+    [["abc"], ["111"], [[0, "topN", "Use a whole number greater than 0."]]],
+    [["0"], ["111"], [[0, "topN", "Use 1 to 1000."]]],
+    [["1001"], ["111"], [[0, "topN", "Use 1 to 1000."]]],
+    [["1"], ["x1"], [[0, "roleId", "Pick a role from the list."]]],
+    [
+      ["1", "1"],
+      ["111", "222"],
+      [[1, "topN", "Another tier has this Top N. Each Top N must be unique."]],
+    ],
+    [
+      ["1", "2"],
+      ["111", "111"],
+      [
+        [
+          1,
+          "roleId",
+          "Another tier uses this role. Each tier needs its own role.",
+        ],
+      ],
+    ],
+  ])("names the field of %j / %j", (topNs, roleIds, expected) => {
+    const { errors } = checkTierRows(topNs, roleIds);
+    expect(errors.map((e) => [e.index, e.field, e.message])).toEqual(expected);
+  });
+
+  it("reports every refused field, not only the first", () => {
+    const { errors } = checkTierRows(["x", "2"], ["", "222"]);
+    expect(errors.map((e) => `${e.index}:${e.field}`)).toEqual([
+      "0:topN",
+      "0:roleId",
+    ]);
+  });
+
+  it("puts the too-many-tiers refusal on the first row past the cap", () => {
+    const topNs = Array.from({ length: 26 }, (_, i) => String(i + 1));
+    const roleIds = Array.from({ length: 26 }, (_, i) => String(1000 + i));
+    const { errors } = checkTierRows(topNs, roleIds);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ index: 25, field: "topN" });
+  });
+
+  it("agrees with validateTierRows on the first refusal", () => {
+    const topNs = ["1", "", "1"];
+    const roleIds = ["111", "222", "333"];
+    expect(validateTierRows(topNs, roleIds)).toEqual({
+      ok: false,
+      error: checkTierRows(topNs, roleIds).errors[0].flat,
+    });
   });
 });

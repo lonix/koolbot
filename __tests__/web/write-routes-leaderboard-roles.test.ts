@@ -78,6 +78,9 @@ jest.unstable_mockModule(
 const { createLeaderboardRolesRouter } =
   await import("../../src/web/routes/write/leaderboard-roles.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
+const { registerFormPage } = await import("../../src/web/form-pages.js");
+const { renderLeaderboardRolesPage } =
+  await import("../../src/web/admin-views.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
 
 /**
@@ -482,6 +485,199 @@ describe("POST /leaderboard-roles/tiers", () => {
     );
     expect(res.status).toBe(403);
     expect(mockSet).not.toHaveBeenCalled();
+  });
+});
+
+describe("a refused POST /leaderboard-roles/tiers (#1523)", () => {
+  let harness: AdminHarness;
+
+  // The read router registers the page's renderer in the app; here the real
+  // view stands in, with one stored tier (Top 1 -> role 111) and three roles.
+  beforeEach(() => {
+    registerFormPage("/admin/leaderboard-roles", async (_req, refused) =>
+      renderLeaderboardRolesPage({
+        guildId: "guild-1",
+        csrfToken: "csrf",
+        remainingMs: 1000,
+        navFeatureStatus: {},
+        enabled: true,
+        voiceTrackingEnabled: true,
+        period: "alltime",
+        cron: "0 0 * * 1",
+        tiers: [
+          {
+            topN: 1,
+            roleId: "111",
+            roleName: "role-111",
+            assignable: true,
+            holders: [],
+            lastUpdated: null,
+          },
+        ],
+        ignoredEntries: [],
+        roles: [
+          { id: "111", name: "role-111" },
+          { id: "222", name: "role-222" },
+          { id: "333", name: "role-333" },
+        ],
+        settingRows: [],
+        refusedForm: refused,
+      }),
+    );
+    mockGetString.mockResolvedValue("1:111");
+  });
+
+  afterEach(async () => {
+    registerFormPage("/admin/leaderboard-roles", async () => {
+      throw new Error("no page");
+    });
+    await harness.close();
+  });
+
+  const world = {
+    roles: {
+      "111": { position: 3 },
+      "222": { position: 2 },
+      "333": { position: 12 },
+    },
+    botPosition: 10,
+  };
+
+  /** Every `aria-invalid` control id and every error line of a 422 page. */
+  async function refusal(res: Response): Promise<{
+    html: string;
+    invalid: string[];
+    lines: Record<string, string>;
+  }> {
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    const invalid = [...html.matchAll(/<[^>]*aria-invalid="true"[^>]*>/g)].map(
+      (m) => /id="([^"]+)"/.exec(m[0])?.[1] ?? "",
+    );
+    const lines: Record<string, string> = {};
+    for (const m of html.matchAll(
+      /<p class="kb-field__error" id="([^"]+)">([^<]*)<\/p>/g,
+    )) {
+      lines[m[1]] = m[2];
+    }
+    return { html, invalid, lines };
+  }
+
+  it("marks the Top N of an added row, and keeps that row and the stored one as typed", async () => {
+    harness = await mount(makeClient(world));
+    const r = await refusal(
+      await harness.post("/leaderboard-roles/tiers", {
+        topN: ["1", "", ""],
+        roleId: ["111", "222", ""],
+      }),
+    );
+    // Row 2 was added and never stored: it comes back from the submission.
+    expect(r.invalid).toEqual(["leaderboard-tiers-topN-1"]);
+    expect(r.lines["leaderboard-tiers-topN-1-error"]).toBe("Enter a Top N.");
+    // Three submitted rows, plus the editor's template for "Add tier".
+    expect(r.html.match(/name="topN"/g)).toHaveLength(4);
+    expect(r.html).toContain('<option value="222" selected>');
+    expect(mockSet).not.toHaveBeenCalled();
+    expect(soleAudit()).toMatchObject({
+      result: "failure",
+      errorMessage: "Row 2: enter a Top N.",
+    });
+  });
+
+  it("marks each refused field of each row with its own line, and echoes text as typed", async () => {
+    harness = await mount(makeClient(world));
+    const r = await refusal(
+      await harness.post("/leaderboard-roles/tiers", {
+        topN: [" 5x", "7", "7"],
+        roleId: ["", "222", "222"],
+      }),
+    );
+    expect(r.invalid).toEqual([
+      "leaderboard-tiers-topN-0",
+      "leaderboard-tiers-roleId-0",
+      "leaderboard-tiers-topN-2",
+      "leaderboard-tiers-roleId-2",
+    ]);
+    expect(r.lines["leaderboard-tiers-topN-0-error"]).toBe(
+      "Use a whole number greater than 0.",
+    );
+    expect(r.lines["leaderboard-tiers-roleId-0-error"]).toBe("Pick a role.");
+    expect(r.lines["leaderboard-tiers-topN-2-error"]).toContain(
+      "Each Top N must be unique",
+    );
+    expect(r.lines["leaderboard-tiers-roleId-2-error"]).toContain(
+      "Each tier needs its own role",
+    );
+    // Raw echo: the leading space the admin typed is still there.
+    expect(r.html).toContain('value=" 5x"');
+  });
+
+  it("refuses a Top N above the cap with a message instead of clamping", async () => {
+    harness = await mount(makeClient(world));
+    const r = await refusal(
+      await harness.post("/leaderboard-roles/tiers", {
+        topN: ["1", "1001"],
+        roleId: ["111", "222"],
+      }),
+    );
+    expect(r.lines["leaderboard-tiers-topN-1-error"]).toBe("Use 1 to 1000.");
+    expect(r.html).toContain('value="1001"');
+  });
+
+  it("marks the role of the row a live check refuses, naming the tier", async () => {
+    harness = await mount(makeClient(world));
+    const r = await refusal(
+      await harness.post("/leaderboard-roles/tiers", {
+        topN: ["1", "4"],
+        roleId: ["111", "333"],
+      }),
+    );
+    expect(r.invalid).toEqual(["leaderboard-tiers-roleId-1"]);
+    expect(r.lines["leaderboard-tiers-roleId-1-error"]).toContain(
+      "Top 4: @role-333 sits at or above the bot&#39;s highest role",
+    );
+    expect(r.lines["leaderboard-tiers-roleId-1-error"]).toContain(
+      "Pick a different role.",
+    );
+    expect(r.html).toContain('<option value="333" selected>');
+    expect(mockSet).not.toHaveBeenCalled();
+  });
+
+  it("marks the role of the row whose role backs a role group", async () => {
+    mockGroupBackedRoles.mockImplementation(async (_guild, ids) =>
+      ids.includes("222") ? [{ roleId: "222", groupName: "Moderators" }] : [],
+    );
+    harness = await mount(makeClient(world));
+    const r = await refusal(
+      await harness.post("/leaderboard-roles/tiers", {
+        topN: ["1", "3"],
+        roleId: ["111", "222"],
+      }),
+    );
+    expect(r.invalid).toEqual(["leaderboard-tiers-roleId-1"]);
+    expect(r.lines["leaderboard-tiers-roleId-1-error"]).toContain("Moderators");
+  });
+
+  it("keeps a Discord failure a page flash, not a field error", async () => {
+    harness = await mount(makeClient({ fetchFails: true }));
+    const res = await harness.post("/leaderboard-roles/tiers", {
+      topN: ["1", "3"],
+      roleId: ["111", "222"],
+    });
+    expect(res.status).toBe(303);
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+      "Could not read the server's roles",
+    );
+  });
+
+  it("keeps an unreadable stored config a page flash", async () => {
+    mockGetAll.mockRejectedValue(new Error("mongo down"));
+    harness = await mount(makeClient(world));
+    const res = await harness.post("/leaderboard-roles/tiers", {
+      topN: "",
+      roleId: "",
+    });
+    expect(res.status).toBe(303);
   });
 });
 

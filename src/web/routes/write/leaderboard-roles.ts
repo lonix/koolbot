@@ -19,7 +19,7 @@ import {
   storedTiersFromSnapshot,
   TIERS_KEY,
   tierRoleProblem,
-  validateTierRows,
+  checkTierRows,
   type LeaderboardTier,
 } from "../../leaderboard-tiers.js";
 import {
@@ -27,7 +27,14 @@ import {
   requireSessionContext,
   asyncHandler,
   findGroupRoleReuse,
+  refuseForm,
 } from "./helpers.js";
+import {
+  addFieldError,
+  type FormErrors,
+  type FormValues,
+} from "../../form-errors.js";
+import { LEADERBOARD_TIERS_FORM, tierFieldKey } from "../../admin-views.js";
 
 const PAGE = "/admin/leaderboard-roles";
 
@@ -80,6 +87,41 @@ function toArray(raw: unknown): string[] {
 }
 
 /**
+ * What the tiers form submitted, as the refused form shows it (#1523): every
+ * row exactly as typed (not trimmed), under the key `topN-<row>` / `roleId-<row>`,
+ * plus how many rows to draw. Rows are drawn from this, not from the stored
+ * tiers, so a row that was added and never saved keeps its values.
+ */
+function tiersFormValues(
+  topNs: readonly string[],
+  roleIds: readonly string[],
+): FormValues {
+  const count = Math.max(topNs.length, roleIds.length);
+  const values: FormValues = { rows: String(count) };
+  for (let i = 0; i < count; i++) {
+    values[tierFieldKey("topN", i)] = topNs[i] ?? "";
+    values[tierFieldKey("roleId", i)] = roleIds[i] ?? "";
+  }
+  return values;
+}
+
+/** A tier role the live guild rules out. `topN` is null when it is not about one tier. */
+interface TierRoleProblem {
+  message: string;
+  topN: number | null;
+}
+
+/**
+ * {@link TierRoleProblem} as the line under the row's role field. It keeps the
+ * "Top N:" lead, so the flash the page falls back to still names the tier.
+ */
+function fieldMessage(problem: TierRoleProblem): string {
+  return /pick a different/.test(problem.message)
+    ? problem.message
+    : `${problem.message} Pick a different role.`;
+}
+
+/**
  * Check every tier's role against the live guild: it must exist, not be
  * @everyone or integration-managed, and sit below the bot's highest role.
  * A role with Administrator or another powerful permission is refused too
@@ -93,7 +135,7 @@ async function findTierRoleProblem(
   guildId: string,
   tiers: readonly LeaderboardTier[],
   keep: readonly string[] = [],
-): Promise<string | null> {
+): Promise<TierRoleProblem | null> {
   if (tiers.length === 0) return null;
   let guild;
   try {
@@ -101,12 +143,20 @@ async function findTierRoleProblem(
     await guild.roles.fetch();
   } catch (err) {
     logger.warn("leaderboard tiers: guild fetch failed", err);
-    return "Could not read the server's roles from Discord to check them. Try again.";
+    return {
+      message:
+        "Could not read the server's roles from Discord to check them. Try again.",
+      topN: null,
+    };
   }
   const me =
     guild.members.me ?? (await guild.members.fetchMe().catch(() => null));
   if (!me) {
-    return "Could not read the bot's own roles from Discord to check the tiers. Try again.";
+    return {
+      message:
+        "Could not read the bot's own roles from Discord to check the tiers. Try again.",
+      topN: null,
+    };
   }
   const botHighest = me.roles.highest.position;
   for (const tier of tiers) {
@@ -114,7 +164,8 @@ async function findTierRoleProblem(
     const problem = tierRoleProblem(role, guild.id, botHighest, {
       allowPrivileged: keep.includes(tier.roleId),
     });
-    if (problem) return `Top ${tier.topN}: ${problem}.`;
+    if (problem)
+      return { message: `Top ${tier.topN}: ${problem}.`, topN: tier.topN };
   }
   return null;
 }
@@ -156,15 +207,31 @@ export function createLeaderboardRolesRouter(client: Client): Router {
         return;
       }
 
-      const rows = validateTierRows(topNs, roleIds);
-      if (!rows.ok) {
+      const rows = checkTierRows(topNs, roleIds);
+      const errors: FormErrors = {};
+      for (const e of rows.errors) {
+        addFieldError(errors, tierFieldKey(e.field, e.index), e.message);
+      }
+      // The submitted row each tier came from, so a refusal about a tier lands
+      // on that row's field.
+      const rowOfTopN = (topN: number): number =>
+        topNs.findIndex((raw) => Number(raw.trim()) === topN);
+      const values = tiersFormValues(topNs, roleIds);
+      const refuse = (): Promise<boolean> =>
+        refuseForm(req, res, {
+          page: PAGE,
+          formId: LEADERBOARD_TIERS_FORM,
+          errors,
+          values,
+        });
+      if (rows.errors.length > 0) {
         await recordAudit(session, {
           action: "leaderboard-roles.tiers",
           targetId: TIERS_KEY,
           result: "failure",
-          errorMessage: rows.error,
+          errorMessage: rows.errors[0].flat,
         });
-        flashRedirect(res, PAGE, { type: "err", text: rows.error });
+        await refuse();
         return;
       }
 
@@ -182,18 +249,31 @@ export function createLeaderboardRolesRouter(client: Client): Router {
           targetId: TIERS_KEY,
           details: { before, attempted: after },
           result: "failure",
-          errorMessage: problem,
+          errorMessage: problem.message,
         });
-        flashRedirect(res, PAGE, { type: "err", text: problem });
+        const row = problem.topN === null ? -1 : rowOfTopN(problem.topN);
+        if (row >= 0) {
+          // About one tier's role: mark it in its row. A failed Discord read
+          // is not about a field and stays a page flash.
+          addFieldError(
+            errors,
+            tierFieldKey("roleId", row),
+            fieldMessage(problem),
+          );
+          await refuse();
+        } else {
+          flashRedirect(res, PAGE, { type: "err", text: problem.message });
+        }
         return;
       }
 
       // A role that backs a role group can't become a reward role (#1023).
       // Roles the tiers already held are left alone.
+      const heldRoles = parseTierConfig(before).tiers.map((t) => t.roleId);
       const reuse = await findGroupRoleReuse(
         session.guildId,
         rows.tiers.map((t) => t.roleId),
-        parseTierConfig(before).tiers.map((t) => t.roleId),
+        heldRoles,
       );
       if (reuse) {
         await recordAudit(session, {
@@ -203,7 +283,25 @@ export function createLeaderboardRolesRouter(client: Client): Router {
           result: "failure",
           errorMessage: reuse,
         });
-        flashRedirect(res, PAGE, { type: "err", text: reuse });
+        // Which tier's role it is: ask once per tier, on this rare path only.
+        for (const tier of rows.tiers) {
+          const row = rowOfTopN(tier.topN);
+          if (
+            row >= 0 &&
+            (await findGroupRoleReuse(
+              session.guildId,
+              [tier.roleId],
+              heldRoles,
+            ))
+          ) {
+            addFieldError(errors, tierFieldKey("roleId", row), reuse);
+          }
+        }
+        if (Object.keys(errors).length > 0) {
+          await refuse();
+        } else {
+          flashRedirect(res, PAGE, { type: "err", text: reuse });
+        }
         return;
       }
 

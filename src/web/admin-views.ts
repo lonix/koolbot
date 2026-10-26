@@ -31,7 +31,7 @@ import {
   REVIEW_JOB_NOTE,
 } from "../utils/moderation-labels.js";
 import { icon } from "./icons.js";
-import { formView, type RefusedForm } from "./form-errors.js";
+import { formView, type FormView, type RefusedForm } from "./form-errors.js";
 import { renderSaveBar } from "./savebar.js";
 import {
   pickPreset,
@@ -5855,8 +5855,21 @@ export interface LeaderboardRolesProps extends CommonProps {
   dependencyState?: ReadonlyMap<string, boolean>;
   /** The stored config could not be read; the card renders a notice. */
   settingsUnavailable?: boolean;
+  /** The tiers form the last save refused (#1523). */
+  refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
 }
+
+/** Form id of the tier editor on the Leaderboard roles page (#1523). */
+export const LEADERBOARD_TIERS_FORM = "leaderboard-tiers";
+
+/**
+ * Field name of one editor row's control in a refused tiers form, for example
+ * `topN-2`. The inputs themselves keep the names `topN` / `roleId` (parallel
+ * arrays); this is the key of the error, the typed value and the element id.
+ */
+export const tierFieldKey = (field: "topN" | "roleId", index: number): string =>
+  `${field}-${index}`;
 
 // Progressive enhancement for the tier editor: "Add tier" clones the blank
 // row template and each row's "Remove" drops it. Both buttons render hidden
@@ -5887,10 +5900,16 @@ const LEADERBOARD_TIER_EDITOR_SCRIPT =
 function renderTierEditorRow(
   roles: RoleOption[],
   tier: { topN: number; roleId: string } | null,
+  refused?: { view: FormView; index: number; topN: string; roleId: string },
 ): string {
+  const topNKey = refused ? tierFieldKey("topN", refused.index) : "";
+  const roleKey = refused ? tierFieldKey("roleId", refused.index) : "";
+  const view = refused?.view;
+  const topN = refused ? refused.topN : tier ? String(tier.topN) : "";
+  const roleId = refused ? refused.roleId : tier?.roleId;
   return `<tr>
-<td><input type="number" name="topN" min="1" max="${Math.max(MAX_TIER_TOP_N, tier?.topN ?? 0)}" step="1" inputmode="numeric" aria-label="Top N" value="${tier ? tier.topN : ""}" style="width:6rem"></td>
-<td><select name="roleId" aria-label="Role">${roleOptionsHtml(roles, tier?.roleId)}</select></td>
+<td><input type="number" name="topN" min="1" max="${Math.max(MAX_TIER_TOP_N, tier?.topN ?? 0)}" step="1" inputmode="numeric" aria-label="Top N" value="${escapeHtml(topN)}" style="width:6rem"${view?.attrs(topNKey) ?? ""}>${view?.error(topNKey) ?? ""}</td>
+<td><select name="roleId" aria-label="Role"${view?.attrs(roleKey) ?? ""}>${roleOptionsHtml(roles, roleId)}</select>${view?.error(roleKey) ?? ""}</td>
 <td><button type="button" class="btn lb-tier-remove" hidden>Remove</button></td>
 </tr>`;
 }
@@ -5965,11 +5984,26 @@ export function renderLeaderboardRolesPage(
             ", ",
           )}. They are not shown below, and saving a change removes them.</div>`;
 
-  const editorRows = [
-    ...props.tiers.map((t) => renderTierEditorRow(props.roles, t)),
-    // One spare row, so a tier can be added without JavaScript.
-    renderTierEditorRow(props.roles, null),
-  ].join("");
+  const tiersForm = formView(props.refusedForm, LEADERBOARD_TIERS_FORM);
+  // A refused save draws the rows as submitted, so a row that was added (and
+  // never stored) keeps its typed values and its error line (#1523).
+  const submittedRows = tiersForm.refused
+    ? Math.max(0, Number(tiersForm.value("rows")) || 0)
+    : 0;
+  const editorRows = tiersForm.refused
+    ? Array.from({ length: submittedRows }, (_, i) =>
+        renderTierEditorRow(props.roles, null, {
+          view: tiersForm,
+          index: i,
+          topN: tiersForm.value(tierFieldKey("topN", i)),
+          roleId: tiersForm.value(tierFieldKey("roleId", i)),
+        }),
+      ).join("")
+    : [
+        ...props.tiers.map((t) => renderTierEditorRow(props.roles, t)),
+        // One spare row, so a tier can be added without JavaScript.
+        renderTierEditorRow(props.roles, null),
+      ].join("");
 
   const runDisabled = !props.enabled;
   const runHint = !props.enabled
