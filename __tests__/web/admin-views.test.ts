@@ -1273,17 +1273,19 @@ describe("renderPermissionsPage with role groups (#1023)", () => {
   it("offers each group and 'and above' next to the roles", () => {
     const html = renderPermissionsPage(base);
     expect(html).toContain('<optgroup label="Role groups">');
-    expect(html).toContain('<option value="group:g1">Mods (group)</option>');
+    expect(html).toContain('<option value="group:g1">@Mods (group)</option>');
     expect(html).toContain(
-      '<option value="group:g1+">Mods and above (group)</option>',
+      '<option value="group:g1+">@Mods and above (group)</option>',
     );
     expect(html).toContain('<optgroup label="Roles">');
+    expect(html).toContain("data-picker");
   });
 
-  it("keeps the plain role picker when there are no groups", () => {
+  it("lists only the roles when there are no groups", () => {
     const html = renderPermissionsPage({ ...base, groups: [] });
-    expect(html).not.toContain("optgroup");
-    expect(html).toContain(">Admins</option>");
+    expect(html).not.toContain('<optgroup label="Role groups">');
+    expect(html).toContain('<optgroup label="Roles">');
+    expect(html).toContain(">@Admins</option>");
   });
 
   it("selects and shows the groups a command names in the matrix", () => {
@@ -1292,7 +1294,7 @@ describe("renderPermissionsPage with role groups (#1023)", () => {
       groupRefsPerCommand: new Map([["quote", ["group:g1+"]]]),
     });
     expect(html).toContain(
-      '<option value="group:g1+" selected>Mods and above (group)</option>',
+      '<option value="group:g1+" selected>@Mods and above (group)</option>',
     );
     expect(html).toContain("Mods and above");
     expect(html).toContain('class="tag tag-warn">restricted');
@@ -1305,8 +1307,19 @@ describe("renderPermissionsPage with role groups (#1023)", () => {
       groupRefsPerCommand: new Map([["quote", ["group:gone"]]]),
     });
     expect(html).toContain(
-      '<option value="group:gone" selected>gone (missing)</option>',
+      '<option value="group:gone" selected>⚠ group:gone (unavailable)</option>',
     );
+    expect(html).toContain(
+      "[&quot;missing&quot;,&quot;group:gone&quot;,&quot;&quot;]",
+    );
+  });
+
+  it("does not offer a stored role that the guild no longer has (posting is unchanged)", () => {
+    const html = renderPermissionsPage({
+      ...base,
+      perCommand: new Map([["quote", ["r-gone"]]]),
+    });
+    expect(html).not.toContain('value="r-gone"');
   });
 
   it("shows the moderation commands as staff only in the matrix too, not open", () => {
@@ -1418,9 +1431,10 @@ describe("renderPermissionsPage", () => {
     expect(html).toContain('<th scope="row" class="mono">/dbtrunk</th>');
     expect(html).not.toContain('<td class="mono">/dbtrunk</td>');
     // A cell is never just a glyph: hidden text says what it means.
-    expect(html).toContain(
-      '<span aria-hidden="true">✓</span><span class="visually-hidden">Allowed</span>',
+    expect(html).toMatch(
+      /<span class="kb-perm kb-perm--has"><svg class="kb-icon"[^>]*aria-hidden="true"[^>]*>.*?<\/svg>Allowed<\/span>/,
     );
+    expect(html).not.toContain('<span aria-hidden="true">✓</span>');
     expect(html).toContain(
       '<span class="muted" aria-hidden="true">—</span><span class="visually-hidden">Not allowed</span>',
     );
@@ -1459,7 +1473,7 @@ describe("renderPermissionsPage", () => {
     expect(html).toContain('name="command" value="dbtrunk"');
     expect(html).toContain('value="r1"');
     expect(html).toContain('value="r2"');
-    expect(html).toContain(">Members<");
+    expect(html).toContain(">@Members<");
     // The currently-restricted role must be pre-selected.
     expect(html).toMatch(/value="r1"\s+selected/);
     // Non-restricted role must NOT be pre-selected.
@@ -5407,6 +5421,70 @@ describe("Command Audit and Metrics settings cards (#978)", () => {
       ...extra,
     });
 
+  describe("window tabs and daily trend (#1545)", () => {
+    it("Command metrics marks the current window with aria-current, in words, without a primary fill", () => {
+      const html = renderMetrics({ windowDays: 30 });
+      expect(html).toContain('<nav class="kb-tabs" aria-label="Time window">');
+      expect(html).toContain(
+        '<a href="/admin/metrics?window=30" aria-current="true">30 days</a>',
+      );
+      expect(html).toContain('<a href="/admin/metrics?window=7">7 days</a>');
+      expect(html).not.toContain("90 days</a>");
+      expect(html).not.toMatch(/btn btn-sm/);
+    });
+
+    it("Voice analytics offers 7, 30 and 90 days and marks the current one", () => {
+      const html = renderAnalyticsPage({
+        ...COMMON,
+        enabled: true,
+        windowDays: 90,
+        heatmap: {
+          matrix: Array.from({ length: 7 }, () => Array(24).fill(0)),
+          byHour: Array(24).fill(0),
+          byDay: Array(7).fill(0),
+          totalMinutes: 0,
+          peak: null,
+          timeZone: "UTC",
+        },
+      });
+      expect(html).toContain('aria-label="Time window"');
+      expect(html).toContain(
+        '<a href="/admin/analytics?window=90" aria-current="true">90 days</a>',
+      );
+      expect(html).toContain('<a href="/admin/analytics?window=7">7 days</a>');
+      expect(html).toContain(
+        '<a href="/admin/analytics?window=30">30 days</a>',
+      );
+      expect(html).not.toMatch(/btn btn-sm/);
+    });
+
+    it("the daily trend is a kb-bars list that names the busiest day and uses no inline colour", () => {
+      const html = renderMetrics({
+        dailyTotals: [
+          { date: "2026-01-08", usageCount: 5, errorCount: 0 },
+          { date: "2026-01-09", usageCount: 20, errorCount: 1 },
+          { date: "2026-01-10", usageCount: 10, errorCount: 0 },
+        ],
+      });
+      expect(html).toContain('<div class="kb-bars">');
+      expect(html).toContain(
+        '<div class="kb-bars__row is-peak"><span title="2026-01-09">01-09</span>',
+      );
+      expect(html).toContain('<span class="kb-bars__val">20</span>');
+      expect(html).toContain("Busiest day: 2026-01-09, 20 invocations.");
+      expect(html).not.toContain('embed-brand)"');
+      expect(html).not.toContain("background:var(--embed-brand)");
+    });
+
+    it("the daily trend names no peak when every day is zero", () => {
+      const html = renderMetrics({
+        dailyTotals: [{ date: "2026-01-09", usageCount: 0, errorCount: 0 }],
+      });
+      expect(html).not.toContain("is-peak");
+      expect(html).not.toContain("Busiest day");
+    });
+  });
+
   it.each([
     ["Command Audit", renderAudit, AUDIT_KEYS, "/admin/audit/commands"],
     ["Command Metrics", renderMetrics, METRICS_KEYS, "/admin/metrics"],
@@ -5736,14 +5814,17 @@ describe("Settings page accessibility (#854)", () => {
       invalidKeys: ["x.count"],
     });
     expect(html).toContain(
-      '<div class="notice err" id="settings-flash" role="status" tabindex="-1" data-flash>',
+      '<div class="notice err" id="settings-flash" role="alert" tabindex="-1" data-flash>',
     );
     expect(html).toMatch(
       /id="set-x\.count" aria-describedby="set-x\.count-help set-x\.count-warn set-x\.count-err settings-flash" aria-invalid="true"/,
     );
+    // The line under the row is a Field error (no role of its own: the flash
+    // is the alert and the line is read when focus lands on the control).
     expect(html).toContain(
-      '<div class="settings-error" id="set-x.count-err" role="alert"',
+      '<p class="kb-field__error settings-error" id="set-x.count-err">Rejected',
     );
+    expect(html).not.toContain('class="settings-error"');
     // The base description is stashed so the AJAX save script can restore it
     // once a later save clears the rejection.
     expect(html).toContain(
@@ -5803,10 +5884,44 @@ describe("Permissions page accessibility (#854)", () => {
     expect(html).toContain(
       '<label class="visually-hidden" for="perm-roles-ping">Allowed roles for /ping</label>',
     );
-    expect(html).toContain(
-      '<select id="perm-roles-ping" name="roleIds" multiple size="3" style="min-width:14rem" aria-describedby="perm-hint-ping">',
+    expect(html).toMatch(
+      /<span class="kb-picker" data-picker data-picker-meta="[^"]*"><select class="kb-select" id="perm-roles-ping" name="roleIds" multiple size="\d+">/,
     );
-    expect(html).toContain('<span class="muted" id="perm-hint-ping"');
+    expect(html).not.toContain("perm-hint-ping");
+  });
+
+  it("renders the role list as the Picker, without the Ctrl/⌘ hint (#1547)", () => {
+    const html = renderPermissionsPage({
+      ...COMMON,
+      commands: ["ping", "quote"],
+      roleIds: ["r1"],
+      allRoleIds: ["r1", "r2"],
+      roleNames: new Map([
+        ["r1", "Admin"],
+        ["r2", "Member"],
+      ]),
+      perCommand: new Map([["quote", ["r1"]]]),
+    });
+    expect((html.match(/data-picker data-picker-meta=/g) ?? []).length).toBe(2);
+    expect(html).not.toContain("Hold Ctrl");
+    expect(html).not.toContain("for multiple");
+    expect(html).toContain('<optgroup label="Roles">');
+    expect(html).toContain('<option value="r1" selected>@Admin</option>');
+    expect(html).toContain('<option value="r2">@Member</option>');
+    expect(html).toContain("[&quot;role&quot;,&quot;Admin&quot;,&quot;&quot;]");
+  });
+
+  it("says so when the guild has no roles, without a Picker (#1547)", () => {
+    const html = renderPermissionsPage({
+      ...COMMON,
+      commands: ["ping"],
+      roleIds: [],
+      allRoleIds: [],
+      roleNames: new Map(),
+      perCommand: new Map(),
+    });
+    expect(html).toContain("No roles available in this guild");
+    expect(html).not.toContain("data-picker");
   });
 });
 

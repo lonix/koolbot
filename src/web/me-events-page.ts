@@ -14,7 +14,7 @@ import { confirmListAttr, escapeHtml } from "./html.js";
 import { icon } from "./icons.js";
 import { CHEVRON_ICON } from "./feature-page.js";
 import { eventCancelItems } from "./admin-views.js";
-import { hostPanelPath } from "./host-panel-shared.js";
+import { hostPanelPath, renderEventStateBadge } from "./host-panel-shared.js";
 
 export const HOST_EVENTS_BASE = "/me/events";
 export const HOST_NEW_EVENT_PATH = `${HOST_EVENTS_BASE}/new`;
@@ -24,7 +24,7 @@ export const HOST_START_NOW_PATH = `${HOST_NEW_EVENT_PATH}?when=now`;
 export interface HostEventListRow {
   id: string;
   title: string;
-  /** Pre-formatted start line with its zone (`formatEventWhen`). */
+  /** Pre-formatted start line with its zone (`formatDateTimeInZone`, in the member's zone). */
   when: string;
   state: string;
   durationMinutes: number;
@@ -52,24 +52,6 @@ function minutes(n: number): string {
   return n > 0 ? `${n} min` : "";
 }
 
-function stateBadge(state: string, running: boolean): string {
-  const cls = running
-    ? "kb-badge--on"
-    : state === "cancelled"
-      ? "kb-badge--off"
-      : "kb-badge--info";
-  const label = running
-    ? "Live"
-    : state === "scheduled" || state === "active"
-      ? "Planned"
-      : state === "ended"
-        ? "Ended"
-        : state === "cancelled"
-          ? "Cancelled"
-          : state;
-  return `<span class="kb-badge ${cls}">${escapeHtml(label)}</span>`;
-}
-
 function rowHtml(
   e: HostEventListRow,
   csrfToken: string,
@@ -92,7 +74,7 @@ function rowHtml(
   return `<tr>
 <th scope="row"><a href="${escapeHtml(panel)}">${label}</a></th>
 <td>${escapeHtml(e.when)}${e.durationMinutes > 0 ? ` <span class="kb-muted">· ${escapeHtml(minutes(e.durationMinutes))}</span>` : ""}</td>
-<td>${stateBadge(e.state, e.running)}</td>
+<td>${renderEventStateBadge(e.state, e.running)}</td>
 <td class="kb-actions"><span class="kb-row">${open}${edit}${cancel}</span></td>
 </tr>`;
 }

@@ -334,7 +334,7 @@ export class RewindNudgeService extends ScheduledService<RewindNudgeRunSummary |
         `DMs closed: ${summary.skippedDmsClosed} · failed: ${summary.failed} · ` +
         `snapshots: ${summary.snapshotsCreated} new / ` +
         `${summary.snapshotsExisting} kept / ${summary.snapshotsFailed} failed`;
-      await discordLogger.logCronSuccess("Rewind Nudge", message);
+      await discordLogger.logCronSuccess("Rewind nudge", message);
     } catch (error) {
       logger.error(
         "Rewind nudge: failed to post run summary to Discord:",

@@ -12,6 +12,8 @@ import {
   type ChatInputCommandInteraction,
 } from "discord.js";
 
+import { errorEmbedPayload } from "../test-utils.js";
+
 const mockCreateSession = jest.fn();
 const mockGetInstance = jest.fn(() => ({
   create: mockCreateSession,
@@ -176,9 +178,12 @@ describe("Config Command — execute", () => {
 
     await execute(interaction);
 
-    expect(editReply).toHaveBeenCalledWith({
-      content: expect.stringContaining("web UI is disabled"),
-    });
+    expect(editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "The Web UI is off",
+        description: expect.stringContaining("WEBUI_ENABLED=true"),
+      }),
+    );
     expect(mockCreateSession).not.toHaveBeenCalled();
   });
 
@@ -191,9 +196,12 @@ describe("Config Command — execute", () => {
 
     await execute(interaction);
 
-    expect(editReply).toHaveBeenCalledWith({
-      content: expect.stringContaining("WEBUI_BASE_URL"),
-    });
+    expect(editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "The Web UI isn't set up correctly",
+        description: expect.stringContaining("WEBUI_BASE_URL"),
+      }),
+    );
     expect(mockCreateSession).not.toHaveBeenCalled();
   });
 
@@ -205,9 +213,12 @@ describe("Config Command — execute", () => {
 
     await execute(interaction);
 
-    expect(editReply).toHaveBeenCalledWith({
-      content: expect.stringContaining("at least 32 bytes"),
-    });
+    expect(editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "The Web UI isn't set up correctly",
+        description: expect.stringContaining("at least 32 bytes"),
+      }),
+    );
     expect(mockCreateSession).not.toHaveBeenCalled();
   });
 
@@ -216,9 +227,12 @@ describe("Config Command — execute", () => {
 
     await execute(interaction);
 
-    expect(editReply).toHaveBeenCalledWith({
-      content: expect.stringContaining("must be run inside a guild"),
-    });
+    expect(editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Can't use this here",
+        description: expect.stringContaining("in a server"),
+      }),
+    );
     expect(mockCreateSession).not.toHaveBeenCalled();
   });
 
@@ -266,9 +280,12 @@ describe("Config Command — execute", () => {
     await execute(interaction);
 
     expect(deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
-    expect(editReply).toHaveBeenCalledWith({
-      content: expect.stringContaining("`/me`"),
-    });
+    expect(editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "You can't use this command",
+        description: expect.stringContaining("`/me`"),
+      }),
+    );
     expect(mockCreateSession).not.toHaveBeenCalled();
     expect(userSend).not.toHaveBeenCalled();
   });
@@ -311,9 +328,12 @@ describe("Config Command — execute", () => {
 
       await execute(interaction);
 
-      expect(editReply).toHaveBeenCalledWith({
-        content: expect.stringContaining("`/me`"),
-      });
+      expect(editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "You can't use this command",
+          description: expect.stringContaining("`/me`"),
+        }),
+      );
       expect(mockCreateSession).not.toHaveBeenCalled();
       spy.mockRestore();
     });
@@ -342,9 +362,12 @@ describe("Config Command — execute", () => {
 
     await execute(interaction);
 
-    expect(editReply).toHaveBeenCalledWith({
-      content: expect.stringContaining("An error occurred"),
-    });
+    expect(editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't issue your sign-in link",
+        description: expect.stringContaining("tell an admin"),
+      }),
+    );
     expect(userSend).not.toHaveBeenCalled();
   });
 });

@@ -119,6 +119,8 @@ export interface HostedEventSummary {
   startTime: Date;
   timezone: string;
   state: string;
+  /** `isEventRunning`: active and the start has arrived. */
+  running: boolean;
 }
 
 /** Most events the overview card lists. */
@@ -148,12 +150,14 @@ export async function listHostedEvents(
       .limit(HOSTED_EVENTS_LIMIT)
       .lean()) as unknown;
     if (!Array.isArray(rows)) return [];
+    const now = new Date();
     return rows.map((r) => ({
       id: String(r._id),
       title: String(r.title ?? ""),
       startTime: r.startTime as Date,
       timezone: String(r.timezone ?? ""),
       state: String(r.state ?? ""),
+      running: isEventRunning(r, now),
     }));
   } catch (err) {
     logger.warn(

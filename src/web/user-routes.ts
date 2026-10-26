@@ -64,7 +64,12 @@ import {
   UserVoicePrefsService,
   VoicePrefsValidationError,
 } from "../services/user-voice-prefs-service.js";
-import { getServerTimezone } from "../utils/timezone.js";
+import {
+  formatDateTimeInZone,
+  formatInZone,
+  getServerTimezone,
+  resolveTimezone,
+} from "../utils/timezone.js";
 import {
   RewindService,
   formatFunComparison,
@@ -101,7 +106,14 @@ import { createMeEventsRouter } from "./routes/me-events.js";
 import { createMeModerationRouter } from "./routes/me-moderation.js";
 import { createMeEventPresetsRouter } from "./routes/me-event-presets.js";
 import { listHostedEvents } from "./event-host.js";
-import { formatEventWhen } from "../services/event-service.js";
+import { readMemberZone } from "./member-timezone.js";
+import {
+  birthdayValue,
+  notificationsValue,
+  privacyValue,
+  timezoneValue,
+  voiceValue,
+} from "./me-preference-values.js";
 
 // Everything on the `/me` surface may carry member-supplied strings, so every
 // audit row written from here is bounded first (#1142).
@@ -126,6 +138,9 @@ function asyncHandler(
 function getCsrfToken(req: AuthenticatedRequest): string {
   return (req as AuthenticatedRequest & { csrfToken?: string }).csrfToken ?? "";
 }
+
+type PreferenceValueKey =
+  "notifications" | "timezone" | "voice" | "birthday" | "privacy";
 
 function readCheckbox(value: unknown): boolean {
   // The page posts "true" when checked; absent → unchecked.
@@ -175,7 +190,7 @@ const NOTIFICATION_ROW_DEFS: readonly NotificationRowDef[] = [
     key: "achievements",
     label: "Achievement DMs",
     description:
-      "Direct messages from Koolbot when you earn a new accolade or badge.",
+      "Direct messages from KoolBot when you earn a new accolade or badge.",
   },
   {
     key: "digest",
@@ -392,6 +407,79 @@ async function findActiveResetCooldown(
  */
 async function readUserFeatureFlags(): Promise<Required<UserFeatureFlags>> {
   return readMeSurfaceFlagsStrict();
+}
+
+/**
+ * How each preference is set now, for the cards on `/me/`. Each value is read
+ * on its own and only for a feature the server has on; a read that fails
+ * leaves that card without a value line instead of failing the page.
+ */
+async function readPreferenceValues(
+  client: Client,
+  session: WebSessionContext,
+  flags: Required<UserFeatureFlags>,
+  /** The member's preference row, read once by the caller; `null`: it failed. */
+  prefsRead: { prefs: NotificationPrefs; timezone: string | null } | null,
+): Promise<Partial<Record<PreferenceValueKey, string>>> {
+  const { discordUserId: userId, guildId } = session;
+  const out: Partial<Record<PreferenceValueKey, string>> = {};
+  const attempt = async (
+    key: PreferenceValueKey,
+    read: () => Promise<string | undefined>,
+  ): Promise<void> => {
+    try {
+      const value = await read();
+      if (value) out[key] = value;
+    } catch (err) {
+      logger.warn(
+        `Could not read the ${key} value for the /me overview: ${sanitizeForLog(String(err))}`,
+      );
+    }
+  };
+  await Promise.all([
+    attempt("notifications", async () => {
+      // A failed read (logged by the caller) leaves both lines out.
+      if (!prefsRead) return undefined;
+      const { prefs, timezone } = prefsRead;
+      // The same row read gives the timezone card its value too, so it does
+      // not depend on the availability read below.
+      out.timezone = timezoneValue(timezone, getServerTimezone(), new Date());
+      const available = await readMeNotificationAvailability(flags);
+      const rows = buildNotificationRows(prefs, available);
+      return notificationsValue(
+        rows.filter((r) => r.enabled).length,
+        rows.length,
+      );
+    }),
+    flags.presetsEnabled
+      ? attempt("voice", async () => {
+          const v =
+            await UserVoicePrefsService.getInstance().getSummary(userId);
+          return voiceValue(v.namePattern, v.presetCount);
+        })
+      : Promise.resolve(),
+    flags.birthdayEnabled
+      ? attempt("birthday", async () =>
+          birthdayValue(
+            await BirthdayService.getInstance(client).getBirthdayStrict(
+              userId,
+              guildId,
+            ),
+          ),
+        )
+      : Promise.resolve(),
+    flags.privacyEnabled
+      ? attempt("privacy", async () =>
+          privacyValue(
+            (await TrackingOptOutService.getInstance().getOptedOutAt(
+              userId,
+              guildId,
+            )) !== null,
+          ),
+        )
+      : Promise.resolve(),
+  ]);
+  return out;
 }
 
 /**
@@ -662,6 +750,24 @@ export function createUserRouter(
         return;
       }
       const flags = await readUserFeatureFlags();
+      // One read of the member's preference row serves the cards' values and
+      // the zone the times below are shown in (#1538). A failed read leaves
+      // the value lines out and shows the times in the server's zone.
+      let prefsRead: Awaited<
+        ReturnType<UserNotificationPrefsService["getPrefsWithTimezoneStrict"]>
+      > | null = null;
+      try {
+        prefsRead =
+          await UserNotificationPrefsService.getInstance().getPrefsWithTimezoneStrict(
+            session.discordUserId,
+            session.guildId,
+          );
+      } catch (err) {
+        logger.warn(
+          `Could not read the notification preferences for the /me overview: ${sanitizeForLog(String(err))}`,
+        );
+      }
+      const zone = resolveTimezone(prefsRead?.timezone);
       // Only hosts see the card: its links lead to `/me/events*` (#1316).
       const hostedEvents = (
         hasScope(session, "host")
@@ -670,8 +776,9 @@ export function createUserRouter(
       ).map((e) => ({
         id: e.id,
         title: e.title,
-        when: formatEventWhen(e),
+        when: formatDateTimeInZone(e.startTime, zone),
         state: e.state,
+        running: e.running,
       }));
 
       // Read-only poll-participation summary for the overview card (#655).
@@ -683,6 +790,13 @@ export function createUserRouter(
           ).getParticipationSummary(session.discordUserId, session.guildId)
         : null;
 
+      const preferenceValues = await readPreferenceValues(
+        client,
+        session,
+        flags,
+        prefsRead,
+      );
+
       res.type("text/html").send(
         renderUserPage({
           title: "Overview",
@@ -693,13 +807,18 @@ export function createUserRouter(
             isAdmin: session.role === "admin",
             ...flags,
             hostedEvents,
+            preferenceValues,
             pollParticipation: pollParticipation
               ? {
                   totalVotes: pollParticipation.totalVotes,
                   thisYearVotes: pollParticipation.thisYearVotes,
                   thisWeekVotes: pollParticipation.thisWeekVotes,
                   lastVoted: pollParticipation.lastVoteAt
-                    ? pollParticipation.lastVoteAt.toISOString().slice(0, 10)
+                    ? formatInZone(
+                        pollParticipation.lastVoteAt,
+                        zone,
+                        "yyyy-MM-dd",
+                      )
                     : null,
                 }
               : null,
@@ -946,7 +1065,7 @@ export function createUserRouter(
       } else if (after === null) {
         flash = {
           type: "ok",
-          text: "Cleared your timezone — Koolbot will use the server timezone.",
+          text: "Cleared your timezone — KoolBot will use the server timezone.",
         };
       } else {
         flash = { type: "ok", text: `Saved your timezone as ${after}.` };
@@ -974,6 +1093,10 @@ export function createUserRouter(
       );
       const flash = readFlashFromQuery(req);
       const flags = await readUserFeatureFlags();
+      const changeCooldownSeconds = await ConfigService.getInstance().getNumber(
+        "birthdays.change_cooldown_seconds",
+        300,
+      );
       res.type("text/html").send(
         renderUserPage({
           title: "Birthday",
@@ -981,6 +1104,7 @@ export function createUserRouter(
           body: renderUserBirthdayBody({
             csrfToken: getCsrfToken(req),
             selected,
+            changeCooldownSeconds,
           }),
           csrfToken: getCsrfToken(req),
           remainingMs: getDisplayedRemainingMs(session),
@@ -1191,13 +1315,13 @@ export function createUserRouter(
             emoji: a.emoji,
             name: a.name,
             description: a.description,
-            earnedAt: a.earnedAt.toISOString().slice(0, 10),
+            earnedAt: formatInZone(a.earnedAt, timezone, "yyyy-MM-dd"),
           })),
           achievements: summary.achievements.map((a) => ({
             emoji: a.emoji,
             name: a.name,
             description: a.description,
-            earnedAt: a.earnedAt.toISOString().slice(0, 10),
+            earnedAt: formatInZone(a.earnedAt, timezone, "yyyy-MM-dd"),
           })),
           annualRank: summary.annualRank,
           annualGuildMembers: summary.annualGuildMembers,
@@ -1933,11 +2057,12 @@ export function createUserRouter(
         result: "failure",
         errorMessage: "reset cooldown still active",
       });
+      const zone = await readMemberZone(userId, guildId);
       res.redirect(
         303,
         flashUrl("/me/privacy", {
           type: "err",
-          text: `You already reset your data recently. You can reset again after ${availableAt.toUTCString()}.`,
+          text: `You already reset your data recently. You can reset again after ${formatDateTimeInZone(availableAt, zone)}.`,
         }),
       );
       return;
@@ -1992,7 +2117,7 @@ export function createUserRouter(
       await finishSignedOut(
         res,
         userId,
-        "Your Koolbot data reset could not finish, and some of your data may already be gone. Sign in again and retry — it is safe to run more than once.",
+        "Your KoolBot data reset could not finish, and some of your data may already be gone. Sign in again and retry — it is safe to run more than once.",
       );
       return;
     }
@@ -2009,8 +2134,8 @@ export function createUserRouter(
       res,
       userId,
       report.ok
-        ? "Your Koolbot data on this server has been reset."
-        : "Your Koolbot data reset did not fully complete. Sign in again and retry — it is safe to run more than once.",
+        ? "Your KoolBot data on this server has been reset."
+        : "Your KoolBot data reset did not fully complete. Sign in again and retry — it is safe to run more than once.",
     );
   }
 

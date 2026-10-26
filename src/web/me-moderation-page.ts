@@ -131,6 +131,11 @@ function caseStatusBadge(status: string): string {
 /**
  * A UTC instant as `2026-10-21 07:30 UTC` (DESIGN.md: times carry their zone).
  * Every date and time on the moderator pages goes through this one helper.
+ *
+ * UTC on purpose, unlike the other `/me` pages (#1538): these pages show the
+ * same log as the admin Moderation page, which staff in different timezones
+ * read together, and DESIGN.md gives admin facts in UTC. Do not switch it to
+ * the member's own zone (`member-timezone.ts`).
  */
 const stamp = (iso: string | null): string =>
   iso ? `${iso.slice(0, 16).replace("T", " ")} UTC` : "";

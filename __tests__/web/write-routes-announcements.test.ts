@@ -16,6 +16,7 @@ import {
   afterEach,
 } from "@jest/globals";
 import type { Client } from "discord.js";
+import { JSDOM } from "jsdom";
 import {
   startAdminHarness,
   stubRequireSession,
@@ -74,6 +75,9 @@ jest.unstable_mockModule(
 const { createAnnouncementsRouter } =
   await import("../../src/web/routes/write/announcements.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
+const { registerFormPage } = await import("../../src/web/form-pages.js");
+const { renderAnnouncementsPage } =
+  await import("../../src/web/admin-views.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
 
 const client = { user: { id: "bot" } } as unknown as Client;
@@ -86,8 +90,50 @@ const VALID = {
   message: "Standup in 5",
 };
 
+// The read router registers the page's renderer in the app (#1517); here the
+// real view stands in, so a refusal is checked as the markup the person gets.
+const registerPage = (): void =>
+  registerFormPage("/admin/announcements", async (_req, refused) =>
+    renderAnnouncementsPage({
+      guildId: "guild-1",
+      csrfToken: "csrf",
+      remainingMs: 1000,
+      navFeatureStatus: {},
+      enabled: true,
+      rows: [],
+      textChannels: [
+        { id: "channel-9", name: "general", type: 0 },
+        { id: "channel-3", name: "random", type: 0 },
+      ],
+      settingRows: [],
+      refusedForm: refused,
+    }),
+  );
+
+/** A refused form: 422 with the page, the first marked field and the error line of each field. */
+async function refusal(res: Response): Promise<{
+  html: string;
+  invalidIds: string[];
+  errorLines: Record<string, string>;
+}> {
+  expect(res.status).toBe(422);
+  expect(res.headers.get("content-type")).toContain("text/html");
+  const html = await res.text();
+  const invalidIds = [...html.matchAll(/<[^>]*aria-invalid="true"[^>]*>/g)].map(
+    (m) => /id="([^"]+)"/.exec(m[0])?.[1] ?? "",
+  );
+  const errorLines: Record<string, string> = {};
+  for (const m of html.matchAll(
+    /<p class="kb-field__error" id="([^"]+)">([^<]*)<\/p>/g,
+  )) {
+    errorLines[m[1]] = m[2];
+  }
+  return { html, invalidIds, errorLines };
+}
+
 beforeEach(async () => {
   jest.clearAllMocks();
+  registerPage();
   mockCreateAnnouncement.mockResolvedValue({ _id: "ann-1" });
   mockDeleteAnnouncement.mockResolvedValue(true);
   mockPostAnnouncementNow.mockResolvedValue(true);
@@ -113,26 +159,107 @@ function lastAudit(): Record<string, unknown> {
 
 describe("POST /announcements/create", () => {
   it.each([
-    ["channel", { cron: "0 9 * * 1", message: "hi" }],
-    ["cron", { channelId: "c", message: "hi" }],
-    ["message", { channelId: "c", cron: "0 9 * * 1" }],
-  ])("rejects a submission missing the %s", async (_field, body) => {
-    const res = await harness.post("/announcements/create", body);
-    const flash = parseFlashRedirect(res.headers.get("location"));
-    expect(flash.path).toBe("/admin/announcements");
-    expect(flash.type).toBe("err");
-    expect(flash.msg).toBe("Channel, cron and message are all required.");
+    [
+      "channel",
+      { cron: "0 9 * * 1", message: "hi" },
+      "announcement-create-channelId",
+      "Pick a channel.",
+    ],
+    [
+      "cron",
+      { channelId: "c", message: "hi" },
+      "announcement-create-cron",
+      "Enter a cron expression, for example 0 9 * * *.",
+    ],
+    [
+      "message",
+      { channelId: "c", cron: "0 9 * * 1" },
+      "announcement-create-message",
+      "Enter the message to post.",
+    ],
+  ])(
+    "refuses a submission missing the %s and marks that field",
+    async (_field, body, id, message) => {
+      const res = await harness.post("/announcements/create", body);
+      const r = await refusal(res);
+      expect(r.invalidIds).toEqual([id]);
+      expect(r.errorLines[`${id}-error`]).toBe(message);
+      expect(mockCreateAnnouncement).not.toHaveBeenCalled();
+    },
+  );
+
+  it("marks an invalid cron expression and keeps every typed value", async () => {
+    const res = await harness.post("/announcements/create", {
+      channelId: "channel-3",
+      cron: "every monday please",
+      message: "Standup <b>now</b> & later",
+      placeholders: "1",
+      embedTitle: "Notice",
+      embedDescription: "Details",
+      embedColor: "#112233",
+    });
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["announcement-create-cron"]);
+    expect(r.errorLines["announcement-create-cron-error"]).toBe(
+      "Not a valid cron expression. Use five fields (minute hour day-of-month month day-of-week), for example 0 9 * * *.",
+    );
+    // Typed text comes back, escaped, in the form that was refused.
+    expect(r.html).toContain('value="every monday please"');
+    expect(r.html).toContain("Standup &lt;b&gt;now&lt;/b&gt; &amp; later");
+    expect(r.html).not.toContain("Standup <b>now</b>");
+    expect(r.html).toContain('value="Notice"');
+    expect(r.html).toContain('value="#112233"');
+    expect(r.html).toContain('<option value="channel-3" selected>');
+    expect(r.html).toMatch(/name="placeholders" value="1" checked/);
     expect(mockCreateAnnouncement).not.toHaveBeenCalled();
   });
 
-  it("rejects an invalid cron expression", async () => {
+  it("echoes the message and embed text exactly as typed, not trimmed", async () => {
     const res = await harness.post("/announcements/create", {
-      ...VALID,
-      cron: "every monday please",
+      channelId: "channel-9",
+      cron: "nope",
+      message: "\n  indented line\n\n",
+      embedDescription: "  spaced  ",
     });
-    const flash = parseFlashRedirect(res.headers.get("location"));
-    expect(flash.msg).toContain("Invalid cron expression");
-    expect(mockCreateAnnouncement).not.toHaveBeenCalled();
+    const r = await refusal(res);
+    // What the browser puts back in the boxes, after HTML parsing.
+    const doc = new JSDOM(r.html).window.document;
+    const box = (name: string): string =>
+      (
+        doc.querySelector(
+          `form[action$="/announcements/create"] [name=${name}]`,
+        ) as unknown as { value: string }
+      ).value;
+    expect(box("message")).toBe("\n  indented line\n\n");
+    expect(box("embedDescription")).toBe("  spaced  ");
+  });
+
+  it("marks every refused field at once, in page order", async () => {
+    const res = await harness.post("/announcements/create", {
+      channelId: "channel-9",
+      cron: "nope",
+      message: "m".repeat(2001),
+      embedTitle: "t".repeat(257),
+      embedColor: "blurple",
+    });
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual([
+      "announcement-create-cron",
+      "announcement-create-message",
+      "announcement-create-embedTitle",
+      "announcement-create-embedColor",
+    ]);
+    expect(r.errorLines["announcement-create-message-error"]).toBe(
+      "At most 2000 characters.",
+    );
+    expect(r.errorLines["announcement-create-embedTitle-error"]).toBe(
+      "At most 256 characters.",
+    );
+    expect(r.errorLines["announcement-create-embedColor-error"]).toBe(
+      "Use six hex digits, for example #5865F2.",
+    );
+    // The one-off form on the same page is not marked.
+    expect(r.html).not.toContain("announcement-once-message-error");
   });
 
   it("strips wrapping quotes so validation and storage agree", async () => {
@@ -145,37 +272,31 @@ describe("POST /announcements/create", () => {
     });
   });
 
-  it("rejects a message past the Discord 2000-character cap", async () => {
-    const res = await harness.post("/announcements/create", {
-      ...VALID,
-      message: "m".repeat(2001),
-    });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
-      "Message must be 2000 characters or fewer.",
-    );
-    expect(mockCreateAnnouncement).not.toHaveBeenCalled();
-  });
-
-  it("rejects an embed description past the 4000-character cap", async () => {
+  it("refuses an embed description past the 4000-character cap", async () => {
     const res = await harness.post("/announcements/create", {
       ...VALID,
       embedDescription: "d".repeat(4001),
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
-      "Embed description must be 4000 characters or fewer.",
-    );
-  });
-
-  it("rejects a malformed hex colour", async () => {
-    const res = await harness.post("/announcements/create", {
-      ...VALID,
-      embedTitle: "Notice",
-      embedColor: "blurple",
-    });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
-      "Invalid hex colour: blurple",
+    const r = await refusal(res);
+    expect(r.errorLines["announcement-create-embedDescription-error"]).toBe(
+      "At most 4000 characters.",
     );
     expect(mockCreateAnnouncement).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a flash redirect when the page has no renderer", async () => {
+    registerFormPage("/admin/announcements", async () => {
+      throw new Error("render failed");
+    });
+    const res = await harness.post("/announcements/create", {
+      ...VALID,
+      message: "",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(res.status).toBe(303);
+    expect(flash.path).toBe("/admin/announcements");
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toBe("Not saved. Enter the message to post.");
   });
 
   it("creates a plain announcement scoped to the session's guild", async () => {
@@ -309,14 +430,29 @@ describe("POST /announcements/:id/{delete,toggle,post-now}", () => {
 });
 
 describe("POST /announcements/post-once and /post-vc-stats", () => {
-  it("requires a channel and a message", async () => {
+  it("refuses a missing channel and keeps the typed message", async () => {
     const res = await harness.post("/announcements/post-once", {
-      message: "hi",
+      message: "hi <there>",
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
-      "Channel and message are both required.",
-    );
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["announcement-once-channelId"]);
+    expect(r.html).toContain("hi &lt;there&gt;");
     expect(mockPostOnce).not.toHaveBeenCalled();
+  });
+
+  it("echoes the one-off message exactly as typed", async () => {
+    const res = await harness.post("/announcements/post-once", {
+      message: "  keep me  ",
+    });
+    const r = await refusal(res);
+    const doc = new JSDOM(r.html).window.document;
+    expect(
+      (
+        doc.querySelector(
+          'form[action$="/announcements/post-once"] [name=message]',
+        ) as unknown as { value: string }
+      ).value,
+    ).toBe("  keep me  ");
   });
 
   it("applies the same length caps as the scheduled create", async () => {
@@ -324,9 +460,11 @@ describe("POST /announcements/post-once and /post-vc-stats", () => {
       channelId: "c",
       message: "m".repeat(2001),
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
-      "Message must be 2000 characters or fewer.",
+    const r = await refusal(res);
+    expect(r.errorLines["announcement-once-message-error"]).toBe(
+      "At most 2000 characters.",
     );
+    expect(r.invalidIds).toEqual(["announcement-once-message"]);
   });
 
   it("posts a one-off message with its embed", async () => {

@@ -1,10 +1,6 @@
-import {
-  SlashCommandBuilder,
-  ChatInputCommandInteraction,
-  MessageFlags,
-} from "discord.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction } from "discord.js";
 import logger from "../utils/logger.js";
-import { safeReply } from "../utils/safe-reply.js";
+import { replyWithUnexpectedError } from "../utils/error-reply.js";
 
 export const data = new SlashCommandBuilder()
   .setName("ping")
@@ -31,9 +27,6 @@ export async function execute(
     );
   } catch (error) {
     logger.error("Error in ping command:", error);
-    await safeReply(interaction, {
-      content: "There was an error while executing this command!",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithUnexpectedError(interaction);
   }
 }

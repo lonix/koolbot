@@ -56,9 +56,11 @@ import {
 } from "../../channel-manager-data.js";
 import {
   CHANNELS_PATH,
+  channelDeleteConfirmable,
   renderChannelDeleteConfirmPage,
   renderChannelManagerPage,
 } from "../../channel-manager-view.js";
+import { CONFIRM_PAGE_HEADER } from "../../confirm-fetch.js";
 import {
   asyncHandler,
   flashRedirect,
@@ -324,13 +326,23 @@ export function createChannelManagerRouter(
             "Couldn't verify whether KoolBot manages this channel, so it can't be deleted right now. Try again in a moment.",
         };
       }
+      const botCanManage = await botCanManageChannels(guild);
+      // The header says which of the two the page is (a question, or a
+      // refusal with its reason); the dialog upgrade (`confirm-fetch.ts`,
+      // #1536) reads nothing else.
+      res.setHeader(
+        CONFIRM_PAGE_HEADER,
+        channelDeleteConfirmable({ channel, verdict, botCanManage })
+          ? "channel-delete"
+          : "channel-delete-refused",
+      );
       res.type("text/html").send(
         renderChannelDeleteConfirmPage({
           ...base,
           channel,
           verdict,
           confirmToken: channel ? confirmationToken(channel, allChannels) : "",
-          botCanManage: await botCanManageChannels(guild),
+          botCanManage,
         }),
       );
     }),

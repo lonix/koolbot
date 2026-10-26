@@ -1576,6 +1576,47 @@ describe("POST /settings/save-section", () => {
     });
   });
 
+  it("returns each refused key's reason beside invalidKeys in the AJAX reply (#1517)", async () => {
+    const res = await harness.post(
+      "/settings/save-section",
+      {
+        category: "quotes",
+        no_cascade: "1",
+        keys: ["quotes.cooldown"],
+        "value_quotes.cooldown": "bad",
+      },
+      { json: true },
+    );
+    const body = (await res.json()) as {
+      text: string;
+      invalidKeys: string[];
+      invalidReasons: Record<string, string>;
+    };
+    expect(body.invalidKeys).toEqual(["quotes.cooldown"]);
+    expect(Object.keys(body.invalidReasons)).toEqual(["quotes.cooldown"]);
+    const reason = body.invalidReasons["quotes.cooldown"];
+    expect(reason.length).toBeGreaterThan(0);
+    // The same reason the flash text carries.
+    expect(body.text).toContain(`quotes.cooldown (${reason})`);
+  });
+
+  it("does not put reasons in the no-JS redirect: only the keys and the signed flash", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "quotes",
+      no_cascade: "1",
+      keys: ["quotes.cooldown"],
+      "value_quotes.cooldown": "bad",
+    });
+    const location = res.headers.get("location") ?? "";
+    const params = new globalThis.URLSearchParams(location.split("?")[1]);
+    expect([...params.keys()].sort()).toEqual([
+      "flash",
+      "invalid",
+      "msg",
+      "sig",
+    ]);
+  });
+
   it("asks a feature page to reload when its card flips the enable flag", async () => {
     // Stored off (null → schema default false), submitted on.
     const res = await harness.post(

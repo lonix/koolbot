@@ -1,6 +1,8 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import type { ChatInputCommandInteraction, EmbedBuilder } from "discord.js";
 
+import { unexpectedErrorPayload } from "../test-utils.js";
+
 const mockGetUserAchievements = jest.fn<() => Promise<unknown>>();
 const mockGetUnearnedAccoladeProgress = jest.fn<() => Promise<unknown[]>>();
 const mockGetAccoladeDefinition = jest.fn<(type: string) => unknown>();
@@ -426,11 +428,7 @@ describe("Achievements Command", () => {
       await execute(interaction);
 
       expect(reply).not.toHaveBeenCalled();
-      expect(editReply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: "There was an error while fetching achievements!",
-        }),
-      );
+      expect(editReply).toHaveBeenCalledWith(unexpectedErrorPayload());
     });
   });
 });

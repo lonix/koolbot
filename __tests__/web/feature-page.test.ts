@@ -516,7 +516,7 @@ describe("every feature page", () => {
   it("is covered by a fixture for each of the 14 pages that share the card", () => {
     const titles = new Set(
       withFold.map((p) =>
-        (parse(p.html).title ?? "").replace(/ — Koolbot Admin$/, ""),
+        (parse(p.html).title ?? "").replace(/ — KoolBot Admin$/, ""),
       ),
     );
     expect([...titles].sort()).toEqual([...TITLES].sort());

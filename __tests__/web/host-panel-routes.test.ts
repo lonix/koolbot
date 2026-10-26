@@ -40,6 +40,7 @@ import { PermissionsService } from "../../src/services/permissions-service.js";
 import { EventService } from "../../src/services/event-service.js";
 import { ConfigService } from "../../src/services/config-service.js";
 import { WebAuditLog } from "../../src/models/web-audit-log.js";
+import { UserNotificationPrefsService } from "../../src/services/user-notification-prefs-service.js";
 import { Event } from "../../src/models/event.js";
 
 const SECRET = "test-secret-for-host-panel-routes";
@@ -98,6 +99,7 @@ let events: Record<string, FakeEvent> = {};
 let auditRows: Array<Record<string, unknown>> = [];
 let sessionRole: Role = "user";
 let sessionUser = CREATOR;
+let memberZone: string | null = null;
 let server: Server;
 let base = "";
 
@@ -180,6 +182,7 @@ beforeEach(() => {
   delete fakeClient.guilds;
   events = { [EVENT_ID]: makeEvent() };
   auditRows = [];
+  memberZone = "UTC";
 
   jest.spyOn(WebSessionService.getInstance(), "findById").mockImplementation(
     async () =>
@@ -198,7 +201,11 @@ beforeEach(() => {
     resolveWebScopes: async () => ["member", "host"],
   } as never);
   groupReport = null;
+  jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+    getTimezone: async () => memberZone,
+  } as never);
   jest.spyOn(EventService, "getInstance").mockReturnValue({
+    editsAllowed: async () => true,
     getEvent: async (id: string) => events[id] ?? null,
     getGroupChannelReport: () => groupReport,
     isEventBeingEnded: () => false,
@@ -222,6 +229,34 @@ afterEach(() => {
 const PANEL = `/me/events/${EVENT_ID}/host`;
 // The app mounts the router at /me, so requests go to the full path.
 const url = (path: string): string => path;
+
+describe("host panel times (#1538)", () => {
+  // 2030-01-01 19:00 UTC is 14:00 in New York (the event's zone) and
+  // 2030-01-02 08:00 in Auckland (the member's); the server runs in neither.
+  it("shows Starts in the member's zone, not the event's", async () => {
+    events[EVENT_ID] = makeEvent({ timezone: "America/New_York" });
+    memberZone = "Pacific/Auckland";
+    const r = await call(url(PANEL));
+    expect(r.status).toBe(200);
+    expect(r.text).toContain("2030-01-02 08:00 (Pacific/Auckland)");
+    expect(r.text).not.toContain("America/New_York");
+  });
+
+  it("keeps the read-only start on Edit event in the event's own zone, beside the fields that edit it", async () => {
+    // Started already, so Edit event shows the start as a fact, not as fields.
+    events[EVENT_ID] = makeEvent({
+      state: "active",
+      timezone: "America/New_York",
+      startTime: new Date("2020-01-01T19:00:00Z"),
+    });
+    memberZone = "Pacific/Auckland";
+    const r = await call(`${PANEL}/edit`);
+    expect(r.status).toBe(200);
+    expect(r.text).toContain("Started");
+    expect(r.text).toContain("2020-01-01 14:00 (America/New_York)");
+    expect(r.text).not.toContain("Pacific/Auckland");
+  });
+});
 
 describe("host panel access", () => {
   it("lets the creator, a non-admin member, open the panel", async () => {
@@ -497,11 +532,31 @@ describe("host panel page", () => {
 
   it("shows only the sections that apply to a plain event", async () => {
     const r = await call(url(PANEL));
-    expect(r.text).toContain("This event has no groups.");
     expect(r.text).toContain('id="host-end"');
     expect(r.text).not.toContain('id="host-board"');
     // Switching groups on is still offered, from the second fold.
     expect(r.text).toContain('id="host-groupchanges"');
+  });
+
+  it("says the state in words, the same ones as Your events (#1518)", async () => {
+    const cases: Array<[Partial<FakeEvent>, string]> = [
+      [{ state: "scheduled" }, "Planned"],
+      // Active, but its start is still ahead: not running yet.
+      [{ state: "active" }, "Planned"],
+      [{ state: "active", startTime: new Date(Date.now() - 600_000) }, "Live"],
+      [{ state: "ended" }, "Ended"],
+      [{ state: "cancelled" }, "Cancelled"],
+    ];
+    for (const [over, word] of cases) {
+      events[EVENT_ID] = makeEvent(over);
+      const r = await call(url(PANEL));
+      expect(r.text).toMatch(
+        new RegExp(
+          `<h1 class="kb-pagehead__title">Host panel <span class="kb-badge kb-badge--(on|off|info)">${word}</span></h1>`,
+        ),
+      );
+      expect(r.text).not.toContain('class="tag ');
+    }
   });
 
   it("is a read-only summary for ended and cancelled events", async () => {
@@ -509,7 +564,9 @@ describe("host panel page", () => {
       events[EVENT_ID] = makeEvent({ state });
       const r = await call(url(PANEL));
       expect(r.status).toBe(200);
-      expect(r.text).toContain("read-only summary");
+      expect(r.text).toContain(
+        `This event is ${state}, so this page is a read-only summary`,
+      );
       expect(r.text).not.toContain('id="host-end"');
     }
   });
@@ -706,26 +763,36 @@ describe("control sections supplied by later issues", () => {
 });
 
 describe("links to the host panel", () => {
-  it("lists the member's open events on the overview", async () => {
+  function stubOpenEvents(rows: Array<Record<string, unknown>>): void {
     jest.spyOn(Event, "find").mockReturnValue({
       sort: () => ({
         limit: () => ({
-          lean: async () => [
-            {
-              _id: EVENT_ID,
-              title: "Quiz <night>",
-              startTime: new Date("2030-01-01T19:00:00Z"),
-              timezone: "UTC",
-              state: "scheduled",
-            },
-          ],
+          lean: async () => rows,
         }),
       }),
     } as never);
+  }
+
+  it("leads the overview with a live event, linked to its host panel (#1508)", async () => {
+    stubOpenEvents([
+      {
+        _id: EVENT_ID,
+        title: "Quiz <night>",
+        startTime: new Date("2020-01-01T19:00:00Z"),
+        timezone: "UTC",
+        state: "active",
+      },
+    ]);
     const r = await call("/me/");
     expect(r.status).toBe(200);
     expect(r.text).toContain(`href="${PANEL}"`);
     expect(r.text).toContain("Quiz &lt;night&gt;");
+    expect(r.text).toContain('<span class="kb-badge kb-badge--on">Live</span>');
+    // The live event comes before the preference cards.
+    expect(r.text.indexOf("hosting-now-h")).toBeGreaterThan(-1);
+    expect(r.text.indexOf("hosting-now-h")).toBeLessThan(
+      r.text.indexOf("kb-features"),
+    );
     expect(Event.find).toHaveBeenCalledWith(
       expect.objectContaining({
         guildId: GUILD,
@@ -733,6 +800,38 @@ describe("links to the host panel", () => {
         state: { $in: ["scheduled", "active"] },
       }),
     );
+  });
+
+  it("reduces planned events to one line that links to Your events (#1508)", async () => {
+    stubOpenEvents([
+      {
+        _id: EVENT_ID,
+        title: "Quiz <night>",
+        startTime: new Date("2030-01-01T19:00:00Z"),
+        timezone: "UTC",
+        state: "scheduled",
+      },
+    ]);
+    const r = await call("/me/");
+    expect(r.status).toBe(200);
+    expect(r.text).toContain('<a href="/me/events">1 event</a>');
+    expect(r.text).not.toContain("hosting-now");
+    expect(r.text).not.toContain("Quiz");
+  });
+
+  it("does not call an active event that has not started yet Live (#1508)", async () => {
+    stubOpenEvents([
+      {
+        _id: EVENT_ID,
+        title: "Quiz night",
+        startTime: new Date("2999-01-01T19:00:00Z"),
+        timezone: "UTC",
+        state: "active",
+      },
+    ]);
+    const r = await call("/me/");
+    expect(r.text).not.toContain("kb-badge--on");
+    expect(r.text).toContain('<a href="/me/events">1 event</a>');
   });
 
   it("still renders the overview when the lookup fails", async () => {

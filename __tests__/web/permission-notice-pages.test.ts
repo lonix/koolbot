@@ -282,7 +282,7 @@ describe("nativeSyncPaused", () => {
 describe("host panel", () => {
   it("shows the missing permission and the category next to the groups, with the link for an admin", () => {
     const html = renderHostPanelBody({
-      event: base,
+      event: { ...base, groups: [group("team")] },
       permissionNotice: noticeFor(),
       canLinkToPermissions: true,
     });
@@ -290,8 +290,8 @@ describe("host panel", () => {
     expect(html).toContain("Manage Channels");
     expect(html).toContain("in the category “Events”");
     expect(html).toContain('href="/admin/bot-permissions"');
-    // Between the summary and the groups.
-    expect(html.indexOf("host-summary")).toBeLessThan(
+    // Directly under the header, before the folded group details (#1518).
+    expect(html.indexOf("</header>")).toBeLessThan(
       html.indexOf("data-permission-notice"),
     );
     expect(html.indexOf("data-permission-notice")).toBeLessThan(
@@ -311,9 +311,8 @@ describe("host panel", () => {
   it("shows nothing when there is no notice, and leaves the markup as it was (no stray blank line)", () => {
     const html = renderHostPanelBody({ event: base });
     expect(html).not.toContain("data-permission-notice");
-    expect(html).toContain(
-      '</section>\n<section class="card" id="host-groups"',
-    );
+    // Nothing between the header and the first section but the newline.
+    expect(html).toContain('</header>\n<section class="kb-panel"');
   });
 
   it("does not say a recorded group warning twice", () => {

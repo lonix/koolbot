@@ -21,6 +21,7 @@ import {
   NONCE_MARKER,
   scriptTag,
 } from "../../src/web/html.js";
+import { renderUserBirthdayBody } from "../../src/web/user-layout.js";
 import { renderSaveBar, SAVEBAR_SCRIPT } from "../../src/web/savebar.js";
 import { applyNonce, buildCsp } from "../../src/web/security-headers.js";
 import {
@@ -29,6 +30,7 @@ import {
   REACTION_ROLE_DELETE_ITEMS,
   REACTION_ROLE_GROUP_DELETE_ITEMS,
 } from "../../src/web/admin-views.js";
+import { renderEndSection } from "../../src/web/event-end-view.js";
 import { installDocumentForAxe } from "./a11y-dom.js";
 import { allPages } from "./a11y-pages.js";
 
@@ -444,7 +446,9 @@ const NEEDS_LIST: Array<[string, (a: string) => boolean]> = [
     (a) => a === "/admin/reaction-roles/group/delete",
   ],
   ["event cancel", (a) => /^\/admin\/events\/[^/]+\/cancel$/.test(a)],
+  ["host end the event", (a) => /^\/me\/events\/[^/]+\/host\/end$/.test(a)],
   ["birthday remove", (a) => /^\/admin\/birthdays\/[^/]+\/remove$/.test(a)],
+  ["member birthday remove", (a) => a === "/me/birthday"],
   ["moderation make permanent", (a) => a.endsWith("/permanent")],
   ["role-group delete", (a) => a.endsWith("/delete-role/apply")],
 ];
@@ -535,7 +539,9 @@ describe("tone: a high-impact site can never be neutral", () => {
       "/admin/reaction-roles/delete",
       "/admin/reaction-roles/group/delete",
       "/admin/events/e1/cancel",
+      "/me/events/e1/host/end",
       "/admin/birthdays/b1/remove",
+      "/me/birthday",
       "/admin/moderation/cases/c1/permanent",
       "/admin/role-groups/g1/delete-role/apply",
     ];
@@ -670,6 +676,116 @@ describe("every data-confirm site in the rendered pages (drift)", () => {
       NEEDS_LIST.map(([name]) => name).sort(),
     );
   }, 120_000);
+});
+
+describe("member birthday removal keeps its submitter (#1521)", () => {
+  it("confirming posts the save form from the Remove button, so clear=1 reaches the route", () => {
+    installDialogStandIn();
+    document.body.innerHTML = renderUserBirthdayBody({
+      csrfToken: "tok",
+      selected: { month: 4, day: 12, year: null },
+      changeCooldownSeconds: 300,
+    });
+    const unload = load(CONFIRM_SCRIPT);
+    const seen: SubmitEvent[] = [];
+    const sink = (e: Event): void => {
+      seen.push(e as SubmitEvent);
+      e.preventDefault();
+    };
+    document.addEventListener("submit", sink);
+    try {
+      const remove = document.querySelector<HTMLButtonElement>(
+        'button[name="clear"]',
+      )!;
+      remove.click();
+      expect(seen).toHaveLength(0);
+      expect(dialog()!.querySelector(".kb-dialog__title")?.textContent).toBe(
+        "Remove your birthday?",
+      );
+      expect(buttons(dialog()!).ok.textContent).toBe("Remove my birthday");
+      buttons(dialog()!).ok.click();
+      expect(seen).toHaveLength(1);
+      expect(seen[0].submitter).toBe(remove);
+      expect(seen[0].submitter).toHaveProperty("name", "clear");
+      expect(seen[0].submitter).toHaveProperty("value", "1");
+      expect(seen[0].target).toBe(remove.form);
+    } finally {
+      document.removeEventListener("submit", sink);
+      unload();
+      removeDialogStandIn();
+    }
+  });
+
+  it("the Save button of the same form still posts at once", () => {
+    installDialogStandIn();
+    document.body.innerHTML = renderUserBirthdayBody({
+      csrfToken: "tok",
+      selected: { month: 4, day: 12, year: null },
+    });
+    const unload = load(CONFIRM_SCRIPT);
+    const seen: Event[] = [];
+    const sink = (e: Event): void => {
+      seen.push(e);
+      e.preventDefault();
+    };
+    document.addEventListener("submit", sink);
+    try {
+      const save = Array.from(
+        document.querySelectorAll<HTMLButtonElement>("button[type=submit]"),
+      ).find((b) => b.name !== "clear")!;
+      save.click();
+      expect(dialog()).toBeNull();
+      expect(seen).toHaveLength(1);
+    } finally {
+      document.removeEventListener("submit", sink);
+      unload();
+      removeDialogStandIn();
+    }
+  });
+});
+
+describe("the host panel's End event now (#1518)", () => {
+  it("confirms in the dialog and re-submits with the End button as the submitter, which carries confirm=1", () => {
+    installDialogStandIn();
+    const unload = load(CONFIRM_SCRIPT);
+    const seen: Array<{ target: EventTarget | null; submitter: unknown }> = [];
+    const sink = (e: Event): void => {
+      seen.push({
+        target: e.target,
+        submitter: (e as SubmitEvent).submitter,
+      });
+      e.preventDefault();
+    };
+    document.addEventListener("submit", sink);
+    try {
+      document.body.innerHTML = renderEndSection({
+        state: "active",
+        actionPath: "/me/events/e1/host/end",
+        csrfToken: "tok",
+        hasGroupChannels: true,
+      });
+      const button = document.querySelector<HTMLButtonElement>(
+        "form button[type=submit]",
+      ) as HTMLButtonElement;
+      expect(button.name).toBe("confirm");
+      expect(button.value).toBe("1");
+      button.click();
+      const d = dialog();
+      expect(d).not.toBeNull();
+      expect(d!.querySelector(".kb-dialog__title")?.textContent).toBe(
+        "End this event now?",
+      );
+      expect(d!.querySelectorAll("li").length).toBeGreaterThanOrEqual(4);
+      expect(seen).toHaveLength(0);
+      buttons(d!).ok.click();
+      expect(seen).toHaveLength(1);
+      expect(seen[0].submitter).toBe(button);
+    } finally {
+      document.removeEventListener("submit", sink);
+      unload();
+      removeDialogStandIn();
+    }
+  });
 });
 
 describe("CSP and nonce", () => {

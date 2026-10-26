@@ -446,12 +446,17 @@ function renderDiscordFacts(scan: ServerScan, sampled: boolean): string {
 
 function renderOverview(scan: ServerScan, sampled: boolean): string {
   const report = buildBotReplacementReport(scan, scan.scanned?.config ?? {});
-  const bots = report.cards.length
-    ? `<section class="kb-panel" aria-labelledby="p-bots"><header class="kb-panel__head"><h2 class="kb-panel__title" id="p-bots">Other bots</h2><span class="kb-panel__meta"><a href="${escapeHtml(scanHref("bots", sampled))}">${report.cards.length} in detail</a></span></header>${report.cards.map(renderBotSummaryCard).join("")}</section>`
+  // The bot-list caveat sits in the footer of the list it qualifies. The cause
+  // and the fix are the folded note (members-intent-off); the tile covers the
+  // case with no bots found (#1546).
+  const botsFoot = report.warnings.length
+    ? `<footer class="kb-panel__foot">A bot without an integration role may be missing from this list. The notes say how to fix it.</footer>`
     : "";
-  const botWarnings = report.warnings.map((w) => callout("warn", w)).join("");
+  const bots = report.cards.length
+    ? `<section class="kb-panel" aria-labelledby="p-bots"><header class="kb-panel__head"><h2 class="kb-panel__title" id="p-bots">Other bots</h2><span class="kb-panel__meta"><a href="${escapeHtml(scanHref("bots", sampled))}">${report.cards.length} in detail</a></span></header>${report.cards.map(renderBotSummaryCard).join("")}${botsFoot}</section>`
+    : "";
   return `${renderVerdict(scan)}
-${botWarnings}
+${renderPartial(scan)}
 ${renderTiles(scan, sampled)}
 <div class="kb-cols">
   <div class="kb-stack">${renderAttention(scan)}</div>
@@ -938,7 +943,7 @@ export function renderAdoptPage(props: AdoptPageProps): string {
   const content = scan
     ? `${renderTabs(scan, props)}
 <div class="kb-stack" id="scan-${props.tab}">
-${renderPartial(scan)}
+${props.tab === "overview" ? "" : renderPartial(scan)}
 ${renderTab(scan, props.tab, props.sampled, props.filter ?? "all")}
 </div>`
     : callout(

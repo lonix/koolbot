@@ -11,7 +11,11 @@ import {
   MIN_PARTY_SIZE,
 } from "../services/lfg-service.js";
 import logger from "../utils/logger.js";
-import { safeReply } from "../utils/safe-reply.js";
+import {
+  afterWrite,
+  replyWithError,
+  replyWithUnexpectedError,
+} from "../utils/error-reply.js";
 
 /**
  * `/lfg` — ad-hoc "looking for group" posts (#957).
@@ -72,7 +76,10 @@ export async function execute(
 
     const game = interaction.options.getString("game", true).trim();
     if (!game) {
-      await interaction.editReply("❌ Tell me what you want to play.");
+      await replyWithError(interaction, {
+        title: "Couldn't post your LFG",
+        next: "Tell me what you want to play, then try again.",
+      });
       return;
     }
     const note = interaction.options.getString("note")?.trim() ?? "";
@@ -93,45 +100,55 @@ export async function execute(
     });
 
     if (result.status === "disabled") {
-      await interaction.editReply(
-        "❌ LFG was switched off while your post was going up. Nothing was posted.",
-      );
+      await replyWithError(interaction, {
+        title: "Couldn't post your LFG",
+        next: "LFG was switched off while your post was going up, so nothing was posted. Ask an admin if it should be on.",
+      });
       return;
     }
     if (result.status === "at_limit") {
-      await interaction.editReply(
-        result.limit === 1
-          ? "❌ You already have an open LFG post. Close it from its **Close** button before opening another."
-          : `❌ You already have ${result.limit} open LFG posts. Close one before opening another.`,
-      );
+      await replyWithError(interaction, {
+        title: "Couldn't post your LFG",
+        next:
+          result.limit === 1
+            ? "You already have an open LFG post. Close it from its **Close** button before opening another."
+            : `You already have ${result.limit} open LFG posts. Close one before opening another.`,
+      });
       return;
     }
     if (result.status === "no_channel") {
-      await interaction.editReply(
-        "❌ I couldn't find a channel to post in. Ask an admin to set the LFG channel in the Web UI.",
-      );
+      await replyWithError(interaction, {
+        title: "Couldn't post your LFG",
+        next: "I couldn't find a channel to post in. Ask an admin to set the LFG channel in the Web UI.",
+      });
       return;
     }
     if (result.status === "post_failed") {
-      await interaction.editReply(
-        "❌ I couldn't post that — check that I can send messages in the LFG channel.",
-      );
+      await replyWithError(interaction, {
+        title: "Couldn't post your LFG",
+        next: "Check that I can send messages in the LFG channel, then try again.",
+      });
       return;
     }
 
+    // The post exists from here on: a failing confirmation must not tell the
+    // member to try again, which would post a second one.
     const { post } = result;
-    const link = post.messageId
-      ? `https://discord.com/channels/${post.guildId}/${post.channelId}/${post.messageId}`
-      : null;
-    await interaction.editReply(
-      `✅ Posted your LFG for **${game}** (${post.memberIds.length}/${post.partySize}).` +
-        (link ? `\n${link}` : ""),
+    await afterWrite(
+      interaction,
+      { done: "Your LFG was posted", check: "the LFG channel" },
+      async () => {
+        const link = post.messageId
+          ? `https://discord.com/channels/${post.guildId}/${post.channelId}/${post.messageId}`
+          : null;
+        await interaction.editReply(
+          `✅ Posted your LFG for **${game}** (${post.memberIds.length}/${post.partySize}).` +
+            (link ? `\n${link}` : ""),
+        );
+      },
     );
   } catch (error) {
     logger.error("Error in /lfg:", error);
-    await safeReply(interaction, {
-      content: "❌ There was an error posting your LFG.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithUnexpectedError(interaction);
   }
 }
