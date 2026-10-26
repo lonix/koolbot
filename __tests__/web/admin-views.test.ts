@@ -1309,7 +1309,9 @@ describe("renderPermissionsPage with role groups (#1023)", () => {
     expect(html).toContain(
       '<option value="group:gone" selected>⚠ group:gone (unavailable)</option>',
     );
-    expect(html).toContain('["missing","group:gone",""]');
+    expect(html).toContain(
+      "[&quot;missing&quot;,&quot;group:gone&quot;,&quot;&quot;]",
+    );
   });
 
   it("does not offer a stored role that the guild no longer has (posting is unchanged)", () => {
@@ -1470,7 +1472,7 @@ describe("renderPermissionsPage", () => {
     expect(html).toContain('name="command" value="dbtrunk"');
     expect(html).toContain('value="r1"');
     expect(html).toContain('value="r2"');
-    expect(html).toContain(">Members<");
+    expect(html).toContain(">@Members<");
     // The currently-restricted role must be pre-selected.
     expect(html).toMatch(/value="r1"\s+selected/);
     // Non-restricted role must NOT be pre-selected.
@@ -5839,7 +5841,7 @@ describe("Permissions page accessibility (#854)", () => {
     expect(html).toContain('<optgroup label="Roles">');
     expect(html).toContain('<option value="r1" selected>@Admin</option>');
     expect(html).toContain('<option value="r2">@Member</option>');
-    expect(html).toContain('["role","Admin",""]');
+    expect(html).toContain("[&quot;role&quot;,&quot;Admin&quot;,&quot;&quot;]");
   });
 
   it("says so when the guild has no roles, without a Picker (#1547)", () => {

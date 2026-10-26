@@ -285,7 +285,9 @@ describe("renderWizardAccessPage", () => {
       expect(selectOf(html, "staff")).toContain(
         '<option value="404" selected>⚠ 404 (unavailable)</option>',
       );
-      expect(html).toContain('["missing","404",""]');
+      expect(html).toContain(
+        "[&quot;missing&quot;,&quot;404&quot;,&quot;&quot;]",
+      );
       expect(html).not.toContain("Unavailable role");
     });
   });
