@@ -1,5 +1,9 @@
 import { describe, it, expect } from "@jest/globals";
-import { renderUserBirthdayBody } from "../../src/web/user-layout.js";
+import { JSDOM } from "jsdom";
+import {
+  birthdayRemoveItems,
+  renderUserBirthdayBody,
+} from "../../src/web/user-layout.js";
 
 describe("renderUserBirthdayBody day dropdown (#704)", () => {
   const base = { csrfToken: "tok" };
@@ -44,5 +48,68 @@ describe("renderUserBirthdayBody day dropdown (#704)", () => {
     });
     expect(html).toContain('<input id="bd-year" name="year" type="number"');
     expect(html).toContain('value="1990"');
+  });
+});
+
+describe("renderUserBirthdayBody remove button (#1521)", () => {
+  const stored = { month: 4, day: 12, year: null };
+
+  function removeButton(html: string): HTMLButtonElement {
+    const doc = new JSDOM(html).window.document;
+    return doc.querySelector<HTMLButtonElement>('button[name="clear"]')!;
+  }
+
+  it("is a danger button without an inline style", () => {
+    const b = removeButton(
+      renderUserBirthdayBody({ csrfToken: "tok", selected: stored }),
+    );
+    expect(b.className).toBe("kb-btn kb-btn--danger");
+    expect(b.getAttribute("style")).toBeNull();
+    expect(b.value).toBe("1");
+    expect(b.type).toBe("submit");
+  });
+
+  it("asks first, with the consequences in the member's terms", () => {
+    const b = removeButton(
+      renderUserBirthdayBody({ csrfToken: "tok", selected: stored }),
+    );
+    expect(b.getAttribute("data-confirm")).toBe("Remove your birthday?");
+    const items = JSON.parse(b.getAttribute("data-confirm-list")!) as string[];
+    expect(items).toEqual(birthdayRemoveItems(0));
+    expect(items.join(" ")).toContain(
+      "birthday role you hold now is taken back",
+    );
+    expect(items.join(" ")).toContain(
+      "your birthday is kept so you can try again",
+    );
+    expect(b.getAttribute("data-confirm-tone")).toBeNull();
+  });
+
+  it("the save form itself does not carry data-confirm", () => {
+    const html = renderUserBirthdayBody({ csrfToken: "tok", selected: stored });
+    const doc = new JSDOM(html).window.document;
+    expect(doc.querySelector("form")!.hasAttribute("data-confirm")).toBe(false);
+  });
+
+  it("adds the cooldown line only when the cooldown is above 0", () => {
+    const list = (seconds?: number): string[] =>
+      JSON.parse(
+        removeButton(
+          renderUserBirthdayBody({
+            csrfToken: "tok",
+            selected: stored,
+            changeCooldownSeconds: seconds,
+          }),
+        ).getAttribute("data-confirm-list")!,
+      ) as string[];
+    expect(list(undefined)).toHaveLength(4);
+    expect(list(0)).toHaveLength(4);
+    expect(list(300).at(-1)).toBe("You can set a birthday again in 5 minutes.");
+    expect(list(30).at(-1)).toBe("You can set a birthday again in 30 seconds.");
+  });
+
+  it("renders no remove button without a stored birthday", () => {
+    const html = renderUserBirthdayBody({ csrfToken: "tok", selected: null });
+    expect(html).not.toContain('name="clear"');
   });
 });

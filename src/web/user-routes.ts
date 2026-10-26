@@ -974,6 +974,10 @@ export function createUserRouter(
       );
       const flash = readFlashFromQuery(req);
       const flags = await readUserFeatureFlags();
+      const changeCooldownSeconds = await ConfigService.getInstance().getNumber(
+        "birthdays.change_cooldown_seconds",
+        300,
+      );
       res.type("text/html").send(
         renderUserPage({
           title: "Birthday",
@@ -981,6 +985,7 @@ export function createUserRouter(
           body: renderUserBirthdayBody({
             csrfToken: getCsrfToken(req),
             selected,
+            changeCooldownSeconds,
           }),
           csrfToken: getCsrfToken(req),
           remainingMs: getDisplayedRemainingMs(session),

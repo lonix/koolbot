@@ -12,7 +12,8 @@
 import { escapeHtml, getInactivityWindowMs } from "./admin-layout.js";
 import { channelMention } from "./discord-labels.js";
 import { designStylesheetLinks } from "./design-assets.js";
-import { CONFIRM_SCRIPT, scriptTag } from "./html.js";
+import { CONFIRM_SCRIPT, confirmListAttr, scriptTag } from "./html.js";
+import { waitText } from "../utils/member-cooldown.js";
 import {
   TIMEZONE_SELECT_SCRIPT,
   renderTimezoneSelect,
@@ -1052,6 +1053,30 @@ export interface BirthdayPageBodyOptions {
   csrfToken: string;
   /** Currently stored birthday, or null when none is set. */
   selected: { month: number; day: number; year: number | null } | null;
+  /**
+   * `birthdays.change_cooldown_seconds`; above 0 the removal dialog says how
+   * long until a birthday can be set again. Absent or 0 adds no line.
+   */
+  changeCooldownSeconds?: number;
+}
+
+/**
+ * The consequence list of the member's *Remove my birthday* dialog, mirroring
+ * the admin Birthdays page's list in the member's terms (#1521).
+ */
+export function birthdayRemoveItems(changeCooldownSeconds = 0): string[] {
+  const items = [
+    "Your saved birthday is removed.",
+    "A birthday role you hold now is taken back.",
+    "The bot's birthday posts about you are deleted.",
+    "If the role or a post cannot be taken back, your birthday is kept so you can try again.",
+  ];
+  if (Number.isFinite(changeCooldownSeconds) && changeCooldownSeconds > 0) {
+    items.push(
+      `You can set a birthday again in ${waitText(Math.ceil(changeCooldownSeconds))}.`,
+    );
+  }
+  return items;
 }
 
 function renderMonthOptions(selected: number | null): string {
@@ -1120,7 +1145,7 @@ export function renderUserBirthdayBody(opts: BirthdayPageBodyOptions): string {
     '<div class="form-actions">',
     '<button class="btn" type="submit">Save birthday</button>',
     hasBirthday
-      ? '<button class="btn" type="submit" name="clear" value="1" style="background:var(--fill-hover)">Remove my birthday</button>'
+      ? `<button class="kb-btn kb-btn--danger" type="submit" name="clear" value="1" data-confirm="Remove your birthday?"${confirmListAttr(birthdayRemoveItems(opts.changeCooldownSeconds))}>Remove my birthday</button>`
       : "",
     "</div>",
     "</div>",
@@ -1333,10 +1358,10 @@ function renderPresetRow(p: VoicePresetView, csrfToken: string): string {
     idFields,
     `<button class="btn-secondary" type="submit">${p.isDefault ? "Unset default" : "Set as default"}</button>`,
     "</form>",
-    '<form method="POST" action="/me/voice/preset/delete">',
+    `<form method="POST" action="/me/voice/preset/delete" data-confirm="Delete the preset '${escapeHtml(p.name)}'?">`,
     csrf,
     idFields,
-    '<button class="btn-danger" type="submit">Delete</button>',
+    `<button class="kb-btn kb-btn--danger" type="submit" aria-label="Delete ${escapeHtml(p.name)}">Delete</button>`,
     "</form>",
     "</div>",
     "</div>",

@@ -29,6 +29,7 @@ import { signValue } from "../../src/web/cookies.js";
 import { WebSessionService } from "../../src/services/web-session-service.js";
 import type { WebSessionContext } from "../../src/web/session.js";
 import { createHmac } from "node:crypto";
+import { JSDOM } from "jsdom";
 import { meConfigStub } from "../test-utils.js";
 
 // The CSRF token is derived from the session id (#1150), not a cookie.
@@ -1349,6 +1350,41 @@ describe("/me/voice (#656)", () => {
     expect(out.body).toContain("Preview:");
   });
 
+  it("asks first before deleting a preset, naming it (#1521)", async () => {
+    const out = await dispatch({
+      method: "GET",
+      prefs: {
+        namePattern: "",
+        presets: [
+          {
+            name: "Chill <b>",
+            channelName: null,
+            userLimit: null,
+            bitrate: null,
+            isDefault: false,
+          },
+        ],
+      },
+    });
+    const doc = new JSDOM(out.body).window.document;
+    const form = doc.querySelector<HTMLFormElement>(
+      'form[action="/me/voice/preset/delete"]',
+    )!;
+    expect(form.getAttribute("data-confirm")).toBe(
+      "Delete the preset 'Chill <b>'?",
+    );
+    expect(form.hasAttribute("data-confirm-list")).toBe(false);
+    const btn = form.querySelector("button")!;
+    expect(btn.className).toBe("kb-btn kb-btn--danger");
+    expect(btn.getAttribute("aria-label")).toBe("Delete Chill <b>");
+    // Set as default is not destructive: no dialog.
+    expect(
+      doc
+        .querySelector('form[action="/me/voice/preset/default"]')!
+        .hasAttribute("data-confirm"),
+    ).toBe(false);
+  });
+
   it("answers 404 when presets are off, with no form and no nav link (#1292)", async () => {
     const out = await dispatch({ method: "GET", presetsEnabled: false });
     expect(out.statusCode).toBe(404);
@@ -1784,7 +1820,9 @@ describe("/me/birthday clear (#1033)", () => {
   async function dispatch(opts: {
     body: Record<string, unknown>;
     purgeImpl?: jest.Mock;
+    get?: { cooldownSeconds: number };
   }): Promise<{
+    html: string;
     statusCode: number;
     redirectedTo?: string;
     audit?: Record<string, unknown>;
@@ -1821,9 +1859,19 @@ describe("/me/birthday clear (#1033)", () => {
 
     const { ConfigService } =
       await import("../../src/services/config-service.js");
-    jest
-      .spyOn(ConfigService, "getInstance")
-      .mockReturnValue(meConfigStub({ "birthdays.enabled": true }) as never);
+    jest.spyOn(ConfigService, "getInstance").mockReturnValue(
+      meConfigStub(
+        { "birthdays.enabled": true },
+        opts.get
+          ? {
+              getNumber: async (key: string, fallback = 0) =>
+                key === "birthdays.change_cooldown_seconds"
+                  ? opts.get!.cooldownSeconds
+                  : fallback,
+            }
+          : {},
+      ) as never,
+    );
 
     const { BirthdayService } =
       await import("../../src/services/birthday-service.js");
@@ -1860,8 +1908,13 @@ describe("/me/birthday clear (#1033)", () => {
       "x-csrf-token": csrf(),
     };
 
-    const captured: { statusCode: number; redirectedTo?: string } = {
+    const captured: {
+      statusCode: number;
+      redirectedTo?: string;
+      html: string;
+    } = {
       statusCode: 200,
+      html: "",
     };
     const res = makeRes() as ReturnType<typeof makeRes> & {
       redirect: jest.Mock;
@@ -1872,6 +1925,10 @@ describe("/me/birthday clear (#1033)", () => {
       res.statusCode = code;
       return res;
     });
+    res.send.mockImplementation((body: unknown) => {
+      captured.html = String(body);
+      return res;
+    });
     res.redirect = jest.fn((code: unknown, url?: unknown) => {
       captured.statusCode = code as number;
       captured.redirectedTo = String(url);
@@ -1880,7 +1937,7 @@ describe("/me/birthday clear (#1033)", () => {
     res.header = jest.fn(() => res);
 
     const req = {
-      method: "POST",
+      method: opts.get ? "GET" : "POST",
       url: "/birthday",
       originalUrl: "/me/birthday",
       path: "/birthday",
@@ -1910,6 +1967,29 @@ describe("/me/birthday clear (#1033)", () => {
 
   const flashOf = (url?: string): URLSearchParams =>
     new URLSearchParams((url ?? "").split("?")[1] ?? "");
+
+  it("GET renders Remove my birthday as a danger button that asks first, with the cooldown line (#1521)", async () => {
+    const out = await dispatch({
+      body: {},
+      get: { cooldownSeconds: 300 },
+    });
+    expect(out.statusCode).toBe(200);
+    const doc = new JSDOM(out.html).window.document;
+    const b = doc.querySelector<HTMLButtonElement>('button[name="clear"]')!;
+    expect(b.className).toBe("kb-btn kb-btn--danger");
+    expect(b.getAttribute("style")).toBeNull();
+    expect(b.getAttribute("data-confirm")).toBe("Remove your birthday?");
+    const items = JSON.parse(b.getAttribute("data-confirm-list")!) as string[];
+    expect(items.at(-1)).toBe("You can set a birthday again in 5 minutes.");
+  });
+
+  it("GET leaves the cooldown line out when the cooldown is 0 (#1521)", async () => {
+    const out = await dispatch({ body: {}, get: { cooldownSeconds: 0 } });
+    const doc = new JSDOM(out.html).window.document;
+    const b = doc.querySelector<HTMLButtonElement>('button[name="clear"]')!;
+    const items = JSON.parse(b.getAttribute("data-confirm-list")!) as string[];
+    expect(items).toHaveLength(4);
+  });
 
   it("purges through the service instead of a raw delete", async () => {
     const out = await dispatch({ body: { _csrf: csrf(), clear: "1" } });
