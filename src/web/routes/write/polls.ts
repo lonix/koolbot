@@ -21,9 +21,145 @@ import {
   validCron,
   requireSessionContext,
   asyncHandler,
+  refuseForm,
   Flash,
   TEXT_LIMITS,
 } from "./helpers.js";
+import {
+  addFieldError,
+  type FormErrors,
+  type FormValues,
+} from "../../form-errors.js";
+import {
+  POLL_ITEM_CREATE_FORM,
+  POLL_SCHEDULE_CREATE_FORM,
+  pollItemEditForm,
+  pollScheduleEditForm,
+} from "../../admin-views.js";
+
+const PAGE = "/admin/polls";
+
+type Req = Parameters<typeof getString>[0];
+
+/** What the schedule create and edit forms submit, checked field by field (#1517). */
+export function checkPollScheduleForm(req: Req): {
+  errors: FormErrors;
+  values: FormValues;
+  channelId: string;
+  cron: string;
+  duration: number;
+  pingRoleId: string;
+} {
+  const channelId = getString(req, "channelId");
+  const typedCron = getString(req, "cron");
+  const cron = normalizeCron(typedCron);
+  const durationRaw = getString(req, "durationHours");
+  const pingRoleId = getString(req, "pingRoleId");
+
+  const errors: FormErrors = {};
+  if (!channelId) addFieldError(errors, "channelId", "Pick a channel.");
+  if (!cron) {
+    addFieldError(
+      errors,
+      "cron",
+      "Enter a cron expression, for example 0 12 * * *.",
+    );
+  } else if (!validCron(cron)) {
+    addFieldError(
+      errors,
+      "cron",
+      "Not a valid cron expression. Use five fields (minute hour day-of-month month day-of-week), for example 0 12 * * *.",
+    );
+  }
+  const duration = Number.parseInt(durationRaw, 10);
+  if (!Number.isFinite(duration)) {
+    addFieldError(
+      errors,
+      "durationHours",
+      "Enter a whole number of hours, from 1 to 768.",
+    );
+  } else if (duration < 1 || duration > 768) {
+    addFieldError(errors, "durationHours", "Use 1 to 768 hours.");
+  }
+  return {
+    errors,
+    values: {
+      channelId,
+      cron: typedCron,
+      durationHours: durationRaw,
+      pingRoleId,
+    },
+    channelId,
+    cron,
+    duration,
+    pingRoleId,
+  };
+}
+
+/** What the question create and edit forms submit, checked field by field (#1517). */
+export function checkPollItemForm(req: Req): {
+  errors: FormErrors;
+  values: FormValues;
+  question: string;
+  answers: string[];
+  tags: string[];
+  multiSelect: boolean;
+} {
+  const question = getString(req, "question");
+  const answersStr = getString(req, "answers");
+  const tagsStr = getString(req, "tags");
+  const multiSelect = getCheckbox(req, "multiSelect");
+
+  const errors: FormErrors = {};
+  if (!question) {
+    addFieldError(errors, "question", "Enter the question.");
+  } else if (question.length > TEXT_LIMITS.pollQuestion) {
+    addFieldError(
+      errors,
+      "question",
+      `At most ${TEXT_LIMITS.pollQuestion} characters.`,
+    );
+  }
+  const answers = answersStr
+    .split(",")
+    .map((a) => a.trim())
+    .filter((a) => a.length > 0);
+  if (answers.length < 2 || answers.length > 10) {
+    addFieldError(
+      errors,
+      "answers",
+      "Give 2 to 10 answers, separated by commas.",
+    );
+  } else if (answers.some((a) => a.length > TEXT_LIMITS.pollAnswer)) {
+    // Discord caps each poll answer (option) at 55 characters; reject an
+    // oversized one here rather than storing it and having Discord refuse the
+    // payload later (#508).
+    addFieldError(
+      errors,
+      "answers",
+      `Each answer is at most ${TEXT_LIMITS.pollAnswer} characters.`,
+    );
+  }
+  const tags = tagsStr
+    ? tagsStr
+        .split(",")
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0)
+    : [];
+  return {
+    errors,
+    values: {
+      question,
+      answers: answersStr,
+      tags: tagsStr,
+      multiSelect: multiSelect ? "1" : "",
+    },
+    question,
+    answers,
+    tags,
+    multiSelect,
+  };
+}
 
 export function createPollsRouter(client: Client): Router {
   const router = Router();
@@ -36,33 +172,18 @@ export function createPollsRouter(client: Client): Router {
     "/polls/schedules/create",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
-      const channelId = getString(req, "channelId");
-      const cron = normalizeCron(getString(req, "cron"));
-      const durationRaw = getString(req, "durationHours");
-      const pingRoleId = getString(req, "pingRoleId");
-
-      if (!channelId || !cron) {
-        flashRedirect(res, "/admin/polls", {
-          type: "err",
-          text: "Channel and cron are required.",
-        });
+      const form = checkPollScheduleForm(req);
+      if (
+        await refuseForm(req, res, {
+          page: PAGE,
+          formId: POLL_SCHEDULE_CREATE_FORM,
+          errors: form.errors,
+          values: form.values,
+        })
+      ) {
         return;
       }
-      const duration = Number.parseInt(durationRaw, 10);
-      if (!Number.isFinite(duration) || duration < 1 || duration > 768) {
-        flashRedirect(res, "/admin/polls", {
-          type: "err",
-          text: "Duration must be an integer between 1 and 768 hours.",
-        });
-        return;
-      }
-      if (!validCron(cron)) {
-        flashRedirect(res, "/admin/polls", {
-          type: "err",
-          text: `Invalid cron expression: ${cron}`,
-        });
-        return;
-      }
+      const { channelId, cron, duration, pingRoleId } = form;
 
       const service = PollService.getInstance(client);
       try {
@@ -111,33 +232,18 @@ export function createPollsRouter(client: Client): Router {
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const id = String(req.params.id);
-      const channelId = getString(req, "channelId");
-      const cron = normalizeCron(getString(req, "cron"));
-      const durationRaw = getString(req, "durationHours");
-      const pingRoleId = getString(req, "pingRoleId");
-
-      if (!channelId || !cron) {
-        flashRedirect(res, "/admin/polls", {
-          type: "err",
-          text: "Channel and cron are required.",
-        });
+      const form = checkPollScheduleForm(req);
+      if (
+        await refuseForm(req, res, {
+          page: PAGE,
+          formId: pollScheduleEditForm(id),
+          errors: form.errors,
+          values: form.values,
+        })
+      ) {
         return;
       }
-      const duration = Number.parseInt(durationRaw, 10);
-      if (!Number.isFinite(duration) || duration < 1 || duration > 768) {
-        flashRedirect(res, "/admin/polls", {
-          type: "err",
-          text: "Duration must be an integer between 1 and 768 hours.",
-        });
-        return;
-      }
-      if (!validCron(cron)) {
-        flashRedirect(res, "/admin/polls", {
-          type: "err",
-          text: `Invalid cron expression: ${cron}`,
-        });
-        return;
-      }
+      const { channelId, cron, duration, pingRoleId } = form;
 
       const service = PollService.getInstance(client);
       try {
@@ -329,52 +435,18 @@ export function createPollsRouter(client: Client): Router {
     "/polls/items/create",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
-      const question = getString(req, "question");
-      const answersStr = getString(req, "answers");
-      const tagsStr = getString(req, "tags");
-      const multiSelect = getCheckbox(req, "multiSelect");
-
-      if (!question) {
-        flashRedirect(res, "/admin/polls", {
-          type: "err",
-          text: "Question is required.",
-        });
+      const form = checkPollItemForm(req);
+      if (
+        await refuseForm(req, res, {
+          page: PAGE,
+          formId: POLL_ITEM_CREATE_FORM,
+          errors: form.errors,
+          values: form.values,
+        })
+      ) {
         return;
       }
-      if (question.length > TEXT_LIMITS.pollQuestion) {
-        flashRedirect(res, "/admin/polls", {
-          type: "err",
-          text: `Question must be ${TEXT_LIMITS.pollQuestion} characters or fewer.`,
-        });
-        return;
-      }
-      const answers = answersStr
-        .split(",")
-        .map((a) => a.trim())
-        .filter((a) => a.length > 0);
-      if (answers.length < 2 || answers.length > 10) {
-        flashRedirect(res, "/admin/polls", {
-          type: "err",
-          text: "Provide 2–10 comma-separated answers.",
-        });
-        return;
-      }
-      // Discord caps each poll answer (option) at 55 characters; reject an
-      // oversized one here so it fails with a clean flash rather than being
-      // stored and only rejected when Discord receives the payload (#508).
-      if (answers.some((a) => a.length > TEXT_LIMITS.pollAnswer)) {
-        flashRedirect(res, "/admin/polls", {
-          type: "err",
-          text: `Each answer must be ${TEXT_LIMITS.pollAnswer} characters or fewer.`,
-        });
-        return;
-      }
-      const tags = tagsStr
-        ? tagsStr
-            .split(",")
-            .map((t) => t.trim())
-            .filter((t) => t.length > 0)
-        : [];
+      const { question, answers, tags, multiSelect } = form;
 
       const service = PollService.getInstance(client);
       try {
@@ -426,50 +498,18 @@ export function createPollsRouter(client: Client): Router {
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const id = String(req.params.id);
-      const question = getString(req, "question");
-      const answersStr = getString(req, "answers");
-      const tagsStr = getString(req, "tags");
-      const multiSelect = getCheckbox(req, "multiSelect");
-
-      if (!question) {
-        flashRedirect(res, "/admin/polls", {
-          type: "err",
-          text: "Question is required.",
-        });
+      const form = checkPollItemForm(req);
+      if (
+        await refuseForm(req, res, {
+          page: PAGE,
+          formId: pollItemEditForm(id),
+          errors: form.errors,
+          values: form.values,
+        })
+      ) {
         return;
       }
-      if (question.length > TEXT_LIMITS.pollQuestion) {
-        flashRedirect(res, "/admin/polls", {
-          type: "err",
-          text: `Question must be ${TEXT_LIMITS.pollQuestion} characters or fewer.`,
-        });
-        return;
-      }
-      const answers = answersStr
-        .split(",")
-        .map((a) => a.trim())
-        .filter((a) => a.length > 0);
-      if (answers.length < 2 || answers.length > 10) {
-        flashRedirect(res, "/admin/polls", {
-          type: "err",
-          text: "Provide 2–10 comma-separated answers.",
-        });
-        return;
-      }
-      // Same 55-char poll-option cap the create route enforces (#508).
-      if (answers.some((a) => a.length > TEXT_LIMITS.pollAnswer)) {
-        flashRedirect(res, "/admin/polls", {
-          type: "err",
-          text: `Each answer must be ${TEXT_LIMITS.pollAnswer} characters or fewer.`,
-        });
-        return;
-      }
-      const tags = tagsStr
-        ? tagsStr
-            .split(",")
-            .map((t) => t.trim())
-            .filter((t) => t.length > 0)
-        : [];
+      const { question, answers, tags, multiSelect } = form;
 
       const service = PollService.getInstance(client);
       try {

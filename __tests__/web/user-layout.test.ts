@@ -57,6 +57,17 @@ describe("renderUserPage accessibility (#855)", () => {
     );
   });
 
+  it("announces a failure flash as an alert and a result as a status (#1517)", () => {
+    const err = render({ flash: { type: "err", text: "Not saved." } });
+    expect(err).toContain(
+      '<div class="notice err" role="alert" tabindex="-1" data-flash>Not saved.</div>',
+    );
+    const warn = render({ flash: { type: "warn", text: "Partly saved." } });
+    expect(warn).toContain(
+      '<div class="notice warn" role="status" tabindex="-1" data-flash>',
+    );
+  });
+
   it("uses colours that clear the WCAG contrast floors", () => {
     const html = render();
     // Sign out is the neutral kb-btn of the shared top bar (no hard-coded colour here).

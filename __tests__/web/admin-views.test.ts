@@ -5737,14 +5737,17 @@ describe("Settings page accessibility (#854)", () => {
       invalidKeys: ["x.count"],
     });
     expect(html).toContain(
-      '<div class="notice err" id="settings-flash" role="status" tabindex="-1" data-flash>',
+      '<div class="notice err" id="settings-flash" role="alert" tabindex="-1" data-flash>',
     );
     expect(html).toMatch(
       /id="set-x\.count" aria-describedby="set-x\.count-help set-x\.count-warn set-x\.count-err settings-flash" aria-invalid="true"/,
     );
+    // The line under the row is a Field error (no role of its own: the flash
+    // is the alert and the line is read when focus lands on the control).
     expect(html).toContain(
-      '<div class="settings-error" id="set-x.count-err" role="alert"',
+      '<p class="kb-field__error settings-error" id="set-x.count-err">Rejected',
     );
+    expect(html).not.toContain('class="settings-error"');
     // The base description is stashed so the AJAX save script can restore it
     // once a later save clears the rejection.
     expect(html).toContain(

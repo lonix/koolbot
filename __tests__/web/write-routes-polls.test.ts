@@ -75,6 +75,8 @@ jest.unstable_mockModule("../../src/services/poll-service.js", () => ({
 const { createPollsRouter } =
   await import("../../src/web/routes/write/polls.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
+const { registerFormPage } = await import("../../src/web/form-pages.js");
+const { renderPollsPage } = await import("../../src/web/admin-views.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
 
 const client = { user: { id: "bot" } } as unknown as Client;
@@ -88,8 +90,79 @@ const SCHEDULE = {
 };
 const ITEM = { question: "Best snack?", answers: "Crisps, Chocolate, Fruit" };
 
+// The read router registers the page's renderer in the app (#1517); here the
+// real view stands in, with one stored schedule and question to edit, so a
+// refusal is checked as the markup the person gets.
+const registerPage = (): void =>
+  registerFormPage("/admin/polls", async (_req, refused) =>
+    renderPollsPage({
+      guildId: "guild-1",
+      csrfToken: "csrf",
+      remainingMs: 1000,
+      navFeatureStatus: {},
+      enabled: true,
+      defaultDurationHours: 24,
+      cooldownDays: 7,
+      settingRows: [],
+      textChannels: [
+        { id: "channel-9", name: "general", type: 0 },
+        { id: "channel-3", name: "random", type: 0 },
+      ],
+      roles: [{ id: "role-5", name: "Pollsters" }],
+      schedules: [
+        {
+          id: "sched-1",
+          channelId: "channel-9",
+          channelName: "general",
+          channelType: 0,
+          cron: "0 12 * * 5",
+          durationHours: 24,
+          pingRoleId: null,
+          pingRoleName: null,
+          enabled: true,
+          lastRun: "—",
+        },
+      ],
+      items: [
+        {
+          id: "item-1",
+          question: "Stored question?",
+          answers: ["Yes", "No"],
+          tags: ["fun"],
+          multiSelect: false,
+          usageCount: 0,
+          lastUsed: "—",
+          enabled: true,
+          source: "manual",
+        },
+      ],
+      refusedForm: refused,
+    }),
+  );
+
+/** A refused form: 422 with the page, the marked fields and each error line. */
+async function refusal(res: Response): Promise<{
+  html: string;
+  invalidIds: string[];
+  errorLines: Record<string, string>;
+}> {
+  expect(res.status).toBe(422);
+  const html = await res.text();
+  const invalidIds = [...html.matchAll(/<[^>]*aria-invalid="true"[^>]*>/g)].map(
+    (m) => /id="([^"]+)"/.exec(m[0])?.[1] ?? "",
+  );
+  const errorLines: Record<string, string> = {};
+  for (const m of html.matchAll(
+    /<p class="kb-field__error" id="([^"]+)">([^<]*)<\/p>/g,
+  )) {
+    errorLines[m[1]] = m[2];
+  }
+  return { html, invalidIds, errorLines };
+}
+
 beforeEach(async () => {
   jest.clearAllMocks();
+  registerPage();
   mockCreateSchedule.mockResolvedValue({ _id: "sched-1" });
   mockUpdateSchedule.mockResolvedValue({ _id: "sched-1" });
   mockDeleteSchedule.mockResolvedValue(true);
@@ -117,38 +190,57 @@ function lastAudit(): Record<string, unknown> {
 }
 
 describe("POST /polls/schedules/create", () => {
-  it("requires a channel and a cron expression", async () => {
+  it("refuses a missing channel and cron and marks both", async () => {
     const res = await harness.post("/polls/schedules/create", {
       durationHours: "24",
     });
-    const flash = parseFlashRedirect(res.headers.get("location"));
-    expect(flash.path).toBe("/admin/polls");
-    expect(flash.msg).toBe("Channel and cron are required.");
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual([
+      "poll-schedule-create-channelId",
+      "poll-schedule-create-cron",
+    ]);
+    expect(r.errorLines["poll-schedule-create-channelId-error"]).toBe(
+      "Pick a channel.",
+    );
     expect(mockCreateSchedule).not.toHaveBeenCalled();
   });
 
-  it.each(["0", "769", "", "lots"])(
-    "rejects an out-of-range duration (%s)",
-    async (durationHours) => {
+  it.each([
+    ["0", "Use 1 to 768 hours."],
+    ["769", "Use 1 to 768 hours."],
+    ["", "Enter a whole number of hours, from 1 to 768."],
+    ["lots", "Enter a whole number of hours, from 1 to 768."],
+  ])(
+    "refuses an out-of-range duration (%s) and keeps it",
+    async (durationHours, message) => {
       const res = await harness.post("/polls/schedules/create", {
         ...SCHEDULE,
         durationHours,
       });
-      expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
-        "Duration must be an integer between 1 and 768 hours.",
+      const r = await refusal(res);
+      expect(r.invalidIds).toEqual(["poll-schedule-create-durationHours"]);
+      expect(r.errorLines["poll-schedule-create-durationHours-error"]).toBe(
+        message,
+      );
+      expect(r.html).toContain(
+        `value="${durationHours}" required id="poll-schedule-create-durationHours"`,
       );
       expect(mockCreateSchedule).not.toHaveBeenCalled();
     },
   );
 
-  it("rejects an invalid cron expression", async () => {
+  it("refuses an invalid cron expression, keeping the typed cron, channel and ping role", async () => {
     const res = await harness.post("/polls/schedules/create", {
       ...SCHEDULE,
-      cron: "every friday",
+      channelId: "channel-3",
+      cron: "every <friday>",
+      pingRoleId: "role-5",
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
-      "Invalid cron expression",
-    );
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["poll-schedule-create-cron"]);
+    expect(r.html).toContain('value="every &lt;friday&gt;"');
+    expect(r.html).toContain('<option value="channel-3" selected>');
+    expect(r.html).toContain('<option value="role-5" selected>');
     expect(mockCreateSchedule).not.toHaveBeenCalled();
   });
 
@@ -190,6 +282,24 @@ describe("POST /polls/schedules/create", () => {
 });
 
 describe("POST /polls/schedules/:id/{edit,delete,toggle,test}", () => {
+  it("refuses a bad edit, reopens that row's form and keeps what was typed", async () => {
+    const res = await harness.post("/polls/schedules/sched-1/edit", {
+      ...SCHEDULE,
+      cron: "bad cron",
+      durationHours: "5",
+    });
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["poll-schedule-edit-sched-1-cron"]);
+    // The details element holding the refused form is open, or the marked
+    // field would be hidden and could not take focus.
+    expect(r.html).toContain(
+      '<details class="helper edit-details" open><summary>Edit</summary>',
+    );
+    expect(r.html).toContain('value="bad cron"');
+    expect(r.html).toContain('value="5"');
+    expect(mockUpdateSchedule).not.toHaveBeenCalled();
+  });
+
   it("edits a schedule scoped to the session's guild", async () => {
     const res = await harness.post("/polls/schedules/sched-1/edit", SCHEDULE);
     expect(mockUpdateSchedule).toHaveBeenCalledWith(
@@ -291,47 +401,58 @@ describe("POST /polls/schedules/:id/{edit,delete,toggle,test}", () => {
 });
 
 describe("POST /polls/items/create", () => {
-  it("requires a question", async () => {
+  it("refuses a missing question, keeping the answers and tags", async () => {
     const res = await harness.post("/polls/items/create", {
       answers: "a, b",
+      tags: "x, y",
+      multiSelect: "1",
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
-      "Question is required.",
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["poll-item-create-question"]);
+    expect(r.errorLines["poll-item-create-question-error"]).toBe(
+      "Enter the question.",
     );
+    expect(r.html).toContain('value="a, b"');
+    expect(r.html).toContain('value="x, y"');
+    expect(r.html).toMatch(/name="multiSelect" value="1" checked/);
     expect(mockCreatePollItem).not.toHaveBeenCalled();
   });
 
-  it("rejects a question past Discord's 300-character cap", async () => {
+  it("refuses a question past Discord's 300-character cap", async () => {
     const res = await harness.post("/polls/items/create", {
       ...ITEM,
       question: "q".repeat(301),
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
-      "Question must be 300 characters or fewer.",
+    const r = await refusal(res);
+    expect(r.errorLines["poll-item-create-question-error"]).toBe(
+      "At most 300 characters.",
     );
   });
 
   it.each([
     ["one answer", "just one"],
     ["eleven answers", "a,b,c,d,e,f,g,h,i,j,k"],
-  ])("rejects %s", async (_label, answers) => {
+  ])("refuses %s", async (_label, answers) => {
     const res = await harness.post("/polls/items/create", {
       ...ITEM,
       answers,
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
-      "Provide 2–10 comma-separated answers.",
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["poll-item-create-answers"]);
+    expect(r.errorLines["poll-item-create-answers-error"]).toBe(
+      "Give 2 to 10 answers, separated by commas.",
     );
     expect(mockCreatePollItem).not.toHaveBeenCalled();
   });
 
-  it("rejects an answer past Discord's 55-character cap", async () => {
+  it("refuses an answer past Discord's 55-character cap", async () => {
     const res = await harness.post("/polls/items/create", {
       ...ITEM,
       answers: `ok, ${"x".repeat(56)}`,
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
-      "Each answer must be 55 characters or fewer.",
+    const r = await refusal(res);
+    expect(r.errorLines["poll-item-create-answers-error"]).toBe(
+      "Each answer is at most 55 characters.",
     );
   });
 
@@ -367,14 +488,20 @@ describe("POST /polls/items/create", () => {
 });
 
 describe("POST /polls/items/:id/{edit,delete,toggle}", () => {
-  it("applies the same answer validation on edit", async () => {
+  it("applies the same answer validation on edit, in that row's open form", async () => {
     const res = await harness.post("/polls/items/item-1/edit", {
       question: "Q",
       answers: "only-one",
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
-      "Provide 2–10 comma-separated answers.",
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["poll-item-edit-item-1-answers"]);
+    expect(r.errorLines["poll-item-edit-item-1-answers-error"]).toBe(
+      "Give 2 to 10 answers, separated by commas.",
     );
+    expect(r.html).toContain(
+      '<details class="helper edit-details" open><summary>Edit</summary>',
+    );
+    expect(r.html).toContain('value="only-one"');
     expect(mockUpdatePollItem).not.toHaveBeenCalled();
   });
 

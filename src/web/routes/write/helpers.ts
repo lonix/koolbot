@@ -31,6 +31,8 @@ import {
   settingsMetadata,
 } from "../../../services/config-schema.js";
 import { signFlash, truncateFlash, wantsJson } from "../../http-flash.js";
+import type { FormErrors, FormValues } from "../../form-errors.js";
+import { getFormPage } from "../../form-pages.js";
 import { loadReactionRoleMessageIds } from "../../reaction-role-messages.js";
 import { PROTECTED_KEYS } from "../../bootstrap-vars.js";
 import { pickCascadeMasterKey } from "../../cascade-master.js";
@@ -129,6 +131,9 @@ export function wizardApplyFailureMessage(result: WizardApplyResult): string {
  */
 export const INVALID_KEYS_MAX = 25;
 
+/** Longest reason sent back for one refused key in the AJAX reply (#1517). */
+export const INVALID_REASON_MAX = 300;
+
 /** Query string for a flash redirect, exported so its caps can be tested. */
 export function flashRedirectQuery(
   flash: Flash,
@@ -166,6 +171,52 @@ export function flashRedirect(
 }
 
 /**
+ * Answer a refused create or edit form: render the page again with status 422,
+ * the typed values and one message per field (#1517). Typed text is never put
+ * into a redirect URL.
+ *
+ * Returns true when it answered, so a route reads
+ * `if (await refuseForm(req, res, {...})) return;`. Returns false when no
+ * field was refused. When the page has no registered renderer, or rendering
+ * fails, it falls back to the old flash redirect with the first message, so a
+ * refusal is never lost.
+ */
+export async function refuseForm(
+  req: Request,
+  res: Response,
+  opts: {
+    /** Path of the page the form is on ("/admin/announcements"). */
+    page: string;
+    /** Which form on the page; see `RefusedForm.formId`. */
+    formId: string;
+    errors: FormErrors;
+    values: FormValues;
+  },
+): Promise<boolean> {
+  const messages = Object.values(opts.errors);
+  if (messages.length === 0) return false;
+  const render = getFormPage(opts.page);
+  if (render) {
+    try {
+      const html = await render(req, {
+        formId: opts.formId,
+        errors: opts.errors,
+        values: opts.values,
+      });
+      res.status(422).type("text/html").send(html);
+      return true;
+    } catch (err) {
+      logger.warn("Could not render a refused form; redirecting", err);
+    }
+  }
+  flashRedirect(res, opts.page, {
+    type: "err",
+    text: `Not saved. ${messages[0]}`,
+  });
+  return true;
+}
+
+/**
  * Reply to a section-save with either an inline JSON flash (AJAX) or the
  * legacy 303 redirect (no-JS). Always returns the same 500-char-capped flash
  * the renderer would show, so both paths surface identical messages.
@@ -187,12 +238,22 @@ export function respondSectionFlash(
   reload = false,
   // The save came from a feature page's folded settings (#1301).
   openSettings = false,
+  // Why each refused key was refused (#1517). Only the AJAX reply carries
+  // them, so the page can print each reason under its own row. The no-JS
+  // redirect cannot: a query string is not signed, and only the flash text is.
+  invalidReasons: Readonly<Record<string, string>> = {},
 ): void {
   if (wantsJson(req)) {
+    const shownKeys = invalidKeys.slice(0, INVALID_KEYS_MAX);
     res.status(200).json({
       type: flash.type,
       text: truncateFlash(flash.text),
-      invalidKeys: invalidKeys.slice(0, INVALID_KEYS_MAX),
+      invalidKeys: shownKeys,
+      invalidReasons: Object.fromEntries(
+        shownKeys
+          .filter((k) => typeof invalidReasons[k] === "string")
+          .map((k) => [k, invalidReasons[k].slice(0, INVALID_REASON_MAX)]),
+      ),
       ...(reload
         ? {
             reload: `${redirectTo}?${flashRedirectQuery(flash, invalidKeys, openSettings)}`,
