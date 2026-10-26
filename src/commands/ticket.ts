@@ -10,7 +10,11 @@ import {
 } from "../services/ticket-channel-manager.js";
 import type { ITicket } from "../models/ticket.js";
 import logger from "../utils/logger.js";
-import { safeReply } from "../utils/safe-reply.js";
+import {
+  replyWithError,
+  replyWithUnexpectedError,
+  type ErrorMessage,
+} from "../utils/error-reply.js";
 import { waitText } from "../utils/member-cooldown.js";
 
 /**
@@ -60,19 +64,43 @@ export const data = new SlashCommandBuilder()
       ),
   );
 
-const FAILURE_TEXT: Record<TicketFailure, string> = {
-  disabled: "Tickets are currently disabled.",
-  "no-staff-role":
-    "Tickets aren't set up yet: an admin needs to choose the staff role first.",
-  "not-found": "I can't find that ticket's channel any more.",
-  "already-closed": "That ticket is already closed.",
-  "not-closed": "That ticket isn't closed.",
-  "already-claimed": "That ticket has already been claimed.",
-  "too-many-open":
-    "You already have an open ticket. Please use it, or close it first.",
-  cooldown: "You opened a ticket a moment ago. Please wait a little.",
-  "discord-error":
-    "Something went wrong talking to Discord. Please try again, or ask a moderator.",
+const FAILURE_TEXT: Record<TicketFailure, ErrorMessage> = {
+  disabled: {
+    title: "Tickets are off",
+    next: "Ask an admin to turn them on in the Web UI.",
+  },
+  "no-staff-role": {
+    title: "Tickets aren't set up yet",
+    next: "An admin needs to choose the staff role first.",
+  },
+  "not-found": {
+    title: "Couldn't find that ticket",
+    next: "I can't find that ticket's channel any more. Ask a moderator if it still needs help.",
+  },
+  "already-closed": {
+    title: "That ticket is already closed",
+    next: "Open a new ticket if you still need help.",
+  },
+  "not-closed": {
+    title: "That ticket isn't closed",
+    next: "Close it first if you want to do that.",
+  },
+  "already-claimed": {
+    title: "That ticket is already claimed",
+    next: "Someone on the staff is already on it.",
+  },
+  "too-many-open": {
+    title: "Couldn't open a ticket",
+    next: "You already have an open ticket. Please use it, or close it first.",
+  },
+  cooldown: {
+    title: "Couldn't open a ticket",
+    next: "You opened a ticket a moment ago. Please wait a little, then try again.",
+  },
+  "discord-error": {
+    title: "Couldn't reach Discord",
+    next: "Something went wrong talking to Discord. Please try again, or ask a moderator.",
+  },
 };
 
 export async function execute(
@@ -80,9 +108,9 @@ export async function execute(
 ): Promise<void> {
   try {
     if (!interaction.guild || !interaction.guildId) {
-      await interaction.reply({
-        content: "This command can only be used in a server.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Can't use this here",
+        next: "Run this command in a server.",
       });
       return;
     }
@@ -92,7 +120,7 @@ export async function execute(
 
     const manager = TicketChannelManager.getInstance(interaction.client);
     if (!(await manager.isEnabled())) {
-      await interaction.editReply({ content: FAILURE_TEXT.disabled });
+      await replyWithError(interaction, FAILURE_TEXT.disabled);
       return;
     }
 
@@ -104,10 +132,7 @@ export async function execute(
     }
   } catch (error) {
     logger.error("Error in ticket command:", error);
-    await safeReply(interaction, {
-      content: "There was an error handling the ticket.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithUnexpectedError(interaction);
   }
 }
 
@@ -117,8 +142,9 @@ async function handleOpen(
 ): Promise<void> {
   const subject = interaction.options.getString("subject", true).trim();
   if (!subject) {
-    await interaction.editReply({
-      content: "Please say what you need help with.",
+    await replyWithError(interaction, {
+      title: "Couldn't open a ticket",
+      next: "Say what you need help with, then try again.",
     });
     return;
   }
@@ -129,14 +155,20 @@ async function handleOpen(
     subject,
   });
   if (!result.ok) {
-    await interaction.editReply({
-      content:
-        result.reason === "cooldown" && result.retryAfterSeconds
-          ? `You opened a ticket a moment ago. Please wait ${waitText(result.retryAfterSeconds)} before opening another.`
-          : result.reason === "too-many-open" && result.maxOpen
-            ? `You already have ${result.maxOpen} open ticket${result.maxOpen === 1 ? "" : "s"}, the most allowed. Please use ${result.maxOpen === 1 ? "it" : "one of them"}, or close ${result.maxOpen === 1 ? "it" : "one"} first.`
-            : FAILURE_TEXT[result.reason],
-    });
+    await replyWithError(
+      interaction,
+      result.reason === "cooldown" && result.retryAfterSeconds
+        ? {
+            title: "Couldn't open a ticket",
+            next: `You opened a ticket a moment ago. Please wait ${waitText(result.retryAfterSeconds)} before opening another.`,
+          }
+        : result.reason === "too-many-open" && result.maxOpen
+          ? {
+              title: "Couldn't open a ticket",
+              next: `You already have ${result.maxOpen} open ticket${result.maxOpen === 1 ? "" : "s"}, the most allowed. Please use ${result.maxOpen === 1 ? "it" : "one of them"}, or close ${result.maxOpen === 1 ? "it" : "one"} first.`,
+            }
+          : FAILURE_TEXT[result.reason],
+    );
     return;
   }
   await interaction.editReply({
@@ -163,9 +195,9 @@ async function handleStaffOrAuthor(
 ): Promise<void> {
   const ticket = await resolveTicket(interaction, manager);
   if (!ticket) {
-    await interaction.editReply({
-      content:
-        "I couldn't find a ticket. Run this inside the ticket channel, or pass a ticket ID.",
+    await replyWithError(interaction, {
+      title: "Couldn't find a ticket",
+      next: "Run this inside the ticket channel, or pass a ticket ID.",
     });
     return;
   }
@@ -181,7 +213,10 @@ async function handleStaffOrAuthor(
 
   // Staff can act on any ticket; the author may only close their own.
   if (!staff && !(sub === "close" && isAuthor)) {
-    await interaction.editReply({ content: "Only staff can do that." });
+    await replyWithError(interaction, {
+      title: "Staff only",
+      next: "Only staff can do that. Ask a moderator for help.",
+    });
     return;
   }
 
@@ -190,7 +225,7 @@ async function handleStaffOrAuthor(
       ? await manager.claimTicket(ticket, interaction.user.id)
       : await manager.closeTicket(ticket, interaction.user.id);
   if (!result.ok) {
-    await interaction.editReply({ content: FAILURE_TEXT[result.reason] });
+    await replyWithError(interaction, FAILURE_TEXT[result.reason]);
     return;
   }
   await interaction.editReply({

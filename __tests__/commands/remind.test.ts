@@ -1,6 +1,8 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
 
+import { errorEmbedPayload } from "../test-utils.js";
+
 const mockGetBoolean =
   jest.fn<(key: string, fallback: boolean) => Promise<boolean>>();
 const mockGetNumber =
@@ -91,7 +93,13 @@ function makeInteraction(
     client: CLIENT,
     replied: false,
     deferred: true,
-    deferReply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    // Like discord.js: deferring marks the interaction, which is what makes a
+    // failure answer edit the deferred reply instead of replying again.
+    deferReply: jest
+      .fn<() => Promise<void>>()
+      .mockImplementation(async function (this: unknown) {
+        (this as { deferred: boolean }).deferred = true;
+      }),
     editReply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     reply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     ...overrides,
@@ -164,7 +172,7 @@ describe("remind command gating", () => {
 
     await execute(interaction);
 
-    expect(replyText(interaction)).toContain("disabled");
+    expect(replyText(interaction)).toContain("Reminders are off");
     expect(ReminderMock.create).not.toHaveBeenCalled();
   });
 
@@ -190,7 +198,7 @@ describe("remind command gating", () => {
 
     await execute(interaction);
 
-    expect(replyText(interaction)).toContain("guild");
+    expect(replyText(interaction)).toContain("Run this command in a server");
     expect(ReminderMock.create).not.toHaveBeenCalled();
   });
 });
@@ -314,7 +322,12 @@ describe("/remind set", () => {
 
     await execute(interaction);
 
-    expect(replyText(interaction)).toContain("couldn't read that duration");
+    expect(interaction.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't read that duration",
+        description: expect.stringContaining("`30m`"),
+      }),
+    );
     expect(ReminderMock.create).not.toHaveBeenCalled();
   });
 
@@ -327,7 +340,9 @@ describe("/remind set", () => {
 
     await execute(interaction);
 
-    expect(replyText(interaction)).toContain("didn't parse");
+    expect(replyText(interaction)).toContain(
+      "Couldn't read that date and time",
+    );
     expect(ReminderMock.create).not.toHaveBeenCalled();
   });
 
@@ -405,7 +420,7 @@ describe("/remind cancel", () => {
 
     await execute(interaction);
 
-    expect(replyText(interaction)).toContain("doesn't look like a reminder ID");
+    expect(replyText(interaction)).toContain("That isn't a reminder ID");
     expect(ReminderMock.deleteOne).not.toHaveBeenCalled();
   });
 

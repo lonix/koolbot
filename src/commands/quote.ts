@@ -9,7 +9,11 @@ import {
 import { quoteService } from "../services/quote-service.js";
 import { QuoteChannelManager } from "../services/quote-channel-manager.js";
 import logger from "../utils/logger.js";
-import { safeReply } from "../utils/safe-reply.js";
+import {
+  replyWithError,
+  replyWithUnexpectedError,
+  UNEXPECTED_ERROR,
+} from "../utils/error-reply.js";
 import { describeDiscordError } from "../utils/log-sanitize.js";
 import { UserFacingError } from "../utils/user-facing-error.js";
 
@@ -161,15 +165,14 @@ export async function execute(
     logger.error("Error executing quote command:", error);
     // Relay only messages written for members; anything else (Mongoose, driver
     // or Discord errors) stays in the log behind a generic reply (#1153).
-    const errorMessage =
-      error instanceof UserFacingError
-        ? error.message
-        : "There was an error while executing this command!";
-
-    await safeReply(interaction, {
-      content: `❌ ${errorMessage}`,
-      flags: MessageFlags.Ephemeral,
-    });
+    if (error instanceof UserFacingError) {
+      await replyWithError(interaction, {
+        title: "Couldn't complete that",
+        next: error.message,
+      });
+    } else {
+      await replyWithUnexpectedError(interaction);
+    }
   }
 }
 
@@ -291,10 +294,9 @@ async function handleEdit(
 
   // Validate at least one field is being updated
   if (!newText && !newAuthor) {
-    await interaction.reply({
-      content:
-        "❌ Please provide at least one field to update (text or author).",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "Nothing to update",
+      next: "Give a new text or a new author, then try again.",
     });
     return;
   }
@@ -302,9 +304,9 @@ async function handleEdit(
   // Get existing quote to verify permissions
   const existingQuote = await quoteService.getQuoteById(quoteId);
   if (!existingQuote) {
-    await interaction.reply({
-      content: "❌ Quote not found with that ID.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "Couldn't find that quote",
+      next: "Check the quote ID and try again.",
     });
     return;
   }
@@ -315,9 +317,9 @@ async function handleEdit(
 
   // Check if user has permission to edit (only the person who added it can edit)
   if (normalizedAddedById !== interaction.user.id) {
-    await interaction.reply({
-      content: "❌ You can only edit quotes that you added.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "Couldn't edit that quote",
+      next: "You can only edit quotes that you added. Ask the person who added it, or an admin.",
     });
     return;
   }
@@ -345,10 +347,9 @@ async function handleEdit(
       error,
     );
 
-    await safeReply(interaction, {
-      content:
-        "❌ I couldn't find or update the quote message in the quote channel. The quote may not have been posted successfully, or the message was deleted. Please contact a server admin.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "Couldn't update the quote message",
+      next: "The quote may not have been posted, or its message was deleted. Ask an admin to check the quote channel.",
     });
     return;
   }
@@ -366,9 +367,9 @@ async function handleExport(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   if (!invokerIsAdmin(interaction.member)) {
-    await interaction.reply({
-      content: "❌ This command requires the Administrator permission.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "Administrators only",
+      next: "This command needs the Administrator permission. Ask an admin to run it.",
     });
     return;
   }
@@ -393,9 +394,9 @@ async function handleImport(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   if (!invokerIsAdmin(interaction.member)) {
-    await interaction.reply({
-      content: "❌ This command requires the Administrator permission.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "Administrators only",
+      next: "This command needs the Administrator permission. Ask an admin to run it.",
     });
     return;
   }
@@ -404,9 +405,9 @@ async function handleImport(
   const rebuild = interaction.options.getBoolean("rebuild") ?? false;
 
   if (attachment.size > MAX_IMPORT_BYTES) {
-    await interaction.reply({
-      content: `❌ Backup file is too large (max ${MAX_IMPORT_BYTES / (1024 * 1024)} MB).`,
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "That backup file is too large",
+      next: `Use a file under ${MAX_IMPORT_BYTES / (1024 * 1024)} MB, such as one made with \`/quote export\`.`,
     });
     return;
   }
@@ -422,9 +423,9 @@ async function handleImport(
     payload = JSON.parse(await response.text());
   } catch (error) {
     logger.error("Failed to read quote backup attachment:", error);
-    await safeReply(interaction, {
-      content:
-        "❌ Could not read the backup file. Make sure it's a valid JSON file produced by `/quote export`.",
+    await replyWithError(interaction, {
+      title: "Couldn't read the backup file",
+      next: "Make sure it's a valid JSON file produced by `/quote export`, then try again.",
     });
     return;
   }
@@ -457,9 +458,9 @@ async function handleReset(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   if (!invokerIsAdmin(interaction.member)) {
-    await interaction.reply({
-      content: "❌ This command requires the Administrator permission.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "Administrators only",
+      next: "This command needs the Administrator permission. Ask an admin to run it.",
     });
     return;
   }
@@ -480,12 +481,12 @@ async function handleReset(
     logger.error(
       `Failed to reset quote channel: ${describeDiscordError(error)}`,
     );
-    await safeReply(interaction, {
-      content: `❌ Failed to rebuild the quote channel: ${
+    await replyWithError(interaction, {
+      title: "Couldn't rebuild the quote channel",
+      next:
         error instanceof UserFacingError
           ? error.message
-          : "an unexpected error occurred. Check the bot log for details."
-      }`,
+          : UNEXPECTED_ERROR.next,
     });
   }
 }

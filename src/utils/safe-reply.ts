@@ -23,6 +23,17 @@ function toEditPayload(
   return rest as InteractionEditReplyOptions;
 }
 
+export interface SafeReplyOptions {
+  /**
+   * Send a deferred interaction's answer as a `followUp` instead of editing
+   * the deferred response. discord.js sets `deferred` for `deferReply()` and
+   * for a component's `deferUpdate()` alike; after `deferUpdate()` the deferred
+   * response is the public message the component sits on, so editing it would
+   * overwrite that message. Ignored when the interaction is not deferred.
+   */
+  followUp?: boolean;
+}
+
 /**
  * Deliver a response to an interaction without ever throwing.
  *
@@ -42,11 +53,14 @@ function toEditPayload(
 export async function safeReply(
   interaction: RepliableInteraction,
   payload: InteractionReplyOptions,
+  options: SafeReplyOptions = {},
 ): Promise<boolean> {
   try {
-    if (interaction.replied) {
+    if (interaction.replied || (interaction.deferred && options.followUp)) {
       // Already acknowledged with a visible response (including `update()` on
       // a component interaction) — a second `reply` would throw, so append.
+      // `followUp` asks for the same on a deferred interaction, so the
+      // deferred message is left as it is.
       await interaction.followUp(payload);
     } else if (interaction.deferred) {
       await interaction.editReply(toEditPayload(payload));

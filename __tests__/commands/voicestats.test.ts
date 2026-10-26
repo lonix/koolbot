@@ -1,6 +1,8 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
 
+import { unexpectedErrorPayload } from "../test-utils.js";
+
 const mockGetBoolean =
   jest.fn<(key: string, def: boolean) => Promise<boolean>>();
 const mockGetUserStats = jest.fn<() => Promise<unknown>>();
@@ -56,7 +58,13 @@ function mockReplyMethods(): Pick<
     replied: false,
     deferred: false,
     reply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    deferReply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    // Like discord.js: deferring marks the interaction, which is what makes a
+    // failure answer edit the deferred reply instead of replying again.
+    deferReply: jest
+      .fn<() => Promise<void>>()
+      .mockImplementation(async function (this: unknown) {
+        (this as { deferred: boolean }).deferred = true;
+      }),
     editReply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
   };
 }
@@ -680,9 +688,7 @@ describe("VoiceStats Command", () => {
 
       expect(interaction.reply).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: "There was an error while executing this command!",
-        }),
+        unexpectedErrorPayload(),
       );
     });
   });

@@ -6,6 +6,7 @@ import {
   getCommandHelpEntries,
   usageFromCommand,
 } from "../../src/commands/help.js";
+import { errorEmbedPayload, unexpectedErrorPayload } from "../test-utils.js";
 import { COMMAND_CONFIGS } from "../../src/services/command-registry.js";
 import { getBotVersion } from "../../src/utils/version.js";
 import { ConfigService } from "../../src/services/config-service.js";
@@ -66,7 +67,11 @@ describe("Help Command", () => {
         options: {
           getString: jest.fn().mockReturnValue(null),
         } as any,
-        deferReply: jest.fn().mockResolvedValue(undefined),
+        // Like discord.js: deferring marks the interaction deferred, which is
+        // what makes an error answer edit the deferred reply.
+        deferReply: jest.fn(async () => {
+          (mockInteraction as { deferred?: boolean }).deferred = true;
+        }),
         editReply: jest.fn().mockResolvedValue(undefined),
         reply: jest.fn().mockResolvedValue(undefined),
       };
@@ -105,16 +110,11 @@ describe("Help Command", () => {
       const getBoolean = jest
         .spyOn(ConfigService.prototype, "getBoolean")
         .mockRejectedValue(new Error("mongo down"));
-      (mockInteraction as any).deferReply = jest.fn(async () => {
-        (mockInteraction as any).deferred = true;
-      });
 
       await execute(mockInteraction as ChatInputCommandInteraction);
 
       expect(mockInteraction.editReply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: "There was an error while executing this command!",
-        }),
+        unexpectedErrorPayload(),
       );
       expect(mockInteraction.reply).not.toHaveBeenCalled();
       getBoolean.mockRestore();
@@ -157,10 +157,13 @@ describe("Help Command", () => {
 
       await execute(mockInteraction as ChatInputCommandInteraction);
 
-      expect(mockInteraction.editReply).toHaveBeenCalledWith({
-        content:
-          "There is no command `/nonexistent`. Use `/help` to see the list of commands.",
-      });
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "Couldn't find that command",
+          description:
+            "There is no command `/nonexistent`. Use `/help` to see the list of commands.",
+        }),
+      );
     });
 
     it("should handle commands without config keys", async () => {

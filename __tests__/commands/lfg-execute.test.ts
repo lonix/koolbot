@@ -10,6 +10,7 @@
 
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import {
+  errorEmbedPayload,
   createMockChatInputInteraction,
   createMockButtonInteraction,
   type MockChatInputInteraction,
@@ -224,21 +225,36 @@ describe("/lfg", () => {
     mockCreatePost.mockResolvedValue({ status: "at_limit", limit: 1 });
     const it_ = interaction({ strings: { game: "Valorant" } });
     await execute(it_);
-    expect(it_.editReply.mock.calls[0][0]).toContain("already have an open");
+    expect(it_.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't post your LFG",
+        description: expect.stringContaining("already have an open"),
+      }),
+    );
   });
 
   it("explains a missing channel", async () => {
     mockCreatePost.mockResolvedValue({ status: "no_channel" });
     const it_ = interaction({ strings: { game: "Valorant" } });
     await execute(it_);
-    expect(it_.editReply.mock.calls[0][0]).toContain("channel to post in");
+    expect(it_.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't post your LFG",
+        description: expect.stringContaining("channel to post in"),
+      }),
+    );
   });
 
   it("explains a send that failed", async () => {
     mockCreatePost.mockResolvedValue({ status: "post_failed" });
     const it_ = interaction({ strings: { game: "Valorant" } });
     await execute(it_);
-    expect(it_.editReply.mock.calls[0][0]).toContain("send messages");
+    expect(it_.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't post your LFG",
+        description: expect.stringContaining("send messages"),
+      }),
+    );
   });
 });
 

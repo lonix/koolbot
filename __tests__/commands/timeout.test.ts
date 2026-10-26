@@ -5,6 +5,8 @@ import {
   type ChatInputCommandInteraction,
 } from "discord.js";
 
+import { errorEmbedPayload, unexpectedErrorPayload } from "../test-utils.js";
+
 const mockIsEnabled = jest.fn<() => Promise<boolean>>();
 const mockLogAction = jest.fn<() => Promise<unknown>>();
 const mockCountHistory = jest.fn<() => Promise<number>>();
@@ -109,7 +111,13 @@ function makeInteraction(
     deferred: false,
     applyTimeout,
     reply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    deferReply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    // Like discord.js: deferring marks the interaction, which is what makes a
+    // failure answer edit the deferred reply instead of replying again.
+    deferReply: jest
+      .fn<() => Promise<void>>()
+      .mockImplementation(async function (this: unknown) {
+        (this as { deferred: boolean }).deferred = true;
+      }),
     editReply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
   } as unknown as MockInteraction;
 }
@@ -243,9 +251,12 @@ describe("Timeout Command", () => {
 
       expect(interaction.applyTimeout).not.toHaveBeenCalled();
       expect(mockLogAction).not.toHaveBeenCalled();
-      expect(interaction.editReply).toHaveBeenCalledWith({
-        content: "The moderation log is currently disabled.",
-      });
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "The moderation log is off",
+          description: expect.stringContaining("turn it on"),
+        }),
+      );
     });
 
     // A timeout only exists on a present member, unlike a ban.
@@ -255,9 +266,12 @@ describe("Timeout Command", () => {
       await execute(interaction);
 
       expect(mockLogAction).not.toHaveBeenCalled();
-      expect(interaction.editReply).toHaveBeenCalledWith({
-        content: expect.stringContaining("isn't a member of this server"),
-      });
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "Couldn't time out that member",
+          description: expect.stringContaining("isn't a member of this server"),
+        }),
+      );
     });
 
     it("refuses a target who outranks the moderator, without acting", async () => {
@@ -268,11 +282,14 @@ describe("Timeout Command", () => {
       await execute(interaction);
 
       expect(mockLogAction).not.toHaveBeenCalled();
-      expect(interaction.editReply).toHaveBeenCalledWith({
-        content: expect.stringContaining(
-          "their highest role is not below yours",
-        ),
-      });
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "Couldn't time out that member",
+          description: expect.stringContaining(
+            "their highest role is not below yours",
+          ),
+        }),
+      );
     });
 
     it("records nothing when Discord rejects the timeout", async () => {
@@ -284,9 +301,12 @@ describe("Timeout Command", () => {
       await execute(interaction);
 
       expect(mockLogAction).not.toHaveBeenCalled();
-      expect(interaction.editReply).toHaveBeenCalledWith({
-        content: expect.stringContaining("Nothing has been recorded."),
-      });
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "Discord rejected the timeout",
+          description: expect.stringContaining("Nothing has been recorded."),
+        }),
+      );
     });
 
     it.each([
@@ -325,9 +345,7 @@ describe("Timeout Command", () => {
       expect(interaction.applyTimeout).not.toHaveBeenCalled();
       expect(interaction.reply).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: "There was an error timing the member out.",
-        }),
+        unexpectedErrorPayload(),
       );
     });
 
@@ -344,9 +362,9 @@ describe("Timeout Command", () => {
 
       expect(interaction.applyTimeout).toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content:
-            "The member was timed out, but I couldn't record it or show the confirmation. Don't run this again — check /modlog.",
+        errorEmbedPayload({
+          title: "The member was timed out",
+          description: expect.stringContaining("Don't run this again"),
         }),
       );
     });
@@ -386,8 +404,9 @@ describe("Timeout Command", () => {
       expect(interaction.applyTimeout).not.toHaveBeenCalled();
       expect(mockLogAction).not.toHaveBeenCalled();
       expect(interaction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: "Please give a reason for the timeout.",
+        errorEmbedPayload({
+          title: "Couldn't time out that member",
+          description: "Give a reason for the timeout, then try again.",
         }),
       );
     });
@@ -409,8 +428,11 @@ describe("Timeout Command", () => {
 
       expect(interaction.applyTimeout).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: "**bob#0001** isn't a member of this server.",
+        errorEmbedPayload({
+          title: "Couldn't time out that member",
+          description: expect.stringContaining(
+            "**bob#0001** isn't a member of this server.",
+          ),
         }),
       );
     });
@@ -436,9 +458,7 @@ describe("Timeout Command", () => {
       expect(interaction.applyTimeout).not.toHaveBeenCalled();
       expect(mockLogAction).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: "There was an error timing the member out.",
-        }),
+        unexpectedErrorPayload(),
       );
     });
   });

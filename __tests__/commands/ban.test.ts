@@ -5,6 +5,8 @@ import {
   type ChatInputCommandInteraction,
 } from "discord.js";
 
+import { errorEmbedPayload, unexpectedErrorPayload } from "../test-utils.js";
+
 const mockIsEnabled = jest.fn<() => Promise<boolean>>();
 const mockLogAction = jest.fn<() => Promise<unknown>>();
 const mockCountHistory = jest.fn<() => Promise<number>>();
@@ -103,7 +105,13 @@ function makeInteraction(
     deferred: false,
     banCreate,
     reply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    deferReply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    // Like discord.js: deferring marks the interaction, which is what makes a
+    // failure answer edit the deferred reply instead of replying again.
+    deferReply: jest
+      .fn<() => Promise<void>>()
+      .mockImplementation(async function (this: unknown) {
+        (this as { deferred: boolean }).deferred = true;
+      }),
     editReply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
   } as unknown as MockInteraction;
 }
@@ -262,9 +270,12 @@ describe("Ban Command", () => {
       });
       expect(interaction.banCreate).not.toHaveBeenCalled();
       expect(mockLogAction).not.toHaveBeenCalled();
-      expect(interaction.editReply).toHaveBeenCalledWith({
-        content: "The moderation log is currently disabled.",
-      });
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "The moderation log is off",
+          description: expect.stringContaining("turn it on"),
+        }),
+      );
     });
 
     // Discord enforces role hierarchy in its native UI; the bot is the
@@ -278,11 +289,14 @@ describe("Ban Command", () => {
 
       expect(interaction.banCreate).not.toHaveBeenCalled();
       expect(mockLogAction).not.toHaveBeenCalled();
-      expect(interaction.editReply).toHaveBeenCalledWith({
-        content: expect.stringContaining(
-          "their highest role is not below yours",
-        ),
-      });
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "Couldn't ban that member",
+          description: expect.stringContaining(
+            "their highest role is not below yours",
+          ),
+        }),
+      );
     });
 
     it("records nothing when Discord rejects the ban", async () => {
@@ -292,9 +306,12 @@ describe("Ban Command", () => {
       await execute(interaction);
 
       expect(mockLogAction).not.toHaveBeenCalled();
-      expect(interaction.editReply).toHaveBeenCalledWith({
-        content: expect.stringContaining("Nothing has been recorded."),
-      });
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "Discord rejected the ban",
+          description: expect.stringContaining("Nothing has been recorded."),
+        }),
+      );
     });
 
     it.each([
@@ -333,9 +350,7 @@ describe("Ban Command", () => {
       expect(interaction.banCreate).not.toHaveBeenCalled();
       expect(interaction.reply).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: "There was an error banning the member.",
-        }),
+        unexpectedErrorPayload(),
       );
     });
 
@@ -352,9 +367,9 @@ describe("Ban Command", () => {
 
       expect(interaction.banCreate).toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content:
-            "The member was banned, but I couldn't record it or show the confirmation. Don't run this again — check /modlog.",
+        errorEmbedPayload({
+          title: "The member was banned",
+          description: expect.stringContaining("Don't run this again"),
         }),
       );
     });
@@ -379,8 +394,9 @@ describe("Ban Command", () => {
       expect(interaction.banCreate).not.toHaveBeenCalled();
       expect(mockLogAction).not.toHaveBeenCalled();
       expect(interaction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: "Please give a reason for the ban.",
+        errorEmbedPayload({
+          title: "Couldn't ban that member",
+          description: "Give a reason for the ban, then try again.",
         }),
       );
     });
@@ -428,9 +444,7 @@ describe("Ban Command", () => {
       expect(interaction.banCreate).not.toHaveBeenCalled();
       expect(mockLogAction).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: "There was an error banning the member.",
-        }),
+        unexpectedErrorPayload(),
       );
     });
   });

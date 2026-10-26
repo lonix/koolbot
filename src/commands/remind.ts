@@ -20,7 +20,10 @@ import {
   truncateText,
 } from "../utils/discord-limits.js";
 import logger from "../utils/logger.js";
-import { safeReply } from "../utils/safe-reply.js";
+import {
+  replyWithError,
+  replyWithUnexpectedError,
+} from "../utils/error-reply.js";
 import { embedColor } from "../utils/embed-style.js";
 
 /**
@@ -97,14 +100,18 @@ export async function execute(
     const config = ConfigService.getInstance();
     const enabled = await config.getBoolean("reminders.enabled", false);
     if (!enabled) {
-      await interaction.editReply(
-        "The reminders feature is currently disabled.",
-      );
+      await replyWithError(interaction, {
+        title: "Reminders are off",
+        next: "Ask an admin to turn them on in the Web UI.",
+      });
       return;
     }
 
     if (!interaction.guildId) {
-      await interaction.editReply("This command must be run inside a guild.");
+      await replyWithError(interaction, {
+        title: "Can't use this here",
+        next: "Run this command in a server.",
+      });
       return;
     }
 
@@ -116,13 +123,14 @@ export async function execute(
     } else if (sub === "cancel") {
       await handleCancel(interaction);
     } else {
-      await interaction.editReply("Unknown subcommand.");
+      await replyWithError(interaction, {
+        title: "Couldn't run that",
+        next: "I don't know that subcommand. Pick `set`, `list` or `cancel`.",
+      });
     }
   } catch (error) {
     logger.error("Error in remind command:", error);
-    await safeReply(interaction, {
-      content: "There was an error while executing this command!",
-    });
+    await replyWithUnexpectedError(interaction);
   }
 }
 
@@ -147,7 +155,10 @@ async function handleSet(
   const timeRaw = interaction.options.getString("time");
 
   if (message.length === 0) {
-    await interaction.editReply("Your reminder needs some text.");
+    await replyWithError(interaction, {
+      title: "Couldn't set your reminder",
+      next: "Add some text for the reminder, then try again.",
+    });
     return;
   }
 
@@ -157,9 +168,10 @@ async function handleSet(
   // one delivery path we promise when DMs are closed. Refuse instead of
   // storing something undeliverable.
   if (!interaction.channelId) {
-    await interaction.editReply(
-      "I couldn't tell which channel this is, so I'd have nowhere to post if your DMs are closed. Try again from a normal text channel.",
-    );
+    await replyWithError(interaction, {
+      title: "Couldn't set your reminder",
+      next: "I couldn't tell which channel this is, so I'd have nowhere to post if your DMs are closed. Try again from a normal text channel.",
+    });
     return;
   }
 
@@ -167,15 +179,17 @@ async function handleSet(
   const hasAbsolute = Boolean(dateRaw || timeRaw);
 
   if (hasRelative && hasAbsolute) {
-    await interaction.editReply(
-      "Pick one way to say when: either `in:` **or** `date:` + `time:`, not both.",
-    );
+    await replyWithError(interaction, {
+      title: "Couldn't set your reminder",
+      next: "Pick one way to say when: either `in:` **or** `date:` + `time:`, not both.",
+    });
     return;
   }
   if (!hasRelative && !hasAbsolute) {
-    await interaction.editReply(
-      "Tell me when: `in:2h` for a relative time, or `date:YYYY-MM-DD time:HH:MM` for a specific one.",
-    );
+    await replyWithError(interaction, {
+      title: "Couldn't set your reminder",
+      next: "Tell me when: `in:2h` for a relative time, or `date:YYYY-MM-DD time:HH:MM` for a specific one.",
+    });
     return;
   }
 
@@ -185,17 +199,19 @@ async function handleSet(
   if (hasRelative) {
     const durationMs = parseDuration(inRaw as string);
     if (durationMs === null) {
-      await interaction.editReply(
-        "I couldn't read that duration. Use a number and a unit — `30m`, `2h`, `3d`, `1w`, or a combination like `1h30m`.",
-      );
+      await replyWithError(interaction, {
+        title: "Couldn't read that duration",
+        next: "Use a number and a unit — `30m`, `2h`, `3d`, `1w`, or a combination like `1h30m`.",
+      });
       return;
     }
     when = { remindAt: new Date(now.getTime() + durationMs), timezone: "" };
   } else {
     if (!dateRaw || !timeRaw) {
-      await interaction.editReply(
-        "`date:` and `time:` go together — give both, or use `in:` instead.",
-      );
+      await replyWithError(interaction, {
+        title: "Couldn't set your reminder",
+        next: "`date:` and `time:` go together — give both, or use `in:` instead.",
+      });
       return;
     }
     // The member's own zone from /me/timezone; the server zone when unset.
@@ -208,9 +224,10 @@ async function handleSet(
     const zone = resolveTimezone(stored);
     const parsed = parseZonedDateTime(dateRaw, timeRaw, zone);
     if (!parsed) {
-      await interaction.editReply(
-        `That date and time didn't parse. Use \`date:YYYY-MM-DD\` and \`time:HH:MM\` (24-hour) — a four-digit year, then month and day. Times are read in **${zone}**.`,
-      );
+      await replyWithError(interaction, {
+        title: "Couldn't read that date and time",
+        next: `Use \`date:YYYY-MM-DD\` and \`time:HH:MM\` (24-hour) — a four-digit year, then month and day. Times are read in **${zone}**.`,
+      });
       return;
     }
     when = { remindAt: parsed, timezone: zone };
@@ -218,15 +235,17 @@ async function handleSet(
 
   const issue = checkRemindAt(when.remindAt, now);
   if (issue === "past") {
-    await interaction.editReply(
-      "That time has already passed. Pick a time in the future.",
-    );
+    await replyWithError(interaction, {
+      title: "That time has already passed",
+      next: "Pick a time in the future.",
+    });
     return;
   }
   if (issue === "too-far") {
-    await interaction.editReply(
-      "That's more than a year away — pick something sooner.",
-    );
+    await replyWithError(interaction, {
+      title: "That time is too far away",
+      next: "That's more than a year away — pick something sooner.",
+    });
     return;
   }
 
@@ -241,9 +260,10 @@ async function handleSet(
   });
 
   if (!result.ok) {
-    await interaction.editReply(
-      `You already have ${result.limit} pending reminders. Cancel one with \`/remind cancel\` before adding another.`,
-    );
+    await replyWithError(interaction, {
+      title: "Couldn't set your reminder",
+      next: `You already have ${result.limit} pending reminders. Cancel one with \`/remind cancel\` before adding another.`,
+    });
     return;
   }
 
@@ -304,9 +324,10 @@ async function handleCancel(
   // Guard before the query: Mongoose throws a CastError on a malformed id,
   // which would surface as the generic error reply instead of a useful one.
   if (!isValidObjectId(id)) {
-    await interaction.editReply(
-      "That doesn't look like a reminder ID. Copy one from `/remind list`.",
-    );
+    await replyWithError(interaction, {
+      title: "That isn't a reminder ID",
+      next: "Copy one from `/remind list`, then try again.",
+    });
     return;
   }
 
@@ -317,9 +338,12 @@ async function handleCancel(
     interaction.guildId as string,
   );
 
-  await interaction.editReply(
-    cancelled
-      ? "🗑️ Reminder cancelled."
-      : "No pending reminder of yours has that ID. Check `/remind list`.",
-  );
+  if (!cancelled) {
+    await replyWithError(interaction, {
+      title: "Couldn't find that reminder",
+      next: "No pending reminder of yours has that ID. Check `/remind list`.",
+    });
+    return;
+  }
+  await interaction.editReply("🗑️ Reminder cancelled.");
 }

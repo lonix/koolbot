@@ -1153,11 +1153,12 @@ the deferral.
 
 ```typescript
 import { ChatInputCommandInteraction, MessageFlags } from "discord.js";
+import { replyWithError, replyWithUnexpectedError } from "../utils/error-reply.js";
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   try {
     if (!interaction.guildId) {
-      await interaction.reply({ content: "Server only.", flags: MessageFlags.Ephemeral });
+      await replyWithError(interaction, { title: "Can't use this here", next: "Run this command in a server." });
       return;
     }
 
@@ -1166,7 +1167,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     await interaction.editReply({ content: render(rows) });
   } catch (error) {
     logger.error("Error in mycmd command:", error);
-    await safeReply(interaction, { content: "Something went wrong.", flags: MessageFlags.Ephemeral });
+    await replyWithUnexpectedError(interaction);
   }
 }
 ```
@@ -1182,22 +1183,37 @@ already dead (`10062 Unknown interaction` after the 3-second ACK window).
 Use `safeReply` from `src/utils/safe-reply.ts` instead. It picks `reply`,
 `editReply`, or `followUp` based on the interaction's current state and
 swallows (logging) any failure, returning `true`/`false` for whether the user
-actually saw the message:
+actually saw the message.
+
+#### Failure replies
+
+A failed or refused command answers with one ephemeral `embed-danger` embed whose title says what failed and whose description says what to do next
+(`docs/design/discord.md`, Replies). Do not write a `❌ …` line or "There was an error" as reply text: a guard in
+`__tests__/utils/discord-style-guard.test.ts` fails on both in `src/commands/`. Use the helpers in `src/utils/error-reply.ts`, which are built on
+`safeReply` and never throw:
 
 ```typescript
-import { MessageFlags } from "discord.js";
-import { safeReply } from "../utils/safe-reply.js";
+import { replyWithError, replyWithUnexpectedError } from "../utils/error-reply.js";
 
 try {
   await riskyOperation();
 } catch (error) {
   logger.error("Context about what failed:", error);
-  await safeReply(interaction, {
-    content: "There was an error while executing this command!",
-    flags: MessageFlags.Ephemeral,
-  });
+  // Shared wording for an error nobody planned for; use it in every catch-all.
+  await replyWithUnexpectedError(interaction);
 }
+
+// A refusal you can name: what failed, and what to do next.
+await replyWithError(interaction, {
+  title: "Couldn't post your LFG",
+  next: "Check that I can send messages in the LFG channel, then try again.",
+});
 ```
+
+The reply is ephemeral when nothing was acknowledged yet. After `deferReply()` the visibility is already fixed, so the embed edits the deferred
+response (a command that defers publicly, such as `/seen`, keeps its error public). For a component that called `deferUpdate()`, discord.js sets
+`deferred` the same way, so pass `whenDeferred: "followUp"` to send an ephemeral follow-up and leave the message the component sits on alone, or keep the
+default `"edit"` to replace an ephemeral panel. `errorEmbed({ title, next })` returns the embed alone for a caller that sends it some other way.
 
 ---
 
