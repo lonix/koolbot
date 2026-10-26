@@ -459,6 +459,45 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
       },
     );
 
+    it.each([
+      ["save", "vc_preset_save_chan1_user1"],
+      ["rename", `vc_preset_rename_0_${tag}_chan1_user1`],
+    ])(
+      "%s shows the modal even while the config read and channel fetch hang",
+      async (_n, id) => {
+        const never = new Promise<never>(() => {});
+        jest
+          .spyOn(ConfigService.prototype, "getBoolean")
+          .mockReturnValue(never);
+        jest.spyOn(ConfigService.prototype, "getNumber").mockReturnValue(never);
+        (mockGuild.channels!.fetch as jest.Mock).mockReturnValue(
+          never as never,
+        );
+        mockInteraction.customId = id;
+
+        await handleVCPresetButton(mockInteraction as ButtonInteraction);
+
+        expect(mockInteraction.showModal).toHaveBeenCalledTimes(1);
+        expect(mockGuild.channels!.fetch).not.toHaveBeenCalled();
+      },
+    );
+
+    it("save prefills the name from the cached channel only", async () => {
+      (mockGuild.channels as any).cache = {
+        get: jest.fn().mockReturnValue(mockChannel),
+      };
+      mockInteraction.customId = "vc_preset_save_chan1_user1";
+
+      await handleVCPresetButton(mockInteraction as ButtonInteraction);
+
+      const modal = (mockInteraction.showModal as jest.Mock).mock
+        .calls[0][0] as {
+        components: Array<{ components: Array<{ data: { value?: string } }> }>;
+      };
+      expect(modal.components[0].components[0].data.value).toBe("Test Channel");
+      expect(mockGuild.channels!.fetch).not.toHaveBeenCalled();
+    });
+
     it("save does not check the preset limit (the submit does)", async () => {
       jest.spyOn(ConfigService.prototype, "getNumber").mockResolvedValue(1);
       mockInteraction.customId = "vc_preset_save_chan1_user1";

@@ -354,9 +354,8 @@ export async function handleVCPresetButton(
     return;
   }
 
-  const isPanel = PANEL_ACTIONS.has(parsed.action);
   const isModal = MODAL_ACTIONS.has(parsed.action);
-  if (!isPanel && !isModal) {
+  if (!PANEL_ACTIONS.has(parsed.action) && !isModal) {
     await interaction.reply({
       content: "❌ Unknown preset action.",
       flags: MessageFlags.Ephemeral,
@@ -365,15 +364,32 @@ export async function handleVCPresetButton(
   }
 
   // A modal must be the first response, so those two actions cannot defer and
-  // must not touch the database (the limit and staleness checks run on submit).
+  // await nothing slow before it: no config read, no channel fetch, no database
+  // (the enabled gate, channel check, limit and staleness checks run on submit
+  // in vc-modal-handler, which already defers and re-checks).
+  if (isModal) {
+    try {
+      if (parsed.action === "save") {
+        await openSaveModal(interaction, parsed);
+      } else {
+        await openRenameModal(interaction, parsed);
+      }
+    } catch (error) {
+      logger.error("Error handling VC preset button:", error);
+      await replyError(
+        interaction,
+        "❌ An error occurred while processing your request.",
+      );
+    }
+    return;
+  }
+
   // Panel actions acknowledge first: "open" posts a new ephemeral panel, the
   // rest edit the one that was clicked.
-  if (isPanel) {
-    if (parsed.action === "open") {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    } else {
-      await interaction.deferUpdate();
-    }
+  if (parsed.action === "open") {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  } else {
+    await interaction.deferUpdate();
   }
 
   try {
@@ -390,16 +406,12 @@ export async function handleVCPresetButton(
     switch (parsed.action) {
       case "open":
         return await openPanel(interaction, parsed);
-      case "save":
-        return await openSaveModal(interaction, parsed, channel);
       case "manage":
         return await switchToManage(interaction, parsed, null);
       case "back":
         return await switchToApply(interaction, parsed);
       case "default":
         return await toggleDefault(interaction, parsed);
-      case "rename":
-        return await openRenameModal(interaction, parsed);
       case "delete":
         return await deletePreset(interaction, parsed);
     }
@@ -523,10 +535,11 @@ async function switchToManage(
 async function openSaveModal(
   interaction: ButtonInteraction,
   parsed: ParsedId,
-  channel: VoiceChannel,
 ): Promise<void> {
-  // No database read here: a modal has to be the first response. The preset
-  // limit is checked on submit (vc-modal-handler, handleSavePresetModal).
+  // Nothing slow here: a modal has to be the first response. The enabled gate,
+  // channel check and preset limit run on submit (vc-modal-handler). The name
+  // prefill uses only the cached channel and is skipped on a cache miss.
+  const cached = interaction.guild?.channels.cache?.get(parsed.channelId);
   const modal = new ModalBuilder()
     .setCustomId(`vc_modal_savepreset_${parsed.channelId}_${parsed.ownerId}`)
     .setTitle("Save preset");
@@ -536,8 +549,10 @@ async function openSaveModal(
     .setStyle(TextInputStyle.Short)
     .setPlaceholder("e.g. Squad night")
     .setRequired(true)
-    .setMaxLength(50)
-    .setValue(channel.name.slice(0, 50));
+    .setMaxLength(50);
+  if (cached?.type === ChannelType.GuildVoice) {
+    nameInput.setValue(cached.name.slice(0, 50));
+  }
 
   modal.addComponents(
     new ActionRowBuilder<TextInputBuilder>().addComponents(nameInput),
