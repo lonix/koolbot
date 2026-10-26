@@ -1593,6 +1593,23 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The no-JavaScript render of a rejected save (#1517): the row is marked
+      // and its line points at the failure flash, which is an alert.
+      name: "Settings (a rejected row, failure flash)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: NESTED_GROUPS,
+        guildId: "g1",
+        guildName: "Test Guild",
+        flash: {
+          type: "err",
+          text: "No changes saved — 1 invalid value in voicetracking: voicetracking.announcements.enabled (Turn on voicetracking first).",
+        },
+        invalidKeys: ["voicetracking.announcements.enabled"],
+      }),
+    },
+    {
       // A bounded number box and bot-managed values: text with a jump link, no
       // field to submit (#1304).
       name: "Settings (bounded number, bot-managed message id)",
@@ -2333,6 +2350,53 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Announcements (create form refused)",
+      html: renderAnnouncementsPage({
+        ...COMMON,
+        enabled: true,
+        textChannels: CHANNELS,
+        settingRows: [
+          {
+            key: "announcements.enabled",
+            label: "Scheduled announcements enabled",
+            current: true,
+            defaultValue: false,
+            type: "boolean",
+            description: "Enable scheduled announcements.",
+            category: "announcements",
+          },
+        ],
+        rows: [
+          {
+            id: "a1",
+            channelName: "general",
+            channelType: ChannelType.GuildText,
+            cron: "0 9 * * 1",
+            enabled: true,
+            messagePreview: "Good morning!",
+            embedTitle: null,
+            placeholders: true,
+            createdAt: "2026-01-01",
+          },
+        ],
+        refusedForm: {
+          formId: "announcement-create",
+          errors: {
+            cron: "Not a valid cron expression. Use five fields (minute hour day-of-month month day-of-week), for example 0 9 * * *.",
+            embedColor: "Use six hex digits, for example #5865F2.",
+          },
+          values: {
+            channelId: "c1",
+            cron: "every monday",
+            message: "Standup in 5 <minutes>",
+            placeholders: "1",
+            embedTitle: "Notice",
+            embedColor: "blurple",
+          },
+        },
+      }),
+    },
+    {
       name: "Events",
       html: renderEventsPage({
         ...COMMON,
@@ -2822,6 +2886,85 @@ export function adminPages(): A11yPage[] {
           },
         ],
         flash: FLASH,
+      }),
+    },
+    {
+      name: "Polls (question edit refused)",
+      html: renderPollsPage({
+        ...COMMON,
+        enabled: true,
+        defaultDurationHours: 24,
+        cooldownDays: 30,
+        settingRows: [
+          {
+            key: "polls.enabled",
+            label: "Polls system enabled",
+            current: true,
+            defaultValue: false,
+            type: "boolean",
+            description: "Enable the poll system.",
+            category: "polls",
+          },
+          {
+            key: "polls.default_duration_hours",
+            label: "Default poll duration (hours)",
+            current: 24,
+            defaultValue: 24,
+            type: "number",
+            description: "Default poll duration in hours (1–768).",
+            category: "polls",
+          },
+          {
+            key: "polls.turnout.retention_days",
+            label: "Poll turnout retention (days)",
+            current: 90,
+            defaultValue: 90,
+            type: "number",
+            description: "Days to keep the per-poll turnout rows.",
+            category: "polls",
+            min: 0,
+          },
+        ],
+        textChannels: CHANNELS,
+        roles: ROLES,
+        schedules: [
+          {
+            id: "s1",
+            channelId: "c1",
+            channelName: "general",
+            channelType: ChannelType.GuildText,
+            cron: "0 12 * * 3",
+            durationHours: 24,
+            pingRoleId: "r2",
+            pingRoleName: "Member",
+            enabled: true,
+            lastRun: "2026-01-07",
+          },
+        ],
+        items: [
+          {
+            id: "p1",
+            question: "Best pizza topping?",
+            answers: ["Pineapple", "Not pineapple"],
+            tags: ["food"],
+            multiSelect: false,
+            usageCount: 2,
+            lastUsed: "2026-01-07",
+            enabled: true,
+            source: "library",
+          },
+        ],
+        flash: FLASH,
+        refusedForm: {
+          formId: "poll-item-edit-p1",
+          errors: { answers: "Give 2 to 10 answers, separated by commas." },
+          values: {
+            question: "Best snack?",
+            answers: "only one",
+            tags: "",
+            multiSelect: "",
+          },
+        },
       }),
     },
     {

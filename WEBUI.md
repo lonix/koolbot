@@ -3916,19 +3916,32 @@ label, so it renders as `role="group"` with `aria-labelledby` pointing at the
 row caption, and each inner input keeps its own `aria-label`.
 
 **Rejected values are pointed at.** When a save is refused, the server echoes
-the offending config keys — as `invalidKeys` in the JSON reply for the AJAX
-save, and as `?invalid=<keys>` on the no-JS redirect. Those controls render
-`aria-invalid="true"` with an inline "Rejected" note, their `aria-describedby`
-is extended to the flash banner carrying the reason, and focus moves to the
-first of them. A page-level "something was invalid" banner on its own is not
-enough on a page with hundreds of fields.
+the offending config keys: as `invalidKeys` (with each key's reason in
+`invalidReasons`) in the JSON reply for the AJAX save, and as `?invalid=<keys>`
+on the no-JS redirect. Those controls render `aria-invalid="true"` with an
+inline error line, their `aria-describedby` is extended to the flash banner,
+and focus moves to the first of them. The AJAX save prints each key's own
+reason under its row. The no-JS redirect carries only the keys, because a
+query string is not signed (only the flash text is), so the line there points
+at the flash, which lists every reason. A page-level "something was invalid"
+banner on its own is not enough on a page with hundreds of fields.
+
+**A refused form comes back with what you typed.** When a create or edit form
+on a feature page is refused (Announcements and Polls so far), the server draws
+the page again with status 422 instead of redirecting: every field you typed is
+still filled in, each refused field has `aria-invalid="true"` and a
+`p.kb-field__error` line under it (linked by `aria-describedby`) that says what
+to change, and focus moves to the first refused field. Typed text never goes
+into a URL. A refused edit opens that row's _Edit_ disclosure. Routes use
+`refuseForm` and pages use `formView` (`src/web/form-errors.ts`).
 
 **Outcomes are announced.** The inline flash the AJAX Settings save inserts is
-a `role="status"` live region, so success, CSRF failure, rate-limit and
-network-error results are all read out. A flash rendered after a
-redirect is not announced on its own (a live region that is part of a fresh
-document never is), so `renderFlash` gives it `role="status" tabindex="-1"
-data-flash` and the layout script focuses it on load when nothing is
+a live region: `role="alert"` for a failure, `role="status"` for success and
+warnings, so CSRF failure, rate-limit and network-error results are all read
+out. A flash rendered after a redirect is not announced on its own (a live
+region that is part of a fresh document never is), so `renderFlash` gives it
+`tabindex="-1" data-flash` (with `role="alert"` for `err`, `role="status"`
+otherwise) and the layout script focuses it on load when nothing is
 `aria-invalid`.
 
 **Keyboard focus is visible.** Both layouts (and the pre-auth / error shell

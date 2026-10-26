@@ -31,6 +31,7 @@ import {
   REVIEW_JOB_NOTE,
 } from "../utils/moderation-labels.js";
 import { icon } from "./icons.js";
+import { formView, type RefusedForm } from "./form-errors.js";
 import { renderSaveBar } from "./savebar.js";
 import {
   pickPreset,
@@ -1391,13 +1392,18 @@ export function renderWarnBelow(r: SettingRow, id = ""): string {
 export const SETTINGS_FLASH_ID = "settings-flash";
 
 /**
- * Inline "this value was rejected" marker for a control the last save
- * refused (#854). `role="alert"` announces it when the page loads with the
- * rejection already rendered; the id is wired into the control's
- * `aria-describedby` so the marker is also read when the field takes focus.
+ * Inline "this value was rejected" line for a control the last save refused
+ * (#854), as `p.kb-field__error` (docs/design/components.md -> Field). The id
+ * is wired into the control's `aria-describedby`, so it is read when the field
+ * takes focus (the load script focuses the first rejected control); it carries
+ * no role of its own, because the flash above it is the alert (#1517).
+ *
+ * This is the no-JavaScript path: the redirect carries the rejected keys but
+ * not their reasons (a query string is not signed, and only the flash text is),
+ * so the line points at the flash. The AJAX save prints each key's own reason.
  */
 function renderInvalidNote(id: string): string {
-  return `<div class="settings-error" id="${escapeHtml(id)}" role="alert" style="margin-top:.4rem;color:var(--err-text);font-size:.85em">Rejected — not saved. See the error message above for the reason.</div>`;
+  return `<p class="kb-field__error settings-error" id="${escapeHtml(id)}">Rejected — not saved. See the error message above for the reason.</p>`;
 }
 
 /**
@@ -2553,6 +2559,8 @@ export interface AnnouncementsProps extends CommonProps {
   enabled: boolean;
   rows: AnnouncementRow[];
   textChannels: ChannelOption[];
+  /** The create or one-off form the server just refused, to draw again with its values and messages (#1517). */
+  refusedForm?: RefusedForm | null;
   /**
    * The `announcements.*` keys, edited in place on this page (#977) through
    * {@link renderFeatureSettingsCard}. Includes `announcements.enabled`, so
@@ -2666,10 +2674,12 @@ export function renderFlash(flash?: FlashMessage | null, id = ""): string {
   // `id` is optional: the Settings page names its banner so the controls of
   // rejected keys can reference it from `aria-describedby` (#854).
   const idAttr = id ? ` id="${escapeHtml(id)}"` : "";
-  // role="status" + tabindex="-1" + data-flash: a polite live region that the
-  // layout's on-load script focuses (when nothing is aria-invalid) so the
-  // outcome of a post-redirect save is actually announced (WCAG 4.1.3, #855).
-  return `<div class="notice ${cls}"${idAttr} role="status" tabindex="-1" data-flash>${escapeHtml(flash.text)}</div>`;
+  // tabindex="-1" + data-flash: the layout's on-load script focuses it (when
+  // nothing is aria-invalid) so the outcome of a post-redirect save is
+  // actually announced (WCAG 4.1.3, #855). A result is a polite status; a
+  // failure is an alert (#1517), as docs/design/components.md -> Callout asks.
+  const role = flash.type === "err" ? "alert" : "status";
+  return `<div class="notice ${cls}"${idAttr} role="${role}" tabindex="-1" data-flash>${escapeHtml(flash.text)}</div>`;
 }
 
 /**
@@ -2795,8 +2805,14 @@ const PLACEHOLDER_REFERENCE_HTML = `
   <p class="muted">Tick "Process placeholders" on the announcement to expand them at send time.</p>
 </details>`;
 
+/** Form ids of the Announcements page, shared with the write routes (#1517). */
+export const ANNOUNCEMENT_CREATE_FORM = "announcement-create";
+export const ANNOUNCEMENT_ONCE_FORM = "announcement-once";
+
 export function renderAnnouncementsPage(props: AnnouncementsProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+  const create = formView(props.refusedForm, ANNOUNCEMENT_CREATE_FORM);
+  const once = formView(props.refusedForm, ANNOUNCEMENT_ONCE_FORM);
 
   const tableRows = props.rows
     .map(
@@ -2845,31 +2861,31 @@ ${renderStatusLine({
   <form method="POST" action="/admin/announcements/create" class="stack">
     ${csrfInput}
     <label>Channel
-      <select name="channelId" required>${channelOptionsHtml(props.textChannels)}</select>
-    </label>
+      <select name="channelId" required${create.attrs("channelId")}>${channelOptionsHtml(props.textChannels, create.selected("channelId") || undefined)}</select>
+    </label>${create.error("channelId")}
     <label>Cron schedule
-      <input type="text" name="cron" placeholder="0 9 * * *" required pattern=".{3,}">
-    </label>
+      <input type="text" name="cron" placeholder="0 9 * * *" required pattern=".{3,}"${create.valueAttr("cron")}${create.attrs("cron")}>
+    </label>${create.error("cron")}
     ${CRON_EXAMPLES_HTML}
     <label>Message
-      <textarea name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"></textarea>
-    </label>
+      <textarea name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"${create.attrs("message")}>${create.textareaContent("message")}</textarea>
+    </label>${create.error("message")}
     <label class="checkbox">
-      <input type="checkbox" name="placeholders" value="1">
+      <input type="checkbox" name="placeholders" value="1"${create.checked("placeholders") ? " checked" : ""}>
       Process placeholders (replace <code>{server_name}</code>, <code>{date}</code>, etc.)
     </label>
     ${PLACEHOLDER_REFERENCE_HTML}
     <fieldset>
       <legend>Optional embed</legend>
       <label>Title
-        <input type="text" name="embedTitle" maxlength="256">
-      </label>
+        <input type="text" name="embedTitle" maxlength="256"${create.valueAttr("embedTitle")}${create.attrs("embedTitle")}>
+      </label>${create.error("embedTitle")}
       <label>Description
-        <textarea name="embedDescription" rows="3" maxlength="4000"></textarea>
-      </label>
+        <textarea name="embedDescription" rows="3" maxlength="4000"${create.attrs("embedDescription")}>${create.textareaContent("embedDescription")}</textarea>
+      </label>${create.error("embedDescription")}
       <label>Colour (hex, e.g. <code>#5865F2</code>)
-        <input type="text" name="embedColor" pattern="^#?[0-9A-Fa-f]{6}$" placeholder="#5865F2">
-      </label>
+        <input type="text" name="embedColor" pattern="^#?[0-9A-Fa-f]{6}$" placeholder="#5865F2"${create.valueAttr("embedColor")}${create.attrs("embedColor")}>
+      </label>${create.error("embedColor")}
     </fieldset>
     <button type="submit" class="btn btn-primary">Create announcement</button>
   </form>
@@ -2880,27 +2896,27 @@ ${renderStatusLine({
   <form method="POST" action="/admin/announcements/post-once" class="stack">
     ${csrfInput}
     <label>Channel
-      <select name="channelId" required>${channelOptionsHtml(props.textChannels)}</select>
-    </label>
+      <select name="channelId" required${once.attrs("channelId")}>${channelOptionsHtml(props.textChannels, once.selected("channelId") || undefined)}</select>
+    </label>${once.error("channelId")}
     <label>Message
-      <textarea name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"></textarea>
-    </label>
+      <textarea name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"${once.attrs("message")}>${once.textareaContent("message")}</textarea>
+    </label>${once.error("message")}
     <label class="checkbox">
-      <input type="checkbox" name="placeholders" value="1">
+      <input type="checkbox" name="placeholders" value="1"${once.checked("placeholders") ? " checked" : ""}>
       Process placeholders (replace <code>{server_name}</code>, <code>{date}</code>, etc.)
     </label>
     ${PLACEHOLDER_REFERENCE_HTML}
     <fieldset>
       <legend>Optional embed</legend>
       <label>Title
-        <input type="text" name="embedTitle" maxlength="256">
-      </label>
+        <input type="text" name="embedTitle" maxlength="256"${once.valueAttr("embedTitle")}${once.attrs("embedTitle")}>
+      </label>${once.error("embedTitle")}
       <label>Description
-        <textarea name="embedDescription" rows="3" maxlength="4000"></textarea>
-      </label>
+        <textarea name="embedDescription" rows="3" maxlength="4000"${once.attrs("embedDescription")}>${once.textareaContent("embedDescription")}</textarea>
+      </label>${once.error("embedDescription")}
       <label>Colour (hex, e.g. <code>#5865F2</code>)
-        <input type="text" name="embedColor" pattern="^#?[0-9A-Fa-f]{6}$" placeholder="#5865F2">
-      </label>
+        <input type="text" name="embedColor" pattern="^#?[0-9A-Fa-f]{6}$" placeholder="#5865F2"${once.valueAttr("embedColor")}${once.attrs("embedColor")}>
+      </label>${once.error("embedColor")}
     </fieldset>
     <button type="submit" class="btn btn-primary">Post now</button>
   </form>
@@ -3194,6 +3210,9 @@ export function renderGroupsSection(
   // A missing bot permission next to the field it breaks (#1478), already
   // rendered by `splitEventFormNotice`; absent or "" leaves the markup as it was.
   permissionInline: Partial<EventFormInline> = {},
+  // True inside a panel whose head already says "Groups" (the member form, #1507): the legend
+  // stays for assistive tech but is not drawn a second time.
+  hideLegend = false,
 ): string {
   const inline = (html: string | undefined): string =>
     html ? `\n      ${html}` : "";
@@ -3233,7 +3252,7 @@ export function renderGroupsSection(
     )
     .join("");
   return `<fieldset data-groups-section>
-      <legend>Groups</legend>${rememberedNote ? `\n      ${rememberedNote}` : ""}
+      <legend${hideLegend ? ' class="kb-visually-hidden"' : ""}>Groups</legend>${rememberedNote ? `\n      ${rememberedNote}` : ""}
       <div class="kb-groupopt">
         <label class="kb-switch"><input type="checkbox" role="switch" name="${GROUP_FORM_FIELDS.enabled}" value="1"${prefill ? " checked" : ""} aria-describedby="groups-enabled-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Split into groups (teams, squads, rooms…)</label>
         <p class="kb-help" id="groups-enabled-help">Each group gets its own voice channel next to the event's channel, made at the channel creation time and removed when the event is over. Leave it off for a plain event.</p>
@@ -3791,8 +3810,17 @@ export interface PollsProps extends CommonProps {
   items: PollItemRow[];
   textChannels: ChannelOption[];
   roles: RoleOption[];
+  /** The schedule or question form the server just refused, to draw again with its values and messages (#1517). */
+  refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
 }
+
+/** Form ids of the Polls page, shared with the write routes (#1517). */
+export const POLL_SCHEDULE_CREATE_FORM = "poll-schedule-create";
+export const POLL_ITEM_CREATE_FORM = "poll-item-create";
+export const pollScheduleEditForm = (id: string): string =>
+  `poll-schedule-edit-${id}`;
+export const pollItemEditForm = (id: string): string => `poll-item-edit-${id}`;
 
 // Progressive enhancement for the poll-import file picker (#646). Reading the
 // chosen file in the browser and dropping its text into the existing textarea
@@ -3835,10 +3863,13 @@ const POLL_IMPORT_UPLOAD_SCRIPT =
 
 export function renderPollsPage(props: PollsProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+  const newSchedule = formView(props.refusedForm, POLL_SCHEDULE_CREATE_FORM);
+  const newItem = formView(props.refusedForm, POLL_ITEM_CREATE_FORM);
 
   const scheduleRows = props.schedules
-    .map(
-      (s) => `<tr>
+    .map((s) => {
+      const f = formView(props.refusedForm, pollScheduleEditForm(s.id));
+      return `<tr>
 <td class="mono">${escapeHtml(s.id)}</td>
 <td>${channelMention({ name: s.channelName, type: s.channelType })}</td>
 <td class="mono">${escapeHtml(s.cron)}</td>
@@ -3847,12 +3878,12 @@ export function renderPollsPage(props: PollsProps): string {
 <td>${tagOnOff(s.enabled)}</td>
 <td class="muted">${escapeHtml(s.lastRun)}</td>
 <td class="actions">
-  <details class="helper edit-details"><summary>Edit</summary>
+  <details class="helper edit-details"${f.open()}><summary>Edit</summary>
     <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/edit" class="stack">${csrfInput}
-      <label>Channel<select name="channelId" required>${channelOptionsHtml(props.textChannels, s.channelId)}</select></label>
-      <label>Cron schedule<input type="text" name="cron" value="${escapeHtml(s.cron)}" required></label>
-      <label>Duration (hours, 1–768)<input type="number" name="durationHours" min="1" max="768" value="${s.durationHours}" required></label>
-      <label>Ping role<select name="pingRoleId">${roleOptionsHtml(props.roles, s.pingRoleId ?? undefined)}</select></label>
+      <label>Channel<select name="channelId" required${f.attrs("channelId")}>${channelOptionsHtml(props.textChannels, f.selected("channelId", s.channelId))}</select></label>${f.error("channelId")}
+      <label>Cron schedule<input type="text" name="cron" value="${escapeHtml(f.value("cron", s.cron))}" required${f.attrs("cron")}></label>${f.error("cron")}
+      <label>Duration (hours, 1–768)<input type="number" name="durationHours" min="1" max="768" value="${escapeHtml(f.value("durationHours", String(s.durationHours)))}" required${f.attrs("durationHours")}></label>${f.error("durationHours")}
+      <label>Ping role<select name="pingRoleId"${f.attrs("pingRoleId")}>${roleOptionsHtml(props.roles, f.selected("pingRoleId", s.pingRoleId ?? "") || undefined)}</select></label>${f.error("pingRoleId")}
       <button type="submit" class="btn btn-primary">Save changes</button>
     </form>
   </details>
@@ -3860,13 +3891,14 @@ export function renderPollsPage(props: PollsProps): string {
   <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/test">${csrfInput}<button type="submit" class="btn">Test</button></form>
   <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/delete" data-confirm="Delete schedule ${escapeHtml(s.id)}?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
 </td>
-</tr>`,
-    )
+</tr>`;
+    })
     .join("");
 
   const itemRows = props.items
-    .map(
-      (it) => `<tr>
+    .map((it) => {
+      const f = formView(props.refusedForm, pollItemEditForm(it.id));
+      return `<tr>
 <td>${escapeHtml(it.question)}<div class="muted mono">${escapeHtml(it.answers.join(" • "))}</div></td>
 <td>${it.tags.length === 0 ? '<span class="muted">—</span>' : it.tags.map((t) => `<span class="tag tag-info">${escapeHtml(t)}</span>`).join(" ")}</td>
 <td>${it.usageCount}</td>
@@ -3874,20 +3906,20 @@ export function renderPollsPage(props: PollsProps): string {
 <td>${tagOnOff(it.enabled)}</td>
 <td class="muted">${escapeHtml(it.source)}</td>
 <td class="actions">
-  <details class="helper edit-details"><summary>Edit</summary>
+  <details class="helper edit-details"${f.open()}><summary>Edit</summary>
     <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/edit" class="stack">${csrfInput}
-      <label>Question<input type="text" name="question" maxlength="300" value="${escapeHtml(it.question)}" required></label>
-      <label>Answers (comma-separated, 2–10 options, ≤55 chars each)<input type="text" name="answers" maxlength="600" value="${escapeHtml(it.answers.join(", "))}" required></label>
-      <label>Tags (comma-separated, optional)<input type="text" name="tags" value="${escapeHtml(it.tags.join(", "))}"></label>
-      <label class="checkbox"><input type="checkbox" name="multiSelect" value="1"${it.multiSelect ? " checked" : ""}> Allow multiple answer selections</label>
+      <label>Question<input type="text" name="question" maxlength="300" value="${escapeHtml(f.value("question", it.question))}" required${f.attrs("question")}></label>${f.error("question")}
+      <label>Answers (comma-separated, 2–10 options, ≤55 chars each)<input type="text" name="answers" maxlength="600" value="${escapeHtml(f.value("answers", it.answers.join(", ")))}" required${f.attrs("answers")}></label>${f.error("answers")}
+      <label>Tags (comma-separated, optional)<input type="text" name="tags" value="${escapeHtml(f.value("tags", it.tags.join(", ")))}"${f.attrs("tags")}></label>${f.error("tags")}
+      <label class="checkbox"><input type="checkbox" name="multiSelect" value="1"${f.checked("multiSelect", it.multiSelect) ? " checked" : ""}> Allow multiple answer selections</label>
       <button type="submit" class="btn btn-primary">Save changes</button>
     </form>
   </details>
   <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/toggle">${csrfInput}<button type="submit" class="btn">${it.enabled ? "Disable" : "Enable"}</button></form>
   <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/delete" data-confirm="Delete poll question?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
 </td>
-</tr>`,
-    )
+</tr>`;
+    })
     .join("");
 
   const body = `
@@ -3918,18 +3950,18 @@ ${renderStatusLine({
   <form method="POST" action="/admin/polls/schedules/create" class="stack">
     ${csrfInput}
     <label>Channel
-      <select name="channelId" required>${channelOptionsHtml(props.textChannels)}</select>
-    </label>
+      <select name="channelId" required${newSchedule.attrs("channelId")}>${channelOptionsHtml(props.textChannels, newSchedule.selected("channelId") || undefined)}</select>
+    </label>${newSchedule.error("channelId")}
     <label>Cron schedule
-      <input type="text" name="cron" placeholder="0 12 * * *" required>
-    </label>
+      <input type="text" name="cron" placeholder="0 12 * * *" required${newSchedule.valueAttr("cron")}${newSchedule.attrs("cron")}>
+    </label>${newSchedule.error("cron")}
     ${CRON_EXAMPLES_HTML}
     <label>Duration (hours, 1–768)
-      <input type="number" name="durationHours" min="1" max="768" value="${props.defaultDurationHours}" required>
-    </label>
+      <input type="number" name="durationHours" min="1" max="768" value="${escapeHtml(newSchedule.value("durationHours", String(props.defaultDurationHours)))}" required${newSchedule.attrs("durationHours")}>
+    </label>${newSchedule.error("durationHours")}
     <label>Ping role
-      <select name="pingRoleId">${roleOptionsHtml(props.roles)}</select>
-    </label>
+      <select name="pingRoleId"${newSchedule.attrs("pingRoleId")}>${roleOptionsHtml(props.roles, newSchedule.selected("pingRoleId") || undefined)}</select>
+    </label>${newSchedule.error("pingRoleId")}
     <button type="submit" class="btn btn-primary">Create schedule</button>
   </form>
 </div>
@@ -3946,16 +3978,16 @@ ${renderStatusLine({
   <form method="POST" action="/admin/polls/items/create" class="stack">
     ${csrfInput}
     <label>Question
-      <input type="text" name="question" maxlength="300" required>
-    </label>
+      <input type="text" name="question" maxlength="300" required${newItem.valueAttr("question")}${newItem.attrs("question")}>
+    </label>${newItem.error("question")}
     <label>Answers (comma-separated, 2–10 options, ≤55 chars each)
-      <input type="text" name="answers" maxlength="600" placeholder="Yes, No, Maybe" required>
-    </label>
+      <input type="text" name="answers" maxlength="600" placeholder="Yes, No, Maybe" required${newItem.valueAttr("answers")}${newItem.attrs("answers")}>
+    </label>${newItem.error("answers")}
     <label>Tags (comma-separated, optional)
-      <input type="text" name="tags" placeholder="icebreaker, funny">
-    </label>
+      <input type="text" name="tags" placeholder="icebreaker, funny"${newItem.valueAttr("tags")}${newItem.attrs("tags")}>
+    </label>${newItem.error("tags")}
     <label class="checkbox">
-      <input type="checkbox" name="multiSelect" value="1">
+      <input type="checkbox" name="multiSelect" value="1"${newItem.checked("multiSelect") ? " checked" : ""}>
       Allow multiple answer selections
     </label>
     <button type="submit" class="btn btn-primary">Add question</button>

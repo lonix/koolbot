@@ -5,6 +5,8 @@
  * no writes.
  */
 
+import { registerFormPage } from "./form-pages.js";
+import type { RefusedForm } from "./form-errors.js";
 import { COMPONENT_AUDIT_LABELS } from "../utils/component-audit.js";
 import { signRoleDeleteReview } from "./review-token.js";
 import {
@@ -1452,50 +1454,56 @@ export function createReadOnlyRouter(
   );
 
   // ---------- Announcements ----------
+  // One renderer for the GET and for a refused form (#1517): the write
+  // routes call it, through `form-pages.ts`, to draw the page again with 422.
+  const renderAnnouncements = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const service = ScheduledAnnouncementService.getInstance(client);
+    const config = ConfigService.getInstance();
+    const [enabled, announcements, channelData, announcementSettings] =
+      await Promise.all([
+        config.getBoolean("announcements.enabled", false),
+        service.listAnnouncements(common.guildId),
+        fetchChannelData(client, common.guildId),
+        // Editable `announcements.*` settings card (#977).
+        loadFeatureSettings(client, common.guildId, ANNOUNCEMENTS_SETTING_KEYS),
+      ]);
+
+    const rows = announcements.map((a) => ({
+      id: String(a._id),
+      channelName: channelData.names.get(a.channelId) ?? a.channelId,
+      channelType: channelData.types.get(a.channelId) ?? null,
+      cron: a.cronSchedule,
+      enabled: a.enabled,
+      messagePreview:
+        a.message.length > 80 ? `${a.message.slice(0, 80)}…` : a.message,
+      embedTitle: a.embedData?.title ?? null,
+      placeholders: a.placeholders,
+      createdAt: new Date(a.createdAt).toISOString(),
+    }));
+
+    return renderAnnouncementsPage({
+      ...common,
+      enabled,
+      rows,
+      textChannels: channelData.textChannels,
+      settingRows: announcementSettings.settingRows,
+      dependencyState: announcementSettings.dependencyState,
+      settingsUnavailable: announcementSettings.unavailable,
+      refusedForm,
+      flash: readFlash(req),
+    });
+  };
+  registerFormPage("/admin/announcements", (req, refused) =>
+    renderAnnouncements(req as AuthenticatedRequest, refused),
+  );
   router.get(
     "/announcements",
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
-      const service = ScheduledAnnouncementService.getInstance(client);
-      const config = ConfigService.getInstance();
-      const [enabled, announcements, channelData, announcementSettings] =
-        await Promise.all([
-          config.getBoolean("announcements.enabled", false),
-          service.listAnnouncements(common.guildId),
-          fetchChannelData(client, common.guildId),
-          // Editable `announcements.*` settings card (#977).
-          loadFeatureSettings(
-            client,
-            common.guildId,
-            ANNOUNCEMENTS_SETTING_KEYS,
-          ),
-        ]);
-
-      const rows = announcements.map((a) => ({
-        id: String(a._id),
-        channelName: channelData.names.get(a.channelId) ?? a.channelId,
-        channelType: channelData.types.get(a.channelId) ?? null,
-        cron: a.cronSchedule,
-        enabled: a.enabled,
-        messagePreview:
-          a.message.length > 80 ? `${a.message.slice(0, 80)}…` : a.message,
-        embedTitle: a.embedData?.title ?? null,
-        placeholders: a.placeholders,
-        createdAt: new Date(a.createdAt).toISOString(),
-      }));
-
-      res.type("text/html").send(
-        renderAnnouncementsPage({
-          ...common,
-          enabled,
-          rows,
-          textChannels: channelData.textChannels,
-          settingRows: announcementSettings.settingRows,
-          dependencyState: announcementSettings.dependencyState,
-          settingsUnavailable: announcementSettings.unavailable,
-          flash: readFlash(req),
-        }),
-      );
+      res.type("text/html").send(await renderAnnouncements(req, null));
     }),
   );
 
@@ -1710,72 +1718,80 @@ export function createReadOnlyRouter(
   );
 
   // ---------- Polls ----------
+  const renderPolls = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const service = PollService.getInstance(client);
+    const config = ConfigService.getInstance();
+    const [
+      enabled,
+      schedules,
+      items,
+      defaultDurationHours,
+      cooldownDays,
+      channelData,
+      roleData,
+      pollSettings,
+    ] = await Promise.all([
+      config.getBoolean("polls.enabled", false),
+      service.listSchedules(common.guildId),
+      service.listPollItems(common.guildId),
+      config.getNumber("polls.default_duration_hours", 24),
+      config.getNumber("polls.cooldown_days", 7),
+      fetchChannelData(client, common.guildId),
+      fetchRoleData(client, common.guildId),
+      // Editable `polls.*` settings card (#973).
+      loadFeatureSettings(client, common.guildId, POLLS_SETTING_KEYS),
+    ]);
+
+    return renderPollsPage({
+      ...common,
+      enabled,
+      defaultDurationHours,
+      cooldownDays,
+      settingRows: pollSettings.settingRows,
+      dependencyState: pollSettings.dependencyState,
+      settingsUnavailable: pollSettings.unavailable,
+      textChannels: channelData.textChannels,
+      roles: roleData.roles,
+      refusedForm,
+      flash: readFlash(req),
+      schedules: schedules.map((s) => ({
+        id: String(s._id),
+        channelId: s.channelId,
+        channelName: channelData.names.get(s.channelId) ?? s.channelId,
+        channelType: channelData.types.get(s.channelId) ?? null,
+        cron: s.cronSchedule,
+        durationHours: s.pollDuration,
+        pingRoleId: s.roleIdToPing ?? null,
+        pingRoleName: s.roleIdToPing
+          ? (roleData.names.get(s.roleIdToPing) ?? s.roleIdToPing)
+          : null,
+        enabled: s.enabled,
+        lastRun: s.lastRun ? new Date(s.lastRun).toISOString() : "—",
+      })),
+      items: items.map((it) => ({
+        id: String(it._id),
+        question: it.question,
+        answers: it.answers ?? [],
+        tags: it.tags ?? [],
+        multiSelect: it.multiSelect,
+        usageCount: it.usageCount,
+        lastUsed: it.lastUsed ? new Date(it.lastUsed).toISOString() : "—",
+        enabled: it.enabled,
+        source: it.source,
+      })),
+    });
+  };
+  registerFormPage("/admin/polls", (req, refused) =>
+    renderPolls(req as AuthenticatedRequest, refused),
+  );
   router.get(
     "/polls",
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
-      const service = PollService.getInstance(client);
-      const config = ConfigService.getInstance();
-      const [
-        enabled,
-        schedules,
-        items,
-        defaultDurationHours,
-        cooldownDays,
-        channelData,
-        roleData,
-        pollSettings,
-      ] = await Promise.all([
-        config.getBoolean("polls.enabled", false),
-        service.listSchedules(common.guildId),
-        service.listPollItems(common.guildId),
-        config.getNumber("polls.default_duration_hours", 24),
-        config.getNumber("polls.cooldown_days", 7),
-        fetchChannelData(client, common.guildId),
-        fetchRoleData(client, common.guildId),
-        // Editable `polls.*` settings card (#973).
-        loadFeatureSettings(client, common.guildId, POLLS_SETTING_KEYS),
-      ]);
-
-      res.type("text/html").send(
-        renderPollsPage({
-          ...common,
-          enabled,
-          defaultDurationHours,
-          cooldownDays,
-          settingRows: pollSettings.settingRows,
-          dependencyState: pollSettings.dependencyState,
-          settingsUnavailable: pollSettings.unavailable,
-          textChannels: channelData.textChannels,
-          roles: roleData.roles,
-          flash: readFlash(req),
-          schedules: schedules.map((s) => ({
-            id: String(s._id),
-            channelId: s.channelId,
-            channelName: channelData.names.get(s.channelId) ?? s.channelId,
-            channelType: channelData.types.get(s.channelId) ?? null,
-            cron: s.cronSchedule,
-            durationHours: s.pollDuration,
-            pingRoleId: s.roleIdToPing ?? null,
-            pingRoleName: s.roleIdToPing
-              ? (roleData.names.get(s.roleIdToPing) ?? s.roleIdToPing)
-              : null,
-            enabled: s.enabled,
-            lastRun: s.lastRun ? new Date(s.lastRun).toISOString() : "—",
-          })),
-          items: items.map((it) => ({
-            id: String(it._id),
-            question: it.question,
-            answers: it.answers ?? [],
-            tags: it.tags ?? [],
-            multiSelect: it.multiSelect,
-            usageCount: it.usageCount,
-            lastUsed: it.lastUsed ? new Date(it.lastUsed).toISOString() : "—",
-            enabled: it.enabled,
-            source: it.source,
-          })),
-        }),
-      );
+      res.type("text/html").send(await renderPolls(req, null));
     }),
   );
 
