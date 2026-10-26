@@ -1,12 +1,12 @@
 import { ButtonInteraction, MessageFlags } from "discord.js";
+import { EventService } from "../services/event-service.js";
+import type { RsvpStatus } from "../models/event.js";
+import logger from "../utils/logger.js";
 import {
   replyAfterWriteError,
   replyWithError,
   replyWithUnexpectedError,
 } from "../utils/error-reply.js";
-import { EventService } from "../services/event-service.js";
-import type { RsvpStatus } from "../models/event.js";
-import logger from "../utils/logger.js";
 
 const RSVP_LABELS: Record<RsvpStatus, string> = {
   going: "✅ Going",
@@ -22,7 +22,8 @@ const OUT_OF_DATE = {
 
 /**
  * Errors go out as a separate ephemeral message and never edit the
- * announcement, whether or not the click was acknowledged (#1510).
+ * announcement: after `deferUpdate()` the deferred response IS the public
+ * announcement (#1510).
  */
 const FOLLOW_UP = { whenDeferred: "followUp" } as const;
 
@@ -57,6 +58,13 @@ export async function handleEventRsvpButton(
   }
 
   try {
+    // Acknowledge before the write: Discord invalidates an interaction left
+    // unacknowledged for three seconds (`10062 Unknown interaction`, #842),
+    // and the write is a Mongo round trip. Everything after this edits the
+    // announcement with `editReply` and answers the member with an ephemeral
+    // `followUp`, as the LFG buttons do (#1534).
+    await interaction.deferUpdate();
+
     const service = EventService.getInstance(interaction.client);
     const event = await service.setRsvp(
       eventId,
@@ -79,7 +87,7 @@ export async function handleEventRsvpButton(
     // announcement. `afterWrite` takes no `whenDeferred`, so this does the same
     // with `followUp`.
     try {
-      await interaction.update(service.buildLegacyRsvpPayload(event));
+      await interaction.editReply(service.buildLegacyRsvpPayload(event));
       await interaction.followUp({
         content: `Your RSVP: **${RSVP_LABELS[status]}**`,
         flags: MessageFlags.Ephemeral,

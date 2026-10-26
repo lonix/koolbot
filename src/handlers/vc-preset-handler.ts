@@ -17,9 +17,10 @@ import {
 import logger from "../utils/logger.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import {
-  afterWrite,
+  replyAfterWriteError,
   replyWithError,
   replyWithUnexpectedError,
+  type WriteDone,
 } from "../utils/error-reply.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 import { ConfigService } from "../services/config-service.js";
@@ -100,10 +101,6 @@ function parseCustomId(customId: string): ParsedId | null {
 
 async function presetsEnabled(): Promise<boolean> {
   return await configService.getBoolean("voicechannels.presets.enabled", false);
-}
-
-async function maxPerUser(): Promise<number> {
-  return await configService.getNumber("voicechannels.presets.max_per_user", 3);
 }
 
 async function loadPrefs(userId: string): Promise<IUserVoicePreferences> {
@@ -268,21 +265,33 @@ function buildManagePanel(
   return { embed, components: rows };
 }
 
-async function ensureOwnership(
+/**
+ * Live-ownership check that needs no I/O: the customId's ownerId is only a
+ * hint, so require the in-memory room owner too (#1143). Safe to answer with a
+ * direct `reply` before any acknowledgement.
+ */
+function isLiveOwner(
   interaction: ButtonInteraction | StringSelectMenuInteraction,
   parsed: ParsedId,
-): Promise<VoiceChannel | null> {
-  // The customId's ownerId is only a hint; require live ownership too (#1143)
-  if (
-    interaction.user.id !== parsed.ownerId ||
-    !VoiceChannelManager.getInstance(interaction.client).isRoomOwner(
+): boolean {
+  return (
+    interaction.user.id === parsed.ownerId &&
+    VoiceChannelManager.getInstance(interaction.client).isRoomOwner(
       interaction.user.id,
       parsed.channelId,
     )
-  ) {
-    await replyWithError(interaction, VC_NOT_OWNER);
-    return null;
-  }
+  );
+}
+
+/**
+ * Fetch the room's voice channel. Returns null when it is gone, after telling
+ * the member (a direct reply before an acknowledgement, a panel replacement
+ * after one: `replyWithError` picks by state).
+ */
+async function fetchVoiceChannel(
+  interaction: ButtonInteraction | StringSelectMenuInteraction,
+  parsed: ParsedId,
+): Promise<VoiceChannel | null> {
   const channel = await interaction.guild?.channels.fetch(parsed.channelId);
   if (!channel || channel.type !== ChannelType.GuildVoice) {
     await replyWithError(interaction, VC_CHANNEL_GONE);
@@ -291,41 +300,126 @@ async function ensureOwnership(
   return channel as VoiceChannel;
 }
 
+/**
+ * Run the steps of a panel action that come after its write (the panel
+ * refresh, the confirmation). A failure is logged and answered with an
+ * ephemeral follow-up that says the work was done, never "try again" and never
+ * an edit of the panel (`afterWrite` would replace it). Never throws.
+ */
+async function afterPanelWrite(
+  interaction: ButtonInteraction,
+  info: WriteDone,
+  step: () => Promise<void>,
+): Promise<void> {
+  try {
+    await step();
+  } catch (error) {
+    logger.error(
+      `A step after "${info.done}" failed for interaction ${interaction.id}:`,
+      error,
+    );
+    await replyAfterWriteError(interaction, info, {
+      whenDeferred: "followUp",
+    });
+  }
+}
+
+/** Show a panel by editing the acknowledged message (or `update` when not yet acknowledged). */
+async function showPanel(
+  interaction: ButtonInteraction | StringSelectMenuInteraction,
+  panel: {
+    embed: EmbedBuilder;
+    components: ActionRowBuilder<ButtonBuilder | StringSelectMenuBuilder>[];
+  },
+): Promise<void> {
+  const payload = { embeds: [panel.embed], components: panel.components };
+  if (interaction.deferred || interaction.replied) {
+    await interaction.editReply(payload);
+  } else {
+    await interaction.update(payload);
+  }
+}
+
+const PRESETS_CHANGED = {
+  title: "Your presets changed",
+  next: "Reopen the presets panel and try again.",
+};
+const NO_PRESET_SELECTED = {
+  title: "No preset selected",
+  next: "Pick a preset in the panel first.",
+};
+
+const PANEL_ACTIONS = new Set(["open", "manage", "back", "default", "delete"]);
+const MODAL_ACTIONS = new Set(["save", "rename"]);
+
 export async function handleVCPresetButton(
   interaction: ButtonInteraction,
 ): Promise<void> {
-  if (!(await presetsEnabled())) {
-    await replyWithError(interaction, VC_PRESETS_OFF);
-    return;
-  }
-
+  // Parse and authorise without I/O, so the acknowledgement below is the first
+  // await. Discord drops an interaction left unanswered for 3 seconds (10062).
   const parsed = parseCustomId(interaction.customId);
   if (!parsed) {
     await replyWithError(interaction, VC_OUT_OF_DATE);
     return;
   }
 
-  const channel = await ensureOwnership(interaction, parsed);
-  if (!channel) return;
+  if (!isLiveOwner(interaction, parsed)) {
+    await replyWithError(interaction, VC_NOT_OWNER);
+    return;
+  }
+
+  const isModal = MODAL_ACTIONS.has(parsed.action);
+  if (!PANEL_ACTIONS.has(parsed.action) && !isModal) {
+    await replyWithError(interaction, VC_OUT_OF_DATE);
+    return;
+  }
+
+  // A modal must be the first response, so those two actions cannot defer and
+  // await nothing slow before it: no config read, no channel fetch, no database
+  // (the enabled gate, channel check, limit and staleness checks run on submit
+  // in vc-modal-handler, which already defers and re-checks).
+  if (isModal) {
+    try {
+      if (parsed.action === "save") {
+        await openSaveModal(interaction, parsed);
+      } else {
+        await openRenameModal(interaction, parsed);
+      }
+    } catch (error) {
+      logger.error("Error handling VC preset button:", error);
+      await replyWithUnexpectedError(interaction);
+    }
+    return;
+  }
+
+  // Panel actions acknowledge first: "open" posts a new ephemeral panel, the
+  // rest edit the one that was clicked.
+  if (parsed.action === "open") {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  } else {
+    await interaction.deferUpdate();
+  }
 
   try {
+    if (!(await presetsEnabled())) {
+      await replyWithError(interaction, VC_PRESETS_OFF);
+      return;
+    }
+
+    const channel = await fetchVoiceChannel(interaction, parsed);
+    if (!channel) return;
+
     switch (parsed.action) {
       case "open":
         return await openPanel(interaction, parsed);
-      case "save":
-        return await openSaveModal(interaction, parsed, channel);
       case "manage":
         return await switchToManage(interaction, parsed, null);
       case "back":
         return await switchToApply(interaction, parsed);
       case "default":
         return await toggleDefault(interaction, parsed);
-      case "rename":
-        return await openRenameModal(interaction, parsed);
       case "delete":
         return await deletePreset(interaction, parsed);
-      default:
-        await replyWithError(interaction, VC_OUT_OF_DATE);
     }
   } catch (error) {
     logger.error("Error handling VC preset button:", error);
@@ -347,7 +441,11 @@ export async function handleVCPresetSelect(
     return;
   }
 
-  const channel = await ensureOwnership(interaction, parsed);
+  if (!isLiveOwner(interaction, parsed)) {
+    await replyWithError(interaction, VC_NOT_OWNER);
+    return;
+  }
+  const channel = await fetchVoiceChannel(interaction, parsed);
   if (!channel) return;
 
   try {
@@ -381,11 +479,8 @@ async function openPanel(
     parsed.channelId,
     parsed.ownerId,
   );
-  await interaction.reply({
-    embeds: [embed],
-    components,
-    flags: MessageFlags.Ephemeral,
-  });
+  // Already acknowledged with deferReply (ephemeral) by the button handler
+  await interaction.editReply({ embeds: [embed], components });
 }
 
 async function switchToApply(
@@ -393,12 +488,10 @@ async function switchToApply(
   parsed: ParsedId,
 ): Promise<void> {
   const prefs = await loadPrefs(parsed.ownerId);
-  const { embed, components } = buildApplyPanel(
-    prefs.presets,
-    parsed.channelId,
-    parsed.ownerId,
+  await showPanel(
+    interaction,
+    buildApplyPanel(prefs.presets, parsed.channelId, parsed.ownerId),
   );
-  await interaction.update({ embeds: [embed], components });
 }
 
 async function switchToManage(
@@ -414,30 +507,25 @@ async function switchToManage(
     });
     return;
   }
-  const { embed, components } = buildManagePanel(
-    prefs.presets,
-    parsed.channelId,
-    parsed.ownerId,
-    selectedIndex,
+  await showPanel(
+    interaction,
+    buildManagePanel(
+      prefs.presets,
+      parsed.channelId,
+      parsed.ownerId,
+      selectedIndex,
+    ),
   );
-  await interaction.update({ embeds: [embed], components });
 }
 
 async function openSaveModal(
   interaction: ButtonInteraction,
   parsed: ParsedId,
-  channel: VoiceChannel,
 ): Promise<void> {
-  const prefs = await loadPrefs(parsed.ownerId);
-  const max = await maxPerUser();
-  if (prefs.presets.length >= max) {
-    await replyWithError(interaction, {
-      title: "You have reached the preset limit",
-      next: `You already have ${max} presets, the most this server allows. Delete one first.`,
-    });
-    return;
-  }
-
+  // Nothing slow here: a modal has to be the first response. The enabled gate,
+  // channel check and preset limit run on submit (vc-modal-handler). The name
+  // prefill uses only the cached channel and is skipped on a cache miss.
+  const cached = interaction.guild?.channels.cache?.get(parsed.channelId);
   const modal = new ModalBuilder()
     .setCustomId(`vc_modal_savepreset_${parsed.channelId}_${parsed.ownerId}`)
     .setTitle("Save preset");
@@ -447,8 +535,10 @@ async function openSaveModal(
     .setStyle(TextInputStyle.Short)
     .setPlaceholder("e.g. Squad night")
     .setRequired(true)
-    .setMaxLength(50)
-    .setValue(channel.name.slice(0, 50));
+    .setMaxLength(50);
+  if (cached?.type === ChannelType.GuildVoice) {
+    nameInput.setValue(cached.name.slice(0, 50));
+  }
 
   modal.addComponents(
     new ActionRowBuilder<TextInputBuilder>().addComponents(nameInput),
@@ -474,10 +564,7 @@ async function resolveTargetPreset(
     !preset ||
     (parsed.nameTag !== null && presetNameTag(preset.name) !== parsed.nameTag)
   ) {
-    await replyWithError(interaction, {
-      title: "Your presets changed",
-      next: "Reopen the presets panel and try again.",
-    });
+    await replyWithError(interaction, PRESETS_CHANGED);
     return null;
   }
   return preset;
@@ -487,19 +574,21 @@ async function openRenameModal(
   interaction: ButtonInteraction,
   parsed: ParsedId,
 ): Promise<void> {
-  if (parsed.presetIndex === null) {
-    await replyWithError(interaction, {
-      title: "No preset selected",
-      next: "Pick a preset in the panel first.",
-    });
+  // No database read: the manage panel put the preset's name tag on this
+  // button's custom id, and the submit (vc-modal-handler) verifies it against
+  // the preset at the index. Buttons from before tags existed carry none, so
+  // they cannot be checked at submit and are refused.
+  if (parsed.presetIndex === null || parsed.nameTag === null) {
+    await replyWithError(
+      interaction,
+      parsed.presetIndex === null ? NO_PRESET_SELECTED : PRESETS_CHANGED,
+    );
     return;
   }
-  const preset = await resolveTargetPreset(interaction, parsed);
-  if (!preset) return;
 
   const modal = new ModalBuilder()
     .setCustomId(
-      `vc_modal_renamepreset_${parsed.presetIndex}_${presetNameTag(preset.name)}_${parsed.channelId}_${parsed.ownerId}`,
+      `vc_modal_renamepreset_${parsed.presetIndex}_${parsed.nameTag}_${parsed.channelId}_${parsed.ownerId}`,
     )
     .setTitle("Rename preset");
   const nameInput = new TextInputBuilder()
@@ -507,8 +596,7 @@ async function openRenameModal(
     .setLabel("New preset name")
     .setStyle(TextInputStyle.Short)
     .setRequired(true)
-    .setMaxLength(50)
-    .setValue(preset.name);
+    .setMaxLength(50);
 
   modal.addComponents(
     new ActionRowBuilder<TextInputBuilder>().addComponents(nameInput),
@@ -520,7 +608,10 @@ async function toggleDefault(
   interaction: ButtonInteraction,
   parsed: ParsedId,
 ): Promise<void> {
-  if (parsed.presetIndex === null) return;
+  if (parsed.presetIndex === null) {
+    await replyWithError(interaction, NO_PRESET_SELECTED);
+    return;
+  }
   const target = await resolveTargetPreset(interaction, parsed);
   if (!target) return;
   let result: { name: string; isDefault: boolean };
@@ -537,6 +628,8 @@ async function toggleDefault(
     // reply here; unexpected errors (DB/Discord) propagate to the outer
     // handler so they're logged and surfaced generically.
     if (error instanceof VoicePrefsValidationError) {
+      // Only VoicePrefsValidationError reaches here: its messages are
+      // written for members. Any other error is rethrown to the catch-all.
       await replyWithError(interaction, {
         title: "Couldn't change the default preset",
         next: escapeDisplayText(error.message),
@@ -549,7 +642,7 @@ async function toggleDefault(
   // The default is stored. A failing panel refresh or confirmation must not
   // fall into the catch-all's "try again": pressing again would flip it back.
   const presetIndex = parsed.presetIndex;
-  await afterWrite(
+  await afterPanelWrite(
     interaction,
     {
       done: "Your default preset was changed",
@@ -571,7 +664,10 @@ async function deletePreset(
   interaction: ButtonInteraction,
   parsed: ParsedId,
 ): Promise<void> {
-  if (parsed.presetIndex === null) return;
+  if (parsed.presetIndex === null) {
+    await replyWithError(interaction, NO_PRESET_SELECTED);
+    return;
+  }
   const target = await resolveTargetPreset(interaction, parsed);
   if (!target) return;
   let removed: { name: string; remaining: number };
@@ -585,6 +681,8 @@ async function deletePreset(
     // As in toggleDefault: translate only the known validation/missing case;
     // rethrow unexpected errors for the outer handler to log and report.
     if (error instanceof VoicePrefsValidationError) {
+      // Only VoicePrefsValidationError reaches here: its messages are
+      // written for members. Any other error is rethrown to the catch-all.
       await replyWithError(interaction, {
         title: "Couldn't delete the preset",
         next: escapeDisplayText(error.message),
@@ -596,12 +694,9 @@ async function deletePreset(
 
   // The preset is deleted. A failing panel refresh or confirmation must not
   // fall into the catch-all's "try again".
-  await afterWrite(
+  await afterPanelWrite(
     interaction,
-    {
-      done: "Your preset was deleted",
-      check: "the presets panel",
-    },
+    { done: "Your preset was deleted", check: "the presets panel" },
     async () => {
       if (removed.remaining === 0) {
         await switchToApply(interaction, parsed);

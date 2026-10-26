@@ -315,6 +315,11 @@ async function handleEdit(
     return;
   }
 
+  // Acknowledge before the database read and the Discord round-trips that
+  // follow: Discord invalidates an interaction left unanswered for 3 seconds
+  // and the resulting 10062 cannot be recovered (#842).
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
   // Get existing quote to verify permissions
   const existingQuote = await quoteService.getQuoteById(quoteId);
   if (!existingQuote) {
@@ -371,9 +376,8 @@ async function handleEdit(
   // Only update quote in database after the message was successfully updated
   await quoteService.editQuote(quoteId, finalContent, finalAuthorId);
 
-  await interaction.reply({
+  await interaction.editReply({
     content: "✅ Quote updated successfully!",
-    flags: MessageFlags.Ephemeral,
   });
 }
 
