@@ -401,8 +401,8 @@ export interface AdminPageOptions {
 
 const STYLE = [
   // kb.css is linked ahead of this sheet but the legacy pages keep their own look until each
-  // moves to the kb- classes (#1314): undo its base line-height and colour-scheme here.
-  ":root{color-scheme:normal}",
+  // moves to the kb- classes (#1314): undo its base line-height here. Never reset `color-scheme`:
+  // the UI is dark only, so native control parts (pickers, file button, selection) stay dark (#1507).
   "*,*::before,*::after{box-sizing:border-box}",
   // Core palette comes from tokens.css, shared with the member and pre-auth pages (issue #569).
   `body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text);line-height:normal}`,
@@ -482,7 +482,7 @@ const STYLE = [
   "form.stack label.checkbox{flex-direction:row;align-items:center;gap:.5rem}",
   // Control borders use --control (3.97:1) — the hairline --border was
   // 1.58:1 against the field, far below the 3:1 floor (WCAG 1.4.11, #855).
-  `form.stack input[type=text],form.stack input[type=number],form.stack input[type=url],form.stack textarea,form.stack select{background:var(--bg);color:var(--text);border:1px solid var(--control);border-radius:6px;padding:.4rem .55rem;font:inherit;font-size:.9rem}`,
+  `form.stack input[type=text],form.stack input[type=number],form.stack input[type=url],form.stack input[type=date],form.stack input[type=time],form.stack textarea,form.stack select{background:var(--bg);color:var(--text);border:1px solid var(--control);border-radius:6px;padding:.4rem .55rem;font:inherit;font-size:.9rem}`,
   "form.stack textarea{resize:vertical;min-height:5rem;font-family:ui-monospace,SFMono-Regular,SF Mono,Menlo,monospace}",
   "form.stack fieldset{border:1px solid var(--border);border-radius:6px;padding:.5rem .75rem;display:flex;flex-direction:column;gap:.4rem}",
   "form.stack fieldset legend{color:var(--muted);padding:0 .35rem}",

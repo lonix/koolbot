@@ -3194,6 +3194,9 @@ export function renderGroupsSection(
   // A missing bot permission next to the field it breaks (#1478), already
   // rendered by `splitEventFormNotice`; absent or "" leaves the markup as it was.
   permissionInline: Partial<EventFormInline> = {},
+  // True inside a panel whose head already says "Groups" (the member form, #1507): the legend
+  // stays for assistive tech but is not drawn a second time.
+  hideLegend = false,
 ): string {
   const inline = (html: string | undefined): string =>
     html ? `\n      ${html}` : "";
@@ -3233,7 +3236,7 @@ export function renderGroupsSection(
     )
     .join("");
   return `<fieldset data-groups-section>
-      <legend>Groups</legend>${rememberedNote ? `\n      ${rememberedNote}` : ""}
+      <legend${hideLegend ? ' class="kb-visually-hidden"' : ""}>Groups</legend>${rememberedNote ? `\n      ${rememberedNote}` : ""}
       <div class="kb-groupopt">
         <label class="kb-switch"><input type="checkbox" role="switch" name="${GROUP_FORM_FIELDS.enabled}" value="1"${prefill ? " checked" : ""} aria-describedby="groups-enabled-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Split into groups (teams, squads, rooms…)</label>
         <p class="kb-help" id="groups-enabled-help">Each group gets its own voice channel next to the event's channel, made at the channel creation time and removed when the event is over. Leave it off for a plain event.</p>
