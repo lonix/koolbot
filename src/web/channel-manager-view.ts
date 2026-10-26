@@ -2,6 +2,7 @@ import { renderAdminPage, type NavFeatureStatus } from "./admin-layout.js";
 import { renderFlash, type FlashMessage } from "./admin-views.js";
 import { escapeHtml } from "./html.js";
 import { formView, type FormView, type RefusedForm } from "./form-errors.js";
+import { confirmLinkAttr, confirmLinkPageAttr } from "./confirm-fetch.js";
 import { channelText, namedChannelMention } from "./discord-labels.js";
 import { ChannelType } from "discord.js";
 import type { RecentChange } from "./channel-manager-data.js";
@@ -199,7 +200,7 @@ function actions(
       ${fieldRows(c, p, tree, off, f)}
       <button type="submit" class="btn btn-primary"${off}>Save changes</button>
     </form></details>`;
-  const del = `<a class="btn btn-sm btn-danger" href="${CHANNELS_PATH}/${id}/delete" aria-label="Delete ${name}">Delete…</a>`;
+  const del = `<a class="btn btn-sm btn-danger" href="${CHANNELS_PATH}/${id}/delete"${confirmLinkAttr("channel-delete")} aria-label="Delete ${name}">Delete…</a>`;
   return `<div class="actions">${move("up", "Up")} ${move("down", "Down")} ${del}</div>${edit}`;
 }
 
@@ -360,17 +361,38 @@ export interface ChannelDeleteConfirmProps {
   botCanManage: boolean;
 }
 
+/**
+ * Whether the confirmation page offers the delete form (the channel exists,
+ * the verdict says yes and the bot may manage channels). The route sends
+ * `CONFIRM_PAGE_HEADER` only then, so the dialog upgrade (`confirm-fetch.ts`)
+ * never reads a refusal as a question.
+ */
+export function channelDeleteConfirmable(
+  p: Pick<ChannelDeleteConfirmProps, "channel" | "verdict" | "botCanManage">,
+): boolean {
+  return p.channel !== null && p.verdict.ok && p.botCanManage;
+}
+
+/**
+ * The refusal of a delete (not found, not allowed, no permission) carries its
+ * dialog title, so the link upgrade (`confirm-fetch.ts`) can say the reason in
+ * a dialog with no confirm button instead of leaving the page (#1536).
+ */
+function refusal(title: string): string {
+  return ` data-confirm-refusal data-confirm-title="${escapeHtml(title)}"`;
+}
+
 export function renderChannelDeleteConfirmPage(
   p: ChannelDeleteConfirmProps,
 ): string {
   const back = `<a class="btn" href="${CHANNELS_PATH}">Back to the Channel Manager</a>`;
   let inner: string;
   if (!p.channel) {
-    inner = `<div class="notice warn" role="status">That channel no longer exists.</div><div class="actions">${back}</div>`;
+    inner = `<div class="notice warn" role="status"${refusal("Can't delete this channel")}>That channel no longer exists.</div><div class="actions">${back}</div>`;
   } else if (!p.verdict.ok) {
-    inner = `<div class="notice err" role="alert">${escapeHtml(p.verdict.message)}</div><div class="actions">${back}</div>`;
+    inner = `<div class="notice err" role="alert"${refusal(`Can't delete ${p.channel.name}`)}>${escapeHtml(p.verdict.message)}</div><div class="actions">${back}</div>`;
   } else if (!p.botCanManage) {
-    inner = `<div class="notice warn" role="status">KoolBot doesn't have the Manage Channels permission, so it can't delete anything. Grant it in Discord first.</div><div class="actions">${back}</div>`;
+    inner = `<div class="notice warn" role="status"${refusal(`Can't delete ${p.channel.name}`)}>KoolBot doesn't have the Manage Channels permission, so it can't delete anything. Grant it in Discord first.</div><div class="actions">${back}</div>`;
   } else {
     const c = p.channel;
     const what =
@@ -379,10 +401,13 @@ export function renderChannelDeleteConfirmPage(
         : c.kind === "voice"
           ? "this voice channel"
           : "this text channel";
-    inner = `<div class="card">
+    // The items are what the dialog lists (`confirm-fetch.ts`, #1536); on this
+    // page they are the consequences in a list.
+    inner = `<div class="card"${confirmLinkPageAttr("channel-delete")}>
   <h2>Delete ${labelHtml(c)}?</h2>
-  <p>You are about to permanently delete ${what}, ${labelHtml(c)}. ${c.kind === "text" ? "Its messages are deleted with it. " : ""}This can't be undone.</p>
-  <form method="POST" action="${CHANNELS_PATH}/${escapeHtml(c.id)}/delete">
+  <p>You are about to permanently delete ${what}, ${labelHtml(c)}.</p>
+  <ul>${c.kind === "text" ? `<li data-confirm-item>Its messages are deleted with it.</li>` : ""}<li data-confirm-item>This can't be undone.</li></ul>
+  <form method="POST" action="${CHANNELS_PATH}/${escapeHtml(c.id)}/delete" data-confirm-form data-confirm-title="${escapeHtml(`Delete ${c.name}?`)}">
     ${csrfInput(p.csrfToken)}
     <input type="hidden" name="confirm" value="${escapeHtml(p.confirmToken)}">
     <div class="actions">

@@ -4,6 +4,7 @@ import {
   type NavFeatureStatus,
 } from "./admin-layout.js";
 import { scriptTag } from "./html.js";
+import { confirmLinkAttr, confirmLinkPageAttr } from "./confirm-fetch.js";
 import { renderFlash, type FlashMessage } from "./admin-views.js";
 import {
   canRollback,
@@ -71,7 +72,7 @@ function row(s: SnapshotSummary): string {
       : "",
   ].filter(Boolean);
   const action = canRollback(s.status)
-    ? `<a class="btn" href="${HISTORY_PATH}/${escapeHtml(s.id)}/restore">Restore…</a>`
+    ? `<a class="btn" href="${HISTORY_PATH}/${escapeHtml(s.id)}/restore"${confirmLinkAttr("snapshot-restore")}>Restore…</a>`
     : `<span class="muted">${s.status === "rolled_back" ? "Already restored" : "In progress"}</span>`;
   return `<tr>
   <td>${when(s.createdAt)}</td>
@@ -141,7 +142,7 @@ export function renderRestoreConfirmPage(props: RestoreConfirmProps): string {
   const items = s.operations
     .map(
       (o) =>
-        `<li>${escapeHtml(o.summary)}${o.destructive ? ' <span class="tag tag-off">destructive</span>' : ""}</li>`,
+        `<li data-confirm-item="${escapeHtml(o.summary + (o.destructive ? " (destructive)" : ""))}">${escapeHtml(o.summary)}${o.destructive ? ' <span class="tag tag-off">destructive</span>' : ""}</li>`,
     )
     .join("");
   // Only roles this restore can still reach: a role.create already rolled back
@@ -153,10 +154,10 @@ export function renderRestoreConfirmPage(props: RestoreConfirmProps): string {
     ? `<label><input type="checkbox" name="deleteCreatedRoles" value="1"> Also delete the ${reachableRoles} role(s) this plan created${s.uncertainCreatedRoles ? ` (${s.uncertainCreatedRoles} of them only if the restore finds the role on the server)` : ""}. Unticked, they are left in place (members who hold them keep them).</label>`
     : "";
   const note = s.destructive
-    ? `<div class="notice warn" role="status">${escapeHtml(props.destructiveNote)}</div>`
+    ? `<div class="notice warn" role="status" data-confirm-item>${escapeHtml(props.destructiveNote)}</div>`
     : "";
   const form = canRollback(s.status)
-    ? `<form method="POST" action="${HISTORY_PATH}/${escapeHtml(s.id)}/restore">
+    ? `<form method="POST" action="${HISTORY_PATH}/${escapeHtml(s.id)}/restore" data-confirm-form data-confirm-title="Restore this snapshot?">
   <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
   ${roles}
   <div class="actions">
@@ -165,17 +166,20 @@ export function renderRestoreConfirmPage(props: RestoreConfirmProps): string {
   </div>
 </form>`
     : `<div class="notice info">This snapshot can't be restored (${escapeHtml(STATUS_LABEL[s.status]?.text ?? s.status)}).</div><div class="actions"><a href="${HISTORY_PATH}" class="btn">Back</a></div>`;
+  // The marked section is what the dialog upgrade reads (`confirm-fetch.ts`,
+  // #1536): the consequences in `data-confirm-item`, the checkbox, the verb.
+  // A snapshot that cannot be restored has no form, so it is never read.
   const body = `
-<h1>Restore snapshot</h1>
+${canRollback(s.status) ? `<div${confirmLinkPageAttr("snapshot-restore")}>\n` : ""}<h1>Restore snapshot</h1>
 <p class="subtitle">Applied ${when(s.createdAt)} by <span class="mono">${escapeHtml(s.appliedBy)}</span>. Only steps that were applied are reverted, newest first.</p>
 ${note}
 <div class="card">
   <h2>What will be reverted</h2>
   ${items ? `<ul>${items}</ul>` : `<p class="muted">Nothing recorded as applied is left to revert in this snapshot.</p>`}
-  ${s.dependentRepairs ? `<p class="notice warn" role="status">${s.dependentRepairs} follow-up repair(s) from an earlier restore are still pending (permissions on recreated roles, channels placed back under recreated categories). Restoring again retries them.</p>` : ""}
-  ${s.interrupted ? `<p class="notice warn" role="status">${s.interrupted} more step(s) were interrupted (started but not recorded as finished, or in flight). The restore checks Discord first and also reverts any that did go through.</p>` : ""}
+  ${s.dependentRepairs ? `<p class="notice warn" role="status" data-confirm-item>${s.dependentRepairs} follow-up repair(s) from an earlier restore are still pending (permissions on recreated roles, channels placed back under recreated categories). Restoring again retries them.</p>` : ""}
+  ${s.interrupted ? `<p class="notice warn" role="status" data-confirm-item>${s.interrupted} more step(s) were interrupted (started but not recorded as finished, or in flight). The restore checks Discord first and also reverts any that did go through.</p>` : ""}
   ${form}
-</div>
+</div>${canRollback(s.status) ? "\n</div>" : ""}
 `;
   return renderAdminPage({
     title: "Restore snapshot",

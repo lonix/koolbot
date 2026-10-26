@@ -1383,7 +1383,7 @@ in lockstep and can't drift apart.
 
 The wizard runs **Features, Access, Channels, Review** (#1321), with a step indicator on every page. The **Access**
 step comes right after you pick features and maps Discord roles to who can do what: one card each for Admins
-(`/config`), Moderators and Event hosts (`/me`), with what they can and cannot do and a multi-select of roles, and a
+(`/config`), Moderators and Event hosts (`/me`), with what they can and cannot do and a searchable role picker (the same one as All settings, #1547), and a
 Members card that points to Command permissions to narrow `/me`. Re-running the wizard shows the current mapping.
 It writes the same role groups as the Role groups page, with the `admin`, `staff` (shown as Moderator) and `host`
 capabilities, and only links existing roles: it does not change a role in Discord. The one role it can create is the
@@ -3436,7 +3436,12 @@ as the other admin pages. It edits structure only; permission overwrites stay in
   elsewhere (another admin, Discord) since you opened the page, the save is refused instead of overwriting it.
 - **Reorder** with Up and Down. Text and voice channels order separately inside a category, as in Discord. Each
   button is drawn for the neighbour it swaps with; if the order changed since the page was opened, the move is refused.
-- **Delete** always goes through a confirmation page. The page and the delete itself both re-check, so a stale
+- **Delete** always asks first. With JavaScript, **Delete…** opens a dialog titled "Delete <channel>?" that lists what goes
+  with it (a text channel's messages, and that it can't be undone) and whose **Delete permanently** button posts the delete.
+  The dialog is built from the confirmation page, which the link fetches when you click, so the verdict and the
+  confirmation token are as fresh as that page; a channel KoolBot manages, or one the bot may not delete, gets a dialog that
+  gives the reason and has no delete button. Without JavaScript the link opens the confirmation page. The page and the delete
+  itself both re-check, so a stale
   tab or a hand-made request cannot skip it. KoolBot **refuses** to delete a channel it manages and names why:
   a channel set in any `*.channel_id` or `*.category_id` setting (quotes, notices, log channels, the voice
   category and lobby, ticket and event categories, ...), the voice lobby and offline lobby (also found by name, with the same quote and
@@ -3554,11 +3559,14 @@ categories and channels. Every row defaults to **Leave alone**; nothing is touch
   `reactionroles.message_channel_id` after the preview makes it a different plan (preview again).
   Each mapping carries the step that made it, so a plan only ever removes its own picker: a mapping another plan or the
   Reaction Roles page made is reused, not owned. A rollback also recovers a registration saved before a crash that was never recorded
-  (looked up by the step's key, never posted again). The picker's footer carries that key, so a picker posted before its
-  mapping was saved is found again: a retry completes it instead of posting a second one, and a rollback deletes it.
-  The search reads the channel back to when the snapshot was created (and says so, changing nothing, if it can't finish).
-  Deletions run under the guild lock until they finish, and a retry also removes this step's own unsaved picker when it
-  finds another plan's mapping for the same pair.
+  (looked up by the step's key, never posted again). The picker shows no key to members.
+  If a crash leaves a picker posted but not yet saved as a mapping, that picker does nothing (reactions on it grant no
+  role), and a retry posts a new one. Delete the left-over message by hand; a rollback only removes pickers it can prove
+  are its own. Pickers posted by an earlier version still carry the key in their footer; those are still recognised, so
+  a retry completes them and a rollback deletes them, and the footer is left as it is until the picker is removed.
+  Looking for an old-footer picker reads the channel back to when the snapshot was created (and says so, changing nothing,
+  if it can't finish). Deletions run under the guild lock until they finish, and a retry also removes this step's own
+  unsaved old-footer picker when it finds another plan's mapping for the same pair.
   A rollback deletes only the picker this plan posted, from the channel it was posted to, never the role or the category; if Discord fails while deleting it,
   the rollback step fails and stays open for a retry (only "unknown channel" or "unknown message" count as already gone). If another mapping was added to
   the picker since (on the Reaction Roles page), the picker is kept and only this mapping and its reaction are removed.
@@ -3625,14 +3633,14 @@ opens the snapshot history.
    read-only, gate it to groups, or bind it to a feature. **Preview changes** shows the diff; **Apply plan** runs it.
 5. **Check the result.** Planning again gives an empty plan when the server already matches.
 6. **Adoption history** (`/admin/adopt/history`). Every apply is listed with its status and what it changed. **Restore…**
-   opens a confirmation page that lists the steps that will be reverted, newest first. Only steps that were applied are
-   reverted, from the state saved before the apply. Roles the plan created are kept unless you tick **Also delete the roles
-   this plan created**. For a plan that deleted something, the page repeats that messages, pins, threads, webhooks and
-   IDs cannot be restored. Restore runs in the background and the page shows its progress; a snapshot that stopped part-way
-   can be restored again to finish. Each accepted restore writes a started entry (`adopt.rollback.start`) to the audit log
-   before it runs, and its outcome (`adopt.rollback`) when it ends; if KoolBot restarts in between, only the started entry
-   exists. A refused restore is written as a failed `adopt.rollback`. Snapshots are kept for
-   `adoption.snapshot.retention_days` (default 90, `0` keeps them forever).
+   opens a dialog (a confirmation page without JavaScript) that lists the steps that will be reverted, newest first. Only
+   steps that were applied are reverted, from the state saved before the apply. Roles the plan created are kept unless you
+   tick **Also delete the roles this plan created**, which is a checkbox in the dialog. For a plan that deleted something, the
+   dialog repeats that messages, pins, threads, webhooks and IDs cannot be restored. Restore runs in the background and the
+   page shows its progress; a snapshot that stopped part-way can be restored again to finish. Each accepted restore writes a
+   started entry (`adopt.rollback.start`) to the audit log before it runs, and its outcome (`adopt.rollback`) when it
+   ends; if KoolBot restarts in between, only the started entry exists. A refused restore is written as a failed
+   `adopt.rollback`. Snapshots are kept for `adoption.snapshot.retention_days` (default 90, `0` keeps them forever).
 
    **Restore checks the live server first** (#1134). A snapshot can be months old, so before anything is written Restore
    scans the server as it is now and works out what it would look like after the remaining steps are undone, using the same
