@@ -10,7 +10,7 @@ import { escapeHtml } from "./html.js";
 function pageShell(
   title: string,
   body: string,
-  product: "Koolbot Admin" | "Koolbot" = "Koolbot Admin",
+  product: "KoolBot Admin" | "KoolBot" = "KoolBot Admin",
 ): string {
   return [
     "<!doctype html>",
@@ -18,7 +18,7 @@ function pageShell(
     '<meta charset="utf-8">',
     `<title>${escapeHtml(title)} — ${product}</title>`,
     '<meta name="viewport" content="width=device-width,initial-scale=1">',
-    designStylesheetLinks(product === "Koolbot" ? "/me" : "/admin"),
+    designStylesheetLinks(product === "KoolBot" ? "/me" : "/admin"),
     "<style>",
     // kb.css is linked above; this shell never set border-box, line-height or a colour-scheme,
     // so keep it that way until it moves to the kb- classes (#1314).
@@ -64,12 +64,12 @@ export function renderErrorPage(opts: {
   heading: string;
   bodyHtml: string;
   /** Which surface the page belongs to — drives the `<title>` suffix. */
-  product?: "Koolbot Admin" | "Koolbot";
+  product?: "KoolBot Admin" | "KoolBot";
 }): string {
   return pageShell(
     opts.title,
     `<h1>${escapeHtml(opts.heading)}</h1>${opts.bodyHtml}`,
-    opts.product ?? "Koolbot Admin",
+    opts.product ?? "KoolBot Admin",
   );
 }
 
@@ -103,7 +103,7 @@ export function renderConsent(opts: {
 }): string {
   const action = `/admin/s/${encodeURIComponent(opts.token)}`;
   const body = [
-    "<h1>Sign in to Koolbot Admin</h1>",
+    "<h1>Sign in to KoolBot Admin</h1>",
     "<p>Click <strong>Continue</strong> to start your admin session in this browser. Your single-use sign-in link will be consumed when you do.</p>",
     `<form method="POST" action="${escapeHtml(action)}">`,
     // Double-submit CSRF token: mirrors the koolbot_csrf cookie so the POST

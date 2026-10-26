@@ -34,15 +34,18 @@ describe("renderUserPage accessibility (#855)", () => {
     expect(html).toContain(
       "a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}",
     );
-    expect(html).toContain(
-      ".page-nav a:focus-visible{background:var(--chrome)",
-    );
+    expect(html).not.toContain("page-nav");
     expect(html).toMatch(
       /<body><a class="skip-link" href="#main">Skip to content<\/a>/,
     );
     expect(html).toContain('<main id="main" tabindex="-1">');
+    // Tabs component (components.md): nav.kb-tabs, still told apart from the
+    // Rewind year picker by its label.
     expect(html).toContain(
-      '<a href="/me/timezone" class="active" aria-current="page">Timezone</a>',
+      '<nav class="kb-tabs" aria-label="My preferences sections">',
+    );
+    expect(html).toContain(
+      '<a href="/me/timezone" aria-current="page">Timezone</a>',
     );
     expect(html.match(/aria-current="page"/g)).toHaveLength(1);
   });
@@ -115,25 +118,60 @@ describe("renderUserVoiceBody (#855)", () => {
   });
 });
 
-describe("renderUserNotificationsBody (#855)", () => {
-  it("gives the preferences table a caption and scoped column headers", () => {
-    const html = renderUserNotificationsBody({
-      csrfToken: "csrf",
-      rows: [
-        {
-          key: "digest",
-          label: "Weekly digest",
-          description: "A weekly DM.",
-          enabled: true,
-        },
-      ],
-    });
+describe("renderUserNotificationsBody (#1508)", () => {
+  const html = renderUserNotificationsBody({
+    csrfToken: "csrf",
+    rows: [
+      {
+        key: "digest",
+        label: "Weekly digest",
+        description: "A weekly DM.",
+        enabled: true,
+      },
+      {
+        key: "achievements",
+        label: "Achievement DMs",
+        description: "A DM per badge.",
+        enabled: false,
+      },
+    ],
+  });
+
+  it("lists each message as a SettingRow with a named switch, not a table", () => {
+    expect(html).toContain('<div class="kb-settings">');
+    expect(html.match(/<div class="kb-setting">/g)).toHaveLength(2);
+    expect(html).not.toContain("<table");
+    expect(html).not.toContain("Current state");
+    expect(html).not.toContain("Enabled");
     expect(html).toContain(
-      '<caption class="visually-hidden">Direct-message notification channels and whether each is on</caption>',
+      '<p class="kb-setting__name" id="notify-digest-name">Weekly digest</p>',
     );
-    expect(html).toContain('<th scope="col">Notification</th>');
-    expect(html).toContain('<th scope="col">Current state</th>');
-    expect(html).not.toContain("<th>");
+    expect(html).toContain('aria-labelledby="notify-digest-name"');
+    expect(html).toContain('aria-describedby="notify-digest-desc"');
+  });
+
+  it("posts value=true when on, so the submitted_<key> handling is unchanged", () => {
+    expect(html).toContain(
+      '<input type="checkbox" role="switch" name="digest" value="true" checked',
+    );
+    expect(html).toMatch(
+      /<input type="checkbox" role="switch" name="achievements" value="true" aria-labelledby/,
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="submitted_digest" value="1">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="submitted_achievements" value="1">',
+    );
+  });
+
+  it("says what happens, without 'Untoggling'", () => {
+    expect(html).toContain(
+      "Switch a message off and save, and the bot stops sending it.",
+    );
+    expect(html).not.toMatch(/untoggl/i);
+    expect(html).toContain("KoolBot may send you");
+    expect(html).not.toContain("Koolbot");
   });
 });
 
@@ -149,7 +187,7 @@ const SURFACES = [
 const ALWAYS = ["/me/", "/me/notifications", "/me/timezone"];
 
 function tabs(html: string): string[] {
-  const nav = html.match(/<nav class="page-nav"[^>]*>(.*?)<\/nav>/s)?.[1] ?? "";
+  const nav = html.match(/<nav class="kb-tabs"[^>]*>(.*?)<\/nav>/s)?.[1] ?? "";
   return [...nav.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
 }
 
@@ -286,5 +324,143 @@ describe("privacy page does not link to Rewind while it is off (#1292)", () => {
   it("keeps it while Rewind is on", () => {
     const html = renderUserPrivacyBody({ ...base, rewindEnabled: true });
     expect(html).toContain('<a href="/me/rewind">Rewind</a>');
+  });
+});
+
+// ---- Overview follows MemberOverviewPage (#1508) ---------------------------
+
+const LIVE = {
+  id: "65a000000000000000000002",
+  title: "Live quiz",
+  when: "2030-01-01 19:00 (UTC)",
+  state: "active",
+  running: true,
+};
+const PLANNED = {
+  id: "65a000000000000000000001",
+  title: "Quiz night",
+  when: "2030-01-02 19:00 (UTC)",
+  state: "scheduled",
+  running: false,
+};
+
+describe("overview (#1508)", () => {
+  it("opens with a PageHeader holding the title and the greeting", () => {
+    const html = overview();
+    expect(html).toContain('<header class="kb-pagehead">');
+    expect(html).toContain(
+      '<h1 class="kb-pagehead__title">My preferences</h1>',
+    );
+    expect(html).toContain('<p class="kb-pagehead__sub">');
+    expect(html).not.toContain('class="subtitle"');
+    expect(html.indexOf("kb-pagehead")).toBeLessThan(
+      html.indexOf("kb-features"),
+    );
+  });
+
+  it("shows one FeatureCard per preference with its current value", () => {
+    const html = renderUserIndexBody({
+      discordUserId: "u1",
+      guildId: "g1",
+      isAdmin: false,
+      preferenceValues: {
+        notifications: "2 of 3 on",
+        timezone: "Europe/Oslo · 10:59 now",
+        voice: "Server default naming · No presets",
+        birthday: "14 March",
+        privacy: "Tracking on",
+      },
+    });
+    expect(html.match(/class="kb-feature"/g)).toHaveLength(6);
+    expect(html).toContain('<p class="kb-feature__value">2 of 3 on</p>');
+    expect(html).toContain(
+      '<p class="kb-feature__value">Europe/Oslo · 10:59 now</p>',
+    );
+    expect(html).toContain('<p class="kb-feature__value">14 March</p>');
+    expect(html).not.toContain("feature-list");
+  });
+
+  it("leaves the value line out when a value is not known, and escapes it", () => {
+    const html = renderUserIndexBody({
+      discordUserId: "u1",
+      guildId: "g1",
+      isAdmin: false,
+      preferenceValues: { voice: "<b>x</b> · No presets" },
+    });
+    expect(html.match(/kb-feature__value/g)).toHaveLength(1);
+    expect(html).toContain("&lt;b&gt;x&lt;/b&gt; · No presets");
+  });
+
+  it("puts a live hosted event first, with a Live badge and its host panel link", () => {
+    const html = overview();
+    expect(html).not.toContain("hosting-now");
+    const live = renderUserIndexBody({
+      discordUserId: "u1",
+      guildId: "g1",
+      isAdmin: false,
+      hostedEvents: [PLANNED, LIVE],
+    });
+    expect(live).toContain('<span class="kb-badge kb-badge--on">Live</span>');
+    expect(live).toContain(`href="/me/events/${LIVE.id}/host"`);
+    expect(live.indexOf("hosting-now-h")).toBeGreaterThan(
+      live.indexOf("kb-pagehead"),
+    );
+    expect(live.indexOf("hosting-now-h")).toBeLessThan(
+      live.indexOf("kb-features"),
+    );
+    // The planned event is a count that links to Your events, not a panel.
+    expect(live).not.toContain("Quiz night");
+    expect(live).toContain(
+      '<a href="/me/events">1 event</a> you host is planned.',
+    );
+    expect(live).not.toContain(" · active");
+  });
+
+  it("describes only planned events as one line with a count", () => {
+    const html = renderUserIndexBody({
+      discordUserId: "u1",
+      guildId: "g1",
+      isAdmin: false,
+      hostedEvents: [PLANNED, { ...PLANNED, id: "65a000000000000000000003" }],
+    });
+    expect(html).not.toContain("kb-badge");
+    expect(html).not.toContain("hosting-now");
+    expect(html).toContain(
+      '<a href="/me/events">2 events</a> you host are planned.',
+    );
+  });
+
+  it("shows poll participation as StatTiles, not Rewind stat boxes", () => {
+    const html = renderUserIndexBody({
+      discordUserId: "u1",
+      guildId: "g1",
+      isAdmin: false,
+      pollParticipation: {
+        totalVotes: 3,
+        thisYearVotes: 2,
+        thisWeekVotes: 1,
+        lastVoted: null,
+      },
+    });
+    expect(html).toContain('<div class="kb-tiles">');
+    expect(html.match(/class="kb-tile"/g)).toHaveLength(4);
+    expect(html).toContain('<div class="kb-tile__value">3</div>');
+    expect(html).not.toContain("rw-stat");
+    expect(html).not.toContain("rw-grid");
+  });
+
+  it("gives the account ids as one help line, not a panel, and says Server", () => {
+    const html = overview();
+    expect(html).toContain(
+      '<p class="kb-help">User <span class="kb-mono">u1</span> · Server <span class="kb-mono">g1</span>. To sign in as someone else, run <span class="kb-mono">/me</span> with that account.</p>',
+    );
+    expect(html).not.toContain("Account context");
+    expect(html).not.toContain("Guild");
+    expect(html).not.toContain('class="card"');
+  });
+
+  it("spells the product KoolBot", () => {
+    expect(overview()).not.toContain("Koolbot");
+    expect(overview()).toContain("KoolBot");
   });
 });

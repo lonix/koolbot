@@ -998,7 +998,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width,initial-scale=1">',
     '<meta name="referrer" content="strict-origin-when-cross-origin">',
-    `<title>${escapeHtml(opts.title)} — Koolbot Admin</title>`,
+    `<title>${escapeHtml(opts.title)} — KoolBot Admin</title>`,
     // tokens.css + kb.css first, so this page-local sheet can still override them.
     designStylesheetLinks("/admin"),
     `<style>${STYLE}</style>`,
