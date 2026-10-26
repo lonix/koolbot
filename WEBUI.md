@@ -3344,7 +3344,7 @@ Web UI audit log. A decision on a case someone else already resolved from anothe
 naming the status it found.
 
 **Server scan** (`/admin/adopt`, #1019) is a read-only inventory of the guild: it has no write routes, and never
-writes to Discord. Since #1323 it opens on an **Overview**: the verdict (ready, or how many blockers), tiles for
+writes to Discord. Since #1323 it opens on an **Overview**: the verdict (ready, or how many blockers), a callout when parts could not be read, tiles for
 Readiness, Roles, Channels and Other bots, what needs fixing, and suggestions that each link to the page that acts
 (Channel claims, Voice channels, and the voice tracking settings). Readiness and permission detail link to **Bot permissions** instead of
 repeating its table. The inventories are tabs (`?tab=roles`, `channels`, `bots`, `discord`; an unknown value is the

@@ -70,7 +70,11 @@ The full role, channel and bot tables live in their tabs. The ownership-hints sw
 
 **As built (#1323).** The tabs are `?tab=` links (Overview, Roles, Channels, Other bots, Discord) and the ownership-hints switch is a GET form, so
 the page works without JavaScript. The tabs share one scan for a minute, and the header says when Discord was read. Issue rows and callouts carry
-no icon yet: the shared icon helper in `app-shell.ts` has none of the alert icons. The Channels tab is the tree described below (#1364).
+their tone icon from `icons.ts`. The Channels tab is the tree described below (#1364).
+
+**As built (#1546).** On the Overview the verdict comes first, then the partial-read callout when there is one, then the tiles. The other tabs keep
+the partial-read callout at the top. With the GuildMembers intent off, the Overview says why once, in the folded *Notes*; the *Other bots* panel
+carries the bot-list caveat in its footer, and with no bots found the *Other bots* tile says the list may be incomplete.
 
 ### ServerScanChannelsPage
 
