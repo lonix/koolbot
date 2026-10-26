@@ -2617,7 +2617,12 @@ export class ReactionRoleService {
         if (
           orphan &&
           (hasLegacyMarker(orphan, botId, input.ownerKey) ||
-            looksLikeStepPicker(orphan, botId, input.ownerKey, input.roleId))
+            looksLikeStepPicker(
+              orphan,
+              botId,
+              input.ownerKey,
+              this.normalizeRoleId(input.roleId),
+            ))
         ) {
           await this.deleteMessageUnderLock(orphan);
         }
