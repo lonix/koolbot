@@ -20,6 +20,7 @@ import {
 } from "./setting-pickers.js";
 import { groupRowsScript } from "./event-group-form.js";
 import { getInactivityWindowMs } from "./session.js";
+import { CONFIRM_LINK_SCRIPT } from "./confirm-fetch.js";
 import {
   CONFIRM_SCRIPT,
   escapeHtml,
@@ -401,8 +402,8 @@ export interface AdminPageOptions {
 
 const STYLE = [
   // kb.css is linked ahead of this sheet but the legacy pages keep their own look until each
-  // moves to the kb- classes (#1314): undo its base line-height and colour-scheme here.
-  ":root{color-scheme:normal}",
+  // moves to the kb- classes (#1314): undo its base line-height here. Never reset `color-scheme`:
+  // the UI is dark only, so native control parts (pickers, file button, selection) stay dark (#1507).
   "*,*::before,*::after{box-sizing:border-box}",
   // Core palette comes from tokens.css, shared with the member and pre-auth pages (issue #569).
   `body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text);line-height:normal}`,
@@ -482,7 +483,7 @@ const STYLE = [
   "form.stack label.checkbox{flex-direction:row;align-items:center;gap:.5rem}",
   // Control borders use --control (3.97:1) — the hairline --border was
   // 1.58:1 against the field, far below the 3:1 floor (WCAG 1.4.11, #855).
-  `form.stack input[type=text],form.stack input[type=number],form.stack input[type=url],form.stack textarea,form.stack select{background:var(--bg);color:var(--text);border:1px solid var(--control);border-radius:6px;padding:.4rem .55rem;font:inherit;font-size:.9rem}`,
+  `form.stack input[type=text],form.stack input[type=number],form.stack input[type=url],form.stack input[type=date],form.stack input[type=time],form.stack textarea,form.stack select{background:var(--bg);color:var(--text);border:1px solid var(--control);border-radius:6px;padding:.4rem .55rem;font:inherit;font-size:.9rem}`,
   "form.stack textarea{resize:vertical;min-height:5rem;font-family:ui-monospace,SFMono-Regular,SF Mono,Menlo,monospace}",
   "form.stack fieldset{border:1px solid var(--border);border-radius:6px;padding:.5rem .75rem;display:flex;flex-direction:column;gap:.4rem}",
   "form.stack fieldset legend{color:var(--muted);padding:0 .35rem}",
@@ -760,15 +761,19 @@ const SETTINGS_SAVE_SCRIPT =
   "var seq=0;" +
   "function flashEl(form){var card=form.closest('.card');if(!card)return null;" +
   "var n=card.querySelector('.section-flash');" +
-  // role="status" makes the node a polite live region, so every save result
-  // (success, CSRF failure, rate-limit, network error) is announced (#855).
+  // The node is a live region, so every save result (success, CSRF failure,
+  // rate-limit, network error) is announced (#855). A result is a polite
+  // status; a failure is an alert (#1517), set in `show`.
   "if(!n){n=document.createElement('div');n.className='notice section-flash';" +
   "n.setAttribute('role','status');n.setAttribute('aria-live','polite');" +
   "form.parentNode.insertBefore(n,form)}" +
   "if(!n.id)n.id='section-flash-'+(++seq);return n}" +
   "function show(form,type,text){var n=flashEl(form);if(!n)return;" +
   "var cls=type==='ok'?'ok':type==='warn'?'warn':'err';" +
-  "n.className='notice section-flash '+cls;n.textContent=text;return n}" +
+  "n.className='notice section-flash '+cls;" +
+  "if(cls==='err'){n.setAttribute('role','alert');n.removeAttribute('aria-live')}" +
+  "else{n.setAttribute('role','status');n.setAttribute('aria-live','polite')}" +
+  "n.textContent=text;return n}" +
   // Rejected-field marking (#854). Without this an AJAX save tells a screen
   // reader that "3 values were invalid" and nothing about which of the ~318
   // controls on the page they were. The pre-existing `aria-describedby` is
@@ -788,21 +793,39 @@ const SETTINGS_SAVE_SCRIPT =
   "if(el.parentNode)el.parentNode.removeChild(el)});" +
   "Array.prototype.forEach.call(form.querySelectorAll('[data-a11y-tabindex]'),function(el){" +
   "el.removeAttribute('tabindex');el.removeAttribute('data-a11y-tabindex')})}" +
-  "function markInvalid(form,keys,msgId){var first=null;" +
+  // Each rejected row also gets the reason for its own key (#1517), in a
+  // `p.kb-field__error.settings-error` placed where the server renders it.
+  // The reason is text (never markup) and the line is linked from the
+  // control's `aria-describedby`, so it is read when focus lands there. A key
+  // without a reason keeps the generic pointer at the flash.
+  "function note(el,key,reason){" +
+  "var row=el.closest?el.closest('.kb-setting'):null;" +
+  "var host=row?row.querySelector('.kb-setting__extra'):null;" +
+  "if(!host)host=el.parentNode;if(!host)return '';" +
+  "var p=document.createElement('p');p.className='kb-field__error settings-error';" +
+  "p.id='set-'+key+'-err';" +
+  "p.textContent=typeof reason==='string'&&reason?reason:'Rejected — not saved. See the error message above for the reason.';" +
+  "var nest=null;for(var c=0;c<host.children.length;c++){" +
+  "if(host.children[c].className&&String(host.children[c].className).indexOf('kb-nested')>-1){nest=host.children[c];break}}" +
+  "host.insertBefore(p,nest);return p.id}" +
+  "function markInvalid(form,keys,msgId,reasons){var first=null;" +
   "for(var i=0;i<keys.length;i++){" +
   "if(typeof keys[i]!=='string')continue;" +
   "var el=document.getElementById('set-'+keys[i]);" +
   "if(!el||!form.contains(el))continue;" +
   "var base=el.getAttribute('aria-describedby')||'';" +
   "el.setAttribute('data-describedby-base',base);" +
-  "if(msgId)el.setAttribute('aria-describedby',base?base+' '+msgId:msgId);" +
+  "var noteId=note(el,keys[i],reasons?reasons[keys[i]]:null);" +
+  "var ids=[base,noteId,msgId].filter(function(x){return x}).join(' ');" +
+  "if(ids)el.setAttribute('aria-describedby',ids);" +
   "el.setAttribute('aria-invalid','true');" +
   "if(!first)first=el}" +
   "focusInvalid(first)}" +
   "function applyResult(form,data,msgId){clearInvalid(form);" +
   "var keys=data&&Object.prototype.toString.call(data.invalidKeys)==='[object Array]'" +
   "?data.invalidKeys:null;" +
-  "if(keys&&keys.length)markInvalid(form,keys,msgId)}" +
+  "var reasons=data&&data.invalidReasons&&typeof data.invalidReasons==='object'?data.invalidReasons:null;" +
+  "if(keys&&keys.length)markInvalid(form,keys,msgId,reasons)}" +
   "function submit(e,submitter){var form=e.currentTarget;" +
   // Reset buttons retarget via formaction — let those submit natively.
   "if(submitter&&submitter.getAttribute('formaction'))return;" +
@@ -998,7 +1021,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width,initial-scale=1">',
     '<meta name="referrer" content="strict-origin-when-cross-origin">',
-    `<title>${escapeHtml(opts.title)} — Koolbot Admin</title>`,
+    `<title>${escapeHtml(opts.title)} — KoolBot Admin</title>`,
     // tokens.css + kb.css first, so this page-local sheet can still override them.
     designStylesheetLinks("/admin"),
     `<style>${STYLE}</style>`,
@@ -1028,6 +1051,10 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     `<main id="main"${opts.body.includes('class="kb-savebar"') ? ' class="has-savebar"' : ""} tabindex="-1">${opts.body}</main></div>`,
     `${scriptTag(SCRIPT)}`,
     `${scriptTag(CONFIRM_SCRIPT)}`,
+    // Confirmation links (#1536): only on a page that has one.
+    ...(opts.body.includes("data-confirm-link=")
+      ? [`${scriptTag(CONFIRM_LINK_SCRIPT)}`]
+      : []),
     `${scriptTag(CRON_PICKER_SCRIPT)}`,
     `${scriptTag(CASCADE_DISABLE_SCRIPT)}`,
     `${scriptTag(NUMBER_INPUT_SCRIPT)}`,

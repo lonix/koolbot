@@ -4,6 +4,8 @@
  * without pulling in the event model or each other.
  */
 
+import { escapeHtml } from "./html.js";
+
 /** Base path of the host panel for one event. Later controls hang off it. */
 export function hostPanelPath(eventId: string): string {
   return `/me/events/${encodeURIComponent(eventId)}/host`;
@@ -44,4 +46,29 @@ export function isEventRunning(
     event.startTime instanceof Date &&
     event.startTime.getTime() <= now.getTime()
   );
+}
+
+/**
+ * The one set of state words for an event (#1518): *Your events* and the host
+ * panel say the same thing for the same event. `running` is `isEventRunning`'s
+ * answer; an `active` event that has not started yet is still *Planned*.
+ * An unknown state is shown as it is stored.
+ */
+export function eventStateWord(
+  state: string,
+  running: boolean,
+): { label: string; tone: "on" | "off" | "info" } {
+  if (running) return { label: "Live", tone: "on" };
+  if (state === "scheduled" || state === "active") {
+    return { label: "Planned", tone: "info" };
+  }
+  if (state === "ended") return { label: "Ended", tone: "info" };
+  if (state === "cancelled") return { label: "Cancelled", tone: "off" };
+  return { label: state, tone: "info" };
+}
+
+/** The state as a `kb-badge`, with the word from `eventStateWord`. */
+export function renderEventStateBadge(state: string, running: boolean): string {
+  const { label, tone } = eventStateWord(state, running);
+  return `<span class="kb-badge kb-badge--${tone}">${escapeHtml(label)}</span>`;
 }

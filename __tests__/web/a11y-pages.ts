@@ -1593,6 +1593,23 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The no-JavaScript render of a rejected save (#1517): the row is marked
+      // and its line points at the failure flash, which is an alert.
+      name: "Settings (a rejected row, failure flash)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: NESTED_GROUPS,
+        guildId: "g1",
+        guildName: "Test Guild",
+        flash: {
+          type: "err",
+          text: "No changes saved — 1 invalid value in voicetracking: voicetracking.announcements.enabled (Turn on voicetracking first).",
+        },
+        invalidKeys: ["voicetracking.announcements.enabled"],
+      }),
+    },
+    {
       // A bounded number box and bot-managed values: text with a jump link, no
       // field to submit (#1304).
       name: "Settings (bounded number, bot-managed message id)",
@@ -2052,6 +2069,10 @@ export function adminPages(): A11yPage[] {
           ["r2", "Member"],
         ]),
         perCommand: new Map([["quote", ["r1"]]]),
+        // A group, "and above", and a reference to a deleted group exercise
+        // every row kind of the role Picker (#1547).
+        groups: [{ id: "g1", name: "Mods" }],
+        groupRefsPerCommand: new Map([["quote", ["group:g1+", "group:gone"]]]),
         flash: FLASH,
       }),
     },
@@ -2171,7 +2192,8 @@ export function adminPages(): A11yPage[] {
       name: "Setup wizard access",
       html: renderWizardAccessPage({
         ...COMMON,
-        selection: { admin: ["r-admin"], staff: ["r-mod"], host: [] },
+        // "r-gone" is a saved role that can no longer be picked (#1547).
+        selection: { admin: ["r-admin"], staff: ["r-mod", "r-gone"], host: [] },
         options: [
           { id: "r-admin", name: "Admins", managed: false, position: 8 },
           { id: "r-mod", name: "Moderator", managed: false, position: 5 },
@@ -2330,6 +2352,53 @@ export function adminPages(): A11yPage[] {
           },
         ],
         flash: FLASH,
+      }),
+    },
+    {
+      name: "Announcements (create form refused)",
+      html: renderAnnouncementsPage({
+        ...COMMON,
+        enabled: true,
+        textChannels: CHANNELS,
+        settingRows: [
+          {
+            key: "announcements.enabled",
+            label: "Scheduled announcements enabled",
+            current: true,
+            defaultValue: false,
+            type: "boolean",
+            description: "Enable scheduled announcements.",
+            category: "announcements",
+          },
+        ],
+        rows: [
+          {
+            id: "a1",
+            channelName: "general",
+            channelType: ChannelType.GuildText,
+            cron: "0 9 * * 1",
+            enabled: true,
+            messagePreview: "Good morning!",
+            embedTitle: null,
+            placeholders: true,
+            createdAt: "2026-01-01",
+          },
+        ],
+        refusedForm: {
+          formId: "announcement-create",
+          errors: {
+            cron: "Not a valid cron expression. Use five fields (minute hour day-of-month month day-of-week), for example 0 9 * * *.",
+            embedColor: "Use six hex digits, for example #5865F2.",
+          },
+          values: {
+            channelId: "c1",
+            cron: "every monday",
+            message: "Standup in 5 <minutes>",
+            placeholders: "1",
+            embedTitle: "Notice",
+            embedColor: "blurple",
+          },
+        },
       }),
     },
     {
@@ -2825,6 +2894,85 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Polls (question edit refused)",
+      html: renderPollsPage({
+        ...COMMON,
+        enabled: true,
+        defaultDurationHours: 24,
+        cooldownDays: 30,
+        settingRows: [
+          {
+            key: "polls.enabled",
+            label: "Polls system enabled",
+            current: true,
+            defaultValue: false,
+            type: "boolean",
+            description: "Enable the poll system.",
+            category: "polls",
+          },
+          {
+            key: "polls.default_duration_hours",
+            label: "Default poll duration (hours)",
+            current: 24,
+            defaultValue: 24,
+            type: "number",
+            description: "Default poll duration in hours (1–768).",
+            category: "polls",
+          },
+          {
+            key: "polls.turnout.retention_days",
+            label: "Poll turnout retention (days)",
+            current: 90,
+            defaultValue: 90,
+            type: "number",
+            description: "Days to keep the per-poll turnout rows.",
+            category: "polls",
+            min: 0,
+          },
+        ],
+        textChannels: CHANNELS,
+        roles: ROLES,
+        schedules: [
+          {
+            id: "s1",
+            channelId: "c1",
+            channelName: "general",
+            channelType: ChannelType.GuildText,
+            cron: "0 12 * * 3",
+            durationHours: 24,
+            pingRoleId: "r2",
+            pingRoleName: "Member",
+            enabled: true,
+            lastRun: "2026-01-07",
+          },
+        ],
+        items: [
+          {
+            id: "p1",
+            question: "Best pizza topping?",
+            answers: ["Pineapple", "Not pineapple"],
+            tags: ["food"],
+            multiSelect: false,
+            usageCount: 2,
+            lastUsed: "2026-01-07",
+            enabled: true,
+            source: "library",
+          },
+        ],
+        flash: FLASH,
+        refusedForm: {
+          formId: "poll-item-edit-p1",
+          errors: { answers: "Give 2 to 10 answers, separated by commas." },
+          values: {
+            question: "Best snack?",
+            answers: "only one",
+            tags: "",
+            multiSelect: "",
+          },
+        },
+      }),
+    },
+    {
       name: "Reaction roles",
       html: renderReactionRolesPage({
         ...COMMON,
@@ -3190,6 +3338,137 @@ export function adminPages(): A11yPage[] {
           },
         ],
         flash: FLASH,
+      }),
+    },
+    {
+      // A refused group form (#1520): the first blank option row is marked, and
+      // its line points at the message.
+      name: "Reaction roles (group create form refused)",
+      html: renderReactionRolesPage({
+        ...COMMON,
+        enabled: true,
+        configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
+        active: [],
+        archived: [],
+        settingRows: [],
+        textChannels: CHANNELS,
+        refusedForm: {
+          formId: "reaction-role-group-create",
+          errors: {
+            "roleName-1":
+              "A role group needs at least two options, each with a role name and an emoji.",
+          },
+          values: {
+            groupName: "Colour",
+            mode: "unique",
+            "roleName-0": "Red",
+            "emoji-0": "🔴",
+          },
+        },
+      }),
+    },
+    {
+      // A refused per-row edit (#1520): that notice's details element is open.
+      name: "Notices (edit form refused)",
+      html: renderNoticesPage({
+        ...COMMON,
+        enabled: true,
+        channel: { name: "rules", id: "c1", type: ChannelType.GuildText },
+        total: 1,
+        textChannels: [
+          { id: "c1", name: "rules", type: ChannelType.GuildText },
+        ],
+        settingRows: [],
+        groups: [
+          {
+            category: "rules",
+            rows: [
+              {
+                id: "n1",
+                order: 1,
+                title: "Be nice",
+                content: "Be nice to each other.",
+                preview: "Be nice to each other.",
+                category: "rules",
+                messageId: "msg1",
+                updatedAt: "2026-01-01",
+              },
+            ],
+          },
+        ],
+        categoryOptions: [{ value: "rules", label: "Rules" }],
+        refusedForm: {
+          formId: "notice-edit-n1",
+          errors: { title: "Enter a title." },
+          values: {
+            title: "",
+            content: "Be nice to each other.",
+            category: "rules",
+            order: "1",
+          },
+        },
+      }),
+    },
+    {
+      name: "Quotes (edit form refused)",
+      html: renderQuotesPage({
+        ...COMMON,
+        enabled: true,
+        channel: { name: "quotes", id: "c1", type: ChannelType.GuildText },
+        headerMessageId: "",
+        settingRows: [],
+        maxLength: 1000,
+        rows: [
+          {
+            id: "0123456789abcdef01234567",
+            content: "Stay hydrated.",
+            authorId: "111111111111111111",
+            authorLabel: "Alice",
+            addedByLabel: "Bob",
+            addedAt: "2026-09-01T00:00:00.000Z",
+            likes: 3,
+            dislikes: 0,
+            messageId: "333333333333333333",
+          },
+        ],
+        total: 1,
+        page: 1,
+        pageSize: 25,
+        search: "",
+        refusedForm: {
+          formId: "quote-edit-0123456789abcdef01234567",
+          errors: {
+            author_id:
+              "Enter the Discord user ID of the author: 17 to 20 digits.",
+          },
+          values: { content: "Stay hydrated.", author_id: "alice" },
+        },
+      }),
+    },
+    {
+      // The Import form sits in a closed disclosure; a refusal opens it (#1520).
+      name: "Bot status (import form refused)",
+      html: renderBotStatusPage({
+        ...COMMON,
+        maxLength: 100,
+        pools: [
+          {
+            pool: "playing",
+            label: "Playing",
+            description: "Shown as “Playing …”.",
+            requiresCount: false,
+            items: [{ id: "i1", order: 1, text: "with the config" }],
+            usingDefaults: false,
+            exportText: "with the config",
+          },
+        ],
+        refusedForm: {
+          formId: "bot-status-import-playing",
+          errors: {
+            items: "Paste at least one entry: one per line, or a JSON array.",
+          },
+          values: { items: "", mode: "replace" },
+        },
       }),
     },
     {
@@ -3636,7 +3915,11 @@ export function adminPages(): A11yPage[] {
             lastUsedAt: null,
           },
         ],
-        dailyTotals: [{ date: "2026-01-09", usageCount: 20, errorCount: 1 }],
+        dailyTotals: [
+          { date: "2026-01-08", usageCount: 8, errorCount: 0 },
+          { date: "2026-01-09", usageCount: 20, errorCount: 1 },
+          { date: "2026-01-10", usageCount: 0, errorCount: 0 },
+        ],
       }),
     },
     {
@@ -4276,7 +4559,7 @@ function settingsData(over: Partial<SettingsViewData> = {}): SettingsViewData {
       leaderLabel: "Captain",
       edits: [
         {
-          at: "2030-01-01T18:00:00.000Z",
+          at: "2030-01-01 19:00 (Europe/Oslo)",
           who: "Ana",
           text: 'renamed Red to "Rubies"',
         },
@@ -4293,7 +4576,7 @@ function hostEvent(over: Partial<HostPanelEvent>): HostPanelEvent {
     title: "Quiz night",
     description: "Bring a pen.",
     state: "scheduled",
-    when: "2030-01-01 19:00 (UTC)",
+    when: "2030-01-01 20:00 (Europe/Oslo)",
     durationMinutes: 90,
     recurrence: "weekly",
     channel: "quiz-night",
@@ -4351,7 +4634,7 @@ function yourEventRow(over: Partial<HostEventListRow>): HostEventListRow {
   return {
     id: "65a000000000000000000001",
     title: "Quiz night",
-    when: "2030-01-01 19:00 (UTC)",
+    when: "2030-01-01 20:00 (Europe/Oslo)",
     state: "scheduled",
     durationMinutes: 90,
     running: false,
@@ -4387,6 +4670,12 @@ export function userPages(): A11yPage[] {
           rewindEnabled: true,
           presetsEnabled: false,
           birthdayEnabled: true,
+          preferenceValues: {
+            notifications: "1 of 2 on",
+            timezone: "Europe/Oslo · 10:59 now",
+            birthday: "14 March",
+            privacy: "Tracking on",
+          },
           pollParticipation: {
             totalVotes: 12,
             thisYearVotes: 4,
@@ -4454,6 +4743,10 @@ export function userPages(): A11yPage[] {
           presetsEnabled: false,
           birthdayEnabled: false,
           privacyEnabled: false,
+          preferenceValues: {
+            notifications: "None of 1 on",
+            timezone: "Server default (UTC) · 10:59 now",
+          },
         }),
         csrfToken: COMMON.csrfToken,
         remainingMs: COMMON.remainingMs,
@@ -4463,6 +4756,41 @@ export function userPages(): A11yPage[] {
         birthdayEnabled: false,
         privacyEnabled: false,
       }),
+    },
+    {
+      name: "/me overview with a live hosted event",
+      html: shell(
+        "Overview",
+        "/me/",
+        renderUserIndexBody({
+          discordUserId: "u1",
+          guildId: "g1",
+          isAdmin: false,
+          hostedEvents: [
+            {
+              id: "65a000000000000000000002",
+              title: "Live quiz",
+              when: "2030-01-01 19:00 (UTC)",
+              state: "active",
+              running: true,
+            },
+            {
+              id: "65a000000000000000000001",
+              title: "Quiz night",
+              when: "2030-01-02 19:00 (UTC)",
+              state: "scheduled",
+              running: false,
+            },
+          ],
+          preferenceValues: {
+            notifications: "2 of 3 on",
+            timezone: "Europe/Oslo · 10:59 now",
+            voice: "Server default naming · No presets",
+            birthday: "Not set",
+            privacy: "Tracking on",
+          },
+        }),
+      ),
     },
     {
       name: "/me overview with hosted events",
@@ -4477,8 +4805,9 @@ export function userPages(): A11yPage[] {
             {
               id: "65a000000000000000000001",
               title: "Quiz night",
-              when: "2030-01-01 19:00 (UTC)",
+              when: "2030-01-01 20:00 (Europe/Oslo)",
               state: "scheduled",
+              running: false,
             },
           ],
         }),
@@ -4568,11 +4897,27 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      // Problems first (#1518): both warnings render as warn Callouts above
+      // the folded group details, which hold the clan tags status.
       name: "/me host panel (scheduled, groups)",
       html: shell(
         "Host panel: Quiz night",
         "/me/events",
-        renderHostPanelBody({ event: hostEvent({ groupsEnabled: true }) }),
+        renderHostPanelBody({
+          event: hostEvent({
+            groupsEnabled: true,
+            groupNotices: ["Reds: the channel could not be created."],
+            tagsEnabled: true,
+            tagNotices: ["The bot cannot change nicknames."],
+            tagSkipped: [
+              {
+                name: "Server owner",
+                reason: "A bot cannot rename the owner.",
+              },
+            ],
+            captainsLobby: { hasChannel: false },
+          }),
+        }),
       ),
     },
     {
@@ -4868,7 +5213,11 @@ export function userPages(): A11yPage[] {
         "Host panel: Quiz night",
         "/me/",
         renderHostPanelBody({
-          event: hostEvent({ groupsEnabled: true, state: "active" }),
+          event: hostEvent({
+            groupsEnabled: true,
+            state: "active",
+            running: true,
+          }),
           controls: {
             end: renderEndSection({
               state: "active",
@@ -4951,7 +5300,7 @@ export function userPages(): A11yPage[] {
         "Host panel: Quiz night",
         "/me/",
         renderHostPanelBody({
-          event: hostEvent({ state: "active" }),
+          event: hostEvent({ state: "active", running: true }),
           controls: {
             end: renderEndSection({
               state: "active",
@@ -4976,7 +5325,9 @@ export function userPages(): A11yPage[] {
       html: shell(
         "Host panel: Quiz night",
         "/me/",
-        renderHostPanelBody({ event: hostEvent({ state: "ended" }) }),
+        renderHostPanelBody({
+          event: hostEvent({ groupsEnabled: true, state: "ended" }),
+        }),
       ),
     },
     {
@@ -5108,6 +5459,30 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      name: "/me new event (rejected start time)",
+      html: shell(
+        "New event",
+        "/me/events/new",
+        renderNewEventBody({
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Oslo",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 15 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+          refusal: { field: "date", message: "Pick a time in the future." },
+          values: {
+            date: "2020-01-01",
+            time: "18:30",
+            title: "Game night",
+            description: "Bring snacks",
+            durationMinutes: 90,
+            timezone: "Europe/Oslo",
+          },
+        }),
+      ),
+    },
+    {
       name: "/me edit event (not started)",
       html: shell(
         "Edit event: Quiz night",
@@ -5115,6 +5490,29 @@ export function userPages(): A11yPage[] {
         renderEventEditBody({
           event: editEventView({}),
           csrfToken: COMMON.csrfToken,
+        }),
+      ),
+    },
+    {
+      name: "/me edit event (rejected duration)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({}),
+          csrfToken: COMMON.csrfToken,
+          refused: {
+            refusal: { field: "duration", message: "At most 1440 minutes." },
+            values: {
+              title: "Quiz night",
+              description: "Bring a friend",
+              duration: "5000",
+              date: "2099-06-01",
+              time: "18:00",
+              timezone: "UTC",
+              scope: "",
+            },
+          },
         }),
       ),
     },

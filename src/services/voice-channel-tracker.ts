@@ -3,13 +3,10 @@ import {
   GuildMember,
   VoiceChannel,
   Client,
-  ButtonInteraction,
   User,
-  MessageFlags,
 } from "discord.js";
 import logger, { isDebugMode } from "../utils/logger.js";
 import { MongoConnectionGuard } from "../utils/mongo.js";
-import { safeReply } from "../utils/safe-reply.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import mongoose from "mongoose";
 import { ConfigService } from "./config-service.js";
@@ -1353,79 +1350,6 @@ export class VoiceChannelTracker {
     } catch (error) {
       logger.error("Error getting user last seen:", error);
       return null;
-    }
-  }
-
-  private async handleButtonInteraction(
-    interaction: ButtonInteraction,
-  ): Promise<void> {
-    try {
-      if (!interaction.guild) {
-        await interaction.reply({
-          content: "This command can only be used in a server.",
-          flags: MessageFlags.Ephemeral,
-        });
-        return;
-      }
-
-      const channel = await this.client.channels.fetch(interaction.channelId);
-      if (!channel || !(channel instanceof VoiceChannel)) {
-        return;
-      }
-
-      const entries = Array.from(this.userChannels.entries());
-      const foundEntry = entries.find(([, vc]) => vc.id === channel.id);
-      const userId = foundEntry ? foundEntry[0] : null;
-
-      if (!userId || userId !== interaction.user.id) {
-        return;
-      }
-
-      let response;
-      switch (interaction.customId) {
-        case "rename":
-          response = "Please enter the new name for your channel:";
-          break;
-        case "public":
-          await channel.permissionOverwrites.edit(
-            interaction.guild.roles.everyone,
-            {
-              ViewChannel: true,
-              Connect: true,
-            },
-          );
-          response = "Channel is now public.";
-          break;
-        case "private":
-          await channel.permissionOverwrites.edit(
-            interaction.guild.roles.everyone,
-            {
-              ViewChannel: false,
-              Connect: false,
-            },
-          );
-          response = "Channel is now private.";
-          break;
-        case "invite":
-          response = "Please mention the user you want to invite:";
-          break;
-        case "kick":
-          response = "Please mention the user you want to kick:";
-          break;
-        default:
-          response = "Unknown action.";
-      }
-
-      await interaction.reply({
-        content: response,
-        flags: MessageFlags.Ephemeral,
-      });
-    } catch (error) {
-      logger.error("Error handling button interaction:", error);
-      await safeReply(interaction, {
-        content: "An error occurred while processing your request.",
-        flags: MessageFlags.Ephemeral,
-      });
     }
   }
 

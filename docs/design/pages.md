@@ -70,7 +70,11 @@ The full role, channel and bot tables live in their tabs. The ownership-hints sw
 
 **As built (#1323).** The tabs are `?tab=` links (Overview, Roles, Channels, Other bots, Discord) and the ownership-hints switch is a GET form, so
 the page works without JavaScript. The tabs share one scan for a minute, and the header says when Discord was read. Issue rows and callouts carry
-no icon yet: the shared icon helper in `app-shell.ts` has none of the alert icons. The Channels tab is the tree described below (#1364).
+their tone icon from `icons.ts`. The Channels tab is the tree described below (#1364).
+
+**As built (#1546).** On the Overview the verdict comes first, then the partial-read callout when there is one, then the tiles. The other tabs keep
+the partial-read callout at the top. With the GuildMembers intent off, the Overview says why once, in the folded *Notes*; the *Other bots* panel
+carries the bot-list caveat in its footer, and with no bots found the *Other bots* tile says the list may be incomplete.
 
 ### ServerScanChannelsPage
 
@@ -179,8 +183,19 @@ The host panel for a live event, as an event host who is neither admin nor moder
 - At the bottom, folded: *Event settings* (Group leaders and Clan tags, children nested) and *Change the groups* (add, remove, preset, switch off).
   Each summary states the current values.
 
-**As built (#1319, #1424).** The panel is in the Hosting section (`active` is `/me/events`, breadcrumb *Your events*). The body is the Summary and
-Groups cards, then the board (`src/web/host-board-view.ts`), then *End the event*, then the two folds.
+**As built (#1319, #1424, #1518).** The panel is in the Hosting section (`active` is `/me/events`, breadcrumb *Your events*). The body is the header,
+the problems, the board (`src/web/host-board-view.ts`), the folded *Group details*, *End the event*, then the two folds.
+
+- *Header*: the `h1` is *Host panel* with the state as a `kb-badge` after it (*Live*, *Planned*, *Ended*, *Cancelled*: `eventStateWord`, shared with
+  *Your events*); `kb-pagehead__sub` is the event's title, a second one carries the description; `kb-pagehead__meta` has one icon span each for the
+  start, duration, repeat, main channel and an adopted event's note.
+- *Problems*: the permission notice, the group-channel warnings and the clan tag warnings are warn Callouts directly under the header, before the board.
+- *Group details*: a closed `kb-disclosure` under the board with who may join each group, whether its channel exists, when channels are made, the
+  Captains lobby line and the clan tags status. It keeps the table's every column. An ended or cancelled event has no board, so it shows this fold
+  under its read-only Callout.
+- *End the event*: a `kb-panel--danger` with one line and a `kb-btn--danger` *End event now* that opens the Dialog (`data-confirm="End this event
+  now?"`, the list is `endEventItems`). Without script a `noscript` block shows the same list and a required tick box; the server's `confirm=1`
+  check stays. An event that has not started gets a plain panel with one sentence.
 
 - *Toolbar* (`kb-toolbar`, `role=group` with a label): the lock state as a `kb-badge` with *Lock groups* / *Unlock groups*, a separator, *Randomise…* and
   *Move people…*, then *Send to teams* at the end. *Randomise…* and *Move people…* are `details.kb-toolbar__action` (a disclosure, so they work
@@ -196,7 +211,6 @@ Groups cards, then the board (`src/web/host-board-view.ts`), then *End the event
 - *Folds* at the bottom, as `kb-disclosure`: *Event settings* (lead time, *Group leaders* and *Clan tags* with their children, the leader label and what
   leaders changed) and *Change the groups* (names and sizes, preset, add, remove, switch off). Their summaries state the current values (for example
   *Channels 20 min before the start · Captains on · Clan tags on* and *2 groups: Reds, Blues*). They open only after a settings save.
-- Not built here: the Summary, Groups and *End the event* parts are still the cards of #1189, and the edit page is #1298's.
 
 ## Moderator
 

@@ -32,6 +32,7 @@ import {
   renderAdoptionHistoryPage,
   renderRestoreConfirmPage,
 } from "../../adoption-history-view.js";
+import { CONFIRM_PAGE_HEADER } from "../../confirm-fetch.js";
 import {
   asyncHandler,
   flashRedirect,
@@ -205,6 +206,11 @@ export function createAdoptionHistoryRouter(client: Client): Router {
           text: "That snapshot wasn't found for this server.",
         });
         return;
+      }
+      // Only a snapshot that can be restored has the form the dialog upgrade
+      // (`confirm-fetch.ts`, #1536) reads.
+      if (canRollback(snapshot.status)) {
+        res.setHeader(CONFIRM_PAGE_HEADER, "snapshot-restore");
       }
       res.type("text/html").send(
         renderRestoreConfirmPage({

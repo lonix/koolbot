@@ -33,6 +33,11 @@ import { EventService } from "../../src/services/event-service.js";
 import { ConfigService } from "../../src/services/config-service.js";
 import { WebAuditLog } from "../../src/models/web-audit-log.js";
 import { Event } from "../../src/models/event.js";
+import {
+  formatDateTimeInZone,
+  getServerTimezone,
+} from "../../src/utils/timezone.js";
+import { UserNotificationPrefsService } from "../../src/services/user-notification-prefs-service.js";
 
 const SECRET = "test-secret-for-me-events-routes";
 const GUILD = "guild-1";
@@ -84,6 +89,7 @@ let scopes: string[] = ["member", "host"];
 let sessionRole: "admin" | "user" = "user";
 let sessionUser = HOST;
 let eventsEnabled = true;
+let memberZone: string | null = null;
 let server: Server;
 let base = "";
 const cancelEvent =
@@ -195,6 +201,7 @@ beforeEach(() => {
   auditRows = [];
   scopes = ["member", "host"];
   eventsEnabled = true;
+  memberZone = "UTC";
   cancelEvent.mockReset();
   cancelEvent.mockImplementation(async (id) => ({
     ...events[id],
@@ -217,6 +224,9 @@ beforeEach(() => {
     checkCommandPermission: async () => true,
     resolveWebScopes: async () => scopes,
     resolveWebScopeReasons: async () => ({ host: ["Event hosts"], staff: [] }),
+  } as never);
+  jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+    getTimezone: async () => memberZone,
   } as never);
   jest.spyOn(EventService, "getInstance").mockReturnValue({
     getEvent: async (id: string) => events[id] ?? null,
@@ -259,6 +269,17 @@ afterEach(() => {
 });
 
 describe("Your events (#1319)", () => {
+  it("says each event's state with the words the host panel shares (#1518)", async () => {
+    const r = await call("/me/events");
+    for (const word of ["Live", "Planned", "Ended"]) {
+      expect(r.text).toMatch(
+        new RegExp(
+          `<span class="kb-badge kb-badge--(on|off|info)">${word}</span>`,
+        ),
+      );
+    }
+  });
+
   it("lists the host's live, upcoming and past events and nobody else's", async () => {
     const r = await call("/me/events");
     expect(r.status).toBe(200);
@@ -351,6 +372,39 @@ describe("Your events (#1319)", () => {
     expect(r.status).toBe(200);
     expect(r.text).toContain("could not be read");
     expect(r.text).not.toContain("No upcoming events");
+  });
+});
+
+describe("Your events times (#1538)", () => {
+  it("shows each start in the member's own zone, not the event's", async () => {
+    // 2030-01-01 19:00 UTC is 14:00 in New York (the event's zone) and
+    // 2030-01-02 08:00 in Auckland (the member's); the server runs elsewhere.
+    events[ID_PLANNED] = makeEvent(ID_PLANNED, {
+      title: "Planned quiz",
+      timezone: "America/New_York",
+    });
+    memberZone = "Pacific/Auckland";
+    const out = await call("/me/events");
+    expect(out.text).toContain("2030-01-02 08:00 (Pacific/Auckland)");
+    expect(out.text).not.toContain("America/New_York");
+    expect(out.text).not.toContain("2030-01-01 14:00");
+  });
+
+  it("falls back to the server zone when the member has none", async () => {
+    events[ID_PLANNED] = makeEvent(ID_PLANNED, {
+      title: "Planned quiz",
+      timezone: "America/New_York",
+    });
+    memberZone = null;
+    const out = await call("/me/events");
+    const server = getServerTimezone();
+    expect(out.text).toContain(
+      formatDateTimeInZone(new Date("2030-01-01T19:00:00Z"), server),
+    );
+    // Not the event's zone, unless the server happens to run in it.
+    if (server !== "America/New_York") {
+      expect(out.text).not.toContain("America/New_York");
+    }
   });
 });
 

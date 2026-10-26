@@ -3,6 +3,11 @@ import { ConfigService } from "../services/config-service.js";
 import { LfgService, spotsLeft } from "../services/lfg-service.js";
 import type { ILfgPost } from "../models/lfg-post.js";
 import logger from "../utils/logger.js";
+import {
+  replyWithError,
+  replyWithUnexpectedError,
+} from "../utils/error-reply.js";
+import { safeReply } from "../utils/safe-reply.js";
 
 /**
  * Handle the Join / Leave / Close buttons on an LFG post (#957).
@@ -22,20 +27,33 @@ import logger from "../utils/logger.js";
 
 const ACTIONS = new Set(["join", "leave", "close"]);
 
-/** Tell just the clicker something, whatever the interaction's state. */
+/**
+ * Tell just the clicker something, whatever the interaction's state. After
+ * `deferUpdate()` on the public post the deferred response IS the post, so this
+ * always sends an ephemeral `followUp`, never an edit (#1510).
+ */
 async function replyQuietly(
   interaction: ButtonInteraction,
   content: string,
 ): Promise<void> {
-  if (interaction.replied || interaction.deferred) {
-    await interaction
-      .followUp({ content, flags: MessageFlags.Ephemeral })
-      .catch(() => undefined);
-    return;
-  }
-  await interaction
-    .reply({ content, flags: MessageFlags.Ephemeral })
-    .catch(() => undefined);
+  await safeReply(
+    interaction,
+    { content, flags: MessageFlags.Ephemeral },
+    { followUp: true },
+  );
+}
+
+/**
+ * Answer a failure as an ephemeral error embed that leaves the public post
+ * alone (`whenDeferred: "followUp"`). Editing would overwrite the LFG post for
+ * everyone.
+ */
+function refuse(
+  interaction: ButtonInteraction,
+  title: string,
+  next: string,
+): Promise<boolean> {
+  return replyWithError(interaction, { title, next, whenDeferred: "followUp" });
 }
 
 export async function handleLfgButton(
@@ -43,7 +61,11 @@ export async function handleLfgButton(
 ): Promise<void> {
   const parts = interaction.customId.split("_");
   if (parts.length !== 3 || parts[0] !== "lfg" || !ACTIONS.has(parts[1])) {
-    await replyQuietly(interaction, "❌ Invalid LFG button.");
+    await refuse(
+      interaction,
+      "This LFG button is out of date",
+      "Use the newest LFG post, or start your own with `/lfg`.",
+    );
     return;
   }
 
@@ -62,9 +84,10 @@ export async function handleLfgButton(
   // when LFG is turned off, but an edit that could not go through leaves a
   // message still carrying live-looking buttons. They must not still work.
   if (!(await ConfigService.getInstance().getBoolean("lfg.enabled", false))) {
-    await replyQuietly(
+    await refuse(
       interaction,
-      "❌ LFG is switched off on this server, so this post is no longer active.",
+      "LFG is switched off on this server",
+      "This post is no longer active. Ask an admin to switch LFG on.",
     );
     return;
   }
@@ -112,9 +135,10 @@ async function handleAction(
     if (action === "join") {
       const result = await service.joinPost(postId, interaction.user.id);
       if (result.status === "closed") {
-        await replyQuietly(
+        await refuse(
           interaction,
-          "❌ This LFG post is no longer open. Start your own with `/lfg`.",
+          "This LFG post is closed",
+          "Start your own with `/lfg`.",
         );
         return;
       }
@@ -123,7 +147,11 @@ async function handleAction(
         return;
       }
       if (result.status === "full") {
-        await replyQuietly(interaction, "❌ This party is already full.");
+        await refuse(
+          interaction,
+          "This party is full",
+          "Check the post again later, or start your own with `/lfg`.",
+        );
         return;
       }
 
@@ -143,7 +171,11 @@ async function handleAction(
     if (action === "leave") {
       const result = await service.leavePost(postId, interaction.user.id);
       if (result.status === "closed") {
-        await replyQuietly(interaction, "❌ This LFG post is no longer open.");
+        await refuse(
+          interaction,
+          "This LFG post is closed",
+          "There is nothing left to leave. Start your own with `/lfg`.",
+        );
         return;
       }
       if (result.status === "host") {
@@ -165,9 +197,10 @@ async function handleAction(
 
     const result = await service.closeByHost(postId, interaction.user.id);
     if (result.status === "not_host") {
-      await replyQuietly(
+      await refuse(
         interaction,
-        "❌ Only the host can close this LFG post.",
+        "Only the host can close this LFG post",
+        "Ask the host to press Close.",
       );
       return;
     }
@@ -178,9 +211,9 @@ async function handleAction(
     await refresh(result.post);
   } catch (error) {
     logger.error("Error handling LFG button:", error);
-    await replyQuietly(
-      interaction,
-      "❌ There was an error updating this LFG post.",
-    );
+    // A join, leave or close that already stored is repeated harmlessly
+    // (second join: already on the roster; second close: already closed), and
+    // the sweep re-renders a post whose edit failed, so "try again" is safe.
+    await replyWithUnexpectedError(interaction, { whenDeferred: "followUp" });
   }
 }

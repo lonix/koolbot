@@ -1,6 +1,8 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
 
+import { errorEmbedPayload, unexpectedErrorPayload } from "../test-utils.js";
+
 const mockIsEnabled = jest.fn<() => Promise<boolean>>();
 const mockLogWarn = jest.fn<() => Promise<unknown>>();
 const mockCountHistory = jest.fn<() => Promise<number>>();
@@ -55,7 +57,13 @@ function makeInteraction(
     replied: false,
     deferred: false,
     reply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    deferReply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    // Like discord.js: deferring marks the interaction, which is what makes a
+    // failure answer edit the deferred reply instead of replying again.
+    deferReply: jest
+      .fn<() => Promise<void>>()
+      .mockImplementation(async function (this: unknown) {
+        (this as { deferred: boolean }).deferred = true;
+      }),
     editReply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
   } as unknown as MockInteraction;
 }
@@ -169,9 +177,12 @@ describe("Warn Command", () => {
         flags: MessageFlags.Ephemeral,
       });
       expect(mockLogWarn).not.toHaveBeenCalled();
-      expect(interaction.editReply).toHaveBeenCalledWith({
-        content: "The moderation log is currently disabled.",
-      });
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "The moderation log is off",
+          description: expect.stringContaining("turn it on"),
+        }),
+      );
     });
 
     it.each([
@@ -207,9 +218,28 @@ describe("Warn Command", () => {
 
       expect(interaction.reply).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: "There was an error recording the warning.",
+        unexpectedErrorPayload(),
+      );
+    });
+
+    // logWarn() inserts a new entry on every call, so once it has succeeded the
+    // reply must not tell the moderator to try again.
+    it("says the warning was recorded, with no retry advice, when only the follow-up read fails", async () => {
+      mockLogWarn.mockResolvedValue({});
+      mockCountHistory.mockRejectedValue(new Error("boom"));
+      const interaction = makeInteraction();
+
+      await execute(interaction);
+
+      expect(mockLogWarn).toHaveBeenCalledTimes(1);
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "The warning was recorded",
+          description: expect.stringContaining("`/modlog`"),
         }),
+      );
+      expect(JSON.stringify(interaction.editReply.mock.calls)).not.toMatch(
+        /Try again/i,
       );
     });
   });
@@ -225,8 +255,9 @@ describe("Warn Command", () => {
     expect(interaction.deferReply).not.toHaveBeenCalled();
     expect(mockLogWarn).not.toHaveBeenCalled();
     expect(interaction.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: "Please give a reason for the warning.",
+      errorEmbedPayload({
+        title: "Couldn't warn that member",
+        description: "Give a reason for the warning, then try again.",
       }),
     );
   });

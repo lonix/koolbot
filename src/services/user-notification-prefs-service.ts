@@ -107,6 +107,28 @@ export class UserNotificationPrefsService {
   }
 
   /**
+   * Like {@link getPrefsWithTimezone}, but a failed read throws instead of
+   * collapsing to defaults, so a display (the `/me/` overview cards) can leave
+   * a value out rather than show "everything off". A missing row still gives
+   * the defaults. Senders keep using the fail-closed method above.
+   */
+  public async getPrefsWithTimezoneStrict(
+    userId: string,
+    guildId: string,
+  ): Promise<{ prefs: NotificationPrefs; timezone: string | null }> {
+    if (!userId || !guildId) {
+      return { prefs: { ...DEFAULT_PREFS }, timezone: null };
+    }
+    const row = await UserNotificationPrefs.findOne({ userId, guildId });
+    if (!row) return { prefs: { ...DEFAULT_PREFS }, timezone: null };
+    const tz =
+      typeof row.timezone === "string" && row.timezone.length > 0
+        ? row.timezone
+        : null;
+    return { prefs: rowToPrefs(row), timezone: tz };
+  }
+
+  /**
    * Apply a partial update. Only keys present in `patch` are written;
    * absent keys keep their prior stored value (or default if no row
    * existed). The merged result is returned so callers can render the

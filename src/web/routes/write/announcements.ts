@@ -16,15 +16,124 @@ import { recordAudit } from "../../audit.js";
 import {
   flashRedirect,
   getString,
+  getRawString,
   getCheckbox,
   normalizeCron,
   validCron,
   parseHexColor,
   requireSessionContext,
   asyncHandler,
+  refuseForm,
   TEXT_LIMITS,
-  firstLengthError,
 } from "./helpers.js";
+import {
+  addFieldError,
+  type FormErrors,
+  type FormValues,
+} from "../../form-errors.js";
+import {
+  ANNOUNCEMENT_CREATE_FORM,
+  ANNOUNCEMENT_ONCE_FORM,
+} from "../../admin-views.js";
+
+const PAGE = "/admin/announcements";
+
+/** What the create and one-off forms submit, checked field by field (#1517). */
+export function checkAnnouncementForm(
+  req: Parameters<typeof getString>[0],
+  withCron: boolean,
+): {
+  errors: FormErrors;
+  values: FormValues;
+  channelId: string;
+  cron: string;
+  message: string;
+  placeholders: boolean;
+  embedData: IScheduledAnnouncement["embedData"] | undefined;
+} {
+  const channelId = getString(req, "channelId");
+  const cron = normalizeCron(getString(req, "cron"));
+  const message = getString(req, "message");
+  const placeholders = getCheckbox(req, "placeholders");
+  const embedTitle = getString(req, "embedTitle");
+  const embedDescription = getString(req, "embedDescription");
+  const embedColorHex = getString(req, "embedColor");
+
+  const errors: FormErrors = {};
+  if (!channelId) addFieldError(errors, "channelId", "Pick a channel.");
+  if (withCron) {
+    if (!cron) {
+      addFieldError(
+        errors,
+        "cron",
+        "Enter a cron expression, for example 0 9 * * *.",
+      );
+    } else if (!validCron(cron)) {
+      addFieldError(
+        errors,
+        "cron",
+        "Not a valid cron expression. Use five fields (minute hour day-of-month month day-of-week), for example 0 9 * * *.",
+      );
+    }
+  }
+  if (!message) {
+    addFieldError(errors, "message", "Enter the message to post.");
+  }
+  // Reject oversized text up front so the operator gets a readable message
+  // rather than a Discord rejection at send time or a Mongoose error (#508).
+  for (const [name, value, max] of [
+    ["message", message, TEXT_LIMITS.announcementMessage],
+    ["embedTitle", embedTitle, TEXT_LIMITS.embedTitle],
+    ["embedDescription", embedDescription, TEXT_LIMITS.embedDescription],
+  ] as const) {
+    if (value.length > max) {
+      addFieldError(errors, name, `At most ${max} characters.`);
+    }
+  }
+  let color: number | undefined;
+  if (embedColorHex) {
+    const parsed = parseHexColor(embedColorHex);
+    if (parsed === null) {
+      addFieldError(
+        errors,
+        "embedColor",
+        "Use six hex digits, for example #5865F2.",
+      );
+    } else {
+      color = parsed;
+    }
+  }
+
+  const embedData: IScheduledAnnouncement["embedData"] | undefined =
+    embedTitle || embedDescription || embedColorHex
+      ? {
+          title: embedTitle || undefined,
+          description: embedDescription || undefined,
+          color,
+        }
+      : undefined;
+  // Echoed exactly as typed (not trimmed), so a draft with indentation or blank
+  // lines comes back unchanged; the trimmed variables above are what is
+  // validated and saved.
+  const values: FormValues = {
+    channelId,
+    message: getRawString(req, "message"),
+    placeholders: placeholders ? "1" : "",
+    embedTitle: getRawString(req, "embedTitle"),
+    embedDescription: getRawString(req, "embedDescription"),
+    embedColor: getRawString(req, "embedColor"),
+  };
+  if (withCron) values.cron = getRawString(req, "cron");
+  return {
+    errors,
+    values,
+    channelId,
+    cron,
+    message,
+    placeholders,
+    embedData,
+  };
+}
 
 export function createAnnouncementsRouter(client: Client): Router {
   const router = Router();
@@ -37,75 +146,18 @@ export function createAnnouncementsRouter(client: Client): Router {
     "/announcements/create",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
-      const channelId = getString(req, "channelId");
-      const cron = normalizeCron(getString(req, "cron"));
-      const message = getString(req, "message");
-      const placeholders = getCheckbox(req, "placeholders");
-      const embedTitle = getString(req, "embedTitle");
-      const embedDescription = getString(req, "embedDescription");
-      const embedColorHex = getString(req, "embedColor");
-
-      if (!channelId || !cron || !message) {
-        flashRedirect(res, "/admin/announcements", {
-          type: "err",
-          text: "Channel, cron and message are all required.",
-        });
+      const form = checkAnnouncementForm(req, true);
+      if (
+        await refuseForm(req, res, {
+          page: PAGE,
+          formId: ANNOUNCEMENT_CREATE_FORM,
+          errors: form.errors,
+          values: form.values,
+        })
+      ) {
         return;
       }
-      if (!validCron(cron)) {
-        flashRedirect(res, "/admin/announcements", {
-          type: "err",
-          text: `Invalid cron expression: ${cron}`,
-        });
-        return;
-      }
-      // Reject oversized text up front so the operator gets a readable flash
-      // rather than a Discord rejection at send time or a Mongoose error (#508).
-      const lengthError = firstLengthError([
-        {
-          label: "Message",
-          value: message,
-          max: TEXT_LIMITS.announcementMessage,
-        },
-        {
-          label: "Embed title",
-          value: embedTitle,
-          max: TEXT_LIMITS.embedTitle,
-        },
-        {
-          label: "Embed description",
-          value: embedDescription,
-          max: TEXT_LIMITS.embedDescription,
-        },
-      ]);
-      if (lengthError) {
-        flashRedirect(res, "/admin/announcements", {
-          type: "err",
-          text: lengthError,
-        });
-        return;
-      }
-
-      let embedData: IScheduledAnnouncement["embedData"] | undefined;
-      if (embedTitle || embedDescription || embedColorHex) {
-        let color: number | undefined;
-        if (embedColorHex) {
-          const parsed = parseHexColor(embedColorHex);
-          if (parsed === null) {
-            flashRedirect(res, "/admin/announcements", {
-              type: "err",
-              text: `Invalid hex colour: ${embedColorHex}`,
-            });
-            return;
-          }
-          color = parsed;
-        }
-        embedData = {
-          title: embedTitle || undefined,
-          description: embedDescription || undefined,
-          color,
-        };
-      }
+      const { channelId, cron, message, placeholders, embedData } = form;
 
       const service = ScheduledAnnouncementService.getInstance(client);
       try {
@@ -264,66 +316,18 @@ export function createAnnouncementsRouter(client: Client): Router {
     "/announcements/post-once",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
-      const channelId = getString(req, "channelId");
-      const message = getString(req, "message");
-      const placeholders = getCheckbox(req, "placeholders");
-      const embedTitle = getString(req, "embedTitle");
-      const embedDescription = getString(req, "embedDescription");
-      const embedColorHex = getString(req, "embedColor");
-
-      if (!channelId || !message) {
-        flashRedirect(res, "/admin/announcements", {
-          type: "err",
-          text: "Channel and message are both required.",
-        });
+      const form = checkAnnouncementForm(req, false);
+      if (
+        await refuseForm(req, res, {
+          page: PAGE,
+          formId: ANNOUNCEMENT_ONCE_FORM,
+          errors: form.errors,
+          values: form.values,
+        })
+      ) {
         return;
       }
-      // Reject oversized text up front, mirroring the create route (#508).
-      const lengthError = firstLengthError([
-        {
-          label: "Message",
-          value: message,
-          max: TEXT_LIMITS.announcementMessage,
-        },
-        {
-          label: "Embed title",
-          value: embedTitle,
-          max: TEXT_LIMITS.embedTitle,
-        },
-        {
-          label: "Embed description",
-          value: embedDescription,
-          max: TEXT_LIMITS.embedDescription,
-        },
-      ]);
-      if (lengthError) {
-        flashRedirect(res, "/admin/announcements", {
-          type: "err",
-          text: lengthError,
-        });
-        return;
-      }
-
-      let embedData: IScheduledAnnouncement["embedData"] | undefined;
-      if (embedTitle || embedDescription || embedColorHex) {
-        let color: number | undefined;
-        if (embedColorHex) {
-          const parsed = parseHexColor(embedColorHex);
-          if (parsed === null) {
-            flashRedirect(res, "/admin/announcements", {
-              type: "err",
-              text: `Invalid hex colour: ${embedColorHex}`,
-            });
-            return;
-          }
-          color = parsed;
-        }
-        embedData = {
-          title: embedTitle || undefined,
-          description: embedDescription || undefined,
-          color,
-        };
-      }
+      const { channelId, message, placeholders, embedData } = form;
 
       const service = ScheduledAnnouncementService.getInstance(client);
       try {

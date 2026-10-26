@@ -34,6 +34,7 @@ import {
   type EventGroupSetup,
 } from "../services/event-groups.js";
 import { validateEventForm } from "./event-form.js";
+import type { EventFormField } from "./event-field-errors.js";
 import { parseEventWhen, plannedStartFor } from "./event-when.js";
 import { recordAudit, type AuditEntry } from "./audit.js";
 import { hostPanelPath } from "./host-panel-shared.js";
@@ -67,7 +68,12 @@ export type CreateEventResult =
       impromptu: boolean;
       started: boolean;
     }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      /** The form field the refusal is about; absent for one that is not (the open-event cap, a Discord failure). */
+      field?: EventFormField;
+    };
 
 function field(body: Record<string, unknown>, name: string): string {
   const raw = body[name];
@@ -171,7 +177,13 @@ async function createEventUnlocked(
     (opts.audit ?? recordAudit)(session, entry);
 
   const when = parseEventWhen(field(body, "when"));
-  if (!when) return { ok: false, error: "Invalid choice for when." };
+  if (!when) {
+    return {
+      ok: false,
+      error: "Pick when the event starts.",
+      field: "when",
+    };
+  }
 
   // The per-host cap (#1408). `capLimit` was resolved by the caller, which
   // holds the host's lock from here to the insert, so two overlapping requests
@@ -247,7 +259,13 @@ async function createEventUnlocked(
     },
     { requireFuture: true, ...(startOverride ? { startOverride } : {}) },
   );
-  if (!parsed.ok) return { ok: false, error: parsed.error };
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      error: parsed.error,
+      ...(parsed.field ? { field: parsed.field } : {}),
+    };
+  }
   const { title, description, startTime, timezone, durationMinutes } =
     parsed.value;
   const config = ConfigService.getInstance();
@@ -279,7 +297,11 @@ async function createEventUnlocked(
       ...(resolvePreset ? { resolvePreset } : {}),
     });
     if (!result.ok) {
-      return { ok: false, error: `Groups: ${result.errors.join(" ")}` };
+      return {
+        ok: false,
+        error: `Groups: ${result.errors.join(" ")}`,
+        field: "groups",
+      };
     }
     groups = result.setup;
   }

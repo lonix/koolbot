@@ -14,6 +14,7 @@ jest.mock("../../src/services/voice-channel-manager.js");
 // Import after mocks
 import { VoiceChannelManager } from "../../src/services/voice-channel-manager.js";
 import { handleVCControlButton } from "../../src/handlers/vc-control-button-handler.js";
+import { errorEmbedPayload, unexpectedErrorPayload } from "../test-utils.js";
 
 const mockVoiceChannelManager = VoiceChannelManager as jest.Mocked<
   typeof VoiceChannelManager
@@ -122,10 +123,19 @@ describe("VCControlButtonHandler", () => {
         id: "owner-id",
         displayName: "OwnerUser",
       } as any,
-      reply: jest.fn().mockResolvedValue(undefined),
-      deferReply: jest.fn().mockResolvedValue(undefined),
+      // Like discord.js, acknowledging flips the state that decides whether a
+      // failure is a fresh reply or an edit of the deferred response (#1510).
+      replied: false,
+      deferred: false,
+      reply: jest.fn(async () => {
+        (mockInteraction as any).replied = true;
+      }),
+      deferReply: jest.fn(async () => {
+        (mockInteraction as any).deferred = true;
+      }),
       deferUpdate: jest.fn().mockResolvedValue(undefined),
       editReply: jest.fn().mockResolvedValue(undefined),
+      followUp: jest.fn().mockResolvedValue(undefined),
       guild: mockGuild as Guild,
       message: {
         edit: jest.fn().mockResolvedValue(undefined),
@@ -144,8 +154,9 @@ describe("VCControlButtonHandler", () => {
       await handleVCControlButton(mockInteraction as ButtonInteraction);
 
       expect(mockInteraction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: expect.stringContaining("Only the current channel owner"),
+        errorEmbedPayload({
+          title: "Only the room owner can use these controls",
+          description: expect.stringContaining("start your own room"),
         }),
       );
     });
@@ -161,8 +172,9 @@ describe("VCControlButtonHandler", () => {
       await handleVCControlButton(mockInteraction as ButtonInteraction);
 
       expect(mockInteraction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: expect.stringContaining("Only the current channel owner"),
+        errorEmbedPayload({
+          title: "Only the room owner can use these controls",
+          description: expect.stringContaining("start your own room"),
         }),
       );
       expect(mockManagerInstance.createWaitingRoom).not.toHaveBeenCalled();
@@ -213,9 +225,12 @@ describe("VCControlButtonHandler", () => {
       expect(
         (mockChannel.permissionOverwrites as any).delete,
       ).not.toHaveBeenCalled();
-      expect(mockInteraction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: expect.stringContaining("current channel owner"),
+      // privacy is a locked action: the click was deferred, so the refusal
+      // edits the ephemeral reply.
+      expect(mockInteraction.deferReply).toHaveBeenCalled();
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "Only the room owner can use these controls",
         }),
       );
     });
@@ -276,6 +291,121 @@ describe("VCControlButtonHandler", () => {
     });
   });
 
+  describe("Failure replies (#1510)", () => {
+    it("edits the deferred reply with the generic embed when a locked action throws", async () => {
+      mockManagerInstance.toggleLive.mockRejectedValue(new Error("db down"));
+      mockInteraction.customId = "vc_control_live_channel-id_owner-id";
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        unexpectedErrorPayload(),
+      );
+      expect(mockInteraction.reply).not.toHaveBeenCalled();
+    });
+
+    it("makes no retry promise when the owner overwrite fails after the @everyone deny", async () => {
+      (mockGuild as any).roles = { everyone: { id: "everyone-role-id" } };
+      const create = (mockChannel.permissionOverwrites as any)
+        .create as jest.Mock;
+      create
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("Missing Permissions"));
+      mockInteraction.customId = "vc_control_privacy_channel-id_owner-id";
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(create).toHaveBeenCalledTimes(2);
+      const sent = (mockInteraction.editReply as jest.Mock).mock.calls
+        .map(
+          (c) =>
+            (
+              c[0] as {
+                embeds?: { data: { title: string; description: string } }[];
+              }
+            ).embeds?.[0]?.data,
+        )
+        .filter(Boolean);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.title).toMatch(/private/i);
+      expect(sent[0]!.description).toMatch(/check the room's permissions/i);
+      expect(`${sent[0]!.title} ${sent[0]!.description}`).not.toMatch(
+        /try again/i,
+      );
+    });
+
+    it("keeps the generic reply when the first privacy write fails (nothing changed)", async () => {
+      (mockGuild as any).roles = { everyone: { id: "everyone-role-id" } };
+      const create = (mockChannel.permissionOverwrites as any)
+        .create as jest.Mock;
+      create.mockRejectedValueOnce(new Error("Missing Permissions"));
+      mockInteraction.customId = "vc_control_privacy_channel-id_owner-id";
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        unexpectedErrorPayload(),
+      );
+    });
+
+    it("answers an unknown action as out of date, not as an internal state", async () => {
+      mockInteraction.customId = "vc_control_bogus_channel-id_owner-id";
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "This control is out of date",
+          description: "Use the newest controls in your channel.",
+        }),
+      );
+    });
+
+    it("answers a custom id it cannot read as out of date", async () => {
+      mockInteraction.customId = "vc_control_live";
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        errorEmbedPayload({ title: "This control is out of date" }),
+      );
+    });
+
+    it("says the room is gone when its channel no longer exists", async () => {
+      (mockGuild.channels!.fetch as jest.Mock).mockResolvedValue(null);
+      mockInteraction.customId = "vc_control_live_channel-id_owner-id";
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({ title: "This voice channel is gone" }),
+      );
+    });
+
+    it("names the member in the description, never the title, when a move fails", async () => {
+      mockManagerInstance.getWaitingRoom.mockReturnValue("waiting-room-id");
+      mockInteraction.customId =
+        "vc_control_letin_channel-id_waiting-user-id_owner-id";
+      (mockGuild.members!.fetch as jest.Mock).mockResolvedValue({
+        id: "waiting-user-id",
+        voice: {
+          channelId: "waiting-room-id",
+          setChannel: jest.fn().mockRejectedValue(new Error("Missing Access")),
+        },
+      });
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "Couldn't move that member into your room",
+          description: expect.stringContaining("<@waiting-user-id>"),
+        }),
+      );
+    });
+  });
+
   describe("Live toggle", () => {
     it("should delegate to manager.toggleLive and report LIVE when going live", async () => {
       mockManagerInstance.toggleLive.mockResolvedValue(true);
@@ -284,7 +414,7 @@ describe("VCControlButtonHandler", () => {
       await handleVCControlButton(mockInteraction as ButtonInteraction);
 
       expect(mockManagerInstance.toggleLive).toHaveBeenCalledWith(mockChannel);
-      expect(mockInteraction.reply).toHaveBeenCalledWith(
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
         expect.objectContaining({ content: expect.stringContaining("LIVE") }),
       );
     });
@@ -296,7 +426,7 @@ describe("VCControlButtonHandler", () => {
       await handleVCControlButton(mockInteraction as ButtonInteraction);
 
       expect(mockManagerInstance.toggleLive).toHaveBeenCalledWith(mockChannel);
-      expect(mockInteraction.reply).toHaveBeenCalledWith(
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
         expect.objectContaining({
           content: expect.stringContaining("offline"),
         }),
@@ -315,7 +445,7 @@ describe("VCControlButtonHandler", () => {
         mockChannel,
         "owner-id",
       );
-      expect(mockInteraction.reply).toHaveBeenCalledWith(
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
         expect.objectContaining({
           content: expect.stringContaining("Waiting room"),
         }),
@@ -333,7 +463,7 @@ describe("VCControlButtonHandler", () => {
       expect(mockManagerInstance.removeWaitingRoom).toHaveBeenCalledWith(
         "channel-id",
       );
-      expect(mockInteraction.reply).toHaveBeenCalledWith(
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
         expect.objectContaining({
           content: expect.stringContaining("removed"),
         }),
@@ -353,8 +483,9 @@ describe("VCControlButtonHandler", () => {
       await handleVCControlButton(mockInteraction as ButtonInteraction);
 
       expect(mockInteraction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: expect.stringContaining("Only the channel owner"),
+        errorEmbedPayload({
+          title: "Only the room owner can let people in",
+          description: expect.stringContaining("start your own room"),
         }),
       );
     });
@@ -371,10 +502,8 @@ describe("VCControlButtonHandler", () => {
 
       await handleVCControlButton(mockInteraction as ButtonInteraction);
 
-      expect(mockInteraction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: expect.stringContaining("current owner"),
-        }),
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({ title: "Only the room owner can let people in" }),
       );
     });
 
@@ -387,9 +516,10 @@ describe("VCControlButtonHandler", () => {
 
       await handleVCControlButton(mockInteraction as ButtonInteraction);
 
-      expect(mockInteraction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: expect.stringContaining("waiting room"),
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "The waiting room is gone",
+          description: expect.stringContaining("create a new one"),
         }),
       );
     });

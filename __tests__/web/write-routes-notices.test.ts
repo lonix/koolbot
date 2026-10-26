@@ -24,6 +24,7 @@ import {
   parseFlashRedirect,
   type AdminHarness,
 } from "./admin-harness.js";
+import { refusal } from "./refused-form-test-utils.js";
 
 const mockRecordAudit = jest.fn(async () => undefined);
 const mockConfigGetBoolean = jest.fn<() => Promise<boolean>>();
@@ -102,6 +103,8 @@ const { createNoticesRouter } =
   await import("../../src/web/routes/write/notices.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
+const { registerFormPage } = await import("../../src/web/form-pages.js");
+const { renderNoticesPage } = await import("../../src/web/admin-views.js");
 
 const client = { user: { id: "bot" } } as unknown as Client;
 const session = createTestSession();
@@ -109,8 +112,59 @@ let harness: AdminHarness;
 
 const VALID = { title: "Welcome", content: "Read me", category: "general" };
 
+// The read router registers the page's renderer in the app (#1520); here the
+// real view stands in, with one stored notice to edit, so a refusal is checked
+// as the markup the person gets.
+const registerPage = (): void =>
+  registerFormPage("/admin/notices", async (_req, refused) =>
+    renderNoticesPage({
+      guildId: "guild-1",
+      csrfToken: "csrf",
+      remainingMs: 1000,
+      navFeatureStatus: {},
+      enabled: true,
+      channel: null,
+      total: 1,
+      settingRows: [],
+      textChannels: [],
+      categoryOptions: [
+        { value: "general", label: "General" },
+        { value: "rules", label: "Rules" },
+      ],
+      groups: [
+        {
+          category: "general",
+          rows: [
+            {
+              id: "notice-1",
+              order: 3,
+              title: "Stored title",
+              content: "Stored text",
+              preview: "Stored text",
+              category: "general",
+              messageId: "m1",
+              updatedAt: "2026-01-01",
+            },
+            {
+              id: "notice-2",
+              order: 4,
+              title: "Other title",
+              content: "Other text",
+              preview: "Other text",
+              category: "rules",
+              messageId: "m2",
+              updatedAt: "2026-01-01",
+            },
+          ],
+        },
+      ],
+      refusedForm: refused,
+    }),
+  );
+
 beforeEach(async () => {
   jest.clearAllMocks();
+  registerPage();
   created.length = 0;
   mockConfigGetBoolean.mockResolvedValue(false);
   mockPostNotice.mockResolvedValue("message-1");
@@ -138,25 +192,55 @@ function lastAudit(): Record<string, unknown> {
 
 describe("POST /notices/create", () => {
   it.each([
-    ["title", { content: "c", category: "general" }],
-    ["content", { title: "t", category: "general" }],
-    ["category", { title: "t", content: "c" }],
-  ])("rejects a submission missing %s", async (_field, body) => {
-    const res = await harness.post("/notices/create", body);
-    const flash = parseFlashRedirect(res.headers.get("location"));
-    expect(flash.path).toBe("/admin/notices");
-    expect(flash.type).toBe("err");
-    expect(flash.msg).toBe("Title, content, and category are all required.");
-    expect(created).toHaveLength(0);
+    ["title", { content: "c", category: "general" }, "Enter a title."],
+    ["content", { title: "t", category: "general" }, "Enter the notice text."],
+    ["category", { title: "t", content: "c" }, "Choose a category."],
+  ])(
+    "marks a submission missing %s and says what to enter",
+    async (field, body, message) => {
+      const res = await harness.post("/notices/create", body);
+      const r = await refusal(res);
+      expect(r.invalidIds).toEqual([`notice-create-${field}`]);
+      expect(r.errorLines[`notice-create-${field}-error`]).toBe(message);
+      expect(created).toHaveLength(0);
+      expect(mockRecordAudit).not.toHaveBeenCalled();
+    },
+  );
+
+  it("marks every refused field, in page order, and keeps the valid ones", async () => {
+    const res = await harness.post("/notices/create", {
+      title: "",
+      content: "Read me",
+      category: "gossip",
+      order: "x",
+    });
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual([
+      "notice-create-title",
+      "notice-create-category",
+      "notice-create-order",
+    ]);
+    expect(r.errorLines["notice-create-category-error"]).toBe(
+      "Choose one of the listed categories.",
+    );
+    expect(r.errorLines["notice-create-order-error"]).toBe(
+      "Use a whole number from -1000 to 10000.",
+    );
+    expect(r.html).toContain("\nRead me</textarea>");
+    expect(r.html).toContain('value="x"');
   });
 
-  it("rejects a title past the Discord embed-title cap", async () => {
+  it("rejects a title past the Discord embed-title cap and keeps it", async () => {
     const res = await harness.post("/notices/create", {
       ...VALID,
       title: "t".repeat(257),
     });
-    const flash = parseFlashRedirect(res.headers.get("location"));
-    expect(flash.msg).toBe("Title must be 256 characters or fewer.");
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["notice-create-title"]);
+    expect(r.errorLines["notice-create-title-error"]).toBe(
+      "At most 256 characters.",
+    );
+    expect(r.html).toContain(`value="${"t".repeat(257)}"`);
     expect(created).toHaveLength(0);
   });
 
@@ -165,29 +249,48 @@ describe("POST /notices/create", () => {
       ...VALID,
       content: "c".repeat(4001),
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
-      "Content must be 4000 characters or fewer.",
+    const r = await refusal(res);
+    expect(r.errorLines["notice-create-content-error"]).toBe(
+      "At most 4000 characters.",
     );
   });
 
-  it("rejects an unknown category", async () => {
+  it("keeps the typed text as typed, with its blank lines and spaces", async () => {
     const res = await harness.post("/notices/create", {
-      ...VALID,
+      title: "  Hi  ",
+      content: "\n\nBody  ",
       category: "gossip",
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
-      "Unknown category: gossip.",
-    );
+    const r = await refusal(res);
+    expect(r.html).toContain('value="  Hi  "');
+    // The refused text starts with a newline of its own, which the HTML parser
+    // drops, so the leading blank lines come back.
+    expect(r.html).toContain("</textarea>");
+    expect(r.html).toMatch(/<textarea[^>]*>\n\n\nBody {2}<\/textarea>/);
+  });
+
+  it("keeps the chosen category when another field is refused", async () => {
+    const res = await harness.post("/notices/create", {
+      ...VALID,
+      category: "rules",
+      order: "99999",
+    });
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["notice-create-order"]);
+    expect(r.html).toContain('<option value="rules" selected>');
     expect(created).toHaveLength(0);
   });
 
-  it("rejects an out-of-range order", async () => {
-    const res = await harness.post("/notices/create", {
-      ...VALID,
-      order: "99999",
+  it("falls back to a flash when the page cannot be drawn", async () => {
+    registerFormPage("/admin/notices", async () => {
+      throw new Error("page down");
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
-      "between -1000 and 10000",
+    const res = await harness.post("/notices/create", { ...VALID, order: "x" });
+    expect(res.status).toBe(303);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/notices");
+    expect(flash.msg).toBe(
+      "Not saved. Use a whole number from -1000 to 10000.",
     );
   });
 
@@ -277,11 +380,76 @@ describe("POST /notices/:id/update", () => {
   });
 
   it("requires an order on update (unlike create, which defaults to 0)", async () => {
+    mockNoticeFindById.mockResolvedValue(storedNotice());
     const res = await harness.post("/notices/notice-1/update", VALID);
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
-      "between -1000 and 10000",
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["notice-edit-notice-1-order"]);
+    expect(r.errorLines["notice-edit-notice-1-order-error"]).toBe(
+      "Use a whole number from -1000 to 10000.",
     );
-    expect(mockNoticeFindById).not.toHaveBeenCalled();
+    expect(mockNoticeSave).not.toHaveBeenCalled();
+  });
+
+  it("reopens only the refused notice's form and keeps what was typed there", async () => {
+    mockNoticeFindById.mockResolvedValue(storedNotice());
+    const res = await harness.post("/notices/notice-1/update", {
+      title: "",
+      content: "New text",
+      category: "rules",
+      order: "7",
+    });
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["notice-edit-notice-1-title"]);
+    expect(r.errorLines["notice-edit-notice-1-title-error"]).toBe(
+      "Enter a title.",
+    );
+    // One details element is open: the refused row's. The other row keeps its
+    // stored values.
+    expect(
+      r.html.match(/<details class="helper edit-details" open>/g),
+    ).toHaveLength(1);
+    expect(r.html.match(/<details class="helper edit-details">/g)).toHaveLength(
+      1,
+    );
+    expect(r.html).toContain("\nNew text</textarea>");
+    expect(r.html).toContain('<option value="rules" selected>');
+    expect(r.html).toContain('value="7"');
+    expect(r.html).toContain('value="Other title"');
+    expect(mockNoticeSave).not.toHaveBeenCalled();
+  });
+
+  it("answers the not-found flash when a refused notice has been deleted", async () => {
+    mockNoticeFindById.mockResolvedValue(null);
+    const res = await harness.post("/notices/notice-1/update", {
+      ...VALID,
+      order: "x",
+    });
+    expect(res.status).toBe(303);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toBe("Notice notice-1 not found.");
+  });
+
+  it("still answers the refusal when the existence lookup fails", async () => {
+    mockNoticeFindById.mockRejectedValue(new Error("db down"));
+    const res = await harness.post("/notices/notice-1/update", {
+      ...VALID,
+      order: "x",
+    });
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["notice-edit-notice-1-order"]);
+  });
+
+  it("falls back to a flash when the lookup fails and the page does not hold the form", async () => {
+    mockNoticeFindById.mockRejectedValue(new Error("db down"));
+    const res = await harness.post("/notices/other/update", {
+      ...VALID,
+      order: "x",
+    });
+    expect(res.status).toBe(303);
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
+      "Not saved. Use a whole number from -1000 to 10000.",
+    );
   });
 
   it("updates without touching the channel while the feature is off", async () => {

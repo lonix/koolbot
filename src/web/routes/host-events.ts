@@ -47,7 +47,8 @@ import { boundAuditEntry, recordAudit, type AuditEntry } from "../audit.js";
 import { readMeSurfaceFlags } from "../me-surfaces.js";
 import { renderUserPage, type UserFlashMessage } from "../user-layout.js";
 import { formatInTimeZone } from "date-fns-tz";
-import { resolveTimezone } from "../../utils/timezone.js";
+import { formatDateTimeInZone, resolveTimezone } from "../../utils/timezone.js";
+import { readMemberZone } from "../member-timezone.js";
 import {
   EDIT_MESSAGES,
   editModeOf,
@@ -59,6 +60,7 @@ import {
 } from "../../services/event-edit.js";
 import {
   renderEventEditBody,
+  type EventEditRefused,
   type EventEditCover,
 } from "../event-edit-view.js";
 import {
@@ -222,6 +224,8 @@ export interface HostSectionContext {
   session: WebSessionContext;
   csrfToken: string;
   actionPath: (name: string) => string;
+  /** The member's own zone, read once per request (#1538). */
+  zone: string;
 }
 
 /**
@@ -255,7 +259,7 @@ function forbidden(res: Response): void {
       renderErrorPage({
         title: "Forbidden",
         heading: "Forbidden",
-        product: "Koolbot",
+        product: "KoolBot",
         bodyHtml:
           `<p>This event is not yours to host, or it does not exist. ` +
           `Back to <a href="/me/events">your events</a>.</p>`,
@@ -972,6 +976,7 @@ function describeEdit(details: Record<string, unknown>): string {
 async function recentLeaderEdits(
   client: Client,
   event: IEvent,
+  zone: string,
 ): Promise<LeaderEditView[]> {
   const edits: LeaderEditView[] = [];
   try {
@@ -986,7 +991,7 @@ async function recentLeaderEdits(
       .lean();
     for (const r of rows) {
       edits.push({
-        at: new Date(r.createdAt).toISOString(),
+        at: formatDateTimeInZone(new Date(r.createdAt), zone),
         who: cachedMemberName(client, event.guildId, r.discordUserId),
         text: describeEdit((r.details ?? {}) as Record<string, unknown>),
       });
@@ -1237,7 +1242,7 @@ async function buildSettingsView(
       hasGroups && fresh.captainsEnabled === true
         ? {
             leaderLabel: fresh.leaderLabel || "Leader",
-            edits: await recentLeaderEdits(client, fresh),
+            edits: await recentLeaderEdits(client, fresh, ctx.zone),
           }
         : undefined,
     groups: hasGroups
@@ -1475,7 +1480,11 @@ function registerSettingsActions(router: Router, client: Client): void {
   );
 }
 
-function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
+function toPanelEvent(
+  client: Client,
+  event: IEvent,
+  zone: string,
+): HostPanelEvent {
   const channelId = event.channelId ?? null;
   const channel = channelId
     ? client.guilds?.cache?.get(event.guildId)?.channels?.cache?.get(channelId)
@@ -1493,7 +1502,8 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
     title: event.title,
     description: event.description ?? "",
     state: event.state,
-    when: formatEventWhen(event),
+    running: isEventRunning(event, new Date()),
+    when: formatDateTimeInZone(event.startTime, zone),
     durationMinutes: event.durationMinutes,
     recurrence: isRecurring(event) ? recurrenceLabel(event.recurrence) : null,
     channel: channelId ? (channelName ?? channelId) : null,
@@ -1663,16 +1673,94 @@ function registerEditRoutes(router: Router, client: Client): void {
     );
   const zoneOf = (event: IEvent): string => resolveTimezone(event.timezone);
 
-  router.get("/edit", (req, res, next: NextFunction) => {
+  // The form, for a fresh page (GET) and for a refused save (#1531), which is
+  // answered in the same response so what was typed is not lost. `shown` is
+  // what the form is rendered in: the stored state on GET, the posted version,
+  // mode and start fields on a refusal, so the stale-form checks still see them.
+  const sendEditForm = async (
+    req: Request,
+    res: Response,
+    shown: {
+      mode: "full" | "limited";
+      version: string;
+      startLocked: boolean;
+    },
+    refused?: EventEditRefused,
+  ): Promise<void> => {
     const { hostEvent: event, hostSession: session } = req as HostRequest;
+    const eventId = String(event._id);
+    const csrfToken = getCsrfToken(req);
+    const zone = zoneOf(event);
+    const flags = await readMeSurfaceFlags();
+    const permissionNotice = await hostPermissionNotice(
+      client,
+      event.guildId,
+      // The panel event's start line is not shown here, so the event's own
+      // zone does (#1538).
+      toPanelEvent(client, event, zone),
+      event,
+      (e) =>
+        hostEditPermissionFeatures(
+          e,
+          !!event.announcementChannelId && !!event.announcementMessageId,
+        ),
+    );
+    res
+      .set("Cache-Control", "no-store")
+      .type("text/html")
+      .send(
+        renderUserPage({
+          title: `Edit event: ${event.title}`,
+          active: "/me/events",
+          body: renderEventEditBody({
+            permissionNotice,
+            canLinkToPermissions: session.role === "admin",
+            cover: coverViewOf(event),
+            ...(session.role === "admin"
+              ? { adminEventsHref: "/admin/events" }
+              : {}),
+            event: {
+              id: eventId,
+              title: event.title,
+              description: event.description ?? "",
+              durationMinutes: event.durationMinutes,
+              timezone: zone,
+              date: formatInTimeZone(event.startTime, zone, "yyyy-MM-dd"),
+              time: formatInTimeZone(event.startTime, zone, "HH:mm"),
+              when: formatEventWhen(event),
+              version: shown.version,
+              mode: shown.mode,
+              startLocked: shown.startLocked,
+              ...(isSeriesRow(event)
+                ? {
+                    series: {
+                      cadence: isRecurring(event)
+                        ? recurrenceLabel(event.recurrence)
+                        : "regularly",
+                    },
+                  }
+                : {}),
+            },
+            csrfToken,
+            ...(refused ? { refused } : {}),
+          }),
+          csrfToken,
+          remainingMs: getDisplayedRemainingMs(session),
+          isAdmin: session.role === "admin",
+          flash: refused ? null : readSignedFlash(req.query),
+          ...flags,
+        }),
+      );
+  };
+
+  router.get("/edit", (req, res, next: NextFunction) => {
+    const { hostEvent: event } = req as HostRequest;
     const eventId = String(event._id);
     const mode = edit(event);
     if (mode.mode === "refused") {
       hostPanelRedirect(res, eventId, { type: "err", text: mode.message });
       return;
     }
-    const csrfToken = getCsrfToken(req);
-    const zone = zoneOf(event);
     void (async (): Promise<void> => {
       if (!(await service().editsAllowed())) {
         hostPanelRedirect(res, eventId, {
@@ -1684,63 +1772,11 @@ function registerEditRoutes(router: Router, client: Client): void {
       // A running Discord event keeps its start: show it as text, not a field.
       const startLocked =
         mode.mode === "full" && !(await service().startMayMove(event));
-      const flags = await readMeSurfaceFlags();
-      const permissionNotice = await hostPermissionNotice(
-        client,
-        event.guildId,
-        toPanelEvent(client, event),
-        event,
-        (e) =>
-          hostEditPermissionFeatures(
-            e,
-            !!event.announcementChannelId && !!event.announcementMessageId,
-          ),
-      );
-      res
-        .set("Cache-Control", "no-store")
-        .type("text/html")
-        .send(
-          renderUserPage({
-            title: `Edit event: ${event.title}`,
-            active: "/me/events",
-            body: renderEventEditBody({
-              permissionNotice,
-              canLinkToPermissions: session.role === "admin",
-              cover: coverViewOf(event),
-              ...(session.role === "admin"
-                ? { adminEventsHref: "/admin/events" }
-                : {}),
-              event: {
-                id: eventId,
-                title: event.title,
-                description: event.description ?? "",
-                durationMinutes: event.durationMinutes,
-                timezone: zone,
-                date: formatInTimeZone(event.startTime, zone, "yyyy-MM-dd"),
-                time: formatInTimeZone(event.startTime, zone, "HH:mm"),
-                when: formatEventWhen(event),
-                version: eventEditVersion(event, mode.mode),
-                mode: mode.mode,
-                startLocked,
-                ...(isSeriesRow(event)
-                  ? {
-                      series: {
-                        cadence: isRecurring(event)
-                          ? recurrenceLabel(event.recurrence)
-                          : "regularly",
-                      },
-                    }
-                  : {}),
-              },
-              csrfToken,
-            }),
-            csrfToken,
-            remainingMs: getDisplayedRemainingMs(session),
-            isAdmin: session.role === "admin",
-            flash: readSignedFlash(req.query),
-            ...flags,
-          }),
-        );
+      await sendEditForm(req, res, {
+        mode: mode.mode,
+        version: eventEditVersion(event, mode.mode),
+        startLocked,
+      });
     })().catch(next);
   });
 
@@ -1855,7 +1891,44 @@ function registerEditRoutes(router: Router, client: Client): void {
         { requireFuture: !startUnchanged },
       );
       if (!parsed.ok) {
-        await fail(parsed.error);
+        // A field refusal answers with the form itself (#1531): the posted
+        // values back in their fields, the refused one marked. It is rendered
+        // with the version, mode and start fields it was posted with, so the
+        // stale-form checks above still decide the next save.
+        await recordAudit(
+          session,
+          boundAuditEntry({
+            action: "event.edit",
+            targetId: eventId,
+            result: "failure",
+            errorMessage: parsed.error,
+          }),
+        );
+        res.status(422);
+        await sendEditForm(
+          req,
+          res,
+          {
+            mode: rendered,
+            version: field("version"),
+            startLocked: full && !offeredStart,
+          },
+          {
+            refusal: {
+              message: parsed.error,
+              ...(parsed.field ? { field: parsed.field } : {}),
+            },
+            values: {
+              title: full ? field("title") : event.title,
+              description: field("description"),
+              duration: field("duration"),
+              date: editStart ? date : shown.date,
+              time: editStart ? time : shown.time,
+              timezone: editStart ? timezone : zone,
+              scope: field("scope"),
+            },
+          },
+        );
         return;
       }
       let result: Awaited<ReturnType<EventService["editEvent"]>>;
@@ -2215,13 +2288,15 @@ export function createHostEventsRouter(client: Client): Router {
     const { hostEvent: event, hostSession: session } = req as HostRequest;
     const flash = readSignedFlash(req.query);
     const csrfToken = getCsrfToken(req);
-    const ctx: HostSectionContext = {
-      event,
-      session,
-      csrfToken,
-      actionPath: (action) => `${hostPanelPath(String(event._id))}/${action}`,
-    };
     void (async (): Promise<void> => {
+      const zone = await readMemberZone(session.discordUserId, session.guildId);
+      const ctx: HostSectionContext = {
+        event,
+        session,
+        csrfToken,
+        actionPath: (action) => `${hostPanelPath(String(event._id))}/${action}`,
+        zone,
+      };
       const flags = await readMeSurfaceFlags();
       const controls: Partial<Record<HostSectionId, string>> = {};
       if (hostControlsAvailable(event)) {
@@ -2232,7 +2307,7 @@ export function createHostEventsRouter(client: Client): Router {
           if (html !== undefined) controls[id] = html;
         }
       }
-      const panelEvent = toPanelEvent(client, event);
+      const panelEvent = toPanelEvent(client, event, zone);
       const permissionNotice = await hostPermissionNotice(
         client,
         event.guildId,

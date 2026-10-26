@@ -8,7 +8,7 @@ import type { IAccolade } from "../models/user-achievements.js";
 import logger from "../utils/logger.js";
 import { discordTimestamp } from "../utils/discord-time.js";
 import { NO_MENTIONS } from "../utils/allowed-mentions.js";
-import { safeReply } from "../utils/safe-reply.js";
+import { replyWithUnexpectedError } from "../utils/error-reply.js";
 import {
   clampToLimit,
   DISCORD_EMBED_FIELD_VALUE_LIMIT,
@@ -223,10 +223,8 @@ export async function execute(
     await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error in achievements command:", error);
-    // Public on purpose: once deferred, visibility is fixed and safeReply
-    // edits the public placeholder, so an ephemeral flag would be a lie.
-    await safeReply(interaction, {
-      content: "There was an error while fetching achievements!",
-    });
+    // Public on purpose: once deferred, visibility is fixed and the helper
+    // edits the public placeholder, so it does not claim to be ephemeral.
+    await replyWithUnexpectedError(interaction);
   }
 }
