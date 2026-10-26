@@ -68,6 +68,7 @@ import {
   formatDateTimeInZone,
   formatInZone,
   getServerTimezone,
+  resolveTimezone,
 } from "../utils/timezone.js";
 import {
   RewindService,
@@ -417,6 +418,8 @@ async function readPreferenceValues(
   client: Client,
   session: WebSessionContext,
   flags: Required<UserFeatureFlags>,
+  /** The member's preference row, read once by the caller; `null`: it failed. */
+  prefsRead: { prefs: NotificationPrefs; timezone: string | null } | null,
 ): Promise<Partial<Record<PreferenceValueKey, string>>> {
   const { discordUserId: userId, guildId } = session;
   const out: Partial<Record<PreferenceValueKey, string>> = {};
@@ -435,11 +438,9 @@ async function readPreferenceValues(
   };
   await Promise.all([
     attempt("notifications", async () => {
-      const { prefs, timezone } =
-        await UserNotificationPrefsService.getInstance().getPrefsWithTimezoneStrict(
-          userId,
-          guildId,
-        );
+      // A failed read (logged by the caller) leaves both lines out.
+      if (!prefsRead) return undefined;
+      const { prefs, timezone } = prefsRead;
       // The same row read gives the timezone card its value too, so it does
       // not depend on the availability read below.
       out.timezone = timezoneValue(timezone, getServerTimezone(), new Date());
@@ -749,8 +750,24 @@ export function createUserRouter(
         return;
       }
       const flags = await readUserFeatureFlags();
-      // Times and dates on this page are the member's own (#1538).
-      const zone = await readMemberZone(session.discordUserId, session.guildId);
+      // One read of the member's preference row serves the cards' values and
+      // the zone the times below are shown in (#1538). A failed read leaves
+      // the value lines out and shows the times in the server's zone.
+      let prefsRead: Awaited<
+        ReturnType<UserNotificationPrefsService["getPrefsWithTimezoneStrict"]>
+      > | null = null;
+      try {
+        prefsRead =
+          await UserNotificationPrefsService.getInstance().getPrefsWithTimezoneStrict(
+            session.discordUserId,
+            session.guildId,
+          );
+      } catch (err) {
+        logger.warn(
+          `Could not read the notification preferences for the /me overview: ${sanitizeForLog(String(err))}`,
+        );
+      }
+      const zone = resolveTimezone(prefsRead?.timezone);
       // Only hosts see the card: its links lead to `/me/events*` (#1316).
       const hostedEvents = (
         hasScope(session, "host")
@@ -777,6 +794,7 @@ export function createUserRouter(
         client,
         session,
         flags,
+        prefsRead,
       );
 
       res.type("text/html").send(

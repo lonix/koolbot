@@ -222,8 +222,10 @@ describe("createUserRouter / index page", () => {
       await import("../../src/services/user-notification-prefs-service.js");
     if (!opts.keepNotificationPrefsService) {
       jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
-        getTimezone: async () =>
-          opts.memberZone === undefined ? "UTC" : opts.memberZone,
+        getPrefsWithTimezoneStrict: async () => ({
+          prefs: { achievements: true, digest: true, rewind: true },
+          timezone: opts.memberZone === undefined ? "UTC" : opts.memberZone,
+        }),
       } as never);
     }
 
@@ -420,6 +422,68 @@ describe("createUserRouter / index page", () => {
     expect(html).toContain(
       '<p class="kb-feature__value">[AMR] {name} · 2 presets</p>',
     );
+  });
+
+  it("reads the member's preference row once for the cards and the times (#1538)", async () => {
+    const { UserNotificationPrefsService } =
+      await import("../../src/services/user-notification-prefs-service.js");
+    const getPrefsWithTimezoneStrict = jest.fn(async () => ({
+      prefs: { achievements: true, digest: true, rewind: true },
+      timezone: "Pacific/Auckland",
+    }));
+    const getTimezone = jest.fn(async () => "Pacific/Auckland");
+    jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+      getPrefsWithTimezoneStrict,
+      getTimezone,
+    } as never);
+
+    const html = await dispatchIndex("user", {
+      keepNotificationPrefsService: true,
+      hostedEvents: [
+        {
+          _id: "65a000000000000000000001",
+          title: "Quiz night",
+          startTime: new Date(Date.now() - 600_000),
+          timezone: "America/New_York",
+          state: "active",
+        },
+      ],
+    });
+    expect(html).toContain("Pacific/Auckland");
+    expect(getPrefsWithTimezoneStrict).toHaveBeenCalledTimes(1);
+    expect(getTimezone).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the server zone for the times when the preference row cannot be read (#1538)", async () => {
+    const { UserNotificationPrefsService } =
+      await import("../../src/services/user-notification-prefs-service.js");
+    const getPrefsWithTimezoneStrict = jest.fn(async () => {
+      throw new Error("db down");
+    });
+    jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+      getPrefsWithTimezoneStrict,
+    } as never);
+    const { getServerTimezone } = await import("../../src/utils/timezone.js");
+
+    const html = await dispatchIndex("user", {
+      keepNotificationPrefsService: true,
+      hostedEvents: [
+        {
+          _id: "65a000000000000000000001",
+          title: "Quiz night",
+          startTime: new Date(Date.now() - 600_000),
+          timezone: "America/New_York",
+          state: "active",
+        },
+      ],
+    });
+    expect(getPrefsWithTimezoneStrict).toHaveBeenCalledTimes(1);
+    expect(html).toContain("My preferences");
+    expect(html).toContain("Quiz night");
+    expect(html).toContain(`(${getServerTimezone()})`);
+    // The unreadable values leave their lines out, as before.
+    expect(html).not.toContain("Server default (");
+    expect(html).not.toMatch(/ now<\/p>/);
   });
 
   it("still renders the page when a value cannot be read (#1508)", async () => {
