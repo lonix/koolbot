@@ -4665,6 +4665,12 @@ export function userPages(): A11yPage[] {
           rewindEnabled: true,
           presetsEnabled: false,
           birthdayEnabled: true,
+          preferenceValues: {
+            notifications: "1 of 2 on",
+            timezone: "Europe/Oslo · 10:59 now",
+            birthday: "14 March",
+            privacy: "Tracking on",
+          },
           pollParticipation: {
             totalVotes: 12,
             thisYearVotes: 4,
@@ -4732,6 +4738,10 @@ export function userPages(): A11yPage[] {
           presetsEnabled: false,
           birthdayEnabled: false,
           privacyEnabled: false,
+          preferenceValues: {
+            notifications: "None of 1 on",
+            timezone: "Server default (UTC) · 10:59 now",
+          },
         }),
         csrfToken: COMMON.csrfToken,
         remainingMs: COMMON.remainingMs,
@@ -4741,6 +4751,41 @@ export function userPages(): A11yPage[] {
         birthdayEnabled: false,
         privacyEnabled: false,
       }),
+    },
+    {
+      name: "/me overview with a live hosted event",
+      html: shell(
+        "Overview",
+        "/me/",
+        renderUserIndexBody({
+          discordUserId: "u1",
+          guildId: "g1",
+          isAdmin: false,
+          hostedEvents: [
+            {
+              id: "65a000000000000000000002",
+              title: "Live quiz",
+              when: "2030-01-01 19:00 (UTC)",
+              state: "active",
+              running: true,
+            },
+            {
+              id: "65a000000000000000000001",
+              title: "Quiz night",
+              when: "2030-01-02 19:00 (UTC)",
+              state: "scheduled",
+              running: false,
+            },
+          ],
+          preferenceValues: {
+            notifications: "2 of 3 on",
+            timezone: "Europe/Oslo · 10:59 now",
+            voice: "Server default naming · No presets",
+            birthday: "Not set",
+            privacy: "Tracking on",
+          },
+        }),
+      ),
     },
     {
       name: "/me overview with hosted events",
@@ -4757,6 +4802,7 @@ export function userPages(): A11yPage[] {
               title: "Quiz night",
               when: "2030-01-01 19:00 (UTC)",
               state: "scheduled",
+              running: false,
             },
           ],
         }),

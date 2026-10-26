@@ -168,6 +168,21 @@ export class UserVoicePrefsService {
 
   // ---------- Name pattern ----------
 
+  /**
+   * The name pattern and how many presets the member has saved, for the
+   * `/me/` overview card. A plain read: unlike `getPrefs` it creates no row
+   * for a member who never set anything.
+   */
+  async getSummary(
+    userId: string,
+  ): Promise<{ namePattern: string | null; presetCount: number }> {
+    const prefs = await UserVoicePreferences.findOne({ userId }).lean();
+    return {
+      namePattern: prefs?.namePattern ?? null,
+      presetCount: Array.isArray(prefs?.presets) ? prefs.presets.length : 0,
+    };
+  }
+
   async getNamePattern(userId: string): Promise<string | null> {
     const prefs = await UserVoicePreferences.findOne({ userId }).lean();
     return prefs?.namePattern ?? null;

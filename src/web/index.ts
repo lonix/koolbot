@@ -289,7 +289,7 @@ export function userWebErrorHandler(
         renderErrorPage({
           title: "Forbidden",
           heading: "Forbidden",
-          product: "Koolbot",
+          product: "KoolBot",
           bodyHtml:
             `<p>That request targeted another user's data. The user self-service ` +
             `surface only lets you view and change your own. Head back to ` +

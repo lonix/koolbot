@@ -71,8 +71,8 @@ describe("design asset links and CSP", () => {
   it("links both files with the content-hash version on every page shell", () => {
     const { version } = loadDesignAssets();
     for (const [surface, product] of [
-      ["/admin", "Koolbot Admin"],
-      ["/me", "Koolbot"],
+      ["/admin", "KoolBot Admin"],
+      ["/me", "KoolBot"],
     ] as const) {
       expect(designStylesheetLinks(surface)).toBe(
         `<link rel="stylesheet" href="${surface}/_assets/tokens.css?v=${version}">` +

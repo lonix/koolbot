@@ -380,6 +380,20 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
   }
 
   /**
+   * Like {@link getBirthday}, but a failed read throws instead of reading as
+   * "not set", so the `/me/` overview can leave its value out rather than say
+   * "Not set" for a saved birthday.
+   */
+  public async getBirthdayStrict(
+    userId: string,
+    guildId: string,
+  ): Promise<StoredBirthday | null> {
+    if (!userId || !guildId) return null;
+    const row = await UserBirthday.findOne({ userId, guildId });
+    return row ? rowToStored(row) : null;
+  }
+
+  /**
    * Set a member's birthday. The month/day are validated against the
    * calendar (Feb 29 allowed); the year, when present, must be a plausible
    * four-digit value not in the future. Resets `lastAnnouncedYear` so a
