@@ -352,17 +352,26 @@ export function channelDeleteConfirmable(
   return p.channel !== null && p.verdict.ok && p.botCanManage;
 }
 
+/**
+ * The refusal of a delete (not found, not allowed, no permission) carries its
+ * dialog title, so the link upgrade (`confirm-fetch.ts`) can say the reason in
+ * a dialog with no confirm button instead of leaving the page (#1536).
+ */
+function refusal(title: string): string {
+  return ` data-confirm-refusal data-confirm-title="${escapeHtml(title)}"`;
+}
+
 export function renderChannelDeleteConfirmPage(
   p: ChannelDeleteConfirmProps,
 ): string {
   const back = `<a class="btn" href="${CHANNELS_PATH}">Back to the Channel Manager</a>`;
   let inner: string;
   if (!p.channel) {
-    inner = `<div class="notice warn" role="status">That channel no longer exists.</div><div class="actions">${back}</div>`;
+    inner = `<div class="notice warn" role="status"${refusal("Can't delete this channel")}>That channel no longer exists.</div><div class="actions">${back}</div>`;
   } else if (!p.verdict.ok) {
-    inner = `<div class="notice err" role="alert">${escapeHtml(p.verdict.message)}</div><div class="actions">${back}</div>`;
+    inner = `<div class="notice err" role="alert"${refusal(`Can't delete ${p.channel.name}`)}>${escapeHtml(p.verdict.message)}</div><div class="actions">${back}</div>`;
   } else if (!p.botCanManage) {
-    inner = `<div class="notice warn" role="status">KoolBot doesn't have the Manage Channels permission, so it can't delete anything. Grant it in Discord first.</div><div class="actions">${back}</div>`;
+    inner = `<div class="notice warn" role="status"${refusal(`Can't delete ${p.channel.name}`)}>KoolBot doesn't have the Manage Channels permission, so it can't delete anything. Grant it in Discord first.</div><div class="actions">${back}</div>`;
   } else {
     const c = p.channel;
     const what =

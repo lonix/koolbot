@@ -559,8 +559,9 @@ and member layouts) builds the dialog from it, so the title is the whole dialog 
 - A confirmation LINK (Channel manager _Delete…_, Adoption history _Restore…_, #1536) is `a[data-confirm-link="<kind>"]` to the confirmation page.
   With JavaScript the script fetches that page with GET and shows its title (`data-confirm-title` on the form), its `data-confirm-item`s, its submit
   button's label as the verb and, for an Options dialog, its checkboxes, in the same dialog. The page is used only when the route marks it with the
-  `X-Kb-Confirm-Page` header, the form posts to the link's own path and has exactly the fields the kind allows (`CONFIRM_LINK_KINDS`); anything else
-  (a refusal, a redirect) navigates to the link, so the reason is read on the page. The page stays as the no-JavaScript route.
+  `X-Kb-Confirm-Page` header, the form posts to the link's own path and has exactly the fields the kind allows (`CONFIRM_LINK_KINDS`). A refusal
+  the route marks `<kind>-refused` (a delete that is not allowed) opens the same dialog with the reason and only _Go back_. Anything else (a redirect, a
+  changed page) navigates to the link. The page stays as the no-JavaScript route.
 
 ### SaveBar
 

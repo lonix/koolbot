@@ -3439,8 +3439,8 @@ as the other admin pages. It edits structure only; permission overwrites stay in
 - **Delete** always asks first. With JavaScript, **Delete…** opens a dialog titled "Delete <channel>?" that lists what goes
   with it (a text channel's messages, and that it can't be undone) and whose **Delete permanently** button posts the delete.
   The dialog is built from the confirmation page, which the link fetches when you click, so the verdict and the
-  confirmation token are as fresh as that page; a channel KoolBot manages, or one the bot may not delete, opens that page
-  instead, where the reason is written. Without JavaScript the link opens the confirmation page. The page and the delete
+  confirmation token are as fresh as that page; a channel KoolBot manages, or one the bot may not delete, gets a dialog that
+  gives the reason and has no delete button. Without JavaScript the link opens the confirmation page. The page and the delete
   itself both re-check, so a stale
   tab or a hand-made request cannot skip it. KoolBot **refuses** to delete a channel it manages and names why:
   a channel set in any `*.channel_id` or `*.category_id` setting (quotes, notices, log channels, the voice

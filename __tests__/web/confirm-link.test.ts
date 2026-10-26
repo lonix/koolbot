@@ -22,6 +22,8 @@ import {
   CONFIRM_PAGE_HEADER,
 } from "../../src/web/confirm-fetch.js";
 import { allPages } from "./a11y-pages.js";
+import type { ManagedChannelView } from "../../src/web/channel-manager.js";
+import { renderChannelDeleteConfirmPage } from "../../src/web/channel-manager-view.js";
 import { installDocumentForAxe } from "./a11y-dom.js";
 
 expect.extend(toHaveNoViolations);
@@ -75,6 +77,18 @@ const flush = async (): Promise<void> => {
   for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0));
 };
 
+const GENERAL: ManagedChannelView = {
+  id: "100000000000000002",
+  name: "general",
+  kind: "text",
+  typeLabel: "text",
+  parentId: "100000000000000001",
+  position: 0,
+  topic: "Say hi",
+  userLimit: null,
+  bitrate: null,
+};
+
 const DELETE_LINK = "a[data-confirm-link=channel-delete]";
 const RESTORE_LINK = "a[data-confirm-link=snapshot-restore]";
 
@@ -98,6 +112,7 @@ interface Run {
   options: string[];
   namedBoxes: number;
   navigations: number;
+  buttons: string[];
   posts: Array<{ action: string; method: string; fields: string[] }>;
 }
 
@@ -199,8 +214,9 @@ async function run(s: Scenario): Promise<Run> {
       d?.querySelectorAll<HTMLInputElement>("input[name]") ?? [],
     ).length;
     const foot = d?.querySelectorAll<HTMLElement>(".kb-dialog__foot button");
-    out.verb = foot ? (foot[1].textContent ?? null) : null;
-    out.okClass = foot ? foot[1].className : null;
+    out.buttons = Array.from(foot ?? []).map((b) => b.textContent ?? "");
+    out.verb = foot && foot[1] ? (foot[1].textContent ?? null) : null;
+    out.okClass = foot && foot[1] ? foot[1].className : null;
     if (d && posts.length > 0) throw new Error("posted before the confirm");
     if (d && s.tick) {
       d.querySelector<HTMLInputElement>("input[type=checkbox]")!.click();
@@ -362,6 +378,89 @@ describe("Adoption history: Restore… opens an Options dialog", () => {
   });
 });
 
+describe("Channel manager: a delete that is refused says why, in a dialog with no confirm button", () => {
+  const refused = (over: Partial<Scenario> = {}): Scenario =>
+    channelScenario({
+      answer: {
+        header: "channel-delete-refused",
+        html: page("Channel delete refused"),
+      },
+      ...over,
+    });
+
+  it("shows the reason as the only content and offers only go back", async () => {
+    const o = await run(refused());
+    expect(o.dialog).toBe(true);
+    expect(o.title).toBe("Can't delete Lobby");
+    expect(o.items).toEqual([
+      'KoolBot manages "Lobby": it is the voicechannels.lobby.channel_id setting.',
+    ]);
+    expect(o.buttons).toEqual(["Go back"]);
+    expect(o.posts).toEqual([]);
+    expect(o.navigations).toBe(0);
+  });
+
+  it.each([
+    ["a channel that is gone", { channel: null }, "Can't delete this channel"],
+    [
+      "a missing Manage Channels permission",
+      { botCanManage: false },
+      "Can't delete general",
+    ],
+    [
+      "a category that still holds channels",
+      {
+        verdict: {
+          ok: false as const,
+          reasons: [],
+          message:
+            '"Community" still holds 2 channels. Move or delete them first.',
+        },
+      },
+      "Can't delete general",
+    ],
+  ])("%s", async (_n, over, title) => {
+    const general = GENERAL;
+    const html = renderChannelDeleteConfirmPage({
+      csrfToken: "csrf-token",
+      remainingMs: 900_000,
+      navFeatureStatus: {},
+      channel: general,
+      verdict: { ok: true },
+      confirmToken: "token",
+      botCanManage: true,
+      ...over,
+    });
+    const o = await run(
+      refused({ answer: { header: "channel-delete-refused", html } }),
+    );
+    expect(o.title).toBe(title);
+    expect(o.buttons).toEqual(["Go back"]);
+    expect(o.items).toHaveLength(1);
+    expect(o.posts).toEqual([]);
+  });
+
+  it("is not accepted for a kind without refusals, or without the refusal header", async () => {
+    const wrongKind = await run(
+      restoreScenario({
+        answer: {
+          header: "snapshot-restore-refused",
+          html: page("Channel delete refused"),
+        },
+      }),
+    );
+    expect(wrongKind.dialog).toBe(false);
+    expect(wrongKind.navigations).toBe(1);
+    const noHeader = await run(
+      refused({
+        answer: { header: null, html: page("Channel delete refused") },
+      }),
+    );
+    expect(noHeader.dialog).toBe(false);
+    expect(noHeader.navigations).toBe(1);
+  });
+});
+
 describe("hostile text stays text", () => {
   it("shows a channel name as text, never as markup", async () => {
     const hostile = `<img src=x onerror="alert(1)">`;
@@ -506,41 +605,72 @@ describe("when the link should behave as a link", () => {
 });
 
 describe("accessibility of the dialogs", () => {
-  it("has no axe violations with the Options dialog open", async () => {
-    installDialogStandIn();
-    installDocumentForAxe(page("Adoption history"));
-    const unloadDialog = load(CONFIRM_SCRIPT);
-    const unload = load(CONFIRM_LINK_SCRIPT);
-    (window as unknown as { fetch: unknown }).fetch = () =>
-      Promise.resolve({
-        status: 200,
-        redirected: false,
-        type: "basic",
-        url: "http://localhost/x",
-        headers: {
-          get: (n: string) =>
-            n.toLowerCase() === "content-type"
-              ? "text/html"
-              : n.toLowerCase() === CONFIRM_PAGE_HEADER.toLowerCase()
-                ? "snapshot-restore"
-                : null,
-        },
-        text: async () => page("Restore snapshot"),
-      });
-    try {
-      document
-        .querySelector<HTMLElement>(RESTORE_LINK)!
-        .dispatchEvent(
-          new window.MouseEvent("click", { bubbles: true, cancelable: true }),
+  // The dialog is built at runtime, so the static fixtures in `a11y-pages.ts`
+  // (scripts are dropped by `installDocumentForAxe`) cannot hold it. Open it
+  // in the real page and scan the whole document, as page-level rules need.
+  const cases: Array<[string, string, string, string, string]> = [
+    [
+      "Delete… (Confirm)",
+      "Channel manager",
+      DELETE_LINK,
+      "channel-delete",
+      "Channel delete confirmation",
+    ],
+    [
+      "Delete… refused (explanation only)",
+      "Channel manager",
+      DELETE_LINK,
+      "channel-delete-refused",
+      "Channel delete refused",
+    ],
+    [
+      "Restore… (Options)",
+      "Adoption history",
+      RESTORE_LINK,
+      "snapshot-restore",
+      "Restore snapshot",
+    ],
+  ];
+  it.each(cases)(
+    "has no axe violations with the %s dialog open",
+    async (_n, list, link, header, confirm) => {
+      installDialogStandIn();
+      installDocumentForAxe(page(list));
+      const unloadDialog = load(CONFIRM_SCRIPT);
+      const unload = load(CONFIRM_LINK_SCRIPT);
+      (window as unknown as { fetch: unknown }).fetch = () =>
+        Promise.resolve({
+          status: 200,
+          redirected: false,
+          type: "basic",
+          url: "http://localhost/x",
+          headers: {
+            get: (n: string) =>
+              n.toLowerCase() === "content-type"
+                ? "text/html"
+                : n.toLowerCase() === CONFIRM_PAGE_HEADER.toLowerCase()
+                  ? header
+                  : null,
+          },
+          text: async () => page(confirm),
+        });
+      try {
+        const own = /action="(\/admin\/channels\/[^"]+\/delete)"/.exec(
+          page(confirm),
         );
-      await flush();
-      const d = document.querySelector("dialog.kb-dialog");
-      expect(d).not.toBeNull();
-      expect(await axe(d as HTMLElement)).toHaveNoViolations();
-    } finally {
-      unload();
-      unloadDialog();
-      removeDialogStandIn();
-    }
-  });
+        document
+          .querySelector<HTMLElement>(own ? `a[href="${own[1]}"]` : link)!
+          .dispatchEvent(
+            new window.MouseEvent("click", { bubbles: true, cancelable: true }),
+          );
+        await flush();
+        expect(document.querySelector("dialog.kb-dialog")).not.toBeNull();
+        expect(await axe(document.documentElement)).toHaveNoViolations();
+      } finally {
+        unload();
+        unloadDialog();
+        removeDialogStandIn();
+      }
+    },
+  );
 });

@@ -170,8 +170,7 @@ export function renderRestoreConfirmPage(props: RestoreConfirmProps): string {
   // #1536): the consequences in `data-confirm-item`, the checkbox, the verb.
   // A snapshot that cannot be restored has no form, so it is never read.
   const body = `
-<div${confirmLinkPageAttr("snapshot-restore")}>
-<h1>Restore snapshot</h1>
+${canRollback(s.status) ? `<div${confirmLinkPageAttr("snapshot-restore")}>\n` : ""}<h1>Restore snapshot</h1>
 <p class="subtitle">Applied ${when(s.createdAt)} by <span class="mono">${escapeHtml(s.appliedBy)}</span>. Only steps that were applied are reverted, newest first.</p>
 ${note}
 <div class="card">
@@ -180,8 +179,7 @@ ${note}
   ${s.dependentRepairs ? `<p class="notice warn" role="status" data-confirm-item>${s.dependentRepairs} follow-up repair(s) from an earlier restore are still pending (permissions on recreated roles, channels placed back under recreated categories). Restoring again retries them.</p>` : ""}
   ${s.interrupted ? `<p class="notice warn" role="status" data-confirm-item>${s.interrupted} more step(s) were interrupted (started but not recorded as finished, or in flight). The restore checks Discord first and also reverts any that did go through.</p>` : ""}
   ${form}
-</div>
-</div>
+</div>${canRollback(s.status) ? "\n</div>" : ""}
 `;
   return renderAdminPage({
     title: "Restore snapshot",

@@ -327,11 +327,15 @@ export function createChannelManagerRouter(
         };
       }
       const botCanManage = await botCanManageChannels(guild);
-      // Only the page that offers the delete form says so; the dialog upgrade
-      // (`confirm-fetch.ts`, #1536) reads nothing else as a question.
-      if (channelDeleteConfirmable({ channel, verdict, botCanManage })) {
-        res.setHeader(CONFIRM_PAGE_HEADER, "channel-delete");
-      }
+      // The header says which of the two the page is (a question, or a
+      // refusal with its reason); the dialog upgrade (`confirm-fetch.ts`,
+      // #1536) reads nothing else.
+      res.setHeader(
+        CONFIRM_PAGE_HEADER,
+        channelDeleteConfirmable({ channel, verdict, botCanManage })
+          ? "channel-delete"
+          : "channel-delete-refused",
+      );
       res.type("text/html").send(
         renderChannelDeleteConfirmPage({
           ...base,

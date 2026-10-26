@@ -1171,26 +1171,34 @@ describe("GET /channels/:id/delete", () => {
     expect(mockDelete).not.toHaveBeenCalled();
   });
 
-  it("says it is the confirmation only when it offers the delete form (the dialog upgrade, #1536)", async () => {
+  it("says what the page is: the confirmation, or its refusal (the dialog upgrade, #1536)", async () => {
+    const header = async (path: string): Promise<string | null> => {
+      const res = await harness.get(path);
+      await res.text();
+      return res.headers.get("x-kb-confirm-page");
+    };
     await mount();
-    const ok = await harness.get(`/channels/${TEXT2}/delete`);
-    expect(ok.headers.get("x-kb-confirm-page")).toBe("channel-delete");
-    await ok.text();
+    expect(await header(`/channels/${TEXT2}/delete`)).toBe("channel-delete");
     protection = new Map([[TEXT2, ["the tickets.category_id setting"]]]);
-    const managed = await harness.get(`/channels/${TEXT2}/delete`);
-    expect(managed.headers.get("x-kb-confirm-page")).toBeNull();
-    await managed.text();
+    expect(await header(`/channels/${TEXT2}/delete`)).toBe(
+      "channel-delete-refused",
+    );
     protection = new Map();
-    const gone = await harness.get(`/channels/199999999999999999/delete`);
-    expect(gone.headers.get("x-kb-confirm-page")).toBeNull();
-    await gone.text();
-    const other = await harness.get(`/channels/${STAGE}/delete`);
-    expect(other.headers.get("x-kb-confirm-page")).toBeNull();
-    await other.text();
+    expect(await header(`/channels/199999999999999999/delete`)).toBe(
+      "channel-delete-refused",
+    );
+    expect(await header(`/channels/${STAGE}/delete`)).toBe(
+      "channel-delete-refused",
+    );
     canManage = false;
-    const noPerm = await harness.get(`/channels/${TEXT2}/delete`);
-    expect(noPerm.headers.get("x-kb-confirm-page")).toBeNull();
-    await noPerm.text();
+    expect(await header(`/channels/${TEXT2}/delete`)).toBe(
+      "channel-delete-refused",
+    );
+    canManage = true;
+    protectionFails = true;
+    expect(await header(`/channels/${TEXT2}/delete`)).toBe(
+      "channel-delete-refused",
+    );
   });
 
   it("shows the refusal, with no delete form, for a managed channel", async () => {

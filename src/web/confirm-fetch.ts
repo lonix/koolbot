@@ -122,10 +122,11 @@ export const CONFIRM_FETCH_SCRIPT = SCRIPT_LINES.join("");
  *
  * The answer is used only if it is the expected confirmation page: status 200,
  * HTML, the response header `CONFIRM_PAGE_HEADER` equal to the link's kind
- * (the routes set it only on the confirmable variant, never on a refusal), a
- * section of that kind holding a POST form to the SAME path on this origin
+ * (the routes set it only on the confirmable variant; a refusal says
+ * `<kind>-refused` and is shown, reason only, in a dialog with no confirm
+ * button), a section of that kind holding a POST form to the SAME path on this origin
  * whose fields are exactly the kind's allowlist, and at least one consequence.
- * Anything else (a refusal, a redirect, a changed page) navigates to the link,
+ * Anything else (a redirect, a changed page, a failed request) navigates to the link,
  * so the admin sees today's page; nothing is ever posted from a page that did
  * not pass. Only the dialog's confirm button posts, with the page's own
  * `_csrf` (which must equal this page's) and its own fields, plus each option
@@ -134,10 +135,15 @@ export const CONFIRM_FETCH_SCRIPT = SCRIPT_LINES.join("");
 
 /** What each kind of confirmation page may carry in its form. */
 export const CONFIRM_LINK_KINDS = {
-  "channel-delete": { hidden: ["_csrf", "confirm"], boxes: [] as string[] },
+  "channel-delete": {
+    hidden: ["_csrf", "confirm"],
+    boxes: [] as string[],
+    refusal: true,
+  },
   "snapshot-restore": {
     hidden: ["_csrf"],
     boxes: ["deleteCreatedRoles"],
+    refusal: false,
   },
 } as const;
 
@@ -161,7 +167,11 @@ const LINK_SCRIPT_LINES = [
   "&&typeof URL==='function'&&typeof CustomEvent==='function'}",
   "function text(n){return(n.textContent||'').replace(/\\s+/g,' ').trim()}",
   "function urlOf(raw){try{return new URL(raw||'',location.href)}catch(x){return null}}",
-  "function read(html,kind,link){var doc=new DOMParser().parseFromString(html,'text/html');",
+  "function read(html,kind,link,refused){var doc=new DOMParser().parseFromString(html,'text/html');",
+  // A refusal (a channel that may not be deleted, and why) has no form: the
+  // reason is shown in the dialog with no confirm button.
+  "if(refused){var rf=doc.querySelector('[data-confirm-refusal]'),rt=rf&&rf.getAttribute('data-confirm-title'),rm=rf&&text(rf);",
+  "return rt&&rm?{refusal:true,title:rt,items:[rm],verb:'',boxes:[]}:null}",
   "var sec=doc.querySelector('[data-confirm-link-page]');",
   "if(!sec||sec.getAttribute('data-confirm-link-page')!==kind)return null;",
   "var f=sec.querySelector('form[data-confirm-form]');if(!f)return null;",
@@ -181,8 +191,11 @@ const LINK_SCRIPT_LINES = [
   "var title=f.getAttribute('data-confirm-title'),b=f.querySelector('button[type=submit]'),verb=b?text(b):'';",
   "if(!items.length||!title||!verb)return null;",
   "return{title:title,items:items,verb:verb,action:u.pathname,fields:fields,boxes:boxes}}",
-  "function isPage(r,kind){return r.status===200&&!r.redirected&&r.type!=='opaqueredirect'",
-  "&&(r.headers.get('content-type')||'').toLowerCase().indexOf('text/html')===0&&r.headers.get(HEAD)===kind}",
+  // 'ask' (the confirmation page), 'refuse' (its refusal, for kinds that have one) or null.
+  "function which(r,kind){if(r.status!==200||r.redirected||r.type==='opaqueredirect')return null;",
+  "if((r.headers.get('content-type')||'').toLowerCase().indexOf('text/html')!==0)return null;",
+  "var h=r.headers.get(HEAD);if(h===kind)return'ask';",
+  "return KINDS[kind].refusal&&h===kind+'-refused'?'refuse':null}",
   "function post(page,chosen){var g=document.createElement('form');g.method='POST';g.action=page.action;g.hidden=true;",
   "page.fields.concat(chosen.map(function(c){return[c.name,c.value]})).forEach(function(p){var i=document.createElement('input');",
   "i.type='hidden';i.name=p[0];i.value=p[1];g.appendChild(i)});document.body.appendChild(g);g.submit()}",
@@ -193,7 +206,7 @@ const LINK_SCRIPT_LINES = [
   "var link=urlOf(a.getAttribute('href'));if(!link||link.origin!==location.origin)return;",
   "e.preventDefault();if(inflight)return;inflight=a;var to=link.pathname+link.search;",
   "fetch(to,{method:'GET',headers:{'Accept':'text/html'},credentials:'same-origin'}).then(function(r){",
-  "if(!isPage(r,kind))return null;return r.text().then(function(h){return read(h,kind,link)})",
+  "var w=which(r,kind);if(!w)return null;return r.text().then(function(h){return read(h,kind,link,w==='refuse')})",
   "}).catch(function(){return null}).then(function(page){inflight=null;",
   "if(!page){location.assign(to);return}",
   // The shared dialog (`CONFIRM_SCRIPT`) shows title, items and verb. An
@@ -205,6 +218,7 @@ const LINK_SCRIPT_LINES = [
   "document.dispatchEvent(new CustomEvent('kb-confirm-request',{detail:d}));",
   "if(!d.handled){location.assign(to);return}",
   "var dlg=document.querySelector('dialog.kb-dialog'),body=dlg&&dlg.querySelector('.kb-dialog__body');",
+  "if(page.refusal){var ok=dlg&&dlg.querySelectorAll('.kb-dialog__foot button')[1];if(ok)ok.parentNode.removeChild(ok);return}",
   "page.boxes.forEach(function(b){var l=document.createElement('label'),c=document.createElement('input'),w=document.createElement('div');",
   "c.type='checkbox';l.appendChild(c);l.appendChild(document.createTextNode(' '+b.label));w.appendChild(l);if(body)body.appendChild(w);boxes.push(c)})})},false)",
   "})();",
