@@ -1171,6 +1171,28 @@ describe("GET /channels/:id/delete", () => {
     expect(mockDelete).not.toHaveBeenCalled();
   });
 
+  it("says it is the confirmation only when it offers the delete form (the dialog upgrade, #1536)", async () => {
+    await mount();
+    const ok = await harness.get(`/channels/${TEXT2}/delete`);
+    expect(ok.headers.get("x-kb-confirm-page")).toBe("channel-delete");
+    await ok.text();
+    protection = new Map([[TEXT2, ["the tickets.category_id setting"]]]);
+    const managed = await harness.get(`/channels/${TEXT2}/delete`);
+    expect(managed.headers.get("x-kb-confirm-page")).toBeNull();
+    await managed.text();
+    protection = new Map();
+    const gone = await harness.get(`/channels/199999999999999999/delete`);
+    expect(gone.headers.get("x-kb-confirm-page")).toBeNull();
+    await gone.text();
+    const other = await harness.get(`/channels/${STAGE}/delete`);
+    expect(other.headers.get("x-kb-confirm-page")).toBeNull();
+    await other.text();
+    canManage = false;
+    const noPerm = await harness.get(`/channels/${TEXT2}/delete`);
+    expect(noPerm.headers.get("x-kb-confirm-page")).toBeNull();
+    await noPerm.text();
+  });
+
   it("shows the refusal, with no delete form, for a managed channel", async () => {
     protection = new Map([[TEXT2, ["the tickets.category_id setting"]]]);
     await mount();

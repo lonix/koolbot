@@ -56,9 +56,11 @@ import {
 } from "../../channel-manager-data.js";
 import {
   CHANNELS_PATH,
+  channelDeleteConfirmable,
   renderChannelDeleteConfirmPage,
   renderChannelManagerPage,
 } from "../../channel-manager-view.js";
+import { CONFIRM_PAGE_HEADER } from "../../confirm-fetch.js";
 import {
   asyncHandler,
   flashRedirect,
@@ -324,13 +326,19 @@ export function createChannelManagerRouter(
             "Couldn't verify whether KoolBot manages this channel, so it can't be deleted right now. Try again in a moment.",
         };
       }
+      const botCanManage = await botCanManageChannels(guild);
+      // Only the page that offers the delete form says so; the dialog upgrade
+      // (`confirm-fetch.ts`, #1536) reads nothing else as a question.
+      if (channelDeleteConfirmable({ channel, verdict, botCanManage })) {
+        res.setHeader(CONFIRM_PAGE_HEADER, "channel-delete");
+      }
       res.type("text/html").send(
         renderChannelDeleteConfirmPage({
           ...base,
           channel,
           verdict,
           confirmToken: channel ? confirmationToken(channel, allChannels) : "",
-          botCanManage: await botCanManageChannels(guild),
+          botCanManage,
         }),
       );
     }),

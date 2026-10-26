@@ -20,6 +20,7 @@ import {
 } from "./setting-pickers.js";
 import { groupRowsScript } from "./event-group-form.js";
 import { getInactivityWindowMs } from "./session.js";
+import { CONFIRM_LINK_SCRIPT } from "./confirm-fetch.js";
 import {
   CONFIRM_SCRIPT,
   escapeHtml,
@@ -1028,6 +1029,10 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     `<main id="main"${opts.body.includes('class="kb-savebar"') ? ' class="has-savebar"' : ""} tabindex="-1">${opts.body}</main></div>`,
     `${scriptTag(SCRIPT)}`,
     `${scriptTag(CONFIRM_SCRIPT)}`,
+    // Confirmation links (#1536): only on a page that has one.
+    ...(opts.body.includes("data-confirm-link=")
+      ? [`${scriptTag(CONFIRM_LINK_SCRIPT)}`]
+      : []),
     `${scriptTag(CRON_PICKER_SCRIPT)}`,
     `${scriptTag(CASCADE_DISABLE_SCRIPT)}`,
     `${scriptTag(NUMBER_INPUT_SCRIPT)}`,

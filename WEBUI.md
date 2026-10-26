@@ -3436,7 +3436,12 @@ as the other admin pages. It edits structure only; permission overwrites stay in
   elsewhere (another admin, Discord) since you opened the page, the save is refused instead of overwriting it.
 - **Reorder** with Up and Down. Text and voice channels order separately inside a category, as in Discord. Each
   button is drawn for the neighbour it swaps with; if the order changed since the page was opened, the move is refused.
-- **Delete** always goes through a confirmation page. The page and the delete itself both re-check, so a stale
+- **Delete** always asks first. With JavaScript, **Delete…** opens a dialog titled "Delete <channel>?" that lists what goes
+  with it (a text channel's messages, and that it can't be undone) and whose **Delete permanently** button posts the delete.
+  The dialog is built from the confirmation page, which the link fetches when you click, so the verdict and the
+  confirmation token are as fresh as that page; a channel KoolBot manages, or one the bot may not delete, opens that page
+  instead, where the reason is written. Without JavaScript the link opens the confirmation page. The page and the delete
+  itself both re-check, so a stale
   tab or a hand-made request cannot skip it. KoolBot **refuses** to delete a channel it manages and names why:
   a channel set in any `*.channel_id` or `*.category_id` setting (quotes, notices, log channels, the voice
   category and lobby, ticket and event categories, ...), the voice lobby and offline lobby (also found by name, with the same quote and
@@ -3625,14 +3630,14 @@ opens the snapshot history.
    read-only, gate it to groups, or bind it to a feature. **Preview changes** shows the diff; **Apply plan** runs it.
 5. **Check the result.** Planning again gives an empty plan when the server already matches.
 6. **Adoption history** (`/admin/adopt/history`). Every apply is listed with its status and what it changed. **Restore…**
-   opens a confirmation page that lists the steps that will be reverted, newest first. Only steps that were applied are
-   reverted, from the state saved before the apply. Roles the plan created are kept unless you tick **Also delete the roles
-   this plan created**. For a plan that deleted something, the page repeats that messages, pins, threads, webhooks and
-   IDs cannot be restored. Restore runs in the background and the page shows its progress; a snapshot that stopped part-way
-   can be restored again to finish. Each accepted restore writes a started entry (`adopt.rollback.start`) to the audit log
-   before it runs, and its outcome (`adopt.rollback`) when it ends; if KoolBot restarts in between, only the started entry
-   exists. A refused restore is written as a failed `adopt.rollback`. Snapshots are kept for
-   `adoption.snapshot.retention_days` (default 90, `0` keeps them forever).
+   opens a dialog (a confirmation page without JavaScript) that lists the steps that will be reverted, newest first. Only
+   steps that were applied are reverted, from the state saved before the apply. Roles the plan created are kept unless you
+   tick **Also delete the roles this plan created**, which is a checkbox in the dialog. For a plan that deleted something, the
+   dialog repeats that messages, pins, threads, webhooks and IDs cannot be restored. Restore runs in the background and the
+   page shows its progress; a snapshot that stopped part-way can be restored again to finish. Each accepted restore writes a
+   started entry (`adopt.rollback.start`) to the audit log before it runs, and its outcome (`adopt.rollback`) when it
+   ends; if KoolBot restarts in between, only the started entry exists. A refused restore is written as a failed
+   `adopt.rollback`. Snapshots are kept for `adoption.snapshot.retention_days` (default 90, `0` keeps them forever).
 
    **Restore checks the live server first** (#1134). A snapshot can be months old, so before anything is written Restore
    scans the server as it is now and works out what it would look like after the remaining steps are undone, using the same

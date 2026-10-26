@@ -556,6 +556,11 @@ and member layouts) builds the dialog from it, so the title is the whole dialog 
   `kb-confirm-request` event (title, items and verb as plain strings, and a `go` callback that runs only from the confirm button). It is for two-step
   routes whose consequences only the server knows: the form carries `data-confirm-fetch`, the script posts it with `fetch`, and the dialog lists the
   server's reasons and changes. The page stays as the no-JavaScript route.
+- A confirmation LINK (Channel manager _Delete…_, Adoption history _Restore…_, #1536) is `a[data-confirm-link="<kind>"]` to the confirmation page.
+  With JavaScript the script fetches that page with GET and shows its title (`data-confirm-title` on the form), its `data-confirm-item`s, its submit
+  button's label as the verb and, for an Options dialog, its checkboxes, in the same dialog. The page is used only when the route marks it with the
+  `X-Kb-Confirm-Page` header, the form posts to the link's own path and has exactly the fields the kind allows (`CONFIRM_LINK_KINDS`); anything else
+  (a refusal, a redirect) navigates to the link, so the reason is read on the page. The page stays as the no-JavaScript route.
 
 ### SaveBar
 
