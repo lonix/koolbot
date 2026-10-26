@@ -86,6 +86,22 @@ export type GroupResult =
   | { ok: true; group: RoleGroupView }
   | { ok: false; error: string; field?: GroupField | "roleId" };
 
+/**
+ * Which unique index a duplicate-key error (code 11000) came from, by the
+ * driver's `keyPattern` (or `keyValue`): the name index or the backing-role
+ * index. Null when the error does not say, so the caller shows no field.
+ */
+export function duplicateKeyField(error: unknown): "name" | "roleId" | null {
+  const e = error as {
+    keyPattern?: Record<string, unknown>;
+    keyValue?: Record<string, unknown>;
+  };
+  const keys = Object.keys(e?.keyPattern ?? e?.keyValue ?? {});
+  if (keys.includes("roleId")) return "roleId";
+  if (keys.includes("name")) return "name";
+  return null;
+}
+
 export class RoleGroupService {
   private static instance: RoleGroupService | undefined;
   private readonly cache = new Map<
@@ -336,10 +352,16 @@ export class RoleGroupService {
       return { ok: true, group: toView(doc) };
     } catch (error) {
       if ((error as { code?: number }).code === 11000) {
+        const field = duplicateKeyField(error);
         return {
           ok: false,
-          error: "That name or role is already in use.",
-          field: "name",
+          error:
+            field === "roleId"
+              ? "That role already backs another group."
+              : field === "name"
+                ? "That name is already in use."
+                : "That name or role is already in use.",
+          ...(field ? { field } : {}),
         };
       }
       throw error;
@@ -395,10 +417,11 @@ export class RoleGroupService {
       return { ok: true, group: toView(doc) };
     } catch (error) {
       if ((error as { code?: number }).code === 11000) {
+        const field = duplicateKeyField(error);
         return {
           ok: false,
           error: "That name is already in use.",
-          field: "name",
+          ...(field === "name" ? { field } : {}),
         };
       }
       throw error;

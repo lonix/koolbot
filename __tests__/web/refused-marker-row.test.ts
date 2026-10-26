@@ -1,6 +1,6 @@
 /* global HTMLInputElement */
 import { describe, it, expect } from "@jest/globals";
-import { JSDOM } from "jsdom";
+import { JSDOM, VirtualConsole } from "jsdom";
 
 /**
  * A group row whose marker the server refused (#1523): the rows script turns
@@ -40,5 +40,48 @@ describe("the rows script and a refused marker", () => {
       "[data-marker-input]",
     );
     expect(box?.hidden).toBe(true);
+  });
+});
+
+describe("a refused marker on the real Group presets page (#1523)", () => {
+  it("is visible and focused after the page's own scripts have run, in their real order", async () => {
+    const { renderEventPresetsPage } =
+      await import("../../src/web/event-presets-page.js");
+    const html = renderEventPresetsPage({
+      csrfToken: "csrf",
+      remainingMs: 60_000,
+      entries: [],
+      state: "ok",
+      maxCount: 15,
+      defaultCount: 2,
+      editing: null,
+      prefillNote: null,
+      values: {
+        preset_name: "Clan",
+        group_0_name: "Red",
+        group_0_marker: "??",
+      },
+      refusedForm: {
+        formId: "event-preset",
+        errors: { group_0_marker: "Not a marker." },
+        values: {},
+      },
+    });
+    const dom = new JSDOM(html, {
+      runScripts: "dangerously",
+      url: "http://localhost/admin/events/presets",
+      virtualConsole: new VirtualConsole(),
+    });
+    const doc = dom.window.document;
+    const marker = doc.querySelector<HTMLInputElement>(
+      '[name="group_0_marker"]',
+    );
+    expect(marker?.getAttribute("aria-invalid")).toBe("true");
+    expect(marker?.hidden).toBe(false);
+    expect(doc.activeElement).toBe(marker);
+    const target = doc.getElementById(
+      marker?.getAttribute("aria-describedby") ?? "",
+    );
+    expect(target?.textContent).toBe("Not a marker.");
   });
 });

@@ -388,11 +388,15 @@ function renderAddForm(props: RoleGroupsPageProps, csrf: string): string {
   const pickedRole = f.selected("roleId", "");
   const options = props.roleOptions
     .map((r) => {
+      // The role a refused form submitted stays selectable: a disabled option
+      // is not posted, so the retry would create a new role instead of
+      // linking this one. The server checks it again and refuses it again.
       const disabled =
-        r.lock === "everyone" ||
-        r.lock === "hierarchy" ||
-        r.taken ||
-        !!r.usedBy?.length;
+        r.id !== pickedRole &&
+        (r.lock === "everyone" ||
+          r.lock === "hierarchy" ||
+          r.taken ||
+          !!r.usedBy?.length);
       const usedNote = r.usedBy?.length ? `used by ${r.usedBy.join(", ")}` : "";
       const note = r.taken
         ? ["already a group", usedNote].filter(Boolean).join("; ")
@@ -402,9 +406,15 @@ function renderAddForm(props: RoleGroupsPageProps, csrf: string): string {
       return `<option value="${escapeHtml(r.id)}"${disabled ? " disabled" : ""}${r.id === pickedRole ? " selected" : ""}>@${escapeHtml(r.name)}${escapeHtml(count)}${note ? ` — ${escapeHtml(note)}` : ""}</option>`;
     })
     .join("");
+  // A refused role that is no longer in the list stays selected too, or the
+  // retry would silently create a new role.
+  const missingPicked =
+    pickedRole && !props.roleOptions.some((r) => r.id === pickedRole)
+      ? `<option value="${escapeHtml(pickedRole)}" selected>Role ${escapeHtml(pickedRole)} (not found)</option>`
+      : "";
   return `<form method="POST" action="/admin/role-groups/create" class="stack">
 ${csrf}
-<label>Backing role <select name="roleId"${f.attrs("roleId")}><option value="">Create a new role</option>${options}</select></label>${f.error("roleId")}
+<label>Backing role <select name="roleId"${f.attrs("roleId")}><option value="">Create a new role</option>${missingPicked}${options}</select></label>${f.error("roleId")}
 <p class="muted">Linking an existing role keeps its members and never changes its permissions unless you edit them. Integration-managed roles (Server Booster, subscriptions) become gate-only groups: they can be used for gating but are never edited.</p>
 <label>Name <input type="text" name="name" maxlength="100" placeholder="(a linked role's own name if empty)"${f.valueAttr("name")}${f.attrs("name")}></label>${f.error("name")}
 <fieldset><legend>Capabilities</legend>${capabilityChecks([], false, f)}${f.error("capability")}</fieldset>

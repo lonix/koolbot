@@ -304,3 +304,16 @@ describe("a refused Channel manager form (#1523)", () => {
     expect(html).toContain(ChannelType.GuildText === 0 ? "general" : "");
   });
 });
+
+describe("the Role groups backing role of a refused Add form (#1523)", () => {
+  it("stays selected when it is no longer in the list, so a retry cannot create a new role", () => {
+    const html = roleGroups({
+      formId: "role-group-create",
+      errors: { roleId: "That role couldn't be found." },
+      values: { roleId: "999" },
+    });
+    expect(html).toContain(
+      '<option value="999" selected>Role 999 (not found)</option>',
+    );
+  });
+});

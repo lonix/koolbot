@@ -108,6 +108,7 @@ function makeClient(opts: { fetchFails?: boolean } = {}): Client {
       { id: "rBoost", name: "Server Booster", managed: true, position: 4 },
     ],
     ["rTop", { id: "rTop", name: "Above", managed: false, position: 10 }],
+    ["rUsed", { id: "rUsed", name: "Used", managed: false, position: 2 }],
     [
       "guild-1",
       { id: "guild-1", name: "@everyone", managed: false, position: 0 },
@@ -346,6 +347,20 @@ describe("a refused Role groups form (#1523)", () => {
             lock: null,
             taken: false,
           },
+          {
+            id: "rTop",
+            name: "Above",
+            memberCount: 1,
+            lock: "hierarchy",
+            taken: false,
+          },
+          {
+            id: "rUsed",
+            name: "Used",
+            memberCount: 1,
+            lock: null,
+            taken: true,
+          },
         ],
         plan: null,
         extraErrors: [],
@@ -428,6 +443,46 @@ describe("a refused Role groups form (#1523)", () => {
     expect(lines(await res.text())).toEqual({
       "role-group-create-roleId-error": "@everyone can't be a group.",
     });
+  });
+
+  it.each([
+    [
+      "rTop",
+      "That role is at or above the bot's own role, so it can't be linked.",
+    ],
+  ])(
+    "keeps the refused backing role (%s) selectable, so a retry is refused again and never creates a role-less group",
+    async (roleId, message) => {
+      await mount();
+      const first = await harness.post("/role-groups/create", { roleId });
+      expect(first.status).toBe(422);
+      const html = await first.text();
+      const option = new RegExp(`<option value="${roleId}"([^>]*)>`).exec(html);
+      expect(option?.[1]).toContain("selected");
+      expect(option?.[1]).not.toContain("disabled");
+      expect(lines(html)["role-group-create-roleId-error"]).toBe(message);
+      // The browser posts the selected, enabled option again.
+      const retry = await harness.post("/role-groups/create", { roleId });
+      expect(retry.status).toBe(422);
+      expect(lines(await retry.text())["role-group-create-roleId-error"]).toBe(
+        message,
+      );
+      expect(svc.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a refused role that the service says is taken selectable too", async () => {
+    svc.create.mockResolvedValue({
+      ok: false,
+      error: "That role already backs another group.",
+      field: "roleId",
+    });
+    await mount();
+    const res = await harness.post("/role-groups/create", { roleId: "rUsed" });
+    expect(res.status).toBe(422);
+    const option = /<option value="rUsed"([^>]*)>/.exec(await res.text());
+    expect(option?.[1]).toContain("selected");
+    expect(option?.[1]).not.toContain("disabled");
   });
 
   it("keeps a refusal that is not about a field a page flash", async () => {

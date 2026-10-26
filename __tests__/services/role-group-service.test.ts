@@ -3,6 +3,8 @@ import { PermissionsBitField, type GuildMember } from "discord.js";
 
 type Doc = Record<string, unknown> & { _id: string };
 let store: Doc[] = [];
+/** A write error the next create or update throws, to test duplicate keys. */
+let nextWriteError: Error | null = null;
 let seq = 0;
 
 const matches = (d: Doc, f: Record<string, unknown>): boolean =>
@@ -18,6 +20,11 @@ jest.unstable_mockModule("../../src/models/role-group.js", () => ({
           .sort((a, b) => (b.rank as number) - (a.rank as number)),
     })),
     create: jest.fn(async (data: Record<string, unknown>) => {
+      if (nextWriteError) {
+        const err = nextWriteError;
+        nextWriteError = null;
+        throw err;
+      }
       if (
         store.some((d) => d.guildId === data.guildId && d.name === data.name)
       ) {
@@ -32,6 +39,11 @@ jest.unstable_mockModule("../../src/models/role-group.js", () => ({
         f: Record<string, unknown>,
         u: { $set: Record<string, unknown> },
       ) => {
+        if (nextWriteError) {
+          const err = nextWriteError;
+          nextWriteError = null;
+          throw err;
+        }
         const doc = store.find((d) => matches(d, f));
         if (doc) Object.assign(doc, u.$set);
         return doc ?? null;
@@ -301,6 +313,51 @@ describe("queries", () => {
 });
 
 describe("writes", () => {
+  describe("a duplicate-key race names the index it hit (#1523)", () => {
+    const dup = (extra: Record<string, unknown>): Error =>
+      Object.assign(new Error("E11000"), { code: 11000, ...extra });
+
+    it("marks the role when the backing-role index refuses", async () => {
+      nextWriteError = dup({ keyPattern: { guildId: 1, roleId: 1 } });
+      expect(await svc.create(G, { name: "A", roleId: "r9" })).toMatchObject({
+        ok: false,
+        error: "That role already backs another group.",
+        field: "roleId",
+      });
+    });
+
+    it("marks the name when the name index refuses", async () => {
+      nextWriteError = dup({ keyPattern: { guildId: 1, name: 1 } });
+      expect(await svc.create(G, { name: "A" })).toMatchObject({
+        ok: false,
+        field: "name",
+      });
+    });
+
+    it("names no field when the index cannot be identified", async () => {
+      nextWriteError = dup({});
+      const res = await svc.create(G, { name: "A" });
+      expect(res).toMatchObject({
+        ok: false,
+        error: "That name or role is already in use.",
+      });
+      expect(res).not.toHaveProperty("field");
+    });
+
+    it("marks the name on an edit only when the name index refuses", async () => {
+      const made = await svc.create(G, { name: "Edit me" });
+      if (!made.ok) throw new Error("setup");
+      nextWriteError = dup({ keyValue: { guildId: G, name: "Taken" } });
+      expect(
+        await svc.update(G, made.group.id, { name: "Taken" }),
+      ).toMatchObject({ ok: false, field: "name" });
+      nextWriteError = dup({});
+      const res = await svc.update(G, made.group.id, { name: "Taken" });
+      expect(res).toMatchObject({ ok: false });
+      expect(res).not.toHaveProperty("field");
+    });
+  });
+
   it("puts new groups on top and rejects duplicates and shared roles", async () => {
     await svc.create(G, { name: "Low", rank: 1 });
     const top = await svc.create(G, { name: "High" });
