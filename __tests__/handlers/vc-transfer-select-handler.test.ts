@@ -12,6 +12,7 @@ jest.mock("../../src/services/voice-channel-manager.js");
 // Import after mocks
 import { VoiceChannelManager } from "../../src/services/voice-channel-manager.js";
 import { handleVCTransferSelect } from "../../src/handlers/vc-transfer-select-handler.js";
+import { errorEmbedPayload, unexpectedErrorPayload } from "../test-utils.js";
 
 const mockVoiceChannelManager = VoiceChannelManager as jest.Mocked<
   typeof VoiceChannelManager
@@ -51,10 +52,21 @@ describe("VCTransferSelectHandler - live ownership (#1143)", () => {
           }),
         },
       } as any,
-      reply: jest.fn().mockResolvedValue(undefined),
-      deferReply: jest.fn().mockResolvedValue(undefined),
-      deferUpdate: jest.fn().mockResolvedValue(undefined),
+      // Like discord.js, acknowledging flips the state that decides whether a
+      // failure is a fresh reply or an edit of the deferred message (#1510).
+      replied: false,
+      deferred: false,
+      reply: jest.fn(async () => {
+        (interaction as any).replied = true;
+      }),
+      deferReply: jest.fn(async () => {
+        (interaction as any).deferred = true;
+      }),
+      deferUpdate: jest.fn(async () => {
+        (interaction as any).deferred = true;
+      }),
       editReply: jest.fn().mockResolvedValue(undefined),
+      followUp: jest.fn().mockResolvedValue(undefined),
       update: jest.fn().mockResolvedValue(undefined),
     } as any;
   });
@@ -110,19 +122,61 @@ describe("VCTransferSelectHandler - live ownership (#1143)", () => {
   it("tells a stale requester (rejected by the lock) via the deferred message", async () => {
     const { NotRoomOwnerError } =
       await import("../../src/services/voice-channel-manager.js");
-    // A real deferUpdate marks the interaction deferred, so replies edit it
-    (interaction.deferUpdate as jest.Mock).mockImplementation(async () => {
-      (interaction as any).deferred = true;
-    });
     manager.transferOwnership.mockRejectedValue(new NotRoomOwnerError());
 
     await handleVCTransferSelect(interaction as StringSelectMenuInteraction);
 
     expect(interaction.editReply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("current channel owner"),
+      errorEmbedPayload({
+        title: "Only the room owner can transfer ownership",
+        description: expect.stringContaining("start your own room"),
       }),
     );
+  });
+
+  it("replaces the select panel with the generic embed when the transfer throws", async () => {
+    manager.transferOwnership.mockRejectedValue(new Error("db down"));
+
+    await handleVCTransferSelect(interaction as StringSelectMenuInteraction);
+
+    expect(interaction.editReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        components: [],
+        embeds: expect.any(Array),
+      }),
+    );
+    expect(interaction.editReply).toHaveBeenCalledWith(
+      unexpectedErrorPayload(),
+    );
+  });
+
+  it.each([
+    [
+      "the target is not in the room",
+      { id: "target-id", voice: { channelId: "elsewhere" } },
+      "That member is not in your room",
+    ],
+    ["the target cannot be found", null, "That member could not be found"],
+  ])("answers when %s", async (_name, member, title) => {
+    (interaction.guild!.members.fetch as jest.Mock).mockResolvedValue(member);
+
+    await handleVCTransferSelect(interaction as StringSelectMenuInteraction);
+
+    expect(manager.transferOwnership).not.toHaveBeenCalled();
+    expect(interaction.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({ title }),
+    );
+  });
+
+  it("answers an unreadable custom id as out of date, before acknowledging", async () => {
+    interaction.customId = "vc_transfer_select";
+
+    await handleVCTransferSelect(interaction as StringSelectMenuInteraction);
+
+    expect(interaction.reply).toHaveBeenCalledWith(
+      errorEmbedPayload({ title: "This control is out of date" }),
+    );
+    expect(interaction.deferUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a former owner whose still-open select names them", async () => {
@@ -132,8 +186,8 @@ describe("VCTransferSelectHandler - live ownership (#1143)", () => {
 
     expect(manager.transferOwnership).not.toHaveBeenCalled();
     expect(interaction.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("current channel owner"),
+      errorEmbedPayload({
+        title: "Only the room owner can transfer ownership",
       }),
     );
   });

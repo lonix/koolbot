@@ -754,18 +754,62 @@ describe("Server scan tabs (#1323)", () => {
     }
   });
 
-  it("says on the Overview when the bot list may be incomplete, even with no bots found", () => {
+  it("leads the Overview with the verdict, then the partial-read callout, then the tiles (#1546)", () => {
+    const html = mainOf(page("overview"));
+    const verdict = html.indexOf("KoolBot is not ready to manage");
+    const partial = html.indexOf("Some parts could not be read");
+    const tiles = html.indexOf('class="kb-tiles"');
+    expect(verdict).toBeGreaterThan(-1);
+    expect(verdict).toBeLessThan(partial);
+    expect(partial).toBeLessThan(tiles);
+    expect(html.match(/Some parts could not be read/g)).toHaveLength(1);
+    // The other tabs keep it first, before their content.
+    const roles = mainOf(page("roles"));
+    expect(roles.indexOf("Some parts could not be read")).toBeLessThan(
+      roles.indexOf('id="p-roles"'),
+    );
+  });
+
+  it("says the GuildMembers intent is off once on the Overview, with the bot-list caveat in the Other bots footer (#1546)", () => {
+    const off = mainOf(
+      page("overview", {
+        scan: {
+          ...scan,
+          readiness: {
+            ...scan.readiness,
+            issues: [
+              ...scan.readiness.issues,
+              {
+                code: "members-intent-off",
+                severity: "info",
+                message: `The bot is not requesting the GuildMembers intent, so role member counts come from the cache and may be low. ${GUILD_MEMBERS_INTENT_HOWTO}`,
+                help: "h",
+              },
+            ],
+          },
+        },
+      }),
+    );
+    expect(off.match(/not requesting the GuildMembers intent/g)).toHaveLength(
+      1,
+    );
+    expect(off.match(/GUILD_MEMBERS_INTENT=true/g)).toHaveLength(1);
+    const bots = off.slice(off.indexOf('id="p-bots"'));
+    const foot = bots.slice(bots.indexOf('<footer class="kb-panel__foot">'));
+    expect(foot.slice(0, foot.indexOf("</footer>"))).toContain(
+      "may be missing from this list",
+    );
+    // No warn callout between the verdict and the tiles.
+    const lead = off.slice(0, off.indexOf('class="kb-tiles"'));
+    expect(lead).not.toContain("may be missing from this list");
+  });
+
+  it("says on the Overview when the bot list may be incomplete, even with no bots found, through the tile (#1546)", () => {
     const noBots = { ...scan, bots: [] as typeof scan.bots };
     const off = mainOf(page("overview", { scan: noBots }));
-    expect(off).toContain(
-      "so a bot without an integration role may be missing",
-    );
-    expect(off).toContain("GUILD_MEMBERS_INTENT=true");
     expect(off).toContain("None found, but the list may be incomplete.");
     expect(off).not.toContain("None found.<");
-    // Cards present: the warning is still on the Overview, once.
-    const withCards = mainOf(page("overview"));
-    expect(withCards.match(/may be missing from this list/g)).toHaveLength(1);
+    expect(off).not.toContain('id="p-bots"');
     // Intent on: nothing to warn about.
     const on = mainOf(
       page("overview", {
@@ -777,6 +821,16 @@ describe("Server scan tabs (#1323)", () => {
     );
     expect(on).not.toContain("may be missing from this list");
     expect(on).toContain("None found.");
+    const onCards = mainOf(
+      page("overview", {
+        scan: {
+          ...scan,
+          readiness: { ...scan.readiness, membersIntent: true },
+        },
+      }),
+    );
+    expect(onCards).not.toContain("may be missing from this list");
+    expect(onCards).not.toContain('<footer class="kb-panel__foot">');
   });
 
   it("does not say the suggestions look fine when webhooks could not be read", () => {

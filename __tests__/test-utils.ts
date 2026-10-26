@@ -74,7 +74,7 @@ import type {
   ChatInputCommandInteraction,
   Client,
 } from "discord.js";
-import { jest } from "@jest/globals";
+import { expect, jest } from "@jest/globals";
 import { TrackingOptOutService } from "../src/services/tracking-opt-out-service.js";
 
 /** Option values a command handler can read off `interaction.options`. */
@@ -134,7 +134,9 @@ export function createMockChatInputInteraction(
       return value;
     };
 
-  return {
+  // Like discord.js: acknowledging flips the state `safeReply` and
+  // `replyWithError` read to choose between reply, editReply and followUp.
+  const interaction: Record<string, unknown> = {
     id: "interaction-id",
     commandName: "test",
     guildId: "guild-1",
@@ -156,12 +158,17 @@ export function createMockChatInputInteraction(
       getUser: lookup(options.users, "user"),
       getAttachment: lookup(options.attachments, "attachment"),
     },
-    reply: jest.fn(async () => undefined),
-    deferReply: jest.fn(async () => undefined),
+    reply: jest.fn(async () => {
+      interaction.replied = true;
+    }),
+    deferReply: jest.fn(async () => {
+      interaction.deferred = true;
+    }),
     editReply: jest.fn(async () => undefined),
     followUp: jest.fn(async () => undefined),
     ...overrides,
-  } as unknown as MockChatInputInteraction;
+  };
+  return interaction as unknown as MockChatInputInteraction;
 }
 
 /** A stubbed button interaction with the reply surface exposed as mocks. */
@@ -169,24 +176,46 @@ export type MockButtonInteraction = ButtonInteraction & {
   reply: jest.Mock;
   update: jest.Mock;
   followUp: jest.Mock;
+  deferUpdate: jest.Mock;
+  deferReply: jest.Mock;
+  editReply: jest.Mock;
 };
 
+/**
+ * Like discord.js, acknowledging flips the state `safeReply` and
+ * `replyWithError` read to choose between reply, editReply and followUp:
+ * `reply` and `update` set `replied`; `deferReply` and `deferUpdate` set
+ * `deferred`. (#1510: without this a handler's failure reply always looked
+ * like a fresh `reply` in tests, whatever the handler had acknowledged.)
+ */
 export function createMockButtonInteraction(
   customId: string,
   overrides: Record<string, unknown> = {},
 ): MockButtonInteraction {
-  return {
+  const interaction: Record<string, unknown> = {
     customId,
     guildId: "guild-1",
     user: { id: "user-1", username: "alice" },
     client: createMockClient(),
     replied: false,
     deferred: false,
-    reply: jest.fn(async () => undefined),
-    update: jest.fn(async () => undefined),
+    reply: jest.fn(async () => {
+      interaction.replied = true;
+    }),
+    update: jest.fn(async () => {
+      interaction.replied = true;
+    }),
+    deferUpdate: jest.fn(async () => {
+      interaction.deferred = true;
+    }),
+    deferReply: jest.fn(async () => {
+      interaction.deferred = true;
+    }),
+    editReply: jest.fn(async () => undefined),
     followUp: jest.fn(async () => undefined),
     ...overrides,
-  } as unknown as MockButtonInteraction;
+  };
+  return interaction as unknown as MockButtonInteraction;
 }
 
 /**
@@ -284,4 +313,35 @@ export function meConfigStub(
     getNumber: async (_key: string, fallback = 0): Promise<number> => fallback,
     ...extra,
   };
+}
+
+/**
+ * What `replyWithError` / `replyWithUnexpectedError` (`src/utils/error-reply.ts`)
+ * sends: one `embed-danger` embed. Each field is a string or an asymmetric
+ * matcher (`expect.stringContaining(...)`); leave one out to ignore it.
+ *
+ * `expect(interaction.editReply).toHaveBeenCalledWith(errorEmbedPayload({
+ *   title: "Couldn't post your LFG",
+ *   description: expect.stringContaining("LFG channel"),
+ * }))`
+ */
+export function errorEmbedPayload(fields: {
+  title?: unknown;
+  description?: unknown;
+}): unknown {
+  return expect.objectContaining({
+    embeds: [
+      expect.objectContaining({
+        data: expect.objectContaining(fields),
+      }),
+    ],
+  });
+}
+
+/** The generic "Something went wrong" payload every catch-all sends. */
+export function unexpectedErrorPayload(): unknown {
+  return errorEmbedPayload({
+    title: "Something went wrong",
+    description: expect.stringContaining("tell an admin"),
+  });
 }

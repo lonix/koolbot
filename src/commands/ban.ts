@@ -18,7 +18,10 @@ import {
 import { getErrorMessage } from "../utils/error-guards.js";
 import logger from "../utils/logger.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
-import { safeReply } from "../utils/safe-reply.js";
+import {
+  replyWithError,
+  replyWithUnexpectedError,
+} from "../utils/error-reply.js";
 
 const SECONDS_PER_DAY = 24 * 60 * 60;
 
@@ -65,9 +68,9 @@ export async function execute(
 
   try {
     if (!interaction.guildId) {
-      await interaction.reply({
-        content: "This command can only be used in a server.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Can't use this here",
+        next: "Run this command in a server.",
       });
       return;
     }
@@ -77,17 +80,17 @@ export async function execute(
     const deleteDays = interaction.options.getInteger("delete_days") ?? 0;
 
     if (targetUser.bot) {
-      await interaction.reply({
-        content: "You can't ban a bot.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Couldn't ban that member",
+        next: "You can't ban a bot. Pick a member, then try again.",
       });
       return;
     }
 
     if (targetUser.id === interaction.user.id) {
-      await interaction.reply({
-        content: "You can't ban yourself.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Couldn't ban that member",
+        next: "You can't ban yourself. Pick someone else, then try again.",
       });
       return;
     }
@@ -96,9 +99,9 @@ export async function execute(
     // "" — an invalid embed field value. Refusing here, before the ban, keeps
     // the failure in front of the action rather than after it.
     if (!reason) {
-      await interaction.reply({
-        content: "Please give a reason for the ban.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Couldn't ban that member",
+        next: "Give a reason for the ban, then try again.",
       });
       return;
     }
@@ -115,16 +118,18 @@ export async function execute(
     // operator who toggles the feature off expects the bot to stop acting
     // immediately. Refuse rather than ban without a record.
     if (!(await moderationService.isEnabled())) {
-      await interaction.editReply({
-        content: "The moderation log is currently disabled.",
+      await replyWithError(interaction, {
+        title: "The moderation log is off",
+        next: "Ask an admin to turn it on in the Web UI, then try again.",
       });
       return;
     }
 
     const guild = interaction.guild;
     if (!guild) {
-      await interaction.editReply({
-        content: "I couldn't read this server's details. Please try again.",
+      await replyWithError(interaction, {
+        title: "Couldn't read this server",
+        next: "Try again in a minute.",
       });
       return;
     }
@@ -144,7 +149,10 @@ export async function execute(
       capability: "bannable",
     });
     if (refusal) {
-      await interaction.editReply({ content: refusal });
+      await replyWithError(interaction, {
+        title: "Couldn't ban that member",
+        next: refusal,
+      });
       return;
     }
 
@@ -153,7 +161,10 @@ export async function execute(
       deleteDays,
     });
     if (applied !== true) {
-      await interaction.editReply({ content: applied });
+      await replyWithError(interaction, {
+        title: "Discord rejected the ban",
+        next: applied,
+      });
       return;
     }
 
@@ -199,12 +210,14 @@ export async function execute(
     await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error in ban command:", error);
-    await safeReply(interaction, {
-      content: banned
-        ? "The member was banned, but I couldn't record it or show the confirmation. Don't run this again — check /modlog."
-        : "There was an error banning the member.",
-      flags: MessageFlags.Ephemeral,
-    });
+    if (banned) {
+      await replyWithError(interaction, {
+        title: "The member was banned",
+        next: "I couldn't record it or show the confirmation. Don't run this again — check `/modlog`.",
+      });
+    } else {
+      await replyWithUnexpectedError(interaction);
+    }
   }
 }
 

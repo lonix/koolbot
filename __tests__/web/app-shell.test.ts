@@ -172,7 +172,7 @@ describe("sidebar per scope (non-admin /me)", () => {
     expect(doc.querySelector(".kb-shell")).toBeNull();
     expect(doc.querySelector("div.shell > main#main")).not.toBeNull();
     // The My preferences tabs stay in that column.
-    expect(doc.querySelector("nav.page-nav")).not.toBeNull();
+    expect(doc.querySelector("nav.kb-tabs")).not.toBeNull();
     expect(badges(doc)).toEqual([]);
   });
 
@@ -277,10 +277,10 @@ describe("sidebar per scope (non-admin /me)", () => {
   it("keeps the My preferences tabs off host and moderator pages", () => {
     expect(
       userPage(host, { active: "/me/events/presets" }).querySelector(
-        "nav.page-nav",
+        "nav.kb-tabs",
       ),
     ).toBeNull();
-    expect(userPage(host).querySelector("nav.page-nav")).not.toBeNull();
+    expect(userPage(host).querySelector("nav.kb-tabs")).not.toBeNull();
   });
 
   it("labels the landmarks apart", () => {

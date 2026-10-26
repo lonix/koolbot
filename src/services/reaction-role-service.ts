@@ -62,14 +62,17 @@ import {
 import { embedColor } from "../utils/embed-style.js";
 
 /**
- * A picker posted by a server-adoption step carries the step's key in its embed
- * footer. The message exists before its mapping is saved, so after a crash the
- * key is how a retry or a rollback finds (and proves ownership of) it.
+ * Pickers posted before #1513 carry their adoption step's key in the embed
+ * footer (`… · ref <key>`). That marker is the only thing that proves such a
+ * message was a step's own, so a retry or a rollback still honours it. A picker
+ * posted now carries no key: until its mapping is saved it is inert (the
+ * reaction handlers look configs up by message id), so a step that died between
+ * `send()` and the save simply posts a fresh picker and leaves the orphan alone.
  */
 const PICKER_SEARCH_MAX_PAGES = 50;
 const PICKER_REF_SEPARATOR = " · ";
 const PICKER_REF_PREFIX = "ref ";
-const isMarkedPicker = (
+const hasLegacyMarker = (
   message: {
     author?: { id: string };
     embeds?: Array<{ footer?: { text?: string } | null }>;
@@ -2071,12 +2074,10 @@ export class ReactionRoleService {
         const embed = new EmbedBuilder()
           .setColor(embedColor("brand"))
           .setTitle(`${emoji} ${role.name}`)
-          .setDescription(`React with ${emoji} to get the <@&${role.id}> role!`)
-          .setFooter({
-            text: options.adoptionOpKey
-              ? `Remove your reaction to lose the role${PICKER_REF_SEPARATOR}${PICKER_REF_PREFIX}${options.adoptionOpKey}`
-              : "Remove your reaction to lose the role",
-          })
+          .setDescription(
+            `React with ${emoji} to get the <@&${role.id}> role!\n\nRemove your reaction to lose the role.`,
+          )
+          .setFooter({ text: "KoolBot · Reaction roles" })
           .setTimestamp();
         postedMessage = await messageChannel.send({ embeds: [embed] });
         targetMessage = postedMessage;
@@ -2371,7 +2372,12 @@ export class ReactionRoleService {
     };
   }
 
-  /** The most recent message in `channelId` carrying `ownerKey`'s marker. */
+  /**
+   * The most recent message in `channelId` carrying `ownerKey`'s old footer
+   * marker (a picker posted before #1513), or null. A picker posted now has no
+   * marker and is never found here: unmapped, it is inert, so callers post a
+   * fresh one and leave it alone.
+   */
   private async findMarkedPicker(
     guild: Guild,
     channelId: string,
@@ -2407,7 +2413,7 @@ export class ReactionRoleService {
         `read messages in ${channelId}`,
       );
       const list = [...batch.values()];
-      const hit = list.find((m) => isMarkedPicker(m, botId, ownerKey));
+      const hit = list.find((m) => hasLegacyMarker(m, botId, ownerKey));
       if (hit) return hit;
       // Fewer than a full page: the history is exhausted.
       if (list.length < 100) return null;
@@ -2463,7 +2469,9 @@ export class ReactionRoleService {
       });
       if (row) return row.messageId;
       // No mapping: the picker may still have been posted before the process
-      // died. Its footer marker proves it was this step's.
+      // died. Only an old footer marker (before #1513) proves one was this
+      // step's; a picker without a mapping or a marker is inert and is not
+      // looked for, so the caller posts a fresh one.
       const api = CommandManager.getInstance(this.client);
       const guild = await api.makeDiscordApiCall(
         () => this.client.guilds.fetch(guildId),
@@ -2509,7 +2517,9 @@ export class ReactionRoleService {
       const api = CommandManager.getInstance(this.client);
       if (!config) {
         // No mapping (the step died before saving it): the picker is only ours
-        // to delete if its footer carries this step's marker.
+        // to delete if its footer carries this step's marker (a picker posted
+        // before #1513). A picker without a marker is never proven ours by its
+        // content: it is inert and stays where it is.
         const guildForOrphan = await api.makeDiscordApiCall(
           () => this.client.guilds.fetch(guildId),
           "fetch guild to remove picker",
@@ -2546,7 +2556,7 @@ export class ReactionRoleService {
               }),
           `read orphan picker ${input.messageId}`,
         );
-        if (orphan && isMarkedPicker(orphan, botId, input.ownerKey)) {
+        if (orphan && hasLegacyMarker(orphan, botId, input.ownerKey)) {
           await this.deleteMessageUnderLock(orphan);
         }
         return;

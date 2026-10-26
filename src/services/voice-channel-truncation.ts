@@ -253,7 +253,7 @@ export class VoiceChannelTruncationService extends ScheduledService<ICleanupStat
       // Log error to Discord
       await this.discordLogger.logError(
         error instanceof Error ? error : new Error(errorMessage),
-        "Voice Channel Cleanup",
+        "voice channel clean-up",
       );
 
       return {

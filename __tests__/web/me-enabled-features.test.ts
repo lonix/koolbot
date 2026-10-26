@@ -456,7 +456,9 @@ describe("Saved choices survive a feature being off (#1292)", () => {
     config.values["digest.enabled"] = true;
     const page = (await app.call("GET", "/notifications")).body;
     expect(page).toContain('name="digest" value="true" checked');
-    expect(page).toContain('name="achievements" value="true">');
+    expect(page).toMatch(
+      /name="achievements" value="true" aria-labelledby="notify-achievements-name"/,
+    );
   });
 
   it("ignores a stale form that still carries a hidden row", async () => {

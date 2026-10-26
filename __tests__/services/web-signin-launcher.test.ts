@@ -1,5 +1,6 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import type { ChatInputCommandInteraction } from "discord.js";
+import { errorEmbedPayload } from "../test-utils.js";
 
 const mockCreate = jest.fn();
 const mockGetString = jest.fn();
@@ -175,9 +176,12 @@ describe("runWebSignin link delivery", () => {
       await runWebSignin(interaction, opts);
       expect(mockCreate).not.toHaveBeenCalled();
       expect(send).not.toHaveBeenCalled();
-      expect(editReply.mock.calls[0][0]).toEqual({
-        content: expect.stringContaining("own server"),
-      });
+      expect(editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "Can't use this here",
+          description: expect.stringContaining("own server"),
+        }),
+      );
     } finally {
       if (prev === undefined) delete process.env.GUILD_ID;
       else process.env.GUILD_ID = prev;
@@ -194,9 +198,12 @@ describe("runWebSignin link delivery", () => {
 
       expect(mockCreate).toHaveBeenCalledTimes(1);
       expect(second.send).not.toHaveBeenCalled();
-      expect(second.editReply).toHaveBeenCalledWith({
-        content: expect.stringMatching(/wait \d+ seconds?/),
-      });
+      expect(second.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "You just asked for a sign-in link",
+          description: expect.stringMatching(/wait \d+ seconds?/),
+        }),
+      );
     });
 
     it("does not let one member's cooldown block another", async () => {
@@ -265,9 +272,12 @@ describe("runWebSignin link delivery", () => {
       const c = build(async () => undefined);
       await runWebSignin(c.interaction, opts);
       expect(mockCreate).toHaveBeenCalledTimes(2);
-      expect(c.editReply).toHaveBeenCalledWith({
-        content: expect.stringMatching(/wait/),
-      });
+      expect(c.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "You just asked for a sign-in link",
+          description: expect.stringMatching(/wait/),
+        }),
+      );
       nowSpy.mockRestore();
     });
 

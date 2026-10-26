@@ -1,10 +1,11 @@
-import {
-  StringSelectMenuInteraction,
-  ChannelType,
-  MessageFlags,
-} from "discord.js";
+import { StringSelectMenuInteraction, ChannelType } from "discord.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import {
+  replyWithError,
+  replyWithUnexpectedError,
+} from "../utils/error-reply.js";
+import { VC_CHANNEL_GONE, VC_NOT_OWNER, VC_OUT_OF_DATE } from "./vc-errors.js";
 import { NO_MENTIONS } from "../utils/allowed-mentions.js";
 import {
   VoiceChannelManager,
@@ -19,10 +20,7 @@ export async function handleVCTransferSelect(
   // Parse custom ID: vc_transfer_select_{channelId}_{ownerId}
   const parts = customId.split("_");
   if (parts.length < 5 || parts[0] !== "vc" || parts[1] !== "transfer") {
-    await interaction.reply({
-      content: "❌ Invalid select menu interaction.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithError(interaction, VC_OUT_OF_DATE);
     return;
   }
 
@@ -34,9 +32,9 @@ export async function handleVCTransferSelect(
   // require live ownership (an ephemeral select can outlive a transfer) (#1143).
   const manager = VoiceChannelManager.getInstance(interaction.client);
   if (userId !== ownerId || !manager.isRoomOwner(userId, channelId)) {
-    await interaction.reply({
-      content: "❌ Only the current channel owner can transfer ownership.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "Only the room owner can transfer ownership",
+      next: VC_NOT_OWNER.next,
     });
     return;
   }
@@ -57,14 +55,17 @@ export async function handleVCTransferSelect(
   const targetUserId = interaction.values[0];
 
   if (!targetUserId) {
-    await done("❌ Please select a user.");
+    await replyWithError(interaction, {
+      title: "No member was selected",
+      next: "Open the menu again and pick a member from your room.",
+    });
     return;
   }
 
   // Get the voice channel
   const channel = await interaction.guild?.channels.fetch(channelId);
   if (!channel || channel.type !== ChannelType.GuildVoice) {
-    await done("❌ Voice channel not found.");
+    await replyWithError(interaction, VC_CHANNEL_GONE);
     return;
   }
 
@@ -72,13 +73,19 @@ export async function handleVCTransferSelect(
     // Get the target member
     const targetMember = await interaction.guild?.members.fetch(targetUserId);
     if (!targetMember) {
-      await done("❌ Could not find the target user.");
+      await replyWithError(interaction, {
+        title: "That member could not be found",
+        next: "Pick someone who is in your room, then try again.",
+      });
       return;
     }
 
     // Check if target user is in the same voice channel
     if (targetMember.voice.channelId !== channelId) {
-      await done("❌ The target user must be in the same voice channel!");
+      await replyWithError(interaction, {
+        title: "That member is not in your room",
+        next: "Ask them to join your voice channel, then pick them again.",
+      });
       return;
     }
 
@@ -90,10 +97,13 @@ export async function handleVCTransferSelect(
     // transferOwnership re-checks ownership under the room lock; a transfer
     // that landed after our preflight makes this request stale (#1143).
     if (error instanceof NotRoomOwnerError) {
-      await done("❌ Only the current channel owner can transfer ownership.");
+      await replyWithError(interaction, {
+        title: "Only the room owner can transfer ownership",
+        next: VC_NOT_OWNER.next,
+      });
       return;
     }
     logger.error("Error transferring ownership:", error);
-    await done("❌ Failed to transfer ownership. Please try again.");
+    await replyWithUnexpectedError(interaction);
   }
 }

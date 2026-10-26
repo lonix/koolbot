@@ -8,7 +8,11 @@ import {
 import { ModerationService } from "../services/moderation-service.js";
 import logger from "../utils/logger.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
-import { safeReply } from "../utils/safe-reply.js";
+import {
+  afterWrite,
+  replyWithError,
+  replyWithUnexpectedError,
+} from "../utils/error-reply.js";
 import { MAX_REASON_LENGTH } from "../utils/moderation-guards.js";
 import { embedColor } from "../utils/embed-style.js";
 
@@ -40,9 +44,9 @@ export async function execute(
 ): Promise<void> {
   try {
     if (!interaction.guildId) {
-      await interaction.reply({
-        content: "This command can only be used in a server.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Can't use this here",
+        next: "Run this command in a server.",
       });
       return;
     }
@@ -51,17 +55,17 @@ export async function execute(
     const reason = interaction.options.getString("reason", true).trim();
 
     if (targetUser.bot) {
-      await interaction.reply({
-        content: "You can't warn a bot.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Couldn't warn that member",
+        next: "You can't warn a bot. Pick a member, then try again.",
       });
       return;
     }
 
     if (targetUser.id === interaction.user.id) {
-      await interaction.reply({
-        content: "You can't warn yourself.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Couldn't warn that member",
+        next: "You can't warn yourself. Pick someone else, then try again.",
       });
       return;
     }
@@ -70,9 +74,9 @@ export async function execute(
     // "" — an invalid embed field value, and a recorded warning with no reason.
     // Refusing here keeps the failure in front of the write.
     if (!reason) {
-      await interaction.reply({
-        content: "Please give a reason for the warning.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Couldn't warn that member",
+        next: "Give a reason for the warning, then try again.",
       });
       return;
     }
@@ -89,8 +93,9 @@ export async function execute(
     // operator who toggles the feature off expects new writes to stop
     // immediately. Return a clear message instead of recording a warning.
     if (!(await moderationService.isEnabled())) {
-      await interaction.editReply({
-        content: "The moderation log is currently disabled.",
+      await replyWithError(interaction, {
+        title: "The moderation log is off",
+        next: "Ask an admin to turn it on in the Web UI, then try again.",
       });
       return;
     }
@@ -102,32 +107,38 @@ export async function execute(
       reason,
     });
 
-    const total = await moderationService.countHistory(
-      interaction.guildId,
-      targetUser.id,
+    // `logWarn` inserts a new entry on every call, so from here on a failure
+    // must not tell the moderator to try again.
+    const guildId = interaction.guildId;
+    await afterWrite(
+      interaction,
+      { done: "The warning was recorded", check: "`/modlog`" },
+      async () => {
+        const total = await moderationService.countHistory(
+          guildId,
+          targetUser.id,
+        );
+
+        const embed = new EmbedBuilder()
+          .setColor(embedColor("warn"))
+          .setTitle("⚠️ Warning recorded")
+          .setDescription(
+            `**${escapeDisplayText(targetUser.tag)}** has been warned.\nThey now have **${total}** entr${
+              total === 1 ? "y" : "ies"
+            } in the moderation log.`,
+          )
+          .addFields({ name: "Reason", value: reason })
+          .setFooter({ text: `Use /modlog to view history` })
+          .setTimestamp();
+
+        // Ephemeral (set at the deferral above) so the moderator gets a clear
+        // confirmation without posting a public call-out; the durable record
+        // lives in the moderation log.
+        await interaction.editReply({ embeds: [embed] });
+      },
     );
-
-    const embed = new EmbedBuilder()
-      .setColor(embedColor("warn"))
-      .setTitle("⚠️ Warning recorded")
-      .setDescription(
-        `**${escapeDisplayText(targetUser.tag)}** has been warned.\nThey now have **${total}** entr${
-          total === 1 ? "y" : "ies"
-        } in the moderation log.`,
-      )
-      .addFields({ name: "Reason", value: reason })
-      .setFooter({ text: `Use /modlog to view history` })
-      .setTimestamp();
-
-    // Ephemeral (set at the deferral above) so the moderator gets a clear
-    // confirmation without posting a public call-out; the durable record
-    // lives in the moderation log.
-    await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error in warn command:", error);
-    await safeReply(interaction, {
-      content: "There was an error recording the warning.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithUnexpectedError(interaction);
   }
 }

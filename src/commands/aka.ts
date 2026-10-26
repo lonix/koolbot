@@ -12,7 +12,10 @@ import {
 import { NAME_KINDS, NameKind } from "../models/user-name-history.js";
 import { TrackingOptOutService } from "../services/tracking-opt-out-service.js";
 import logger from "../utils/logger.js";
-import { safeReply } from "../utils/safe-reply.js";
+import {
+  replyWithError,
+  replyWithUnexpectedError,
+} from "../utils/error-reply.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
 
 export const data = new SlashCommandBuilder()
@@ -89,16 +92,16 @@ export async function execute(
   try {
     const targetUser = interaction.options.getUser("user");
     if (!targetUser) {
-      await interaction.reply({
-        content: "Please specify a member to look up.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Couldn't look that member up",
+        next: "Pick a member, then try again.",
       });
       return;
     }
     if (!interaction.guildId) {
-      await interaction.reply({
-        content: "This command can only be used in a server.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Can't use this here",
+        next: "Run this command in a server.",
       });
       return;
     }
@@ -180,8 +183,6 @@ export async function execute(
     }
   } catch (error) {
     logger.error("Error in aka command:", error);
-    await safeReply(interaction, {
-      content: "There was an error while executing this command!",
-    });
+    await replyWithUnexpectedError(interaction);
   }
 }

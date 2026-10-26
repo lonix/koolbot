@@ -75,7 +75,7 @@ function notFound(res: Response): void {
         heading: "Not found",
         bodyHtml:
           '<p>Events are switched off on this server. Visit <a href="/me/">/me</a> for your own preferences.</p>',
-        product: "Koolbot",
+        product: "KoolBot",
       }),
     );
 }

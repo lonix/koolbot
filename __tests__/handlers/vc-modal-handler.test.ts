@@ -5,7 +5,6 @@ import {
   type Guild,
   type VoiceChannel,
   type Client,
-  MessageFlags,
 } from "discord.js";
 
 // Mock dependencies before importing
@@ -15,9 +14,13 @@ jest.mock("../../src/services/voice-channel-manager.js");
 // Import after mocks
 import { VoiceChannelManager } from "../../src/services/voice-channel-manager.js";
 import { ConfigService } from "../../src/services/config-service.js";
-import { UserVoicePrefsService } from "../../src/services/user-voice-prefs-service.js";
+import {
+  UserVoicePrefsService,
+  VoicePrefsValidationError,
+} from "../../src/services/user-voice-prefs-service.js";
 import { presetNameTag } from "../../src/handlers/vc-preset-handler.js";
 import { handleVCModal } from "../../src/handlers/vc-modal-handler.js";
+import { errorEmbedPayload, unexpectedErrorPayload } from "../test-utils.js";
 
 const mockVoiceChannelManager = VoiceChannelManager as jest.Mocked<
   typeof VoiceChannelManager
@@ -84,10 +87,20 @@ describe("VCModalHandler - Custom Name Tracking", () => {
       fields: {
         getTextInputValue: jest.fn().mockReturnValue("New Custom Name"),
       } as any,
-      reply: jest.fn().mockResolvedValue(undefined),
-      deferReply: jest.fn().mockResolvedValue(undefined),
+      // Like discord.js, acknowledging flips the state that decides whether a
+      // reply is a fresh message or an edit of the deferred one (#1510). The
+      // modal defers before any slow work, so its answers are edits.
+      replied: false,
+      deferred: false,
+      reply: jest.fn(async () => {
+        (mockInteraction as any).replied = true;
+      }),
+      deferReply: jest.fn(async () => {
+        (mockInteraction as any).deferred = true;
+      }),
       deferUpdate: jest.fn().mockResolvedValue(undefined),
       editReply: jest.fn().mockResolvedValue(undefined),
+      followUp: jest.fn().mockResolvedValue(undefined),
       guild: mockGuild as Guild,
       client: {} as any as Client,
     } as any;
@@ -105,9 +118,10 @@ describe("VCModalHandler - Custom Name Tracking", () => {
       );
       expect(mockChannel.setName).not.toHaveBeenCalled();
       expect(mockSetCustomChannelName).not.toHaveBeenCalled();
-      expect(mockInteraction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: expect.stringContaining("current channel owner"),
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "Only the room owner can do this",
+          description: expect.stringContaining("start your own room"),
         }),
       );
     });
@@ -157,9 +171,10 @@ describe("VCModalHandler - Custom Name Tracking", () => {
       expect(mockIsReservedChannelName).toHaveBeenCalledWith("Lobby");
       expect(mockChannel.setName).not.toHaveBeenCalled();
       expect(mockSetCustomChannelName).not.toHaveBeenCalled();
-      expect(mockInteraction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: expect.stringContaining("reserved"),
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "That channel name is reserved",
+          description: expect.stringContaining("different name"),
         }),
       );
     });
@@ -174,9 +189,8 @@ describe("VCModalHandler - Custom Name Tracking", () => {
         "test-channel-id",
         "New Custom Name",
       );
-      expect(mockInteraction.reply).toHaveBeenCalledWith({
+      expect(mockInteraction.editReply).toHaveBeenCalledWith({
         content: "✅ Channel renamed to: **New Custom Name**",
-        flags: MessageFlags.Ephemeral,
       });
     });
 
@@ -188,10 +202,9 @@ describe("VCModalHandler - Custom Name Tracking", () => {
       await handleVCModal(mockInteraction as ModalSubmitInteraction);
 
       expect(mockSetCustomChannelName).not.toHaveBeenCalled();
-      expect(mockInteraction.reply).toHaveBeenCalledWith({
-        content: "❌ Failed to rename channel. Please try again.",
-        flags: MessageFlags.Ephemeral,
-      });
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        unexpectedErrorPayload(),
+      );
     });
 
     it("should reject names longer than 100 characters", async () => {
@@ -204,10 +217,12 @@ describe("VCModalHandler - Custom Name Tracking", () => {
 
       expect(mockChannel.setName).not.toHaveBeenCalled();
       expect(mockSetCustomChannelName).not.toHaveBeenCalled();
-      expect(mockInteraction.reply).toHaveBeenCalledWith({
-        content: "❌ Channel name must be 100 characters or less.",
-        flags: MessageFlags.Ephemeral,
-      });
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "That channel name is too long",
+          description: expect.stringContaining("100 characters"),
+        }),
+      );
     });
 
     it("should reject empty names", async () => {
@@ -219,10 +234,12 @@ describe("VCModalHandler - Custom Name Tracking", () => {
 
       expect(mockChannel.setName).not.toHaveBeenCalled();
       expect(mockSetCustomChannelName).not.toHaveBeenCalled();
-      expect(mockInteraction.reply).toHaveBeenCalledWith({
-        content: "❌ Channel name cannot be empty.",
-        flags: MessageFlags.Ephemeral,
-      });
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "The channel name is empty",
+          description: expect.stringContaining("Type a name"),
+        }),
+      );
     });
   });
 
@@ -267,9 +284,8 @@ describe("VCModalHandler - Custom Name Tracking", () => {
         "Renamed Preset",
         "Squad Night",
       );
-      expect(mockInteraction.reply).toHaveBeenCalledWith({
+      expect(mockInteraction.editReply).toHaveBeenCalledWith({
         content: "✏️ Preset **Squad Night** renamed to **Renamed Preset**.",
-        flags: MessageFlags.Ephemeral,
       });
     });
 
@@ -287,7 +303,7 @@ describe("VCModalHandler - Custom Name Tracking", () => {
       await handleVCModal(mockInteraction as ModalSubmitInteraction);
 
       const text = (
-        (mockInteraction.reply as jest.Mock).mock.calls[0][0] as {
+        (mockInteraction.editReply as jest.Mock).mock.calls[0][0] as {
           content: string;
         }
       ).content;
@@ -312,7 +328,7 @@ describe("VCModalHandler - Custom Name Tracking", () => {
       await handleVCModal(mockInteraction as ModalSubmitInteraction);
 
       const text = (
-        (mockInteraction.reply as jest.Mock).mock.calls[0][0] as {
+        (mockInteraction.editReply as jest.Mock).mock.calls[0][0] as {
           content: string;
         }
       ).content;
@@ -332,11 +348,12 @@ describe("VCModalHandler - Custom Name Tracking", () => {
       await handleVCModal(mockInteraction as ModalSubmitInteraction);
 
       expect(mockService.renamePreset).not.toHaveBeenCalled();
-      expect(mockInteraction.reply).toHaveBeenCalledWith({
-        content:
-          "❌ Your presets changed since this dialog was opened — reopen the panel and try again.",
-        flags: MessageFlags.Ephemeral,
-      });
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "Your presets changed",
+          description: expect.stringContaining("Reopen the presets panel"),
+        }),
+      );
     });
 
     it("refuses when the preset index no longer exists", async () => {
@@ -346,11 +363,8 @@ describe("VCModalHandler - Custom Name Tracking", () => {
       await handleVCModal(mockInteraction as ModalSubmitInteraction);
 
       expect(mockService.renamePreset).not.toHaveBeenCalled();
-      expect(mockInteraction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content:
-            "❌ Your presets changed since this dialog was opened — reopen the panel and try again.",
-        }),
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({ title: "Your presets changed" }),
       );
     });
 
@@ -374,5 +388,152 @@ describe("VCModalHandler - Custom Name Tracking", () => {
         "Squad Night",
       );
     });
+  });
+});
+
+describe("VCModalHandler - failure replies (#1510)", () => {
+  // Only a VoicePrefsValidationError is written for members; any other error,
+  // whatever its message, stays in the log and the member gets the generic
+  // embed. The same split guards vc-preset-handler.ts.
+  let interaction: any;
+  let service: {
+    savePreset: jest.Mock;
+    getPrefs: jest.Mock;
+    renamePreset: jest.Mock;
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (mockVoiceChannelManager.getInstance as unknown as jest.Mock) = jest.fn(
+      () => ({
+        isReservedChannelName: jest.fn().mockResolvedValue(false),
+        runAsRoomOwner: async (
+          _u: string,
+          _c: string,
+          work: () => Promise<void>,
+        ) => {
+          await work();
+          return true;
+        },
+      }),
+    );
+    jest.spyOn(ConfigService.prototype, "getBoolean").mockResolvedValue(true);
+    jest.spyOn(ConfigService.prototype, "getNumber").mockResolvedValue(3);
+    service = {
+      savePreset: jest.fn(),
+      getPrefs: jest.fn(),
+      renamePreset: jest.fn(),
+    };
+    jest
+      .spyOn(UserVoicePrefsService, "getInstance")
+      .mockReturnValue(service as unknown as UserVoicePrefsService);
+    interaction = {
+      customId: "vc_modal_savepreset_test-channel-id_test-user-id",
+      user: { id: "test-user-id" },
+      fields: { getTextInputValue: jest.fn().mockReturnValue("Squad") },
+      replied: false,
+      deferred: false,
+      reply: jest.fn(async () => {
+        interaction.replied = true;
+      }),
+      deferReply: jest.fn(async () => {
+        interaction.deferred = true;
+      }),
+      editReply: jest.fn().mockResolvedValue(undefined),
+      followUp: jest.fn().mockResolvedValue(undefined),
+      guild: {
+        channels: {
+          fetch: jest.fn().mockResolvedValue({
+            id: "test-channel-id",
+            name: "Room",
+            type: ChannelType.GuildVoice,
+            userLimit: 0,
+            bitrate: 64000,
+          }),
+        },
+      },
+      client: {} as Client,
+    };
+  });
+
+  it("shows a VoicePrefsValidationError message as the description", async () => {
+    service.savePreset.mockRejectedValue(
+      new VoicePrefsValidationError("Preset name must be 1–50 characters."),
+    );
+
+    await handleVCModal(interaction as ModalSubmitInteraction);
+
+    expect(interaction.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't save the preset",
+        description: "Preset name must be 1–50 characters.",
+      }),
+    );
+  });
+
+  it("escapes a member-typed name inside a validation message", async () => {
+    service.savePreset.mockRejectedValue(
+      new VoicePrefsValidationError(
+        'You already have a preset named "<@555> @everyone".',
+      ),
+    );
+
+    await handleVCModal(interaction as ModalSubmitInteraction);
+
+    const sent = interaction.editReply.mock.calls[0][0] as {
+      embeds: { data: { description: string } }[];
+    };
+    expect(sent.embeds[0].data.description).not.toContain("<@555>");
+    expect(sent.embeds[0].data.description).not.toContain("@everyone");
+  });
+
+  it("keeps any other error's message out of the reply", async () => {
+    service.savePreset.mockRejectedValue(
+      new Error("MongoServerError: secret connection string"),
+    );
+
+    await handleVCModal(interaction as ModalSubmitInteraction);
+
+    expect(interaction.editReply).toHaveBeenCalledWith(
+      unexpectedErrorPayload(),
+    );
+    expect(JSON.stringify(interaction.editReply.mock.calls)).not.toContain(
+      "secret",
+    );
+  });
+
+  it("answers an unreadable modal id as out of date, before acknowledging", async () => {
+    interaction.customId = "vc_modal_name";
+
+    await handleVCModal(interaction as ModalSubmitInteraction);
+
+    expect(interaction.reply).toHaveBeenCalledWith(
+      errorEmbedPayload({ title: "This control is out of date" }),
+    );
+    expect(interaction.deferReply).not.toHaveBeenCalled();
+  });
+
+  it("refuses a modal opened by someone else, before acknowledging", async () => {
+    interaction.user = { id: "someone-else" };
+
+    await handleVCModal(interaction as ModalSubmitInteraction);
+
+    expect(interaction.reply).toHaveBeenCalledWith(
+      errorEmbedPayload({ title: "This form belongs to someone else" }),
+    );
+    expect(service.savePreset).not.toHaveBeenCalled();
+  });
+
+  it("says presets are switched off when the feature is off", async () => {
+    jest.spyOn(ConfigService.prototype, "getBoolean").mockResolvedValue(false);
+
+    await handleVCModal(interaction as ModalSubmitInteraction);
+
+    expect(interaction.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Presets are switched off",
+        description: expect.stringContaining("admin"),
+      }),
+    );
   });
 });

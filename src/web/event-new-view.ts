@@ -145,7 +145,7 @@ ${permissionLine}<form method="POST" action="/me/events/new" class="kb-stack" da
   <section class="kb-panel" aria-labelledby="new-event-groups-h">
     <header class="kb-panel__head"><h2 class="kb-panel__title" id="new-event-groups-h">Groups</h2></header>
     <div class="kb-panel__body">
-      ${renderGroupsSection(props.groupLimits, props.groupPresets, props.groupPresetsNotice, "/me/events/presets", props.groupRemembered ?? null, permissionInline)}
+      ${renderGroupsSection(props.groupLimits, props.groupPresets, props.groupPresetsNotice, "/me/events/presets", props.groupRemembered ?? null, permissionInline, true)}
     </div>
   </section>
   <div class="kb-row"><button type="submit" class="kb-btn kb-btn--primary">Create event</button></div>
