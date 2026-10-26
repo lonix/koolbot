@@ -97,7 +97,7 @@ export interface HostPanelEvent {
    * state reads *Live*; otherwise an open event reads *Planned*. Absent = false.
    */
   running?: boolean;
-  /** Pre-formatted start line (`formatEventWhen`). */
+  /** Pre-formatted start line (`formatDateTimeInZone`, in the member's zone). */
   when: string;
   durationMinutes: number;
   /** Recurrence label (e.g. "weekly") or null for a one-off event. */

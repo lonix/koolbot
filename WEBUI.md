@@ -3702,6 +3702,13 @@ existing achievements award detection. `celebrations.enabled` depends on
 | **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.                                                                                     |
 | **Privacy** (`/me/privacy`)             | See what Koolbot stores about you, download it as one JSON file, and (if `privacy.delete.enabled`) reset it. Gated by `privacy.enabled`; audited.                                                                                         |
 
+**Member and host pages show times in your own timezone (#1538).** The zone is the one on the Timezone page, or the server's zone while it is
+unset, and a time names it, for example `2026-10-25 12:15 (Europe/Oslo)`. This covers the start of your events on the Overview, _Your events_ and
+the host panel, the leaders' recent changes in the host panel and when you can reset your data again. _Last voted_ and the dates on Rewind's badges
+are the calendar day in that zone. _Edit event_ stays in the event's own zone, fields and read-only start alike, because that is what the form
+edits. The moderator pages (Mod log, a case, Command audit) and the admin pages show UTC on purpose: staff in several timezones read the same
+log. Discord messages use Discord timestamps, which each reader sees in their own zone.
+
 **A switched-off feature is not shown on `/me/*` (#1292, extending #1066).**
 Voice, Birthday, Rewind and Privacy each follow their feature switch
 (`voicechannels.presets.enabled`, `birthdays.enabled`, `rewind.enabled`,

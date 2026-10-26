@@ -169,7 +169,21 @@ describe("createUserRouter / index page", () => {
     (WebSessionService as unknown as { instance: unknown }).instance = null;
   });
 
-  async function dispatchIndex(role: "admin" | "user"): Promise<string> {
+  async function dispatchIndex(
+    role: "admin" | "user",
+    opts: {
+      /** The member's stored timezone (#1538); `null`: none. */
+      memberZone?: string | null;
+      /** Events the member created, as `Event.find().lean()` returns them. */
+      hostedEvents?: Array<Record<string, unknown>>;
+      /**
+       * The test stubbed (or restored) `UserNotificationPrefsService` itself
+       * for the preference values (#1508); a stub must then provide
+       * `getTimezone` as well.
+       */
+      keepNotificationPrefsService?: boolean;
+    } = {},
+  ): Promise<string> {
     const now = Date.now();
     const payload: CookiePayload = {
       sid: "session-id",
@@ -200,7 +214,34 @@ describe("createUserRouter / index page", () => {
     jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
       checkCommandPermission: async () => true,
       isAdministrator: async () => true,
+      ...(opts.hostedEvents
+        ? { resolveWebScopes: async () => ["member", "host"] }
+        : {}),
     } as never);
+
+    const { UserNotificationPrefsService } =
+      await import("../../src/services/user-notification-prefs-service.js");
+    if (!opts.keepNotificationPrefsService) {
+      jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+        getPrefsWithTimezoneStrict: async () => ({
+          prefs: { achievements: true, digest: true, rewind: true },
+          timezone: opts.memberZone === undefined ? "UTC" : opts.memberZone,
+        }),
+      } as never);
+    }
+
+    if (opts.hostedEvents) {
+      const { Event } = await import("../../src/models/event.js");
+      const rows = opts.hostedEvents;
+      jest.spyOn(Event, "find").mockImplementation((() => {
+        const chain = {
+          sort: () => chain,
+          limit: () => chain,
+          lean: async () => rows,
+        };
+        return chain;
+      }) as never);
+    }
 
     const { createSessionMiddleware } =
       await import("../../src/web/session.js");
@@ -289,6 +330,48 @@ describe("createUserRouter / index page", () => {
     );
   });
 
+  it("shows the last vote as the calendar day in the member's zone, not in UTC (#1538)", async () => {
+    await enablePollParticipationGate();
+    const { PollParticipationTracker } =
+      await import("../../src/services/poll-participation-tracker.js");
+    jest.spyOn(PollParticipationTracker, "getInstance").mockReturnValue({
+      getParticipationSummary: async () => ({
+        totalVotes: 1,
+        thisYearVotes: 1,
+        thisWeekVotes: 0,
+        // 23:30 UTC on the 4th is already the 5th in Auckland (UTC+13).
+        lastVoteAt: new Date("2026-03-04T23:30:00Z"),
+      }),
+    } as never);
+
+    const html = await dispatchIndex("user", {
+      memberZone: "Pacific/Auckland",
+    });
+    expect(html).toContain("2026-03-05");
+    expect(html).not.toContain("2026-03-04");
+  });
+
+  it("shows hosted events in the member's zone, not the event's (#1538)", async () => {
+    // 2020-01-01 19:00 UTC: 14:00 in New York (the event's zone), 2020-01-02
+    // 08:00 in Auckland (the member's). The event is running, so the Overview
+    // lists it with its start (planned events are only a count, #1508).
+    const html = await dispatchIndex("user", {
+      memberZone: "Pacific/Auckland",
+      hostedEvents: [
+        {
+          _id: "65a000000000000000000001",
+          title: "Quiz night",
+          startTime: new Date("2020-01-01T19:00:00Z"),
+          timezone: "America/New_York",
+          state: "active",
+        },
+      ],
+    });
+    expect(html).toContain("Quiz night");
+    expect(html).toContain("2020-01-02 08:00 (Pacific/Auckland)");
+    expect(html).not.toContain("America/New_York");
+  });
+
   it("renders a zero weekly count rather than hiding the stat (#816)", async () => {
     await enablePollParticipationGate();
     const { PollParticipationTracker } =
@@ -319,6 +402,7 @@ describe("createUserRouter / index page", () => {
     const { UserNotificationPrefsService } =
       await import("../../src/services/user-notification-prefs-service.js");
     jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+      getTimezone: async () => "Europe/Oslo",
       getPrefsWithTimezoneStrict: async () => ({
         prefs: { achievements: true, digest: false, rewind: false },
         timezone: "Europe/Oslo",
@@ -330,7 +414,9 @@ describe("createUserRouter / index page", () => {
       getSummary: async () => ({ namePattern: "[AMR] {name}", presetCount: 2 }),
     } as never);
 
-    const html = await dispatchIndex("user");
+    const html = await dispatchIndex("user", {
+      keepNotificationPrefsService: true,
+    });
     expect(html).toMatch(
       /<p class="kb-feature__value">Europe\/Oslo · \d\d:\d\d now<\/p>/,
     );
@@ -339,16 +425,81 @@ describe("createUserRouter / index page", () => {
     );
   });
 
+  it("reads the member's preference row once for the cards and the times (#1538)", async () => {
+    const { UserNotificationPrefsService } =
+      await import("../../src/services/user-notification-prefs-service.js");
+    const getPrefsWithTimezoneStrict = jest.fn(async () => ({
+      prefs: { achievements: true, digest: true, rewind: true },
+      timezone: "Pacific/Auckland",
+    }));
+    const getTimezone = jest.fn(async () => "Pacific/Auckland");
+    jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+      getPrefsWithTimezoneStrict,
+      getTimezone,
+    } as never);
+
+    const html = await dispatchIndex("user", {
+      keepNotificationPrefsService: true,
+      hostedEvents: [
+        {
+          _id: "65a000000000000000000001",
+          title: "Quiz night",
+          startTime: new Date(Date.now() - 600_000),
+          timezone: "America/New_York",
+          state: "active",
+        },
+      ],
+    });
+    expect(html).toContain("Pacific/Auckland");
+    expect(getPrefsWithTimezoneStrict).toHaveBeenCalledTimes(1);
+    expect(getTimezone).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the server zone for the times when the preference row cannot be read (#1538)", async () => {
+    const { UserNotificationPrefsService } =
+      await import("../../src/services/user-notification-prefs-service.js");
+    const getPrefsWithTimezoneStrict = jest.fn(async () => {
+      throw new Error("db down");
+    });
+    jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+      getPrefsWithTimezoneStrict,
+    } as never);
+    const { getServerTimezone } = await import("../../src/utils/timezone.js");
+
+    const html = await dispatchIndex("user", {
+      keepNotificationPrefsService: true,
+      hostedEvents: [
+        {
+          _id: "65a000000000000000000001",
+          title: "Quiz night",
+          startTime: new Date(Date.now() - 600_000),
+          timezone: "America/New_York",
+          state: "active",
+        },
+      ],
+    });
+    expect(getPrefsWithTimezoneStrict).toHaveBeenCalledTimes(1);
+    expect(html).toContain("My preferences");
+    expect(html).toContain("Quiz night");
+    expect(html).toContain(`(${getServerTimezone()})`);
+    // The unreadable values leave their lines out, as before.
+    expect(html).not.toContain("Server default (");
+    expect(html).not.toMatch(/ now<\/p>/);
+  });
+
   it("still renders the page when a value cannot be read (#1508)", async () => {
     const { UserNotificationPrefsService } =
       await import("../../src/services/user-notification-prefs-service.js");
     jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+      getTimezone: async () => "Europe/Oslo",
       getPrefsWithTimezoneStrict: async () => {
         throw new Error("db down");
       },
     } as never);
 
-    const html = await dispatchIndex("user");
+    const html = await dispatchIndex("user", {
+      keepNotificationPrefsService: true,
+    });
     expect(html).toContain("My preferences");
     expect(html).toContain('href="/me/timezone"');
     // The unreadable values leave their lines out; other cards are unaffected.
@@ -380,7 +531,9 @@ describe("createUserRouter / index page", () => {
 
     let html: string;
     try {
-      html = await dispatchIndex("user");
+      html = await dispatchIndex("user", {
+        keepNotificationPrefsService: true,
+      });
     } finally {
       prefsSpy.mockRestore();
       birthdaySpy.mockRestore();
@@ -786,6 +939,7 @@ describe("/me/rewind", () => {
     defaultYear?: number; // What getDefaultRewindYear resolves to (bare route only)
     rewindEnabled?: boolean; // Feature gate `rewind.enabled` (#608); defaults to enabled
     channelTypes?: Record<string, number>; // Channel id -> Discord type in the client cache (#1303)
+    memberZone?: string | null; // The member's stored timezone (#1538)
   }): Promise<{
     statusCode: number;
     body: string;
@@ -823,7 +977,7 @@ describe("/me/rewind", () => {
     const { UserNotificationPrefsService } =
       await import("../../src/services/user-notification-prefs-service.js");
     jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
-      getTimezone: async () => null,
+      getTimezone: async () => opts.memberZone ?? null,
     } as never);
 
     const { ConfigService } =
@@ -947,6 +1101,26 @@ describe("/me/rewind", () => {
     // Neutral wording; the stored room name is never shown here (#1420).
     expect(out.body).toContain("on 2026-03-14 in a voice channel");
     expect(out.body).not.toContain("General");
+  });
+
+  it("shows the earned dates as days in the member's zone, not in UTC (#1538)", async () => {
+    const earnedAt = new Date("2026-03-04T23:30:00Z");
+    const out = await dispatchRewind({
+      pathSuffix: "",
+      memberZone: "Pacific/Auckland",
+      summary: makeSummary({
+        year: new Date().getUTCFullYear(),
+        accolades: [
+          { emoji: "A", name: "Night Owl", description: "d", earnedAt },
+        ],
+        achievements: [
+          { emoji: "B", name: "Regular", description: "d", earnedAt },
+        ],
+      }),
+    });
+    // The 4th at 23:30 UTC is the 5th in Auckland (UTC+13).
+    expect(out.body.match(/Earned 2026-03-05/g)).toHaveLength(2);
+    expect(out.body).not.toContain("Earned 2026-03-04");
   });
 
   it("summarises voice time by kind of room, not by room name (#1420)", async () => {
