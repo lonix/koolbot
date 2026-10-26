@@ -6455,7 +6455,7 @@ function renderRowCaseCell(row: ModerationRow, props: ModerationProps): string {
       <input type="hidden" name="entry_id" value="${escapeHtml(row.entryId)}">${query ? `\n      <input type="hidden" name="view_query" value="${escapeHtml(query)}">` : ""}
       <label>Review in (days)<input type="number" name="review_in_days" min="1" max="3650" value="${escapeHtml(f.value("review_in_days", String(props.defaultReviewDays ?? 90)))}"${f.attrs("review_in_days", "")}></label>${f.error("review_in_days")}
       <p class="muted">Clear the days for a case with no review date.</p>
-      <label>Note<input type="text" name="note" maxlength="500" value="${escapeHtml(f.value("note"))}"${f.attrs("note")}></label>${f.error("note")}
+      <label>Note<input type="text" name="note" maxlength="500"${f.valueAttr("note")}${f.attrs("note")}></label>${f.error("note")}
       <button type="submit" class="btn btn-primary btn-sm">Open case</button>
     </form>
   </details>`;
@@ -6500,7 +6500,7 @@ function renderCaseActions(c: CaseView, props: ModerationProps): string {
   return `<form method="POST" action="${base}/uphold" class="stack">
       <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
       <label>Next review in (days)<input type="number" name="next_review_in_days" min="1" max="3650" value="${escapeHtml(f.value("next_review_in_days", String(days)))}"${f.attrs("next_review_in_days")}></label>${f.error("next_review_in_days")}
-      <label>Note<input type="text" name="note" maxlength="500" value="${escapeHtml(f.value("note"))}"${f.attrs("note")}></label>${f.error("note")}
+      <label>Note<input type="text" name="note" maxlength="500"${f.valueAttr("note")}${f.attrs("note")}></label>${f.error("note")}
       <div class="inline-form">
         <button type="submit" class="btn btn-sm">${DECISION_LABELS.uphold}</button>
         <button type="submit" class="btn btn-sm" formaction="${base}/extend">${DECISION_LABELS.extend}</button>

@@ -331,7 +331,7 @@ describe("a refused case form (#1523)", () => {
   const registerPage = (pageNumber = 1): void =>
     registerFormPage("/admin/moderation", async (req, refused) => {
       // The real renderer takes the log's query from `view_query`.
-      const query = new URLSearchParams(
+      const query = new globalThis.URLSearchParams(
         String((req.body as Record<string, unknown>)?.view_query ?? ""),
       );
       return renderModerationPage({

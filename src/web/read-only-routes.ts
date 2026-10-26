@@ -3104,7 +3104,7 @@ export function createReadOnlyRouter(
     // the refused row is on the page (#1523).
     const query: Record<string, unknown> = refusedForm
       ? Object.fromEntries(
-          new URLSearchParams(
+          new globalThis.URLSearchParams(
             typeof req.body?.view_query === "string"
               ? req.body.view_query.slice(0, 200)
               : "",
