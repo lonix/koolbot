@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import { MessageFlags } from "discord.js";
 import { createMockButtonInteraction } from "../test-utils.js";
 
 const mockSetRsvp = jest.fn<() => Promise<unknown>>();
@@ -39,6 +40,36 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
+/**
+ * A button interaction that behaves like Discord's: `deferUpdate()` flips
+ * `deferred`, and every call is recorded in `order` so a test can assert what
+ * ran before what (#1534).
+ */
+function rsvpClick(
+  customId: string,
+  order: string[] = [],
+  overrides: Record<string, unknown> = {},
+): ReturnType<typeof createMockButtonInteraction> & {
+  deferUpdate: jest.Mock;
+  editReply: jest.Mock;
+} {
+  const it_ = createMockButtonInteraction(customId, {
+    message: { id: "msg-1" },
+    ...overrides,
+  }) as ReturnType<typeof createMockButtonInteraction> & {
+    deferUpdate: jest.Mock;
+    editReply: jest.Mock;
+  };
+  it_.deferUpdate = jest.fn(async () => {
+    order.push("deferUpdate");
+    (it_ as unknown as { deferred: boolean }).deferred = true;
+  });
+  it_.editReply = jest.fn(async () => {
+    order.push("editReply");
+  });
+  return it_;
+}
+
 describe("event RSVP button handler", () => {
   it("rejects a customId that isn't an event RSVP button", async () => {
     const it_ = createMockButtonInteraction("vc_control_rename");
@@ -62,13 +93,25 @@ describe("event RSVP button handler", () => {
     expect(mockSetRsvp).not.toHaveBeenCalled();
   });
 
+  it("acknowledges the click before it writes the RSVP", async () => {
+    const order: string[] = [];
+    mockSetRsvp.mockImplementation(async () => {
+      order.push("setRsvp");
+      return { _id: "event-1" };
+    });
+    const it_ = rsvpClick("event_rsvp_event-1_going", order);
+    await handleEventRsvpButton(it_);
+    expect(order.indexOf("deferUpdate")).toBe(0);
+    expect(order.indexOf("setRsvp")).toBeGreaterThan(
+      order.indexOf("deferUpdate"),
+    );
+  });
+
   it.each(["going", "maybe", "cant"])(
-    "records a %s RSVP and refreshes the announcement in place",
+    "records a %s RSVP, edits the announcement and follows up",
     async (status) => {
       mockSetRsvp.mockResolvedValue({ _id: "event-1" });
-      const it_ = createMockButtonInteraction(`event_rsvp_event-1_${status}`, {
-        message: { id: "msg-1" },
-      });
+      const it_ = rsvpClick(`event_rsvp_event-1_${status}`);
       await handleEventRsvpButton(it_);
       expect(mockSetRsvp).toHaveBeenCalledWith(
         "event-1",
@@ -76,53 +119,60 @@ describe("event RSVP button handler", () => {
         status,
         "msg-1",
       );
-      expect(it_.update).toHaveBeenCalledWith({ content: "refreshed" });
+      expect(it_.editReply).toHaveBeenCalledWith({ content: "refreshed" });
+      expect(it_.update).not.toHaveBeenCalled();
+      expect(it_.reply).not.toHaveBeenCalled();
       expect(it_.followUp).toHaveBeenCalledWith(
         expect.objectContaining({
           content: expect.stringContaining("Your RSVP"),
+          flags: MessageFlags.Ephemeral,
         }),
       );
     },
   );
 
-  it("tells the member when the event no longer accepts RSVPs", async () => {
+  it("follows up ephemerally, and leaves the post alone, when the event no longer accepts RSVPs", async () => {
     mockSetRsvp.mockResolvedValue(null);
-    const it_ = createMockButtonInteraction("event_rsvp_event-1_going", {
-      message: { id: "msg-1" },
-    });
+    const it_ = rsvpClick("event_rsvp_event-1_going");
     await handleEventRsvpButton(it_);
+    expect(it_.editReply).not.toHaveBeenCalled();
     expect(it_.update).not.toHaveBeenCalled();
-    expect(it_.reply).toHaveBeenCalledWith(
+    expect(it_.reply).not.toHaveBeenCalled();
+    expect(it_.followUp).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringContaining("no longer accepting RSVPs"),
+        flags: MessageFlags.Ephemeral,
       }),
     );
   });
 
-  it("replies with an error when the RSVP write threw", async () => {
+  it("follows up ephemerally, and leaves the post alone, when the RSVP write threw", async () => {
     mockSetRsvp.mockRejectedValue(new Error("mongo down"));
-    const it_ = createMockButtonInteraction("event_rsvp_event-1_going", {
-      message: { id: "msg-1" },
-    });
+    const it_ = rsvpClick("event_rsvp_event-1_going");
     await expect(handleEventRsvpButton(it_)).resolves.toBeUndefined();
-    expect(it_.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("error recording your RSVP"),
-      }),
-    );
-  });
-
-  it("follows up (rather than re-replying) on an already-acknowledged interaction", async () => {
-    mockSetRsvp.mockRejectedValue(new Error("mongo down"));
-    const it_ = createMockButtonInteraction("event_rsvp_event-1_going", {
-      replied: true,
-    });
-    await handleEventRsvpButton(it_);
+    expect(it_.editReply).not.toHaveBeenCalled();
+    expect(it_.update).not.toHaveBeenCalled();
     expect(it_.reply).not.toHaveBeenCalled();
     expect(it_.followUp).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringContaining("error recording your RSVP"),
+        flags: MessageFlags.Ephemeral,
       }),
     );
+  });
+
+  it("does not write the RSVP when the defer itself fails", async () => {
+    const it_ = rsvpClick("event_rsvp_event-1_going");
+    it_.deferUpdate.mockRejectedValue(new Error("Unknown interaction"));
+    await expect(handleEventRsvpButton(it_)).resolves.toBeUndefined();
+    expect(mockSetRsvp).not.toHaveBeenCalled();
+    expect(it_.editReply).not.toHaveBeenCalled();
+  });
+
+  it("does not hide the error when the follow-up fails too", async () => {
+    mockSetRsvp.mockRejectedValue(new Error("mongo down"));
+    const it_ = rsvpClick("event_rsvp_event-1_going");
+    it_.followUp.mockRejectedValue(new Error("Unknown interaction"));
+    await expect(handleEventRsvpButton(it_)).resolves.toBeUndefined();
   });
 });
