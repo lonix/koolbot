@@ -1502,6 +1502,7 @@ function toPanelEvent(
     title: event.title,
     description: event.description ?? "",
     state: event.state,
+    running: isEventRunning(event, new Date()),
     when: formatDateTimeInZone(event.startTime, zone),
     durationMinutes: event.durationMinutes,
     recurrence: isRecurring(event) ? recurrenceLabel(event.recurrence) : null,

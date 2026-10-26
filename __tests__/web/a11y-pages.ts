@@ -4897,11 +4897,27 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      // Problems first (#1518): both warnings render as warn Callouts above
+      // the folded group details, which hold the clan tags status.
       name: "/me host panel (scheduled, groups)",
       html: shell(
         "Host panel: Quiz night",
         "/me/events",
-        renderHostPanelBody({ event: hostEvent({ groupsEnabled: true }) }),
+        renderHostPanelBody({
+          event: hostEvent({
+            groupsEnabled: true,
+            groupNotices: ["Reds: the channel could not be created."],
+            tagsEnabled: true,
+            tagNotices: ["The bot cannot change nicknames."],
+            tagSkipped: [
+              {
+                name: "Server owner",
+                reason: "A bot cannot rename the owner.",
+              },
+            ],
+            captainsLobby: { hasChannel: false },
+          }),
+        }),
       ),
     },
     {
@@ -5197,7 +5213,11 @@ export function userPages(): A11yPage[] {
         "Host panel: Quiz night",
         "/me/",
         renderHostPanelBody({
-          event: hostEvent({ groupsEnabled: true, state: "active" }),
+          event: hostEvent({
+            groupsEnabled: true,
+            state: "active",
+            running: true,
+          }),
           controls: {
             end: renderEndSection({
               state: "active",
@@ -5280,7 +5300,7 @@ export function userPages(): A11yPage[] {
         "Host panel: Quiz night",
         "/me/",
         renderHostPanelBody({
-          event: hostEvent({ state: "active" }),
+          event: hostEvent({ state: "active", running: true }),
           controls: {
             end: renderEndSection({
               state: "active",
@@ -5305,7 +5325,9 @@ export function userPages(): A11yPage[] {
       html: shell(
         "Host panel: Quiz night",
         "/me/",
-        renderHostPanelBody({ event: hostEvent({ state: "ended" }) }),
+        renderHostPanelBody({
+          event: hostEvent({ groupsEnabled: true, state: "ended" }),
+        }),
       ),
     },
     {

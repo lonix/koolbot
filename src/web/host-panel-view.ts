@@ -1,16 +1,25 @@
 /**
  * Page body of the event host panel (#1189), rendered inside `renderUserPage`.
  *
- * The page is a summary plus a fixed list of control sections. The sections
- * are the extension point: each later issue of the event groups epic (#1187)
- * fills its own section by passing HTML for that id in `controls`, and adds no
- * new page. Ended and cancelled events show the summary only.
+ * The page leads with the event's state and problems (#1518): a header with
+ * the state badge and the event's facts, then warn Callouts for anything the
+ * bot could not do, then a fixed list of control sections. The sections are the
+ * extension point: each later issue of the event groups epic (#1187) fills its
+ * own section by passing HTML for that id in `controls`, and adds no new page.
+ * Ended and cancelled events show the header, the problems and the group
+ * details only.
  */
 
 import { escapeHtml } from "./html.js";
 import { channelMention } from "./discord-labels.js";
-import { hostControlsAvailable, hostPanelPath } from "./host-panel-shared.js";
+import {
+  eventStateWord,
+  hostControlsAvailable,
+  hostPanelPath,
+  renderEventStateBadge,
+} from "./host-panel-shared.js";
 import { CHEVRON_ICON } from "./feature-page.js";
+import { icon, toneIcon, type IconName } from "./icons.js";
 import type { EventGroupKind } from "../models/event-group-kinds.js";
 import { nativeSyncPaused } from "../services/event-native-rules.js";
 import {
@@ -83,6 +92,11 @@ export interface HostPanelEvent {
   title: string;
   description: string;
   state: string;
+  /**
+   * The event is `active` and its start has arrived (`isEventRunning`), so its
+   * state reads *Live*; otherwise an open event reads *Planned*. Absent = false.
+   */
+  running?: boolean;
   /** Pre-formatted start line (`formatDateTimeInZone`, in the member's zone). */
   when: string;
   durationMinutes: number;
@@ -145,51 +159,77 @@ const KIND_LABEL: Record<EventGroupKind, string> = {
   leads: "Leaders only",
 };
 
-function stateTag(state: string): string {
-  const cls = state === "cancelled" ? "tag-off" : "tag-info";
-  return `<span class="tag ${cls}">${escapeHtml(state)}</span>`;
+function metaSpan(name: IconName, html: string): string {
+  return `<span>${icon(name)}${html}</span>`;
 }
 
-function row(label: string, valueHtml: string): string {
-  return `<tr><th scope="row">${escapeHtml(label)}</th><td>${valueHtml}</td></tr>`;
-}
-
-function renderSummary(e: HostPanelEvent): string {
-  const rows = [
-    row("State", stateTag(e.state)),
-    row("Starts", `<span class="mono">${escapeHtml(e.when)}</span>`),
-    row("Duration", `${escapeHtml(e.durationMinutes)} minutes`),
-    e.recurrence ? row("Repeats", escapeHtml(e.recurrence)) : "",
-    row(
-      "Main voice channel",
-      e.channel
-        ? channelMention({ name: e.channel, type: e.channelType })
-        : '<span class="muted">Not created yet</span>',
-    ),
+/** The event's facts as page-header meta: each a span with a leading icon. */
+function renderMeta(e: HostPanelEvent): string {
+  const spans = [
+    metaSpan("calendar", `Starts ${escapeHtml(e.when)}`),
+    metaSpan("clock", `${escapeHtml(e.durationMinutes)} minutes`),
+    e.recurrence
+      ? metaSpan("refresh-cw", `Repeats ${escapeHtml(e.recurrence)}`)
+      : "",
+    // A channel mention carries its own icon.
+    e.channel
+      ? `<span>Main channel ${channelMention({ name: e.channel, type: e.channelType })}</span>`
+      : metaSpan("volume-2", "Main channel not created yet"),
     e.adopted
-      ? row(
-          "Discord event",
+      ? metaSpan(
+          "info",
           "Existing Discord event; KoolBot reads it but never changes it.",
         )
       : "",
-  ].join("");
-  const description = e.description
-    ? `<p>${escapeHtml(e.description)}</p>`
-    : "";
-  return `<section class="card" id="host-summary" aria-labelledby="host-summary-h">
-<h2 id="host-summary-h">Summary</h2>
-${description}<table class="prefs-table"><tbody>${rows}</tbody></table>
-</section>`;
+  ].filter(Boolean);
+  return `<p class="kb-pagehead__meta">${spans.join("")}</p>`;
 }
 
-function renderGroups(e: HostPanelEvent): string {
+/** A warn Callout with a list of recorded problems (plain text, escaped here). */
+function warnCallout(title: string, items: readonly string[]): string {
+  if (items.length === 0) return "";
+  return `<div class="kb-callout kb-callout--warn" role="status">${toneIcon("warn")}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(title)}</p><div class="kb-callout__text"><ul>${items.map((n) => `<li>${escapeHtml(n)}</li>`).join("")}</ul></div></div></div>`;
+}
+
+/** What the last group-channel and clan tag passes could not do, as warn Callouts. */
+function renderProblems(e: HostPanelEvent): string {
+  return [
+    e.groupsEnabled
+      ? warnCallout(
+          "Some group channels could not be set up",
+          e.groupNotices ?? [],
+        )
+      : "",
+    e.groupsEnabled && e.tagsEnabled === true
+      ? warnCallout("Some clan tags could not be applied", e.tagNotices ?? [])
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function groupsFoldHint(e: HostPanelEvent): string {
+  const parts = ["Who can join", "channels"];
+  if (e.captainsLobby) parts.push("Captains lobby");
+  if (e.tagsEnabled === true) {
+    const skipped = (e.tagSkipped ?? []).length;
+    parts.push(skipped > 0 ? `clan tags (${skipped} not tagged)` : "clan tags");
+  }
+  return parts.join(", ");
+}
+
+/**
+ * The facts about the groups that the board does not show (#1518): who may
+ * join, whether each channel exists, the Captains lobby, when channels are
+ * made and the clan tags status. Folded, below the board. The table keeps every
+ * column it had: the board lists only team groups, and an ended event has no
+ * board at all.
+ */
+function renderGroupsFold(e: HostPanelEvent): string {
   // A legacy event with only a leaders-only group has no listed group but still
-  // has the lobby's status line and the channel warnings to show (#1251).
+  // has the lobby's status line to show (#1251).
   if (!e.groupsEnabled || (e.groups.length === 0 && !e.captainsLobby)) {
-    return `<section class="card" id="host-groups" aria-labelledby="host-groups-h">
-<h2 id="host-groups-h">Groups</h2>
-<p class="muted">This event has no groups.</p>
-</section>`;
+    return "";
   }
   const label = e.groupLabel || "Group";
   const body = e.groups
@@ -197,12 +237,12 @@ function renderGroups(e: HostPanelEvent): string {
       (g) =>
         `<tr><td>${g.marker ? `${escapeHtml(g.marker)} ` : ""}${escapeHtml(g.name)}</td>` +
         `<td>${escapeHtml(KIND_LABEL[g.kind] ?? g.kind)}</td>` +
-        `<td>${g.size === null ? '<span class="muted">No limit</span>' : escapeHtml(g.size)}</td>` +
-        `<td>${g.tag ? escapeHtml(g.tag) : '<span class="muted">None</span>'}</td>` +
-        `<td>${g.hasChannel ? "Created" : '<span class="muted">Not created yet</span>'}</td>` +
-        `<td>${g.kind === "team" ? `<span class="mono">${escapeHtml(g.fill)}</span>` : '<span class="muted">n/a</span>'}</td>` +
+        `<td>${g.size === null ? '<span class="kb-muted">No limit</span>' : escapeHtml(g.size)}</td>` +
+        `<td>${g.tag ? escapeHtml(g.tag) : '<span class="kb-muted">None</span>'}</td>` +
+        `<td>${g.hasChannel ? "Created" : '<span class="kb-muted">Not created yet</span>'}</td>` +
+        `<td>${g.kind === "team" ? `<span class="kb-mono">${escapeHtml(g.fill)}</span>` : '<span class="kb-muted">n/a</span>'}</td>` +
         (e.captainsEnabled
-          ? `<td>${g.kind === "team" ? (g.leaderName ? escapeHtml(g.leaderName) : '<span class="muted">None</span>') : '<span class="muted">n/a</span>'}</td>`
+          ? `<td>${g.kind === "team" ? (g.leaderName ? escapeHtml(g.leaderName) : '<span class="kb-muted">None</span>') : '<span class="kb-muted">n/a</span>'}</td>`
           : "") +
         `</tr>`,
     )
@@ -211,17 +251,11 @@ function renderGroups(e: HostPanelEvent): string {
     e.channelLeadMinutes === null
       ? "the server default"
       : `${escapeHtml(e.channelLeadMinutes)} minutes before the start`;
-  const notices = (e.groupNotices ?? []).length
-    ? `<div class="notice warn" role="status"><p>Some group channels could not be set up:</p><ul>${(e.groupNotices ?? []).map((n) => `<li>${escapeHtml(n)}</li>`).join("")}</ul></div>`
-    : "";
-  return `<section class="card" id="host-groups" aria-labelledby="host-groups-h">
-<h2 id="host-groups-h">Groups</h2>
-<p class="muted">Set up when the event was created. Channels are created ${lead}.</p>
-${notices}
+  const inner = `<p class="kb-muted">Set up when the event was created. Channels are created ${lead}.</p>
 ${renderTags(e)}
-${e.groups.length > 0 ? `<table class="prefs-table"><thead><tr><th scope="col">${escapeHtml(label)}</th><th scope="col">Who</th><th scope="col">Size</th><th scope="col">Tag</th><th scope="col">Channel</th><th scope="col">People</th>${e.captainsEnabled ? `<th scope="col">${escapeHtml(e.leaderLabel || "Leader")}</th>` : ""}</tr></thead><tbody>${body}</tbody></table>` : ""}
-${renderLobbyLine(e)}
-</section>`;
+${e.groups.length > 0 ? `<div class="kb-panel__body--flush"><table class="kb-table"><thead><tr><th scope="col">${escapeHtml(label)}</th><th scope="col">Who</th><th scope="col">Size</th><th scope="col">Tag</th><th scope="col">Channel</th><th scope="col">People</th>${e.captainsEnabled ? `<th scope="col">${escapeHtml(e.leaderLabel || "Leader")}</th>` : ""}</tr></thead><tbody>${body}</tbody></table></div>` : ""}
+${renderLobbyLine(e)}`;
+  return fold("host-groups", "Group details", groupsFoldHint(e), false, inner);
 }
 
 /** One line about the Captains lobby (#1251), which is a switch and not a row of the table. */
@@ -233,26 +267,24 @@ function renderLobbyLine(e: HostPanelEvent): string {
   const channel = e.captainsLobby.hasChannel
     ? "its channel is created"
     : "its channel is not created yet";
-  return `<p class="muted"><strong>Captains lobby:</strong> on, ${who}; ${channel}.</p>`;
+  return `<p class="kb-muted"><strong>Captains lobby:</strong> on, ${who}; ${channel}.</p>`;
 }
 
 /**
- * The clan tags status (#1194): how they are applied, who could not be tagged
- * (the server owner and members whose top role is at or above the bot's can
- * never be), and anything that needs the host's attention.
+ * The clan tags status (#1194): how they are applied and who could not be
+ * tagged (the server owner and members whose top role is at or above the bot's
+ * can never be). What needs the host's attention is a warn Callout at the top
+ * of the page (`renderProblems`).
  */
 function renderTags(e: HostPanelEvent): string {
   if (e.tagsEnabled !== true) return "";
   const where = e.tagsSuffix ? "after" : "before";
-  const notices = (e.tagNotices ?? []).length
-    ? `<div class="notice warn" role="status"><ul>${(e.tagNotices ?? []).map((n) => `<li>${escapeHtml(n)}</li>`).join("")}</ul></div>`
-    : "";
   const skipped = (e.tagSkipped ?? []).length
     ? `<p>Not tagged:</p><ul>${(e.tagSkipped ?? []).map((s) => `<li>${escapeHtml(s.name)}: ${escapeHtml(s.reason)}</li>`).join("")}</ul>`
     : "";
   return `<h3>Clan tags</h3>
-<p class="muted">While the event runs, each member of a team with a tag gets that tag ${where} their server nickname. The original nickname is put back when the event ends or is cancelled, or when the member leaves the team.</p>
-${notices}${skipped}`;
+<p class="kb-muted">While the event runs, each member of a team with a tag gets that tag ${where} their server nickname. The original nickname is put back when the event ends or is cancelled, or when the member leaves the team.</p>
+${skipped}`;
 }
 
 /** What "Event settings" holds right now, so people can skip it. */
@@ -301,7 +333,9 @@ function renderControls(
   settingsOpen: boolean,
 ): string {
   if (!hostControlsAvailable({ state: e.state })) {
-    return `<div class="notice info" role="note">This event is ${escapeHtml(e.state)}, so this page is a read-only summary.</div>`;
+    const word = eventStateWord(e.state, false).label.toLowerCase();
+    return `<div class="kb-callout" role="note">${toneIcon("")}<div class="kb-callout__body"><p class="kb-callout__title">This event is ${escapeHtml(word)}, so this page is a read-only summary.</p></div></div>
+${renderGroupsFold(e)}`;
   }
   return HOST_SECTIONS.filter((s) => !s.needsGroups || e.groupsEnabled)
     .map((s) => {
@@ -310,7 +344,16 @@ function renderControls(
         html ??
         `<p class="muted">${escapeHtml(s.placeholder)} Not available yet.</p>`;
       // The board is the page (#1424): it renders its own section.
-      if (s.id === "board") return html ?? "";
+      if (s.id === "board") {
+        return [html ?? "", renderGroupsFold(e)].filter(Boolean).join("\n");
+      }
+      // The groups fold sits under the board; without groups there is no board.
+      if (s.id === "end") {
+        return `<section class="kb-panel${e.state === "active" ? " kb-panel--danger" : ""}" id="host-end" aria-labelledby="host-end-h">
+<header class="kb-panel__head"><h2 class="kb-panel__title" id="host-end-h">${escapeHtml(s.title)}</h2></header>
+<div class="kb-panel__body">${inner}</div>
+</section>`;
+      }
       // Settings and group changes sit folded at the bottom (#1319, #1424):
       // they are not what a host does while the event runs. Open after a
       // settings save, so the flash and the result are in view.
@@ -337,6 +380,7 @@ function renderControls(
 ${inner}
 </section>`;
     })
+    .filter(Boolean)
     .join("\n");
 }
 
@@ -437,18 +481,21 @@ export function renderHostPanelBody(opts: {
   const notice = renderPermissionNotice(opts.permissionNotice ?? null, {
     canLinkToPage: opts.canLinkToPermissions === true,
   });
-  const noticeBlock = notice ? `${notice}\n` : "";
+  const problems = [notice, renderProblems(e)].filter(Boolean).join("\n");
+  const problemsBlock = problems ? `${problems}\n` : "";
   const edit = e.editable
     ? `\n  <div class="kb-pagehead__actions"><a class="kb-btn" href="${escapeHtml(hostPanelPath(e.id))}/edit">Edit event</a></div>`
+    : "";
+  const description = e.description
+    ? `\n    <p class="kb-pagehead__sub">${escapeHtml(e.description)}</p>`
     : "";
   return `<header class="kb-pagehead">
   <div class="kb-pagehead__text">
     <p class="kb-pagehead__crumbs"><a href="/me/events">Your events</a></p>
-    <h1 class="kb-pagehead__title">Host panel</h1>
-    <p class="kb-pagehead__sub"><strong>${escapeHtml(e.title)}</strong></p>
+    <h1 class="kb-pagehead__title">Host panel ${renderEventStateBadge(e.state, e.running === true)}</h1>
+    <p class="kb-pagehead__sub"><strong>${escapeHtml(e.title)}</strong></p>${description}
+    ${renderMeta(e)}
   </div>${edit}
 </header>
-${renderSummary(e)}
-${noticeBlock}${renderGroups(e)}
-${renderControls(e, opts.controls ?? {}, opts.settingsOpen === true)}`;
+${problemsBlock}${renderControls(e, opts.controls ?? {}, opts.settingsOpen === true)}`;
 }
