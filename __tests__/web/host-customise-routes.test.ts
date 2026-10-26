@@ -223,7 +223,7 @@ beforeEach(() => {
   seed();
   auditRows = [];
   leaderEditRows = [];
-  memberZone = null;
+  memberZone = "UTC";
   sessionUser = CREATOR;
   eventsOn = true;
   syncGroupNames.mockClear();

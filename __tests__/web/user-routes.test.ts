@@ -215,7 +215,8 @@ describe("createUserRouter / index page", () => {
     const { UserNotificationPrefsService } =
       await import("../../src/services/user-notification-prefs-service.js");
     jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
-      getTimezone: async () => opts.memberZone ?? null,
+      getTimezone: async () =>
+        opts.memberZone === undefined ? "UTC" : opts.memberZone,
     } as never);
 
     if (opts.hostedEvents) {

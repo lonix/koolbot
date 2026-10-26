@@ -354,7 +354,7 @@ beforeEach(() => {
   eventsEnabled = true;
   botMayMove = true;
   sessionUser = CREATOR;
-  memberZone = null;
+  memberZone = "UTC";
   patchGate = null;
   patchReached = () => undefined;
   voice = new Map<string, string | null>([

@@ -33,6 +33,10 @@ import { EventService } from "../../src/services/event-service.js";
 import { ConfigService } from "../../src/services/config-service.js";
 import { WebAuditLog } from "../../src/models/web-audit-log.js";
 import { Event } from "../../src/models/event.js";
+import {
+  formatDateTimeInZone,
+  getServerTimezone,
+} from "../../src/utils/timezone.js";
 import { UserNotificationPrefsService } from "../../src/services/user-notification-prefs-service.js";
 
 const SECRET = "test-secret-for-me-events-routes";
@@ -197,7 +201,7 @@ beforeEach(() => {
   auditRows = [];
   scopes = ["member", "host"];
   eventsEnabled = true;
-  memberZone = null;
+  memberZone = "UTC";
   cancelEvent.mockReset();
   cancelEvent.mockImplementation(async (id) => ({
     ...events[id],
@@ -382,8 +386,14 @@ describe("Your events times (#1538)", () => {
     });
     memberZone = null;
     const out = await call("/me/events");
-    expect(out.text).not.toContain("America/New_York");
-    expect(out.text).toMatch(/2030-01-0[12] \d\d:\d\d \(\S+\)/);
+    const server = getServerTimezone();
+    expect(out.text).toContain(
+      formatDateTimeInZone(new Date("2030-01-01T19:00:00Z"), server),
+    );
+    // Not the event's zone, unless the server happens to run in it.
+    if (server !== "America/New_York") {
+      expect(out.text).not.toContain("America/New_York");
+    }
   });
 });
 

@@ -182,7 +182,7 @@ beforeEach(() => {
   delete fakeClient.guilds;
   events = { [EVENT_ID]: makeEvent() };
   auditRows = [];
-  memberZone = null;
+  memberZone = "UTC";
 
   jest.spyOn(WebSessionService.getInstance(), "findById").mockImplementation(
     async () =>
