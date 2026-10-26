@@ -44,7 +44,7 @@ describe("renderErrorPage (#855)", () => {
     expect(html).toContain(
       '<meta name="viewport" content="width=device-width,initial-scale=1">',
     );
-    expect(html).toContain("<title>Sign in required — Koolbot Admin</title>");
+    expect(html).toContain("<title>Sign in required — KoolBot Admin</title>");
     expect(html).toContain(
       "<main><h1>Sign in required</h1><p>Run <code>/config</code> in Discord.</p></main>",
     );
@@ -60,10 +60,10 @@ describe("renderErrorPage (#855)", () => {
       title: "Forbidden",
       heading: "<Forbidden>",
       bodyHtml: "",
-      product: "Koolbot",
+      product: "KoolBot",
     });
     expect(html).toContain("<h1>&lt;Forbidden&gt;</h1>");
-    expect(html).toContain("<title>Forbidden — Koolbot</title>");
+    expect(html).toContain("<title>Forbidden — KoolBot</title>");
   });
 
   it("wraps the existing scaffold pages in the same main landmark", () => {

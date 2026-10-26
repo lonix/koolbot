@@ -673,7 +673,7 @@ export class DigestService extends ScheduledService<DigestRunSummary | null> {
         `Qualifying: ${summary.qualifying} · sent: ${summary.sent} · ` +
         `opted out: ${summary.skippedOptOut} · DMs closed: ${summary.skippedDmsClosed} · ` +
         `failed: ${summary.failed}`;
-      await discordLogger.logCronSuccess("Weekly Digest", message);
+      await discordLogger.logCronSuccess("Weekly digest", message);
     } catch (error) {
       logger.error("Digest: failed to post run summary to Discord:", error);
     }

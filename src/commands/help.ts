@@ -9,7 +9,10 @@ import {
   MessageFlags,
 } from "discord.js";
 import logger from "../utils/logger.js";
-import { safeReply } from "../utils/safe-reply.js";
+import {
+  replyWithError,
+  replyWithUnexpectedError,
+} from "../utils/error-reply.js";
 import { ConfigService } from "../services/config-service.js";
 import {
   COMMAND_CONFIGS,
@@ -185,8 +188,9 @@ export async function execute(
       // Show detailed help for a specific command
       const commandInfo = helpEntries.get(requestedCommand);
       if (!commandInfo) {
-        await interaction.editReply({
-          content: `There is no command \`/${requestedCommand}\`. Use \`/help\` to see the list of commands.`,
+        await replyWithError(interaction, {
+          title: "Couldn't find that command",
+          next: `There is no command \`/${requestedCommand}\`. Use \`/help\` to see the list of commands.`,
         });
         return;
       }
@@ -277,9 +281,6 @@ export async function execute(
     }
   } catch (error) {
     logger.error("Error in help command:", error);
-    await safeReply(interaction, {
-      content: "There was an error while executing this command!",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithUnexpectedError(interaction);
   }
 }

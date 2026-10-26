@@ -129,14 +129,18 @@ async function createEvent(
 
 describe("POST /events/create — validation", () => {
   it.each([
-    ["title", { date: "2999-01-01", time: "18:00" }],
-    ["date", { title: "Raid", time: "18:00" }],
-    ["time", { title: "Raid", date: "2999-01-01" }],
-  ])("rejects a submission missing %s", async (_field, body) => {
+    ["title", { date: "2999-01-01", time: "18:00" }, "Enter a title."],
+    ["date", { title: "Raid", time: "18:00" }, "Pick a date."],
+    [
+      "time",
+      { title: "Raid", date: "2999-01-01" },
+      "Enter a time, for example 19:30.",
+    ],
+  ])("rejects a submission missing %s", async (_field, body, msg) => {
     const flash = await createEvent(body);
     expect(flash.path).toBe("/admin/events");
     expect(flash.type).toBe("err");
-    expect(flash.msg).toBe("Title, date and time are all required.");
+    expect(flash.msg).toBe(msg);
     expect(mockCreateEvent).not.toHaveBeenCalled();
   });
 
@@ -144,7 +148,7 @@ describe("POST /events/create — validation", () => {
     const { date, time } = futureDateTime();
     const flash = await createEvent({ title: "x".repeat(101), date, time });
     expect(flash.type).toBe("err");
-    expect(flash.msg).toBe("Title must be 100 characters or fewer.");
+    expect(flash.msg).toBe("Use at most 100 characters for the title.");
     expect(mockCreateEvent).not.toHaveBeenCalled();
   });
 
@@ -157,7 +161,7 @@ describe("POST /events/create — validation", () => {
       description: "y".repeat(1001),
     });
     expect(flash.type).toBe("err");
-    expect(flash.msg).toBe("Description must be 1000 characters or fewer.");
+    expect(flash.msg).toBe("Use at most 1000 characters for the description.");
   });
 
   it("rejects an unknown IANA timezone", async () => {
@@ -169,7 +173,7 @@ describe("POST /events/create — validation", () => {
       timezone: "Mars/Olympus_Mons",
     });
     expect(flash.type).toBe("err");
-    expect(flash.msg).toContain("Invalid timezone: Mars/Olympus_Mons");
+    expect(flash.msg).toBe("Pick a timezone from the list.");
     expect(mockCreateEvent).not.toHaveBeenCalled();
   });
 
@@ -180,7 +184,7 @@ describe("POST /events/create — validation", () => {
       time: "half seven",
     });
     expect(flash.type).toBe("err");
-    expect(flash.msg).toContain("Use YYYY-MM-DD and 24-hour HH:MM");
+    expect(flash.msg).toBe("Use the date format YYYY-MM-DD.");
     expect(mockCreateEvent).not.toHaveBeenCalled();
   });
 
@@ -191,7 +195,7 @@ describe("POST /events/create — validation", () => {
       time: "18:00",
     });
     expect(flash.type).toBe("err");
-    expect(flash.msg).toContain("must be in the future");
+    expect(flash.msg).toBe("Pick a time in the future.");
     expect(mockCreateEvent).not.toHaveBeenCalled();
   });
 
@@ -201,7 +205,11 @@ describe("POST /events/create — validation", () => {
       const { date, time } = futureDateTime();
       const flash = await createEvent({ title: "Raid", date, time, duration });
       expect(flash.type).toBe("err");
-      expect(flash.msg).toBe("Duration must be between 1 and 1440 minutes.");
+      expect(flash.msg).toBe(
+        duration === "1441"
+          ? "At most 1440 minutes."
+          : "Enter a whole number of minutes, from 1 to 1440.",
+      );
       expect(mockCreateEvent).not.toHaveBeenCalled();
     },
   );

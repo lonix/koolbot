@@ -11,7 +11,7 @@ import {
   type RaidStatus,
 } from "../services/raid-protection-service.js";
 import logger from "../utils/logger.js";
-import { safeReply } from "../utils/safe-reply.js";
+import { replyWithError, UNEXPECTED_ERROR } from "../utils/error-reply.js";
 import { embedColor } from "../utils/embed-style.js";
 
 export const data = new SlashCommandBuilder()
@@ -82,9 +82,9 @@ export async function execute(
 ): Promise<void> {
   try {
     if (!interaction.guildId || !interaction.guild) {
-      await interaction.reply({
-        content: "This command can only be used in a server.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Can't use this here",
+        next: "Run this command in a server.",
       });
       return;
     }
@@ -94,9 +94,9 @@ export async function execute(
     if (
       !interaction.memberPermissions?.has(PermissionFlagsBits.ModerateMembers)
     ) {
-      await interaction.reply({
-        content: "You need the Moderate Members permission to use this.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Moderators only",
+        next: "This needs the Moderate Members permission. Ask a moderator or an admin.",
       });
       return;
     }
@@ -130,9 +130,9 @@ export async function execute(
     await interaction.editReply({ content: result.message });
   } catch (error) {
     logger.error("Error in raidmode command:", error);
-    await safeReply(interaction, {
-      content: "There was an error changing raid mode.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "Couldn't change raid mode",
+      next: UNEXPECTED_ERROR.next,
     });
   }
 }

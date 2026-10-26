@@ -24,7 +24,12 @@ import {
   parseFlashRedirect,
   type AdminHarness,
 } from "./admin-harness.js";
-import { STATUS_POOL_DEFAULTS } from "../../src/content/statuses.js";
+import { refusal } from "./refused-form-test-utils.js";
+import {
+  BOT_STATUS_POOLS,
+  BOT_STATUS_POOL_META,
+  STATUS_POOL_DEFAULTS,
+} from "../../src/content/statuses.js";
 
 const mockRecordAudit = jest.fn(async () => undefined);
 const mockRefreshStatusPools = jest.fn<() => Promise<void>>();
@@ -90,10 +95,43 @@ const { createBotStatusRouter } =
   await import("../../src/web/routes/write/bot-status.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
+const { registerFormPage } = await import("../../src/web/form-pages.js");
+const { renderBotStatusPage } = await import("../../src/web/admin-views.js");
 
 const client = { user: { id: "bot" } } as unknown as Client;
 const session = createTestSession();
 let harness: AdminHarness;
+
+// The read router registers the page's renderer in the app (#1520); here the
+// real view stands in, with one stored entry in the "single" pool to edit, so a
+// refusal is checked as the markup the person gets.
+registerFormPage("/admin/bot-status", async (_req, refused) =>
+  renderBotStatusPage({
+    guildId: "guild-1",
+    csrfToken: "csrf",
+    remainingMs: 1000,
+    navFeatureStatus: {},
+    maxLength: 128,
+    pools: BOT_STATUS_POOLS.map((pool) => {
+      const items =
+        pool === "single"
+          ? [{ id: "entry-1", order: 3, text: "Chatting with {user}" }]
+          : [];
+      return {
+        pool,
+        label: BOT_STATUS_POOL_META[pool].label,
+        description: BOT_STATUS_POOL_META[pool].description,
+        requiresCount: BOT_STATUS_POOL_META[pool].requiresCount,
+        items,
+        usingDefaults: items.length === 0,
+        exportText: items.length
+          ? items.map((i) => i.text).join("\n")
+          : STATUS_POOL_DEFAULTS[pool].join("\n"),
+      };
+    }),
+    refusedForm: refused,
+  }),
+);
 
 beforeEach(async () => {
   jest.clearAllMocks();
@@ -149,33 +187,60 @@ describe("POST /bot-status/pool/:pool/add", () => {
     expect(created).toHaveLength(0);
   });
 
-  it("rejects empty status text", async () => {
+  it("marks empty status text and keeps the order that was typed", async () => {
     const res = await harness.post("/bot-status/pool/lonely/add", {
       text: "   ",
+      order: "4",
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
-      "Status text cannot be empty.",
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["bot-status-add-lonely-text"]);
+    expect(r.errorLines["bot-status-add-lonely-text-error"]).toBe(
+      "Enter the status text.",
     );
+    expect(r.html).toContain('value="4"');
+    expect(created).toHaveLength(0);
+    expect(mockRecordAudit).not.toHaveBeenCalled();
   });
 
-  it("requires the {count} placeholder in the multiple-users pool", async () => {
+  it("says the multiple-users pool needs the {count} placeholder, and keeps the text", async () => {
     const res = await harness.post("/bot-status/pool/multiple/add", {
-      text: "people are here",
+      text: "  people are here ",
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
-      "{count} placeholder",
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["bot-status-add-multiple-text"]);
+    expect(r.errorLines["bot-status-add-multiple-text-error"]).toBe(
+      "This pool needs the {count} placeholder.",
     );
+    // Echoed as typed; only the saved value is trimmed.
+    expect(r.html).toContain('value="  people are here "');
+    // Only that pool's add form is marked.
+    expect(r.html).not.toContain("bot-status-add-single-text-error");
     expect(created).toHaveLength(0);
   });
 
-  it("rejects an out-of-range order", async () => {
+  it("marks text past the length cap", async () => {
+    const res = await harness.post("/bot-status/pool/lonely/add", {
+      text: "x".repeat(129),
+    });
+    const r = await refusal(res);
+    expect(r.errorLines["bot-status-add-lonely-text-error"]).toBe(
+      "At most 128 characters.",
+    );
+  });
+
+  it("marks an out-of-range order and keeps the text", async () => {
     const res = await harness.post("/bot-status/pool/lonely/add", {
       text: "alone",
       order: "50000",
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
-      "between -1000 and 10000",
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["bot-status-add-lonely-order"]);
+    expect(r.errorLines["bot-status-add-lonely-order-error"]).toBe(
+      "Use a whole number from -1000 to 10000.",
     );
+    expect(r.html).toContain('value="alone"');
+    expect(r.html).toContain('value="50000"');
+    expect(created).toHaveLength(0);
   });
 
   it("stores the entry, refreshes the live pools and audits it", async () => {
@@ -236,8 +301,37 @@ describe("POST /bot-status/entry/:id/{update,order,delete}", () => {
     const res = await harness.post("/bot-status/entry/entry-1/update", {
       text: "no placeholder here",
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
-      "{count} placeholder",
+    const r = await refusal(res);
+    expect(r.errorLines["bot-status-edit-entry-1-text-error"]).toBe(
+      "This pool needs the {count} placeholder.",
+    );
+  });
+
+  it("refuses a bad edit, reopens that entry's form and keeps what was typed", async () => {
+    mockFindById.mockResolvedValue(ownedEntry());
+    const res = await harness.post("/bot-status/entry/entry-1/update", {
+      text: "  ",
+    });
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["bot-status-edit-entry-1-text"]);
+    expect(r.errorLines["bot-status-edit-entry-1-text-error"]).toBe(
+      "Enter the status text.",
+    );
+    expect(r.html).toContain(
+      '<details class="helper edit-details" open><summary>Chatting with {user}</summary>',
+    );
+    expect(r.html).toContain('value="  "');
+    expect(mockEntrySave).not.toHaveBeenCalled();
+  });
+
+  it("answers the not-found flash when the refused entry no longer exists", async () => {
+    mockFindById.mockResolvedValue(null);
+    const res = await harness.post("/bot-status/entry/entry-1/update", {
+      text: "",
+    });
+    expect(res.status).toBe(303);
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
+      "Status entry entry-1 not found.",
     );
   });
 
@@ -304,23 +398,36 @@ describe("POST /bot-status/pool/:pool/import", () => {
     );
   });
 
-  it("rejects an empty paste", async () => {
+  it("marks an empty paste and opens the import section", async () => {
     const res = await harness.post("/bot-status/pool/lonely/import", {
       items: "  \n \n",
+      mode: "append",
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
-      "Nothing to import",
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["bot-status-import-lonely-items"]);
+    expect(r.errorLines["bot-status-import-lonely-items-error"]).toBe(
+      "Paste at least one entry: one per line, or a JSON array.",
     );
+    // The disclosure holding the form is open, or the message would be hidden;
+    // the append choice and the pasted text come back as typed.
+    expect(r.html).toMatch(
+      /<details class="helper" open>\s*<summary>Import \/ export<\/summary>/,
+    );
+    expect(r.html).toMatch(/value="append" checked/);
+    expect(r.html).toContain("\n  \n \n</textarea>");
     expect(mockInsertMany).not.toHaveBeenCalled();
   });
 
-  it("validates every entry before writing anything", async () => {
+  it("validates every entry before writing anything and names the entry", async () => {
     const res = await harness.post("/bot-status/pool/multiple/import", {
       items: "{count} people here\nno placeholder",
     });
-    const flash = parseFlashRedirect(res.headers.get("location"));
-    expect(flash.type).toBe("err");
-    expect(flash.msg).toContain("Import rejected at entry 2");
+    const r = await refusal(res);
+    expect(r.errorLines["bot-status-import-multiple-items-error"]).toBe(
+      "Entry 2 (&quot;no placeholder&quot;): This pool needs the {count} placeholder.",
+    );
+    // The typed list is what the box holds, not the stored one.
+    expect(r.html).toContain("{count} people here\nno placeholder</textarea>");
     // Nothing may be written — a partially applied "replace" would leave the
     // pool short of the entries it deleted.
     expect(mockDeleteMany).not.toHaveBeenCalled();

@@ -19,6 +19,10 @@ import { sanitizeForLog } from "./utils/log-sanitize.js";
 import { getSharedRest } from "./utils/discord-rest.js";
 import { markMongoDisconnectIntentional } from "./utils/mongo.js";
 import { safeReply } from "./utils/safe-reply.js";
+import {
+  replyWithError,
+  replyWithUnexpectedError,
+} from "./utils/error-reply.js";
 import { runWithTimeout } from "./utils/run-with-timeout.js";
 import { ConfigService } from "./services/config-service.js";
 import { startComponentAudit } from "./utils/component-audit.js";
@@ -730,10 +734,7 @@ async function initializeServices(): Promise<void> {
     await discordLogger.initialize();
 
     // Log database connection status
-    await discordLogger.logDatabaseStatus(
-      true,
-      "Successfully connected to MongoDB database",
-    );
+    await discordLogger.logDatabaseStatus(true);
 
     // Try to register commands, but don't fail if Discord API is unavailable
     try {
@@ -942,7 +943,7 @@ async function initializeServices(): Promise<void> {
     if (discordLogger) {
       await discordLogger.logError(
         error instanceof Error ? error : new Error(String(error)),
-        "Service Initialization",
+        "service initialisation",
       );
     }
 
@@ -1033,10 +1034,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         logger.debug(
           `Ignoring button interaction with unrecognized customId: ${sanitizeForLog(interaction.customId)}`,
         );
-        await interaction.reply({
-          content:
-            "This button is no longer supported. The control it belongs to has been removed in v1.0 — please dismiss this message.",
-          flags: MessageFlags.Ephemeral,
+        await replyWithError(interaction, {
+          title: "This button is out of date",
+          next: "Use the newest controls in your channel, or run the command again.",
         });
       }
       await audit.done();
@@ -1066,10 +1066,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         logger.debug(
           `Ignoring select menu interaction with unrecognized customId: ${sanitizeForLog(interaction.customId)}`,
         );
-        await interaction.reply({
-          content:
-            "This menu is no longer supported. The control it belongs to has been removed in v1.0 — please dismiss this message.",
-          flags: MessageFlags.Ephemeral,
+        await replyWithError(interaction, {
+          title: "This menu is out of date",
+          next: "Use the newest controls in your channel, or run the command again.",
         });
       }
       await audit.done();
@@ -1097,10 +1096,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         logger.debug(
           `Ignoring modal interaction with unrecognized customId: ${sanitizeForLog(interaction.customId)}`,
         );
-        await interaction.reply({
-          content:
-            "This form is no longer supported. The control it belongs to has been removed in v1.0 — please dismiss this message.",
-          flags: MessageFlags.Ephemeral,
+        await replyWithError(interaction, {
+          title: "This form is out of date",
+          next: "Use the newest controls in your channel, or run the command again.",
         });
       }
       await audit.done();
@@ -1146,10 +1144,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     );
   } catch (error) {
     logger.error(`Error executing command ${interaction.commandName}:`, error);
-    await safeReply(interaction, {
-      content: "There was an error while executing this command!",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithUnexpectedError(interaction);
   }
 });
 

@@ -62,6 +62,39 @@ describe("UserNotificationPrefsService", () => {
     });
   });
 
+  describe("getPrefsWithTimezoneStrict (#1508)", () => {
+    it("gives the defaults and no zone for a missing row", async () => {
+      findOne.mockResolvedValueOnce(null);
+      const out =
+        await UserNotificationPrefsService.getInstance().getPrefsWithTimezoneStrict(
+          "u1",
+          "g1",
+        );
+      expect(out.timezone).toBeNull();
+      expect(Object.values(out.prefs).every((v) => v === false)).toBe(true);
+    });
+
+    it("returns the stored zone", async () => {
+      findOne.mockResolvedValueOnce({ timezone: "Europe/Oslo" });
+      const out =
+        await UserNotificationPrefsService.getInstance().getPrefsWithTimezoneStrict(
+          "u1",
+          "g1",
+        );
+      expect(out.timezone).toBe("Europe/Oslo");
+    });
+
+    it("throws on a failed read, while the sender-facing read still fails closed", async () => {
+      const svc = UserNotificationPrefsService.getInstance();
+      findOne.mockRejectedValueOnce(new Error("db down"));
+      await expect(svc.getPrefsWithTimezoneStrict("u1", "g1")).rejects.toThrow(
+        "db down",
+      );
+      findOne.mockRejectedValueOnce(new Error("db down"));
+      expect((await svc.getPrefsWithTimezone("u1", "g1")).timezone).toBeNull();
+    });
+  });
+
   describe("getPrefs", () => {
     it("returns all defaults (off) when no row exists", async () => {
       findOne.mockResolvedValueOnce(null);

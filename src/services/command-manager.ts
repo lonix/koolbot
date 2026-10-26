@@ -11,6 +11,7 @@ import {
 } from "discord.js";
 import logger, { isDebugMode } from "../utils/logger.js";
 import { getErrorMessage } from "../utils/error-guards.js";
+import { replyWithError } from "../utils/error-reply.js";
 import { getSharedRest } from "../utils/discord-rest.js";
 import { commandListsMatch } from "../utils/command-diff.js";
 import { recordCommandAudit } from "../utils/record-command-audit.js";
@@ -594,10 +595,9 @@ export class CommandManager {
             `Permission check for ${commandName} unavailable, refusing execution:`,
             error,
           );
-          await interaction.reply({
-            content:
-              "⚠️ Permissions can't be verified right now. Please try again in a moment.",
-            flags: MessageFlags.Ephemeral,
+          await replyWithError(interaction, {
+            title: "Couldn't check your permissions",
+            next: "Permissions can't be verified right now. Try again in a moment.",
           });
 
           monitoringService.trackCommandEnd(
@@ -611,9 +611,9 @@ export class CommandManager {
         }
 
         if (!hasPermission) {
-          await interaction.reply({
-            content: "❌ You don't have permission to use this command.",
-            flags: MessageFlags.Ephemeral,
+          await replyWithError(interaction, {
+            title: "You can't use this command",
+            next: "You don't have permission to use it. Ask an admin if you think you should.",
           });
 
           monitoringService.trackCommandEnd(
@@ -665,11 +665,9 @@ export class CommandManager {
               maxCommands,
               windowSeconds,
             );
-            const errorMessage = `⏱️ You're using commands too quickly! Please wait ${resetTime} second${resetTime !== 1 ? "s" : ""} before trying again.`;
-
-            await interaction.reply({
-              content: errorMessage,
-              flags: MessageFlags.Ephemeral,
+            await replyWithError(interaction, {
+              title: "You're using commands too quickly",
+              next: `Please wait ${resetTime} second${resetTime !== 1 ? "s" : ""}, then try again.`,
             });
 
             monitoringService.trackCommandEnd(

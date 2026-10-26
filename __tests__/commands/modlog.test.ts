@@ -5,6 +5,8 @@ import {
   type EmbedBuilder,
 } from "discord.js";
 
+import { errorEmbedPayload, unexpectedErrorPayload } from "../test-utils.js";
+
 const mockIsEnabled = jest.fn<() => Promise<boolean>>();
 const mockCountHistory = jest.fn<() => Promise<number>>();
 const mockGetHistory = jest.fn<() => Promise<unknown[]>>();
@@ -54,9 +56,13 @@ function makeInteraction(
   tag = "target#0001",
 ) {
   const reply = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  // Like discord.js: deferring marks the interaction, which is what makes a
+  // failure answer edit the deferred reply instead of replying again.
   const deferReply = jest
     .fn<() => Promise<void>>()
-    .mockResolvedValue(undefined);
+    .mockImplementation(async () => {
+      interaction.deferred = true;
+    });
   const editReply = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
   const interaction = {
     id: "interaction-1",
@@ -428,9 +434,12 @@ describe("Modlog Command", () => {
         flags: MessageFlags.Ephemeral,
       });
       expect(mockCountHistory).not.toHaveBeenCalled();
-      expect(editReply).toHaveBeenCalledWith({
-        content: "The moderation log is currently disabled.",
-      });
+      expect(editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "The moderation log is off",
+          description: expect.stringContaining("turn it on"),
+        }),
+      );
     });
 
     it("replies directly, without deferring, outside a guild", async () => {
@@ -454,11 +463,7 @@ describe("Modlog Command", () => {
       await execute(interaction);
 
       expect(reply).not.toHaveBeenCalled();
-      expect(editReply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: "There was an error fetching the moderation history.",
-        }),
-      );
+      expect(editReply).toHaveBeenCalledWith(unexpectedErrorPayload());
     });
   });
 });

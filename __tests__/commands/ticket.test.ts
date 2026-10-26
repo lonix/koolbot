@@ -1,6 +1,8 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
 
+import { errorEmbedPayload } from "../test-utils.js";
+
 const manager = {
   isEnabled: jest.fn<() => Promise<boolean>>(),
   openTicket: jest.fn<(i: unknown) => Promise<unknown>>(),
@@ -42,7 +44,11 @@ function makeInteraction(
     channelId: "chan-1",
     user: { id: "u1", username: "ola" },
     client: {},
-    deferReply: jest.fn(async () => undefined),
+    // Like discord.js: deferring marks the interaction, which is what makes a
+    // failure answer edit the deferred reply instead of replying again.
+    deferReply: jest.fn(async function (this: unknown) {
+      (this as { deferred: boolean }).deferred = true;
+    }),
     reply: jest.fn(async () => undefined),
     editReply,
     options: {
@@ -74,9 +80,12 @@ describe("/ticket", () => {
       subject: "help",
     });
     await execute(interaction);
-    expect(editReply).toHaveBeenCalledWith({
-      content: expect.stringContaining("3 open tickets"),
-    });
+    expect(editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't open a ticket",
+        description: expect.stringContaining("3 open tickets"),
+      }),
+    );
 
     manager.openTicket.mockResolvedValue({
       ok: false,
@@ -85,9 +94,12 @@ describe("/ticket", () => {
     });
     const single = makeInteraction("open", { subject: "help" });
     await execute(single.interaction);
-    expect(single.editReply).toHaveBeenCalledWith({
-      content: expect.stringContaining("1 open ticket,"),
-    });
+    expect(single.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't open a ticket",
+        description: expect.stringContaining("1 open ticket,"),
+      }),
+    );
   });
 
   it("defines open, close and claim subcommands", () => {
@@ -108,6 +120,30 @@ describe("/ticket", () => {
     expect(interaction.deferReply).toHaveBeenCalledWith({
       flags: MessageFlags.Ephemeral,
     });
+  });
+
+  // openTicket() creates a channel on every call, so once it has succeeded no
+  // reply may tell the member to try again.
+  it("says the ticket was opened, with no retry advice, when the confirmation fails", async () => {
+    manager.openTicket.mockResolvedValue({
+      ok: true,
+      ticket: { channelId: "c9" },
+    });
+    const { interaction, editReply } = makeInteraction("open", {
+      subject: "help",
+    });
+    editReply.mockRejectedValueOnce(new Error("Unknown interaction"));
+
+    await expect(execute(interaction)).resolves.toBeUndefined();
+
+    expect(manager.openTicket).toHaveBeenCalledTimes(1);
+    expect(editReply).toHaveBeenLastCalledWith(
+      errorEmbedPayload({
+        title: "Your ticket was opened",
+        description: expect.stringContaining("the ticket channels"),
+      }),
+    );
+    expect(JSON.stringify(editReply.mock.calls)).not.toMatch(/try again/i);
   });
 
   it("opens a ticket and links the channel", async () => {
@@ -136,9 +172,12 @@ describe("/ticket", () => {
       reason: "no-staff-role",
     });
     await execute(interaction);
-    expect(editReply).toHaveBeenCalledWith({
-      content: expect.stringContaining("staff role"),
-    });
+    expect(editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Tickets aren't set up yet",
+        description: expect.stringContaining("staff role"),
+      }),
+    );
   });
 
   it("refuses when tickets are disabled", async () => {
@@ -148,9 +187,12 @@ describe("/ticket", () => {
     });
     await execute(interaction);
     expect(manager.openTicket).not.toHaveBeenCalled();
-    expect(editReply).toHaveBeenCalledWith({
-      content: expect.stringContaining("disabled"),
-    });
+    expect(editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Tickets are off",
+        description: expect.stringContaining("Web UI"),
+      }),
+    );
   });
 
   it("lets the author close their own ticket", async () => {
@@ -177,9 +219,12 @@ describe("/ticket", () => {
     manager.isStaff.mockReturnValue(false);
     await execute(interaction);
     expect(manager.closeTicket).not.toHaveBeenCalled();
-    expect(editReply).toHaveBeenCalledWith({
-      content: "Only staff can do that.",
-    });
+    expect(editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Staff only",
+        description: expect.stringContaining("Only staff can do that."),
+      }),
+    );
   });
 
   it("stops a non-staff member closing someone else's ticket", async () => {
@@ -188,9 +233,12 @@ describe("/ticket", () => {
     manager.isStaff.mockReturnValue(false);
     await execute(interaction);
     expect(manager.closeTicket).not.toHaveBeenCalled();
-    expect(editReply).toHaveBeenCalledWith({
-      content: "Only staff can do that.",
-    });
+    expect(editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Staff only",
+        description: expect.stringContaining("Only staff can do that."),
+      }),
+    );
   });
 
   it("keeps claim staff-only, even for the ticket's author", async () => {
@@ -214,8 +262,11 @@ describe("/ticket", () => {
     const { interaction, editReply } = makeInteraction("close");
     manager.findByChannel.mockResolvedValue(null);
     await execute(interaction);
-    expect(editReply).toHaveBeenCalledWith({
-      content: expect.stringContaining("couldn't find a ticket"),
-    });
+    expect(editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't find a ticket",
+        description: expect.stringContaining("ticket channel"),
+      }),
+    );
   });
 });

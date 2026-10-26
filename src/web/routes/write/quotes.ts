@@ -20,9 +20,14 @@ import { finishRepost } from "./repost-response.js";
 import {
   flashRedirect,
   getString,
+  getRawString,
   requireSessionContext,
   asyncHandler,
+  refuseForm,
+  rowIsGone,
 } from "./helpers.js";
+import { addFieldError, type FormErrors } from "../../form-errors.js";
+import { quoteEditForm } from "../../admin-views.js";
 
 const QUOTES_PAGE = "/admin/quotes";
 
@@ -43,38 +48,72 @@ export function createQuotesRouter(client: Client): Router {
       const content = getString(req, "content");
       const authorId = normalizeUserId(getString(req, "author_id"));
 
-      if (!content) {
-        flashRedirect(res, QUOTES_PAGE, {
-          type: "err",
-          text: "Quote text is required.",
-        });
-        return;
-      }
+      const errors: FormErrors = {};
+      if (!content) addFieldError(errors, "content", "Enter the quote.");
       if (!SNOWFLAKE.test(authorId)) {
-        flashRedirect(res, QUOTES_PAGE, {
-          type: "err",
-          text: "Author must be a Discord user ID (17–20 digits).",
-        });
-        return;
+        addFieldError(
+          errors,
+          "author_id",
+          "Enter the Discord user ID of the author: 17 to 20 digits.",
+        );
       }
 
-      try {
+      // `quotes.max_length` is stored config. Read it before answering a
+      // refusal so the length is checked with the others; a failed read is
+      // not fatal to the refusal (the save path below reads it again and
+      // reports a failure there).
+      const readLimits = (): Promise<[boolean, number]> => {
         const config = ConfigService.getInstance();
-        const [enabled, maxLength] = await Promise.all([
+        return Promise.all([
           config.getBoolean("quotes.enabled", false),
           config.getNumber("quotes.max_length", 1000),
         ]);
-        // Checked before the post is touched: `editQuote` enforces the same
-        // cap, and failing there would leave the post showing text the row
-        // never took.
-        if (content.length > maxLength) {
+      };
+      let limits: [boolean, number] | null = null;
+      try {
+        limits = await readLimits();
+      } catch (err) {
+        logger.warn("Quote edit: could not read quotes.max_length", err);
+      }
+      // Checked before the post is touched: `editQuote` enforces the same
+      // cap, and failing there would leave the post showing text the row
+      // never took.
+      if (limits && content.length > limits[1]) {
+        addFieldError(errors, "content", `At most ${limits[1]} characters.`);
+      }
+
+      if (Object.keys(errors).length > 0) {
+        // A refused edit is drawn in the row's own form; a quote deleted in
+        // another tab has none, so say so instead.
+        const gone = await rowIsGone(
+          async () =>
+            QUOTE_ID.test(id) && !!(await quoteService.getQuoteById(id)),
+          "Quote",
+        );
+        if (gone) {
           flashRedirect(res, QUOTES_PAGE, {
             type: "err",
-            text: `Quote is too long. Maximum length is ${maxLength} characters (quotes.max_length).`,
+            text: `Quote ${id} not found.`,
           });
           return;
         }
+        if (
+          await refuseForm(req, res, {
+            page: QUOTES_PAGE,
+            formId: quoteEditForm(id),
+            errors,
+            values: {
+              content: getRawString(req, "content"),
+              author_id: getRawString(req, "author_id"),
+            },
+          })
+        ) {
+          return;
+        }
+      }
 
+      try {
+        const [enabled] = limits ?? (await readLimits());
         const quote = QUOTE_ID.test(id)
           ? await quoteService.getQuoteById(id)
           : null;

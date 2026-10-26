@@ -11,16 +11,102 @@ import { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
 import { ReactionRoleService } from "../../../services/reaction-role-service.js";
 import { ReactionRoleGroupService } from "../../../services/reaction-role-group-service.js";
-import { findReactionRoleGroupPreset } from "../../../content/reaction-role-groups.js";
+import {
+  MAX_GROUP_ENTRIES,
+  findReactionRoleGroupPreset,
+} from "../../../content/reaction-role-groups.js";
 import type { ReactionRoleMode } from "../../../models/reaction-role-config.js";
 import { recordAudit } from "../../audit.js";
 import {
   flashRedirect,
   getString,
+  getRawString,
   getCheckbox,
   requireSessionContext,
   asyncHandler,
+  refuseForm,
 } from "./helpers.js";
+import {
+  addFieldError,
+  type FormErrors,
+  type FormValues,
+} from "../../form-errors.js";
+import {
+  REACTION_ROLE_BIND_FORM,
+  REACTION_ROLE_CREATE_FORM,
+  REACTION_ROLE_GROUP_CREATE_FORM,
+  REACTION_ROLE_GROUP_GENERATE_FORM,
+  groupEmojiField,
+  groupRoleNameField,
+} from "../../admin-views.js";
+
+const PAGE = "/admin/reaction-roles";
+
+/** Discord caps role names at 100 characters. */
+const ROLE_NAME_MAX = 100;
+/**
+ * Emoji input is a single Unicode cluster or custom markup like
+ * `<:name:id>` / `<a:name:id>`; 100 is well past any legitimate input and
+ * matches the form's `maxlength`.
+ */
+const EMOJI_MAX = 100;
+
+const toArray = (raw: unknown): string[] =>
+  Array.isArray(raw) ? raw.map(String) : typeof raw === "string" ? [raw] : [];
+
+/** The parallel `roleName` / `emoji` arrays of a group form, as typed. */
+function groupRows(req: Parameters<typeof getString>[0]): {
+  roleNames: string[];
+  emojis: string[];
+} {
+  const body = (req.body as Record<string, unknown> | undefined) ?? {};
+  return {
+    roleNames: toArray(body["roleName"]),
+    emojis: toArray(body["emoji"]),
+  };
+}
+
+/**
+ * Pair the rows positionally. Only fully blank rows are dropped; half-filled
+ * rows pass through so the service reports the missing name or emoji.
+ */
+function pairRows(rows: {
+  roleNames: string[];
+  emojis: string[];
+}): Array<{ roleName: string; emoji: string }> {
+  const entries: Array<{ roleName: string; emoji: string }> = [];
+  for (
+    let i = 0;
+    i < Math.max(rows.roleNames.length, rows.emojis.length);
+    i++
+  ) {
+    const roleName = (rows.roleNames[i] ?? "").trim();
+    const emoji = (rows.emojis[i] ?? "").trim();
+    if (roleName || emoji) entries.push({ roleName, emoji });
+  }
+  return entries;
+}
+
+/** The typed option rows, by the field names the view gives them (capped at the form's own rows). */
+function rowValues(rows: {
+  roleNames: string[];
+  emojis: string[];
+}): FormValues {
+  const values: FormValues = {};
+  for (let i = 0; i < MAX_GROUP_ENTRIES; i++) {
+    values[groupRoleNameField(i)] = rows.roleNames[i] ?? "";
+    values[groupEmojiField(i)] = rows.emojis[i] ?? "";
+  }
+  return values;
+}
+
+function checkEmoji(errors: FormErrors, emoji: string): void {
+  if (!emoji) {
+    addFieldError(errors, "emoji", "Enter an emoji.");
+  } else if (emoji.length > EMOJI_MAX) {
+    addFieldError(errors, "emoji", `At most ${EMOJI_MAX} characters.`);
+  }
+}
 
 export function createReactionRolesRouter(client: Client): Router {
   const router = Router();
@@ -36,40 +122,37 @@ export function createReactionRolesRouter(client: Client): Router {
       const name = getString(req, "name");
       const emoji = getString(req, "emoji");
 
-      if (!name || !emoji) {
-        flashRedirect(res, "/admin/reaction-roles", {
-          type: "err",
-          text: "Role name and emoji are both required.",
-        });
-        return;
-      }
-      // Discord caps role names at 100 chars. Validate here so we surface a
-      // clean flash instead of letting the Discord API reject the create
-      // mid-rollback.
-      if (name.length > 100) {
-        flashRedirect(res, "/admin/reaction-roles", {
-          type: "err",
-          text: "Role name must be 100 characters or fewer.",
-        });
-        return;
-      }
-      // Emoji input is either a single Unicode codepoint cluster or a custom
-      // emoji markup like `<:name:id>` / `<a:name:id>`. 100 chars is well past
-      // any legitimate input and matches the form's `maxlength`.
-      if (emoji.length > 100) {
-        flashRedirect(res, "/admin/reaction-roles", {
-          type: "err",
-          text: "Emoji input must be 100 characters or fewer.",
-        });
-        return;
-      }
-
       const createChannel = getCheckbox(req, "createChannel");
       // Assignment mode (#814): toggle (default) / sticky. Anything else falls
       // back to toggle so a bad form value can't reach the DB enum. (unique is
       // offered on the role-group form, not the single-role form.)
       const modeRaw = getString(req, "mode");
       const mode: ReactionRoleMode = modeRaw === "sticky" ? modeRaw : "toggle";
+
+      // Discord caps role names, so a long one is refused here with a message
+      // rather than letting the Discord API reject the create mid-rollback.
+      const errors: FormErrors = {};
+      if (!name) {
+        addFieldError(errors, "name", "Enter a name for the role.");
+      } else if (name.length > ROLE_NAME_MAX) {
+        addFieldError(errors, "name", `At most ${ROLE_NAME_MAX} characters.`);
+      }
+      checkEmoji(errors, emoji);
+      if (
+        await refuseForm(req, res, {
+          page: PAGE,
+          formId: REACTION_ROLE_CREATE_FORM,
+          errors,
+          values: {
+            name: getRawString(req, "name"),
+            emoji: getRawString(req, "emoji"),
+            createChannel: createChannel ? "1" : "",
+            mode,
+          },
+        })
+      ) {
+        return;
+      }
 
       const service = ReactionRoleService.getInstance(client);
       try {
@@ -123,18 +206,21 @@ export function createReactionRolesRouter(client: Client): Router {
       const emoji = getString(req, "emoji");
       const messageId = getString(req, "messageId");
 
-      if (!roleId || !emoji) {
-        flashRedirect(res, "/admin/reaction-roles", {
-          type: "err",
-          text: "Role ID and emoji are both required.",
-        });
-        return;
-      }
-      if (emoji.length > 100) {
-        flashRedirect(res, "/admin/reaction-roles", {
-          type: "err",
-          text: "Emoji input must be 100 characters or fewer.",
-        });
+      const errors: FormErrors = {};
+      if (!roleId) addFieldError(errors, "roleId", "Enter the role ID.");
+      checkEmoji(errors, emoji);
+      if (
+        await refuseForm(req, res, {
+          page: PAGE,
+          formId: REACTION_ROLE_BIND_FORM,
+          errors,
+          values: {
+            roleId: getRawString(req, "roleId"),
+            emoji: getRawString(req, "emoji"),
+            messageId: getRawString(req, "messageId"),
+          },
+        })
+      ) {
         return;
       }
 
@@ -375,44 +461,44 @@ export function createReactionRolesRouter(client: Client): Router {
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const groupName = getString(req, "groupName");
-
-      const body = (req.body as Record<string, unknown> | undefined) ?? {};
-      const toArray = (raw: unknown): string[] =>
-        Array.isArray(raw)
-          ? raw.map(String)
-          : typeof raw === "string"
-            ? [raw]
-            : [];
-      const roleNames = toArray(body["roleName"]);
-      const emojis = toArray(body["emoji"]);
-
-      // Pair positionally. Drop only fully blank rows; half-filled rows pass
-      // through so the service reports the missing name or emoji.
-      const entries: Array<{ roleName: string; emoji: string }> = [];
-      for (let i = 0; i < Math.max(roleNames.length, emojis.length); i++) {
-        const roleName = (roleNames[i] ?? "").trim();
-        const emoji = (emojis[i] ?? "").trim();
-        if (roleName || emoji) {
-          entries.push({ roleName, emoji });
-        }
-      }
+      const rows = groupRows(req);
+      const entries = pairRows(rows);
 
       const modeRaw = getString(req, "mode");
       const mode: ReactionRoleMode =
         modeRaw === "sticky" || modeRaw === "toggle" ? modeRaw : "unique";
 
+      const errors: FormErrors = {};
       if (!groupName) {
-        flashRedirect(res, "/admin/reaction-roles", {
-          type: "err",
-          text: "Group name is required.",
-        });
-        return;
+        addFieldError(errors, "groupName", "Enter a name for the group.");
       }
       if (entries.length < 2) {
-        flashRedirect(res, "/admin/reaction-roles", {
-          type: "err",
-          text: "A role group needs at least two role/emoji options.",
-        });
+        // Marked on the first row left blank, which is always on the form.
+        let firstBlank = 0;
+        while (
+          (rows.roleNames[firstBlank] ?? "").trim() ||
+          (rows.emojis[firstBlank] ?? "").trim()
+        ) {
+          firstBlank++;
+        }
+        addFieldError(
+          errors,
+          groupRoleNameField(firstBlank),
+          "A role group needs at least two options, each with a role name and an emoji.",
+        );
+      }
+      if (
+        await refuseForm(req, res, {
+          page: PAGE,
+          formId: REACTION_ROLE_GROUP_CREATE_FORM,
+          errors,
+          values: {
+            groupName: getRawString(req, "groupName"),
+            mode: modeRaw,
+            ...rowValues(rows),
+          },
+        })
+      ) {
         return;
       }
 
@@ -466,39 +552,23 @@ export function createReactionRolesRouter(client: Client): Router {
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const presetKey = getString(req, "preset");
-      const body = (req.body as Record<string, unknown> | undefined) ?? {};
-      const toArray = (raw: unknown): string[] =>
-        Array.isArray(raw)
-          ? raw.map(String)
-          : typeof raw === "string"
-            ? [raw]
-            : [];
+      const rows = groupRows(req);
 
+      const errors: FormErrors = {};
       let groupName = getString(req, "groupName");
       let entries: Array<{ roleName: string; emoji: string }> = [];
       let defaultMode: ReactionRoleMode = "unique";
       if (presetKey && presetKey !== "custom") {
         const preset = findReactionRoleGroupPreset(presetKey);
         if (!preset) {
-          flashRedirect(res, "/admin/reaction-roles", {
-            type: "err",
-            text: "Unknown preset.",
-          });
-          return;
+          addFieldError(errors, "preset", "Choose one of the listed sources.");
+        } else {
+          groupName = preset.name;
+          entries = preset.entries.map((e) => ({ ...e }));
+          defaultMode = preset.mode;
         }
-        groupName = preset.name;
-        entries = preset.entries.map((e) => ({ ...e }));
-        defaultMode = preset.mode;
       } else {
-        const roleNames = toArray(body["roleName"]);
-        const emojis = toArray(body["emoji"]);
-        for (let i = 0; i < Math.max(roleNames.length, emojis.length); i++) {
-          const roleName = (roleNames[i] ?? "").trim();
-          const emoji = (emojis[i] ?? "").trim();
-          // Only fully blank rows are ignored; half-filled rows reach the
-          // service, which reports the missing name or emoji.
-          if (roleName || emoji) entries.push({ roleName, emoji });
-        }
+        entries = pairRows(rows);
       }
       const modeRaw = getString(req, "mode");
       const mode: ReactionRoleMode =
@@ -506,11 +576,26 @@ export function createReactionRolesRouter(client: Client): Router {
           ? modeRaw
           : defaultMode;
 
-      if (!groupName) {
-        flashRedirect(res, "/admin/reaction-roles", {
-          type: "err",
-          text: "Group name is required.",
-        });
+      if (!groupName && !errors["preset"]) {
+        addFieldError(
+          errors,
+          "groupName",
+          "Enter a name for the custom group.",
+        );
+      }
+      if (
+        await refuseForm(req, res, {
+          page: PAGE,
+          formId: REACTION_ROLE_GROUP_GENERATE_FORM,
+          errors,
+          values: {
+            preset: presetKey,
+            groupName: getRawString(req, "groupName"),
+            mode: modeRaw,
+            ...rowValues(rows),
+          },
+        })
+      ) {
         return;
       }
 

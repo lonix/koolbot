@@ -1383,7 +1383,7 @@ in lockstep and can't drift apart.
 
 The wizard runs **Features, Access, Channels, Review** (#1321), with a step indicator on every page. The **Access**
 step comes right after you pick features and maps Discord roles to who can do what: one card each for Admins
-(`/config`), Moderators and Event hosts (`/me`), with what they can and cannot do and a multi-select of roles, and a
+(`/config`), Moderators and Event hosts (`/me`), with what they can and cannot do and a searchable role picker (the same one as All settings, #1547), and a
 Members card that points to Command permissions to narrow `/me`. Re-running the wizard shows the current mapping.
 It writes the same role groups as the Role groups page, with the `admin`, `staff` (shown as Moderator) and `host`
 capabilities, and only links existing roles: it does not change a role in Discord. The one role it can create is the
@@ -1633,8 +1633,8 @@ flushes them in batches to MongoDB as daily `{command, date, guildId}`
 buckets, so the data survives restarts (unlike the live in-memory view) and
 is pruned automatically by a TTL index. The page shows commands by usage,
 an error spotlight (commands at or above a 10% error rate), the slowest
-commands by average response time, and a per-day usage trend. The 7d/30d
-toggle only selects the view window over already-persisted data; it is not a
+commands by average response time, and a per-day usage trend. The "7 days" / "30 days"
+window tabs (the current one carries `aria-current`) only select the view window over already-persisted data; it is not a
 config key. Persistence is governed by `monitoring.metrics_persistence.enabled`
 (default on), while `monitoring.metrics_retention_days` (default 30) controls
 how long buckets are kept before the TTL index prunes them; both are edited in
@@ -1918,8 +1918,8 @@ voice-activity heatmap (#675, Part B). It aggregates the already-stored
 `VoiceChannelTracking` sessions into a 24×7 (hour × weekday) grid of total
 voice minutes — a colour-intensity matrix where darker cells are busier — plus
 per-weekday and per-hour bar breakdowns and a "busiest slot" callout. Use it to
-pick high-reach times for digests, announcements, and polls. A 7d/30d/90d
-window toggle selects the trailing date range over already-persisted data (it
+pick high-reach times for digests, announcements, and polls. The "7 days" / "30 days" / "90 days"
+window tabs select the trailing date range over already-persisted data (it
 is not a config key); the default is 90 days so weekly patterns read clearly.
 Sessions are bucketed by their **start** hour/weekday in the **server**
 timezone and weighted by the whole session duration — no new data capture, no
@@ -1976,6 +1976,14 @@ same Groups block, without **Repeat** (a host's events do not repeat) and withou
 `events.announcement_channel_id` is used). The event is owned by the signed-in host (`createdBy` and the server come from the session, never
 from the form), the scope is checked on every request, and the host reaches only events they created. Both forms use one create pipeline
 (`src/web/event-create.ts`), and every create is audited as `event.create` with `via` (`admin` or `host`) and `when`.
+
+**A refused form keeps what was typed** (#1531). When the server refuses **New event** or **Edit event**, the answer is the form itself
+(status 422, no redirect): the title, date, time, timezone, duration and Groups rows come back as posted, the field the refusal is about gets
+`aria-invalid="true"` and an error line linked by `aria-describedby` that says what to change, a short error callout sits at the top, and
+focus moves to the marked field. A Groups error shows above the Groups block. A refusal that is not about one field (the open-event limit,
+a Discord failure) shows its reason in the callout only. The edit form comes back with the version, mode and CSRF token it was posted with,
+so a stale form is still refused on the next save. Other refusals on the edit page (a conflict, an event that has started) still return to a
+fresh page with a message. The admin Events form is not changed yet.
 
 **Limit on open events** (#1408). `events.max_active_per_host` (Settings, Events) is the most events a host who is not an administrator may
 have open at once; `0`, the default, means no limit. Open means scheduled or running, the same events **Your events** lists under Live now
@@ -3353,7 +3361,7 @@ Web UI audit log. A decision on a case someone else already resolved from anothe
 naming the status it found.
 
 **Server scan** (`/admin/adopt`, #1019) is a read-only inventory of the guild: it has no write routes, and never
-writes to Discord. Since #1323 it opens on an **Overview**: the verdict (ready, or how many blockers), tiles for
+writes to Discord. Since #1323 it opens on an **Overview**: the verdict (ready, or how many blockers), a callout when parts could not be read, tiles for
 Readiness, Roles, Channels and Other bots, what needs fixing, and suggestions that each link to the page that acts
 (Channel claims, Voice channels, and the voice tracking settings). Readiness and permission detail link to **Bot permissions** instead of
 repeating its table. The inventories are tabs (`?tab=roles`, `channels`, `bots`, `discord`; an unknown value is the
@@ -3445,7 +3453,12 @@ as the other admin pages. It edits structure only; permission overwrites stay in
   elsewhere (another admin, Discord) since you opened the page, the save is refused instead of overwriting it.
 - **Reorder** with Up and Down. Text and voice channels order separately inside a category, as in Discord. Each
   button is drawn for the neighbour it swaps with; if the order changed since the page was opened, the move is refused.
-- **Delete** always goes through a confirmation page. The page and the delete itself both re-check, so a stale
+- **Delete** always asks first. With JavaScript, **Delete…** opens a dialog titled "Delete <channel>?" that lists what goes
+  with it (a text channel's messages, and that it can't be undone) and whose **Delete permanently** button posts the delete.
+  The dialog is built from the confirmation page, which the link fetches when you click, so the verdict and the
+  confirmation token are as fresh as that page; a channel KoolBot manages, or one the bot may not delete, gets a dialog that
+  gives the reason and has no delete button. Without JavaScript the link opens the confirmation page. The page and the delete
+  itself both re-check, so a stale
   tab or a hand-made request cannot skip it. KoolBot **refuses** to delete a channel it manages and names why:
   a channel set in any `*.channel_id` or `*.category_id` setting (quotes, notices, log channels, the voice
   category and lobby, ticket and event categories, ...), the voice lobby and offline lobby (also found by name, with the same quote and
@@ -3563,11 +3576,14 @@ categories and channels. Every row defaults to **Leave alone**; nothing is touch
   `reactionroles.message_channel_id` after the preview makes it a different plan (preview again).
   Each mapping carries the step that made it, so a plan only ever removes its own picker: a mapping another plan or the
   Reaction Roles page made is reused, not owned. A rollback also recovers a registration saved before a crash that was never recorded
-  (looked up by the step's key, never posted again). The picker's footer carries that key, so a picker posted before its
-  mapping was saved is found again: a retry completes it instead of posting a second one, and a rollback deletes it.
-  The search reads the channel back to when the snapshot was created (and says so, changing nothing, if it can't finish).
-  Deletions run under the guild lock until they finish, and a retry also removes this step's own unsaved picker when it
-  finds another plan's mapping for the same pair.
+  (looked up by the step's key, never posted again). The picker shows no key to members.
+  If a crash leaves a picker posted but not yet saved as a mapping, that picker does nothing (reactions on it grant no
+  role), and a retry posts a new one. Delete the left-over message by hand; a rollback only removes pickers it can prove
+  are its own. Pickers posted by an earlier version still carry the key in their footer; those are still recognised, so
+  a retry completes them and a rollback deletes them, and the footer is left as it is until the picker is removed.
+  Looking for an old-footer picker reads the channel back to when the snapshot was created (and says so, changing nothing,
+  if it can't finish). Deletions run under the guild lock until they finish, and a retry also removes this step's own
+  unsaved old-footer picker when it finds another plan's mapping for the same pair.
   A rollback deletes only the picker this plan posted, from the channel it was posted to, never the role or the category; if Discord fails while deleting it,
   the rollback step fails and stays open for a retry (only "unknown channel" or "unknown message" count as already gone). If another mapping was added to
   the picker since (on the Reaction Roles page), the picker is kept and only this mapping and its reaction are removed.
@@ -3634,14 +3650,14 @@ opens the snapshot history.
    read-only, gate it to groups, or bind it to a feature. **Preview changes** shows the diff; **Apply plan** runs it.
 5. **Check the result.** Planning again gives an empty plan when the server already matches.
 6. **Adoption history** (`/admin/adopt/history`). Every apply is listed with its status and what it changed. **Restore…**
-   opens a confirmation page that lists the steps that will be reverted, newest first. Only steps that were applied are
-   reverted, from the state saved before the apply. Roles the plan created are kept unless you tick **Also delete the roles
-   this plan created**. For a plan that deleted something, the page repeats that messages, pins, threads, webhooks and
-   IDs cannot be restored. Restore runs in the background and the page shows its progress; a snapshot that stopped part-way
-   can be restored again to finish. Each accepted restore writes a started entry (`adopt.rollback.start`) to the audit log
-   before it runs, and its outcome (`adopt.rollback`) when it ends; if KoolBot restarts in between, only the started entry
-   exists. A refused restore is written as a failed `adopt.rollback`. Snapshots are kept for
-   `adoption.snapshot.retention_days` (default 90, `0` keeps them forever).
+   opens a dialog (a confirmation page without JavaScript) that lists the steps that will be reverted, newest first. Only
+   steps that were applied are reverted, from the state saved before the apply. Roles the plan created are kept unless you
+   tick **Also delete the roles this plan created**, which is a checkbox in the dialog. For a plan that deleted something, the
+   dialog repeats that messages, pins, threads, webhooks and IDs cannot be restored. Restore runs in the background and the
+   page shows its progress; a snapshot that stopped part-way can be restored again to finish. Each accepted restore writes a
+   started entry (`adopt.rollback.start`) to the audit log before it runs, and its outcome (`adopt.rollback`) when it
+   ends; if KoolBot restarts in between, only the started entry exists. A refused restore is written as a failed
+   `adopt.rollback`. Snapshots are kept for `adoption.snapshot.retention_days` (default 90, `0` keeps them forever).
 
    **Restore checks the live server first** (#1134). A snapshot can be months old, so before anything is written Restore
    scans the server as it is now and works out what it would look like after the remaining steps are undone, using the same
@@ -3676,15 +3692,15 @@ existing achievements award detection. `celebrations.enabled` depends on
 
 ### User self-service (`/me/*`, both admin and user roles)
 
-| Page                                    | What it's for                                                                                                                                             |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                                      |
-| **Notifications** (`/me/notifications`) | Opt in to DM nudges (achievements, weekly digest, Rewind). Off by default — Koolbot never DMs you until you opt in here. Records a `WebAuditLog` row.     |
-| **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete). Gated by `voicechannels.presets.enabled`.           |
-| **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in with a searchable select (_Server default_ clears it); also used for your birthday.                  |
-| **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row. |
-| **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.     |
-| **Privacy** (`/me/privacy`)             | See what Koolbot stores about you, download it as one JSON file, and (if `privacy.delete.enabled`) reset it. Gated by `privacy.enabled`; audited.         |
+| Page                                    | What it's for                                                                                                                                                                                                                             |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Overview** (`/me/`)                   | Opens with a live event you host (a panel linking to its host panel, with a _Live_ badge), then one card per available preference showing how it is set now, then your poll participation and your account ids as one line of fine print. |
+| **Notifications** (`/me/notifications`) | Opt in to DM nudges (achievements, weekly digest, Rewind) with a switch per message. Off by default — KoolBot never DMs you until you opt in here. Records a `WebAuditLog` row.                                                           |
+| **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete; delete asks first). Gated by `voicechannels.presets.enabled`.                                                                        |
+| **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in with a searchable select (_Server default_ clears it); also used for your birthday.                                                                                                  |
+| **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row; removing asks first.                                                            |
+| **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.                                                                                     |
+| **Privacy** (`/me/privacy`)             | See what Koolbot stores about you, download it as one JSON file, and (if `privacy.delete.enabled`) reset it. Gated by `privacy.enabled`; audited.                                                                                         |
 
 **A switched-off feature is not shown on `/me/*` (#1292, extending #1066).**
 Voice, Birthday, Rewind and Privacy each follow their feature switch
@@ -3699,9 +3715,16 @@ cannot be read (a database error) the page answers an error rather than a
 `404`, so a hiccup never takes away a page that is on. The one list of what
 gates `/me` is `GATED_ME_SURFACES` in `src/web/me-surfaces.ts`.
 
+The **Overview** cards (a FeatureCard each, see `docs/design/components.md`) say how a preference is set without opening it. Notifications shows
+how many of the offered DMs are on ("2 of 3 on"). Timezone shows the zone and the time there ("Europe/Oslo · 10:59 now", or "Server default (UTC) · 10:59
+now"). Voice shows the name pattern or "Server default naming" and the number of presets. Birthday shows the date or "Not set". Privacy shows
+"Tracking on" or "Opted out of tracking". Rewind shows no value: its figures need a heavy read that has a rate limit of its own on the Rewind page. Only a
+running event is _Live_ and gets a panel; events that are planned are one line with a count that links to **Your events**. A card whose value could not
+be read shows no value line.
+
 When `polls.participation.enabled` is on and you have voted on at least
 one poll, the **Overview** page also shows a read-only **Poll
-participation** card — lifetime votes, this-year votes, this-week votes,
+participation** panel of tiles — lifetime votes, this-year votes, this-week votes,
 and when you last voted (#655, #816). The same per-year count surfaces on
 **Rewind** as the **Poll votes cast** stat, hidden in any year you cast no
 votes. The weekly figure comes from per-ISO-week buckets kept for
@@ -3723,7 +3746,11 @@ The **Birthday** page (`#657`) stores a month/day and an optional year
 per `(userId, guildId)`. The year is optional by design — many people
 share the date but not the age — and when omitted no age is computed or
 shown. The page is gated by `birthdays.enabled` and answers `404` while it
-is off. A "Remove my birthday" button clears the stored date. The daily birthday
+is off. A "Remove my birthday" button clears the stored date; it is a danger button that
+opens the confirmation dialog first, listing what the removal does (the saved date, a birthday
+role you hold, the bot's birthday posts about you, and the wait before a birthday can be set
+again when `birthdays.change_cooldown_seconds` is above 0). Without JavaScript the form posts at
+once. The daily birthday
 announcement itself is evaluated in the member's `/me/timezone`
 preference so it fires on their local day (`#524`).
 
@@ -3742,7 +3769,7 @@ naming) and your **saved presets**. Presets themselves are still _created_
 in Discord by snapshotting a live channel (control panel → Presets → Save
 current as preset); the web page lets you **edit** a preset's name, channel
 name, user limit, and bitrate, **set-default** (the default auto-applies on
-your next lobby spawn), and **delete**. Every write goes through the same
+your next lobby spawn), and **delete** (which asks first in the confirmation dialog, naming the preset). Every write goes through the same
 `UserVoicePrefsService` validation as the Discord modal — so the
 max-per-user cap, name/limit/bitrate bounds, and name-pattern length are
 identical on both surfaces — and records a `WebAuditLog` row
@@ -3922,19 +3949,37 @@ label, so it renders as `role="group"` with `aria-labelledby` pointing at the
 row caption, and each inner input keeps its own `aria-label`.
 
 **Rejected values are pointed at.** When a save is refused, the server echoes
-the offending config keys — as `invalidKeys` in the JSON reply for the AJAX
-save, and as `?invalid=<keys>` on the no-JS redirect. Those controls render
-`aria-invalid="true"` with an inline "Rejected" note, their `aria-describedby`
-is extended to the flash banner carrying the reason, and focus moves to the
-first of them. A page-level "something was invalid" banner on its own is not
-enough on a page with hundreds of fields.
+the offending config keys: as `invalidKeys` (with each key's reason in
+`invalidReasons`) in the JSON reply for the AJAX save, and as `?invalid=<keys>`
+on the no-JS redirect. Those controls render `aria-invalid="true"` with an
+inline error line, their `aria-describedby` is extended to the flash banner,
+and focus moves to the first of them. The AJAX save prints each key's own
+reason under its row. The no-JS redirect carries only the keys, because a
+query string is not signed (only the flash text is), so the line there points
+at the flash, which lists every reason. A page-level "something was invalid"
+banner on its own is not enough on a page with hundreds of fields.
+
+**A refused form comes back with what you typed.** When a create or edit form
+on a feature page is refused (Announcements, Polls, Reaction roles, Notices,
+Quotes and Presence so far), the server draws the page again with status 422
+instead of redirecting: every field you typed is still filled in, each refused
+field has `aria-invalid="true"` and a `p.kb-field__error` line under it (linked
+by `aria-describedby`) that says what to change, and focus moves to the first
+refused field. Typed text never goes into a URL. A refused edit opens that
+row's _Edit_ disclosure (on Presence, a refused import opens _Import / export_,
+and a role-group form opens _More options_ when a refused row sits in it). A
+refusal that is not about one field stays a page message: a failure from
+Discord (such as a role the bot cannot manage), a row that was deleted in
+another tab, or a page that cannot be drawn again. Routes use `refuseForm` and
+pages use `formView` (`src/web/form-errors.ts`).
 
 **Outcomes are announced.** The inline flash the AJAX Settings save inserts is
-a `role="status"` live region, so success, CSRF failure, rate-limit and
-network-error results are all read out. A flash rendered after a
-redirect is not announced on its own (a live region that is part of a fresh
-document never is), so `renderFlash` gives it `role="status" tabindex="-1"
-data-flash` and the layout script focuses it on load when nothing is
+a live region: `role="alert"` for a failure, `role="status"` for success and
+warnings, so CSRF failure, rate-limit and network-error results are all read
+out. A flash rendered after a redirect is not announced on its own (a live
+region that is part of a fresh document never is), so `renderFlash` gives it
+`tabindex="-1" data-flash` (with `role="alert"` for `err`, `role="status"`
+otherwise) and the layout script focuses it on load when nothing is
 `aria-invalid`.
 
 **Keyboard focus is visible.** Both layouts (and the pre-auth / error shell
