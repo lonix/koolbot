@@ -169,10 +169,27 @@ beforeEach(() => {
   }));
 });
 
+/**
+ * The outcome of a post, as a flash. A create opens the host panel with an "ok"
+ * flash; a refusal is the form itself (#1531, status 422) and its reason is the
+ * callout text, so it reads as an "err" on the New event page.
+ */
 const flashOf = async (
   body: Record<string, string>,
-): Promise<ReturnType<typeof parseFlashRedirect>> =>
-  parseFlashRedirect((await harness.post("", body)).headers.get("location"));
+): Promise<ReturnType<typeof parseFlashRedirect>> => {
+  const res = await harness.post("", body);
+  if (res.status !== 422) {
+    return parseFlashRedirect(res.headers.get("location"));
+  }
+  const html = await res.text();
+  return {
+    path: "/me/events/new",
+    type: "err",
+    msg: /kb-callout__text">([^<]*)</.exec(html)?.[1] ?? null,
+    invalid: [],
+    settings: null,
+  };
+};
 
 describe("events.max_active_per_host", () => {
   it.each([

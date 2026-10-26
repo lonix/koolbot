@@ -142,12 +142,14 @@ describe("markField and renderRefusalCallout", () => {
       '<p class="kb-field__error" id="d-error">At most 1440 minutes.</p>',
     );
     const other = markField(refusal, "title", "t");
-    expect(other).toEqual({
+    expect(other).toMatchObject({
       invalid: false,
       errorId: undefined,
       attrs: "",
       line: "",
     });
+    expect(other.after(8)).toBe("");
+    expect(m.after(8)).toBe(`\n        ${m.line}`);
   });
 
   it("escapes the message", () => {
