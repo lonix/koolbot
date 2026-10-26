@@ -3194,6 +3194,8 @@ export function renderGroupsSection(
   remembered: {
     prefill: GroupFormPrefill;
     resetHref: string | null;
+    /** The switch's own state; absent means on whenever there is a prefill. */
+    enabled?: boolean;
   } | null = null,
   // A missing bot permission next to the field it breaks (#1478), already
   // rendered by `splitEventFormNotice`; absent or "" leaves the markup as it was.
@@ -3239,7 +3241,7 @@ export function renderGroupsSection(
   return `<fieldset data-groups-section>
       <legend>Groups</legend>${rememberedNote ? `\n      ${rememberedNote}` : ""}
       <div class="kb-groupopt">
-        <label class="kb-switch"><input type="checkbox" role="switch" name="${GROUP_FORM_FIELDS.enabled}" value="1"${prefill ? " checked" : ""} aria-describedby="groups-enabled-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Split into groups (teams, squads, rooms…)</label>
+        <label class="kb-switch"><input type="checkbox" role="switch" name="${GROUP_FORM_FIELDS.enabled}" value="1"${(remembered?.enabled ?? prefill !== null) ? " checked" : ""} aria-describedby="groups-enabled-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Split into groups (teams, squads, rooms…)</label>
         <p class="kb-help" id="groups-enabled-help">Each group gets its own voice channel next to the event's channel, made at the channel creation time and removed when the event is over. Leave it off for a plain event.</p>
       </div>${inline(permissionInline.groups)}
       <div data-groups-body class="kb-stack">

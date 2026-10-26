@@ -55,6 +55,8 @@ export interface NewEventViewProps {
     prefill: GroupFormPrefill;
     /** Null for a refused form's own rows: there is no "defaults" link to offer. */
     resetHref: string | null;
+    /** The Groups switch's own state when it is not "on because there is a prefill". */
+    enabled?: boolean;
   } | null;
   /** The channel category or the announcement channel is not set. */
   setupNotice?: string | null;

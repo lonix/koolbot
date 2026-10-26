@@ -88,29 +88,44 @@ function valuesFromPost(
   };
 }
 
-/** The group section as posted, in the shape the form prefills from; null when it was off. */
-function groupPrefillFromPost(
-  body: Record<string, unknown>,
-): GroupFormPrefill | null {
+/**
+ * The group section as posted, in the shape the form prefills from. The values
+ * are kept whether or not the Groups switch was on (`enabled` restores the
+ * switch itself), and each row goes back at the position it was posted in:
+ * `parseGroupForm` drops blank rows but keeps their position for messages, so
+ * the gaps are refilled to make "Group 2" in a message the second row shown.
+ */
+function groupPrefillFromPost(body: Record<string, unknown>): {
+  prefill: GroupFormPrefill;
+  enabled: boolean;
+} {
   const input = parseGroupForm(body);
-  if (!input.enabled) return null;
-  return {
-    presetId: input.presetId === "custom" ? "" : input.presetId,
-    groupLabel: input.groupLabel,
-    leaderLabel: input.leaderLabel,
-    channelLeadMinutes: input.channelLeadMinutes,
-    rows: input.rows.map((r) => ({
+  const blank = { name: "", kind: "team", size: "", tag: "", marker: "" };
+  const rows: GroupFormPrefill["rows"] = [];
+  for (const r of input.rows) {
+    while (rows.length < r.position - 1) rows.push({ ...blank });
+    rows.push({
       name: r.name,
       kind: r.kind,
       size: r.size,
       tag: r.tag,
       marker: r.marker,
-    })),
-    captainsEnabled: input.captainsEnabled === true,
-    captainCustomisationEnabled: input.captainCustomisationEnabled === true,
-    captainsLobby: input.captainsLobby === true,
-    tagsEnabled: input.tagsEnabled === true,
-    tagsSuffix: input.tagsSuffix === true,
+    });
+  }
+  return {
+    enabled: input.enabled,
+    prefill: {
+      presetId: input.presetId === "custom" ? "" : input.presetId,
+      groupLabel: input.groupLabel,
+      leaderLabel: input.leaderLabel,
+      channelLeadMinutes: input.channelLeadMinutes,
+      rows,
+      captainsEnabled: input.captainsEnabled === true,
+      captainCustomisationEnabled: input.captainCustomisationEnabled === true,
+      captainsLobby: input.captainsLobby === true,
+      tagsEnabled: input.tagsEnabled === true,
+      tagsSuffix: input.tagsSuffix === true,
+    },
   };
 }
 
@@ -221,7 +236,11 @@ export function createMeNewEventRouter(client: Client): Router {
               catalog.personalUnreadable,
             ),
             groupRemembered: postedGroups
-              ? { prefill: postedGroups, resetHref: null }
+              ? {
+                  prefill: postedGroups.prefill,
+                  resetHref: null,
+                  enabled: postedGroups.enabled,
+                }
               : remembered
                 ? {
                     prefill: remembered,

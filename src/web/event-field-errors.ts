@@ -93,17 +93,19 @@ export function renderRefusalCallout(
   const text = refusal.field
     ? "Check the field marked below, change it and try again."
     : refusal.message;
-  return `<div class="kb-callout kb-callout--err" role="alert">${toneIcon("err")}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(heading)}</p><p class="kb-callout__text">${escapeHtml(text)}</p></div></div>`;
+  return `<div class="kb-callout kb-callout--err" role="alert" tabindex="-1" data-refusal-callout>${toneIcon("err")}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(heading)}</p><p class="kb-callout__text">${escapeHtml(text)}</p></div></div>`;
 }
 
 /**
  * Moves focus to the first marked field on load. Without JavaScript the error
- * line is still read through `aria-describedby`. A control is focused as it is;
+ * line is still read through `aria-describedby`. A refusal that is not about
+ * one field (the open-event limit, a Discord failure) has none, so focus falls
+ * back to the callout that carries the reason. A control is focused as it is;
  * the Groups error line is not a control, so it takes a temporary tabindex.
  */
 export const FOCUS_FIRST_INVALID_SCRIPT =
   "(function(){" +
-  "var el=document.querySelector('[aria-invalid=\"true\"],[data-field-error-target]');" +
+  "var el=document.querySelector('[aria-invalid=\"true\"],[data-field-error-target]')||document.querySelector('[data-refusal-callout]');" +
   "if(!el)return;" +
   "if(!/^(a|button|input|select|textarea)$/i.test(el.tagName)&&!el.hasAttribute('tabindex'))el.setAttribute('tabindex','-1');" +
   "try{el.focus()}catch(e){}" +

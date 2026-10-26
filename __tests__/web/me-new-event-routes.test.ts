@@ -577,6 +577,69 @@ describe("POST /me/events/new: a refused form (#1531)", () => {
     expect(mockCreateEvent).not.toHaveBeenCalled();
   });
 
+  it("puts each posted group row back at the position it was posted in (blank rows keep their slot)", async () => {
+    // No script: Group 1 is blank and only Group 2 has a size, so the refusal is about Group 2.
+    const res = await harness.post("", {
+      ...planned,
+      groups_enabled: "1",
+      groups_preset: "",
+      group_1_size: "7",
+    });
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    expect(html).toContain("Group 2");
+    const size = (n: number): string =>
+      new RegExp(`name="group_${n}_size"[^>]*>`).exec(html)?.[0] ?? "";
+    expect(size(0)).not.toContain('value="7"');
+    expect(size(1)).toContain('value="7"');
+  });
+
+  it("keeps the posted group setup when the Groups switch is off, and keeps the switch off", async () => {
+    const res = await harness.post("", {
+      ...planned,
+      duration: "5000",
+      group_0_name: "Red",
+      group_1_name: "Blue",
+    });
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    expect(html).toContain('value="Red"');
+    expect(html).toContain('value="Blue"');
+    expect(
+      /<input type="checkbox" role="switch" name="groups_enabled"[^>]*checked/.test(
+        html,
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps the Groups switch on when it was on", async () => {
+    const res = await harness.post("", {
+      ...planned,
+      duration: "5000",
+      groups_enabled: "1",
+      group_0_name: "Red",
+    });
+    const html = await res.text();
+    expect(
+      /<input type="checkbox" role="switch" name="groups_enabled"[^>]*checked/.test(
+        html,
+      ),
+    ).toBe(true);
+  });
+
+  it("makes the callout the focus target when no field is marked", async () => {
+    // A refusal that is not about one field (no channel category set) reaches the callout.
+    mockCreateImpromptu.mockRejectedValueOnce(
+      new actualEvents.ImpromptuNotReadyError("No channel category is set."),
+    );
+    const res = await harness.post("", { when: "now", title: "Right now" });
+    const html = await res.text();
+    expect(html).toMatch(
+      /<div class="kb-callout kb-callout--err"[^>]*tabindex="-1"[^>]*data-refusal-callout/,
+    );
+    expect(html).toContain("[data-refusal-callout]");
+  });
+
   it("leaves a fresh form without any marks", async () => {
     const html = await (await harness.get("")).text();
     expect(html).not.toContain("aria-invalid");
