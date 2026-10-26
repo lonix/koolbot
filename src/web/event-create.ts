@@ -34,6 +34,7 @@ import {
   type EventGroupSetup,
 } from "../services/event-groups.js";
 import { validateEventForm } from "./event-form.js";
+import type { EventFormField } from "./event-field-errors.js";
 import { parseEventWhen, plannedStartFor } from "./event-when.js";
 import { recordAudit, type AuditEntry } from "./audit.js";
 import { hostPanelPath } from "./host-panel-shared.js";
@@ -70,10 +71,11 @@ export type CreateEventResult =
   | {
       ok: false;
       error: string;
+      /** The form field the refusal is about; absent for one that is not (the open-event cap, a Discord failure). */
+      field?: EventFormField;
       /**
-       * The refusal by form field, when it is about fields of the form (#1523):
-       * the page marks them. Absent for what is not (the Groups section, the
-       * per-host cap, an unreadable setting), which stays a flash.
+       * A refusal about a field the validator does not name (the Repeat
+       * choice, #1523), by form field, for the admin form to mark.
        */
       fields?: Record<string, string>;
     };
@@ -180,7 +182,13 @@ async function createEventUnlocked(
     (opts.audit ?? recordAudit)(session, entry);
 
   const when = parseEventWhen(field(body, "when"));
-  if (!when) return { ok: false, error: "Invalid choice for when." };
+  if (!when) {
+    return {
+      ok: false,
+      error: "Pick when the event starts.",
+      field: "when",
+    };
+  }
 
   // The per-host cap (#1408). `capLimit` was resolved by the caller, which
   // holds the host's lock from here to the insert, so two overlapping requests
@@ -258,9 +266,7 @@ async function createEventUnlocked(
     return {
       ok: false,
       error: parsed.error,
-      ...(parsed.fields && Object.keys(parsed.fields).length > 0
-        ? { fields: parsed.fields }
-        : {}),
+      ...(parsed.field ? { field: parsed.field } : {}),
     };
   }
   const { title, description, startTime, timezone, durationMinutes } =
@@ -294,7 +300,11 @@ async function createEventUnlocked(
       ...(resolvePreset ? { resolvePreset } : {}),
     });
     if (!result.ok) {
-      return { ok: false, error: `Groups: ${result.errors.join(" ")}` };
+      return {
+        ok: false,
+        error: `Groups: ${result.errors.join(" ")}`,
+        field: "groups",
+      };
     }
     groups = result.setup;
   }

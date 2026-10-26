@@ -135,14 +135,18 @@ async function createEvent(
 
 describe("POST /events/create — validation", () => {
   it.each([
-    ["title", { date: "2999-01-01", time: "18:00" }],
-    ["date", { title: "Raid", time: "18:00" }],
-    ["time", { title: "Raid", date: "2999-01-01" }],
-  ])("rejects a submission missing %s", async (_field, body) => {
+    ["title", { date: "2999-01-01", time: "18:00" }, "Enter a title."],
+    ["date", { title: "Raid", time: "18:00" }, "Pick a date."],
+    [
+      "time",
+      { title: "Raid", date: "2999-01-01" },
+      "Enter a time, for example 19:30.",
+    ],
+  ])("rejects a submission missing %s", async (_field, body, msg) => {
     const flash = await createEvent(body);
     expect(flash.path).toBe("/admin/events");
     expect(flash.type).toBe("err");
-    expect(flash.msg).toBe("Title, date and time are all required.");
+    expect(flash.msg).toBe(msg);
     expect(mockCreateEvent).not.toHaveBeenCalled();
   });
 
@@ -150,7 +154,7 @@ describe("POST /events/create — validation", () => {
     const { date, time } = futureDateTime();
     const flash = await createEvent({ title: "x".repeat(101), date, time });
     expect(flash.type).toBe("err");
-    expect(flash.msg).toBe("Title must be 100 characters or fewer.");
+    expect(flash.msg).toBe("Use at most 100 characters for the title.");
     expect(mockCreateEvent).not.toHaveBeenCalled();
   });
 
@@ -163,7 +167,7 @@ describe("POST /events/create — validation", () => {
       description: "y".repeat(1001),
     });
     expect(flash.type).toBe("err");
-    expect(flash.msg).toBe("Description must be 1000 characters or fewer.");
+    expect(flash.msg).toBe("Use at most 1000 characters for the description.");
   });
 
   it("rejects an unknown IANA timezone", async () => {
@@ -175,7 +179,7 @@ describe("POST /events/create — validation", () => {
       timezone: "Mars/Olympus_Mons",
     });
     expect(flash.type).toBe("err");
-    expect(flash.msg).toContain("Invalid timezone: Mars/Olympus_Mons");
+    expect(flash.msg).toBe("Pick a timezone from the list.");
     expect(mockCreateEvent).not.toHaveBeenCalled();
   });
 
@@ -186,7 +190,7 @@ describe("POST /events/create — validation", () => {
       time: "half seven",
     });
     expect(flash.type).toBe("err");
-    expect(flash.msg).toContain("Use YYYY-MM-DD and 24-hour HH:MM");
+    expect(flash.msg).toBe("Use the date format YYYY-MM-DD.");
     expect(mockCreateEvent).not.toHaveBeenCalled();
   });
 
@@ -197,7 +201,7 @@ describe("POST /events/create — validation", () => {
       time: "18:00",
     });
     expect(flash.type).toBe("err");
-    expect(flash.msg).toContain("must be in the future");
+    expect(flash.msg).toBe("Pick a time in the future.");
     expect(mockCreateEvent).not.toHaveBeenCalled();
   });
 
@@ -207,7 +211,11 @@ describe("POST /events/create — validation", () => {
       const { date, time } = futureDateTime();
       const flash = await createEvent({ title: "Raid", date, time, duration });
       expect(flash.type).toBe("err");
-      expect(flash.msg).toBe("Duration must be between 1 and 1440 minutes.");
+      expect(flash.msg).toBe(
+        duration === "1441"
+          ? "At most 1440 minutes."
+          : "Enter a whole number of minutes, from 1 to 1440.",
+      );
       expect(mockCreateEvent).not.toHaveBeenCalled();
     },
   );
@@ -256,22 +264,27 @@ describe("a refused Schedule form (#1523)", () => {
     return { html, invalid, lines };
   };
 
-  it("marks every missing field at once, in page order, and keeps the description", async () => {
+  it("marks the first missing field, as the validator names one at a time, and keeps the description", async () => {
     const r = await refusal({ description: "  keep <me>\n", duration: "90" });
-    expect(r.invalid).toEqual([
-      "event-create-title",
-      "event-create-date",
-      "event-create-time",
-    ]);
-    expect(r.lines).toEqual({
-      "event-create-title-error": "Enter a title.",
-      "event-create-date-error": "Pick a date.",
-      "event-create-time-error": "Enter a time, for example 19:30.",
-    });
+    expect(r.invalid).toEqual(["event-create-title"]);
+    expect(r.lines).toEqual({ "event-create-title-error": "Enter a title." });
     // Raw echo, escaped; the textarea keeps its text.
     expect(r.html).toContain("  keep &lt;me&gt;");
     expect(r.html).toContain('value="90"');
     expect(mockCreateEvent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["date", { title: "Raid", time: "18:00" }, "Pick a date."],
+    [
+      "time",
+      { title: "Raid", date: "2999-01-01" },
+      "Enter a time, for example 19:30.",
+    ],
+  ])("marks the missing %s", async (field, body, message) => {
+    const r = await refusal(body);
+    expect(r.invalid).toEqual([`event-create-${field}`]);
+    expect(r.lines[`event-create-${field}-error`]).toBe(message);
   });
 
   it("says at the top that the form was not saved, so the Groups draft is put back", async () => {
@@ -282,28 +295,36 @@ describe("a refused Schedule form (#1523)", () => {
   });
 
   it.each([
-    ["title", { title: "x".repeat(101) }, "At most 100 characters."],
+    [
+      "title",
+      { title: "x".repeat(101) },
+      "Use at most 100 characters for the title.",
+    ],
     [
       "description",
       { description: "y".repeat(1001) },
-      "At most 1000 characters.",
+      "Use at most 1000 characters for the description.",
     ],
-    ["duration", { duration: "1441" }, "Use 1 to 1440 minutes."],
-    ["duration", { duration: "abc" }, "Use 1 to 1440 minutes."],
+    ["duration", { duration: "1441" }, "At most 1440 minutes."],
+    [
+      "duration",
+      { duration: "abc" },
+      "Enter a whole number of minutes, from 1 to 1440.",
+    ],
     [
       "date",
       { date: "2000-01-01", time: "18:00" },
-      "The start time must be in the future.",
+      "Pick a time in the future.",
     ],
     [
       "date",
       { date: "next tuesday", time: "18:00" },
-      "Use a date like 2026-05-01.",
+      "Use the date format YYYY-MM-DD.",
     ],
     [
       "time",
       { date: "2999-01-01", time: "half seven" },
-      "Use 24-hour time, for example 19:30.",
+      "Use 24-hour time as HH:MM, for example 19:30.",
     ],
   ])(
     "marks the %s field and keeps the typed values",

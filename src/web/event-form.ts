@@ -14,7 +14,8 @@ import {
 import { parseEventDateTime } from "../services/event-service.js";
 import { ConfigService } from "../services/config-service.js";
 import { isValidTimezone, resolveTimezone } from "../utils/timezone.js";
-import { firstLengthError, parseIntInRange } from "./routes/write/helpers.js";
+import { parseIntInRange } from "./routes/write/helpers.js";
+import type { EventFormField } from "./event-field-errors.js";
 
 /** The posted fields, already trimmed (as `getString` returns them). */
 export interface EventFormFields {
@@ -40,15 +41,25 @@ export type EventFormResult =
     }
   | {
       ok: false;
+      /** What to change, in the host's terms. */
       error: string;
-      /**
-       * The same refusal by form field (`title`, `description`, `date`, `time`,
-       * `duration`), worded to read under the field, for a page that marks it
-       * (#1523). Empty when it is about no one field (the timezone). All
-       * missing fields are named here; `error` is the first, as before.
-       */
-      fields?: Record<string, string>;
+      /** The field the refusal is about; absent when it is not about one. */
+      field?: EventFormField;
     };
+
+const refuse = (
+  field: EventFormField,
+  error: string,
+): { ok: false; error: string; field: EventFormField } => ({
+  ok: false,
+  error,
+  field,
+});
+
+const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_SHAPE = /^\d{2}:\d{2}$/;
+const TIME_IN_RANGE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const TIME_RANGE_MESSAGE = "Pick a time between 00:00 and 23:59.";
 
 /**
  * Validate the core fields. `requireFuture` is true for a new event and for an
@@ -76,64 +87,57 @@ export async function validateEventForm(
     duration,
     timezone: tzInput,
   } = fields;
-  if (opts.startOverride ? !title : !title || !date || !time) {
-    const fields: Record<string, string> = {};
-    if (!title) fields.title = "Enter a title.";
-    if (!opts.startOverride && !date) fields.date = "Pick a date.";
-    if (!opts.startOverride && !time) {
-      fields.time = "Enter a time, for example 19:30.";
-    }
-    return {
-      ok: false,
-      error: opts.startOverride
-        ? "A title is required."
-        : "Title, date and time are all required.",
-      fields,
-    };
+  if (!title) return refuse("title", "Enter a title.");
+  if (!opts.startOverride) {
+    if (!date) return refuse("date", "Pick a date.");
+    if (!time) return refuse("time", "Enter a time, for example 19:30.");
   }
-  const lengthError = firstLengthError([
-    { label: "Title", value: title, max: EVENT_TITLE_MAX },
-    { label: "Description", value: description, max: EVENT_DESCRIPTION_MAX },
-  ]);
-  if (lengthError) {
-    const fields: Record<string, string> = {};
-    if (title.length > EVENT_TITLE_MAX) {
-      fields.title = `At most ${EVENT_TITLE_MAX} characters.`;
-    }
-    if (description.length > EVENT_DESCRIPTION_MAX) {
-      fields.description = `At most ${EVENT_DESCRIPTION_MAX} characters.`;
-    }
-    return { ok: false, error: lengthError, fields };
+  if (title.length > EVENT_TITLE_MAX) {
+    return refuse(
+      "title",
+      `Use at most ${EVENT_TITLE_MAX} characters for the title.`,
+    );
+  }
+  if (description.length > EVENT_DESCRIPTION_MAX) {
+    return refuse(
+      "description",
+      `Use at most ${EVENT_DESCRIPTION_MAX} characters for the description.`,
+    );
   }
   if (tzInput && !isValidTimezone(tzInput)) {
-    return { ok: false, error: `Invalid timezone: ${tzInput}`, fields: {} };
+    return refuse("timezone", "Pick a timezone from the list.");
   }
 
   const config = ConfigService.getInstance();
   const configuredTz = await config.getString("events.timezone", "");
   const timezone = tzInput || configuredTz;
 
+  // A clock value out of range names the time field, whatever the parser makes of it.
+  if (
+    !opts.startOverride &&
+    DATE_SHAPE.test(date) &&
+    TIME_SHAPE.test(time) &&
+    !TIME_IN_RANGE.test(time)
+  ) {
+    return refuse("time", TIME_RANGE_MESSAGE);
+  }
   const startTime =
     opts.startOverride ?? parseEventDateTime(date, time, timezone);
   if (!startTime) {
-    // The date alone parses (at noon) or it does not: say which of the two.
-    const dateOk = parseEventDateTime(date, "12:00", timezone) !== null;
-    return {
-      ok: false,
-      error: "Invalid date/time. Use YYYY-MM-DD and 24-hour HH:MM.",
-      fields: dateOk
-        ? { time: "Use 24-hour time, for example 19:30." }
-        : { date: "Use a date like 2026-05-01." },
-    };
+    return !DATE_SHAPE.test(date)
+      ? refuse("date", "Use the date format YYYY-MM-DD.")
+      : !TIME_SHAPE.test(time)
+        ? refuse("time", "Use 24-hour time as HH:MM, for example 19:30.")
+        : !TIME_IN_RANGE.test(time)
+          ? refuse("time", TIME_RANGE_MESSAGE)
+          : refuse("date", "That date and time do not exist. Pick another.");
   }
   if (opts.requireFuture && startTime.getTime() <= Date.now()) {
-    return {
-      ok: false,
-      error: "The event start time must be in the future.",
-      fields: opts.startOverride
-        ? {}
-        : { date: "The start time must be in the future." },
-    };
+    // A start decided by the When choice has no date field to mark.
+    return refuse(
+      opts.startOverride ? "when" : "date",
+      "Pick a time in the future.",
+    );
   }
 
   let durationMinutes =
@@ -146,13 +150,12 @@ export async function validateEventForm(
       EVENT_DURATION_MAX,
     );
     if (parsed === null) {
-      return {
-        ok: false,
-        error: `Duration must be between ${EVENT_DURATION_MIN} and ${EVENT_DURATION_MAX} minutes.`,
-        fields: {
-          duration: `Use ${EVENT_DURATION_MIN} to ${EVENT_DURATION_MAX} minutes.`,
-        },
-      };
+      return refuse(
+        "duration",
+        /^\d+$/.test(duration) && Number(duration) > EVENT_DURATION_MAX
+          ? `At most ${EVENT_DURATION_MAX} minutes.`
+          : `Enter a whole number of minutes, from ${EVENT_DURATION_MIN} to ${EVENT_DURATION_MAX}.`,
+      );
     }
     durationMinutes = parsed;
   }
