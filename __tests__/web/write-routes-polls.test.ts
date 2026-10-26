@@ -282,6 +282,31 @@ describe("POST /polls/schedules/create", () => {
 });
 
 describe("POST /polls/schedules/:id/{edit,delete,toggle,test}", () => {
+  it("still answers the validation refusal when the existence lookup fails", async () => {
+    mockGetSchedule.mockRejectedValue(new Error("db down"));
+    const res = await harness.post("/polls/schedules/sched-1/edit", {
+      ...SCHEDULE,
+      cron: "bad cron",
+    });
+    // The lookup is best effort: a failed read must not turn the refusal into
+    // a generic server error. The stand-in page holds sched-1, so it is a 422.
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["poll-schedule-edit-sched-1-cron"]);
+    expect(mockUpdateSchedule).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a flash when the lookup fails and the page cannot show the form", async () => {
+    mockGetSchedule.mockRejectedValue(new Error("db down"));
+    const res = await harness.post("/polls/schedules/other/edit", {
+      ...SCHEDULE,
+      cron: "bad cron",
+    });
+    expect(res.status).toBe(303);
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
+      "Not saved. Not a valid cron expression. Use five fields (minute hour day-of-month month day-of-week), for example 0 12 * * *.",
+    );
+  });
+
   it("falls back to the not-found flash when the refused row no longer exists", async () => {
     mockGetSchedule.mockResolvedValue(null);
     const res = await harness.post("/polls/schedules/gone/edit", {
@@ -511,6 +536,17 @@ describe("POST /polls/items/create", () => {
 });
 
 describe("POST /polls/items/:id/{edit,delete,toggle}", () => {
+  it("still answers the validation refusal when the question lookup fails", async () => {
+    mockListPollItems.mockRejectedValue(new Error("db down"));
+    const res = await harness.post("/polls/items/item-1/edit", {
+      question: "Q",
+      answers: "only-one",
+    });
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["poll-item-edit-item-1-answers"]);
+    expect(mockUpdatePollItem).not.toHaveBeenCalled();
+  });
+
   it("falls back to the not-found flash when the refused question no longer exists", async () => {
     mockListPollItems.mockResolvedValue([]);
     const res = await harness.post("/polls/items/gone/edit", {

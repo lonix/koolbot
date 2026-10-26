@@ -42,6 +42,22 @@ const PAGE = "/admin/polls";
 
 type Req = Parameters<typeof getString>[0];
 
+/**
+ * Whether a successful lookup found the row missing. The lookup only decides
+ * between "not found" and the validation refusal, so a failed read counts as
+ * "not known to be gone": the refusal is still answered (and `refuseForm`
+ * falls back to a flash if the page cannot show the form) rather than the
+ * request failing with a generic server error.
+ */
+async function isGone(exists: () => Promise<boolean>): Promise<boolean> {
+  try {
+    return !(await exists());
+  } catch (err) {
+    logger.warn("Poll row lookup before a refused edit failed", err);
+    return false;
+  }
+}
+
 /** What the schedule create and edit forms submit, checked field by field (#1517). */
 export function checkPollScheduleForm(req: Req): {
   errors: FormErrors;
@@ -236,8 +252,11 @@ export function createPollsRouter(client: Client): Router {
       // A refused edit is drawn in the row's own form; a row deleted in another
       // tab has none, so say so instead.
       if (Object.keys(form.errors).length > 0) {
-        const current = await PollService.getInstance(client).getSchedule(id);
-        if (!current || current.guildId !== session.guildId) {
+        const gone = await isGone(async () => {
+          const current = await PollService.getInstance(client).getSchedule(id);
+          return !!current && current.guildId === session.guildId;
+        });
+        if (gone) {
           flashRedirect(res, PAGE, {
             type: "err",
             text: `Schedule ${id} not found.`,
@@ -512,10 +531,13 @@ export function createPollsRouter(client: Client): Router {
       const id = String(req.params.id);
       const form = checkPollItemForm(req);
       if (Object.keys(form.errors).length > 0) {
-        const items = await PollService.getInstance(client).listPollItems(
-          session.guildId,
-        );
-        if (!items.some((it) => String(it._id) === id)) {
+        const gone = await isGone(async () => {
+          const items = await PollService.getInstance(client).listPollItems(
+            session.guildId,
+          );
+          return items.some((it) => String(it._id) === id);
+        });
+        if (gone) {
           flashRedirect(res, PAGE, {
             type: "err",
             text: `Question ${id} not found.`,
