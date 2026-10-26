@@ -1,6 +1,10 @@
 import { ModalSubmitInteraction, ChannelType, MessageFlags } from "discord.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import {
+  replyWithError,
+  replyWithUnexpectedError,
+} from "../utils/error-reply.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 import { ConfigService } from "../services/config-service.js";
@@ -9,6 +13,12 @@ import {
   VoicePrefsValidationError,
 } from "../services/user-voice-prefs-service.js";
 import { presetNameTag } from "./vc-preset-handler.js";
+import {
+  VC_CHANNEL_GONE,
+  VC_NOT_OWNER,
+  VC_OUT_OF_DATE,
+  VC_PRESETS_OFF,
+} from "./vc-errors.js";
 
 const configService = ConfigService.getInstance();
 
@@ -23,10 +33,7 @@ export async function handleVCModal(
   //   vc_modal_{action}_{presetIndex}_{nameTag}_{channelId}_{userId}  (7 parts, preset-targeting actions)
   const parts = customId.split("_");
   if (parts.length < 5 || parts[0] !== "vc" || parts[1] !== "modal") {
-    await safeReply(interaction, {
-      content: "❌ Invalid modal interaction.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithError(interaction, VC_OUT_OF_DATE);
     return;
   }
 
@@ -44,9 +51,9 @@ export async function handleVCModal(
 
   // Verify user
   if (userId !== interaction.user.id) {
-    await safeReply(interaction, {
-      content: "❌ This modal belongs to another user.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "This form belongs to someone else",
+      next: "Open your own from the controls in your channel.",
     });
     return;
   }
@@ -60,10 +67,7 @@ export async function handleVCModal(
   // Get the voice channel
   const channel = await interaction.guild?.channels.fetch(channelId);
   if (!channel || channel.type !== ChannelType.GuildVoice) {
-    await safeReply(interaction, {
-      content: "❌ Voice channel not found.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithError(interaction, VC_CHANNEL_GONE);
     return;
   }
 
@@ -81,10 +85,7 @@ export async function handleVCModal(
         break;
       case "renamepreset":
         if (presetIndex === null || !Number.isInteger(presetIndex)) {
-          await safeReply(interaction, {
-            content: "❌ Invalid preset reference.",
-            flags: MessageFlags.Ephemeral,
-          });
+          await replyWithError(interaction, VC_OUT_OF_DATE);
           return;
         }
         await handleRenamePresetModal(
@@ -95,17 +96,11 @@ export async function handleVCModal(
         );
         break;
       default:
-        await safeReply(interaction, {
-          content: "❌ Unknown modal action.",
-          flags: MessageFlags.Ephemeral,
-        });
+        await replyWithError(interaction, VC_OUT_OF_DATE);
     }
   } catch (error) {
     logger.error("Error handling VC modal:", error);
-    await safeReply(interaction, {
-      content: "❌ An error occurred while processing your request.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithUnexpectedError(interaction);
   }
 }
 
@@ -128,9 +123,9 @@ async function asLiveOwner(
     work,
   );
   if (!ran) {
-    await safeReply(interaction, {
-      content: "❌ Only the current channel owner can do this.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "Only the room owner can do this",
+      next: VC_NOT_OWNER.next,
     });
   }
 }
@@ -143,17 +138,17 @@ async function handleNameModal(
 
   // Validate name length
   if (newName.length > 100) {
-    await safeReply(interaction, {
-      content: "❌ Channel name must be 100 characters or less.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "That channel name is too long",
+      next: "Use 100 characters or fewer, then submit again.",
     });
     return;
   }
 
   if (newName.length < 1) {
-    await safeReply(interaction, {
-      content: "❌ Channel name cannot be empty.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "The channel name is empty",
+      next: "Type a name, then submit again.",
     });
     return;
   }
@@ -162,9 +157,9 @@ async function handleNameModal(
   // reserved: a room carrying one could be mistaken for the lobby (#1148).
   const manager = VoiceChannelManager.getInstance(interaction.client);
   if (await manager.isReservedChannelName(newName)) {
-    await safeReply(interaction, {
-      content: "❌ That name is reserved. Please choose a different name.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "That channel name is reserved",
+      next: "Choose a different name, then submit again.",
     });
     return;
   }
@@ -172,10 +167,7 @@ async function handleNameModal(
   try {
     const channel = await interaction.guild?.channels.fetch(channelId);
     if (!channel || channel.type !== ChannelType.GuildVoice) {
-      await safeReply(interaction, {
-        content: "❌ Voice channel not found.",
-        flags: MessageFlags.Ephemeral,
-      });
+      await replyWithError(interaction, VC_CHANNEL_GONE);
       return;
     }
 
@@ -195,10 +187,7 @@ async function handleNameModal(
     });
   } catch (error) {
     logger.error("Error renaming channel:", error);
-    await safeReply(interaction, {
-      content: "❌ Failed to rename channel. Please try again.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithUnexpectedError(interaction);
   }
 }
 
@@ -212,10 +201,7 @@ async function handleSavePresetModal(
     false,
   );
   if (!enabled) {
-    await safeReply(interaction, {
-      content: "❌ Presets are disabled on this server.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithError(interaction, VC_PRESETS_OFF);
     return;
   }
 
@@ -223,10 +209,7 @@ async function handleSavePresetModal(
 
   const channel = await interaction.guild?.channels.fetch(channelId);
   if (!channel || channel.type !== ChannelType.GuildVoice) {
-    await safeReply(interaction, {
-      content: "❌ Voice channel not found.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithError(interaction, VC_CHANNEL_GONE);
     return;
   }
 
@@ -260,9 +243,11 @@ async function handleSavePresetModal(
     });
   } catch (error) {
     if (error instanceof VoicePrefsValidationError) {
-      await safeReply(interaction, {
-        content: `❌ ${error.message}`,
-        flags: MessageFlags.Ephemeral,
+      // Only VoicePrefsValidationError reaches here: its messages are
+      // written for members. Any other error is rethrown to the catch-all.
+      await replyWithError(interaction, {
+        title: "Couldn't save the preset",
+        next: escapeDisplayText(error.message),
       });
       return;
     }
@@ -281,10 +266,7 @@ async function handleRenamePresetModal(
     false,
   );
   if (!enabled) {
-    await safeReply(interaction, {
-      content: "❌ Presets are disabled on this server.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithError(interaction, VC_PRESETS_OFF);
     return;
   }
 
@@ -299,10 +281,9 @@ async function handleRenamePresetModal(
   const prefs = await service.getPrefs(userId);
   const target = prefs.presets[presetIndex];
   if (!target || (nameTag !== null && presetNameTag(target.name) !== nameTag)) {
-    await safeReply(interaction, {
-      content:
-        "❌ Your presets changed since this dialog was opened — reopen the panel and try again.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "Your presets changed",
+      next: "Reopen the presets panel and try again.",
     });
     return;
   }
@@ -321,9 +302,11 @@ async function handleRenamePresetModal(
     });
   } catch (error) {
     if (error instanceof VoicePrefsValidationError) {
-      await safeReply(interaction, {
-        content: `❌ ${error.message}`,
-        flags: MessageFlags.Ephemeral,
+      // Only VoicePrefsValidationError reaches here: its messages are
+      // written for members. Any other error is rethrown to the catch-all.
+      await replyWithError(interaction, {
+        title: "Couldn't rename the preset",
+        next: escapeDisplayText(error.message),
       });
       return;
     }
