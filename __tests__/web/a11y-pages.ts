@@ -3277,11 +3277,10 @@ export function adminPages(): A11yPage[] {
         pageSize: 50,
         refusedForm: {
           formId: "moderation-case-decide-case1",
-          errors: {
-            next_review_in_days:
-              "Review days must be a whole number from 1 to 3650.",
-          },
-          values: { next_review_in_days: "5000", note: "" },
+          // Days the browser accepts: a control its own checks call invalid
+          // cannot be submitted, which the confirm dialog test needs.
+          errors: { note: "At most 500 characters." },
+          values: { next_review_in_days: "90", note: "A very long note" },
         },
       }),
     },

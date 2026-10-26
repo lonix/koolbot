@@ -979,6 +979,50 @@ export function readFlash(req: Pick<Request, "query">): FlashMessage | null {
 const INVALID_KEYS_MAX = 25;
 const CONFIG_KEY_RE = /^[a-z0-9_]+(\.[a-z0-9_]+)*$/i;
 
+/**
+ * The page of the Birthdays list to draw (#1523). A refused edit is a POST with
+ * no `?page=`, so the page that holds the refused member is drawn instead of
+ * page 1, where that row may not be.
+ */
+export function birthdaysPageFor(
+  entries: ReadonlyArray<{ userId: string }>,
+  refusedForm: RefusedForm | null,
+  requestedPage: number,
+  pageSize: number,
+): number {
+  const at = refusedForm
+    ? entries.findIndex(
+        (e) => birthdayEditForm(e.userId) === refusedForm.formId,
+      )
+    : -1;
+  return at >= 0 ? Math.floor(at / pageSize) + 1 : requestedPage;
+}
+
+/**
+ * The query (`page`, `action`, `user`) the Moderation log is drawn with. A
+ * refused Open case form is a POST with no query string; it hands back the
+ * page's own query as the hidden `view_query` field, so the same log rows are
+ * drawn and the refused row is on the page (#1523). Only those keys are read,
+ * and only from the first 200 characters.
+ */
+export function moderationLogQuery(
+  refusedForm: RefusedForm | null,
+  body: unknown,
+  query: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!refusedForm) return query;
+  const raw = (body as { view_query?: unknown } | undefined)?.view_query;
+  const params = new globalThis.URLSearchParams(
+    typeof raw === "string" ? raw.slice(0, 200) : "",
+  );
+  return Object.fromEntries(
+    ["page", "action", "user"].flatMap((key) => {
+      const value = params.get(key);
+      return value === null ? [] : [[key, value]];
+    }),
+  );
+}
+
 export function readInvalidKeys(req: Pick<Request, "query">): string[] {
   const raw = req.query.invalid;
   if (typeof raw !== "string" || raw === "") return [];
@@ -2187,13 +2231,8 @@ export function createReadOnlyRouter(
     const lastPage = Math.max(1, Math.ceil(total / pageSize));
     // A refused edit is drawn on the page that holds its row: the POST has
     // no `?page=`, so the row would otherwise be missing from page 1 (#1523).
-    const refusedAt = refusedForm
-      ? (entries ?? []).findIndex(
-          (e) => birthdayEditForm(e.userId) === refusedForm.formId,
-        )
-      : -1;
     const page = Math.min(
-      refusedAt >= 0 ? Math.floor(refusedAt / pageSize) + 1 : requestedPage,
+      birthdaysPageFor(entries ?? [], refusedForm, requestedPage, pageSize),
       lastPage,
     );
     const pageEntries = (entries ?? []).slice(
@@ -3099,18 +3138,7 @@ export function createReadOnlyRouter(
     const moderationService = ModerationService.getInstance(client);
 
     const pageSize = 50;
-    // A refused Open case form is a POST with no query string; it hands back
-    // the page's own query (`view_query`) so the same log rows are drawn and
-    // the refused row is on the page (#1523).
-    const query: Record<string, unknown> = refusedForm
-      ? Object.fromEntries(
-          new globalThis.URLSearchParams(
-            typeof req.body?.view_query === "string"
-              ? req.body.view_query.slice(0, 200)
-              : "",
-          ),
-        )
-      : req.query;
+    const query = moderationLogQuery(refusedForm, req.body, req.query);
     const pageRaw = Number.parseInt(String(query.page ?? "1"), 10);
     const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
 

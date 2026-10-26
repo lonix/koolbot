@@ -20,6 +20,8 @@ import {
   envSettingFallback,
   readInvalidKeys,
   createReadOnlyRouter,
+  birthdaysPageFor,
+  moderationLogQuery,
 } from "../../src/web/read-only-routes.js";
 import { getFormPage } from "../../src/web/form-pages.js";
 import { createMockCollection } from "../test-utils.js";
@@ -993,4 +995,83 @@ describe("refused-form pages (#1517)", () => {
       expect(getFormPage(path)).toBeInstanceOf(Function);
     }
   });
+});
+
+describe("birthdaysPageFor (#1523)", () => {
+  const entries = Array.from({ length: 60 }, (_, i) => ({
+    userId: String(100000000000000000n + BigInt(i)),
+  }));
+  const refused = (i: number) => ({
+    formId: `birthday-edit-${entries[i].userId}`,
+    errors: {},
+    values: {},
+  });
+
+  it("draws the requested page when nothing was refused", () => {
+    expect(birthdaysPageFor(entries, null, 2, 25)).toBe(2);
+  });
+
+  it("draws the page that holds the refused member, from the first to the last row of each page", () => {
+    expect(birthdaysPageFor(entries, refused(0), 1, 25)).toBe(1);
+    expect(birthdaysPageFor(entries, refused(24), 1, 25)).toBe(1);
+    expect(birthdaysPageFor(entries, refused(25), 1, 25)).toBe(2);
+    expect(birthdaysPageFor(entries, refused(59), 1, 25)).toBe(3);
+  });
+
+  it("falls back to the requested page when the member is gone or the form is another one", () => {
+    expect(
+      birthdaysPageFor(
+        entries,
+        { formId: "birthday-edit-999", errors: {}, values: {} },
+        1,
+        25,
+      ),
+    ).toBe(1);
+    expect(
+      birthdaysPageFor(
+        entries,
+        { formId: "poll-item-create", errors: {}, values: {} },
+        2,
+        25,
+      ),
+    ).toBe(2);
+  });
+});
+
+describe("moderationLogQuery (#1523)", () => {
+  const refused = { formId: "moderation-case-open-x", errors: {}, values: {} };
+
+  it("is the request's own query when nothing was refused", () => {
+    const query = { page: "2" };
+    expect(moderationLogQuery(null, { view_query: "?page=9" }, query)).toBe(
+      query,
+    );
+  });
+
+  it("reads the page and filters a refused Open case form handed back", () => {
+    expect(
+      moderationLogQuery(
+        refused,
+        { view_query: "?action=kick&user=123&page=3" },
+        {},
+      ),
+    ).toEqual({ action: "kick", user: "123", page: "3" });
+  });
+
+  it("reads only the keys the log understands", () => {
+    expect(
+      moderationLogQuery(
+        refused,
+        { view_query: "?page=2&evil=1&flash=ok" },
+        {},
+      ),
+    ).toEqual({ page: "2" });
+  });
+
+  it.each([undefined, {}, { view_query: 5 }, { view_query: "" }])(
+    "is empty when the form handed back no query (%j)",
+    (body) => {
+      expect(moderationLogQuery(refused, body, { page: "4" })).toEqual({});
+    },
+  );
 });

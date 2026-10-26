@@ -3551,6 +3551,17 @@ export function renderEventsPage(props: EventsProps): string {
   );
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const create = formView(props.refusedForm, EVENT_CREATE_FORM);
+  // A refused form also says so at the top (when no flash is already there).
+  // That notice is what makes the Groups section put back the rows the admin
+  // had filled in: its draft is restored whenever the page comes back with an
+  // error notice (#1523).
+  const refusedNotice =
+    create.refused && !props.flash
+      ? renderFlash({
+          type: "err",
+          text: "Not saved. Check the fields marked below.",
+        })
+      : "";
 
   const renderEventRow = (e: EventRow, cols: EventCols): string => {
     const finished = e.state === "cancelled" || e.state === "ended";
@@ -3686,15 +3697,7 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
   const body = `
 <h1>Events</h1>
 <p class="subtitle">Schedule events that spin up a temporary voice channel shortly before they start, are announced with a Discord event link members can mark Interested on, remind attendees, and clean themselves up afterward.</p>
-${renderPageFlash(
-  props.flash ??
-    // A refused form also says so at the top. That notice is what makes the
-    // Groups section put back the rows the admin had filled in: its draft is
-    // restored whenever the page comes back with an error notice (#1523).
-    (create.refused
-      ? { type: "err", text: "Not saved. Check the fields marked below." }
-      : null),
-)}
+${renderPageFlash(props.flash)}${refusedNotice}
 ${renderFeatureDisabledNotice({
   enabled: props.enabled,
   label: "Events",
