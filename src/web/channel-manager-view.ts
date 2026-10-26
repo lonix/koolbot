@@ -1,6 +1,7 @@
 import { renderAdminPage, type NavFeatureStatus } from "./admin-layout.js";
 import { renderFlash, type FlashMessage } from "./admin-views.js";
 import { escapeHtml } from "./html.js";
+import { formView, type FormView, type RefusedForm } from "./form-errors.js";
 import { channelText, namedChannelMention } from "./discord-labels.js";
 import { ChannelType } from "discord.js";
 import type { RecentChange } from "./channel-manager-data.js";
@@ -38,8 +39,17 @@ export interface ChannelManagerProps {
   /** Bits per second. */
   maxBitrate: number;
   error?: string;
+  /** The create or edit form the last save refused (#1523). */
+  refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
 }
+
+/** Form id of the Create form (#1523). */
+export const CHANNEL_CREATE_FORM = "channel-create";
+
+/** Form id of one channel's Edit form (#1523). */
+export const channelEditForm = (channelId: string): string =>
+  `channel-edit-${channelId}`;
 
 const KIND_LABEL = { text: "Text", voice: "Voice", category: "Category" };
 
@@ -69,16 +79,19 @@ function parentSelect(
   selected: string | null,
   label: string,
   disabled: boolean,
+  f: FormView,
 ): string {
+  // A refused form keeps the category that was picked ("" = no category).
+  const picked = f.refused ? f.selected("parent") || null : selected;
   const options = tree.categories
     .map(
       (n) =>
-        `<option value="${escapeHtml(n.category.id)}"${n.category.id === selected ? " selected" : ""}>${escapeHtml(channelText({ name: n.category.name, type: ChannelType.GuildCategory }))}</option>`,
+        `<option value="${escapeHtml(n.category.id)}"${n.category.id === picked ? " selected" : ""}>${escapeHtml(channelText({ name: n.category.name, type: ChannelType.GuildCategory }))}</option>`,
     )
     .join("");
   return `<label>${escapeHtml(label)}
-    <select name="parent"${disabled ? " disabled" : ""}><option value=""${selected === null ? " selected" : ""}>(no category)</option>${options}</select>
-  </label>`;
+    <select name="parent"${disabled ? " disabled" : ""}${f.attrs("parent")}><option value=""${picked === null ? " selected" : ""}>(no category)</option>${options}</select>
+  </label>${f.error("parent")}`;
 }
 
 function fieldRows(
@@ -86,6 +99,7 @@ function fieldRows(
   p: ChannelManagerProps,
   tree: ChannelTree,
   off: string,
+  f: FormView,
 ): string {
   const kind = c?.kind ?? null;
   // An existing bitrate above today's maximum (the server lost a boost level)
@@ -99,21 +113,21 @@ function fieldRows(
   const topic =
     kind === null || kind === "text"
       ? `<label>Topic${kind === null ? " (text channels only)" : ""}
-      <textarea name="topic" rows="2" maxlength="${CHANNEL_LIMITS.topicMax}"${off}>${escapeHtml(c?.topic ?? "")}</textarea></label>`
+      <textarea name="topic" rows="2" maxlength="${CHANNEL_LIMITS.topicMax}"${off}${f.attrs("topic")}>${f.textareaContent("topic", c?.topic ?? "")}</textarea></label>${f.error("topic")}`
       : "";
   const voice =
     kind === null || kind === "voice"
       ? `<label>User limit${kind === null ? " (voice only)" : ""}
-      <input type="number" name="userLimit" min="0" max="${CHANNEL_LIMITS.userLimitMax}" value="${escapeHtml(c?.userLimit ?? "")}"${off}>
-      <span class="muted">0 or empty means no limit</span></label>
+      <input type="number" name="userLimit" min="0" max="${CHANNEL_LIMITS.userLimitMax}" value="${escapeHtml(f.value("userLimit", String(c?.userLimit ?? "")))}"${off}${f.attrs("userLimit")}>
+      <span class="muted">0 or empty means no limit</span></label>${f.error("userLimit")}
     <label>Bitrate in kbps${kind === null ? " (voice only)" : ""}
-      <input type="number" name="bitrate" min="${Math.min(minKbps, c?.bitrate ? Math.round(c.bitrate / 1000) : minKbps)}" max="${maxKbps}" value="${c?.bitrate ? escapeHtml(Math.round(c.bitrate / 1000)) : ""}"${off}>
-      <span class="muted">${minKbps} to ${Math.floor(p.maxBitrate / 1000)}; empty keeps Discord's default</span></label>`
+      <input type="number" name="bitrate" min="${Math.min(minKbps, c?.bitrate ? Math.round(c.bitrate / 1000) : minKbps)}" max="${maxKbps}" value="${escapeHtml(f.value("bitrate", c?.bitrate ? String(Math.round(c.bitrate / 1000)) : ""))}"${off}${f.attrs("bitrate")}>
+      <span class="muted">${minKbps} to ${Math.floor(p.maxBitrate / 1000)}; empty keeps Discord's default</span></label>${f.error("bitrate")}`
       : "";
   const parent =
     kind === "category"
       ? ""
-      : parentSelect(tree, c?.parentId ?? null, "Category", off !== "");
+      : parentSelect(tree, c?.parentId ?? null, "Category", off !== "", f);
   return `${topic}${voice}${parent}`;
 }
 
@@ -122,9 +136,11 @@ function fieldRows(
  * fields the admin changed from these, and refuses the save when a field they
  * changed was altered elsewhere in the meantime.
  */
-function baselineInputs(c: ManagedChannelView): string {
+function baselineInputs(c: ManagedChannelView, f: FormView): string {
+  // A refused form hands back the baselines it was posted with, not today's
+  // values, so a conflict made elsewhere in the meantime is still caught.
   const field = (name: string, value: string): string =>
-    `<input type="hidden" name="orig_${name}" value="${escapeHtml(value)}">`;
+    `<input type="hidden" name="orig_${name}" value="${escapeHtml(f.value(`orig_${name}`, value))}">`;
   return [
     field("name", c.name),
     c.kind === "text" ? field("topic", c.topic ?? "") : "",
@@ -176,10 +192,11 @@ function actions(
   if (c.kind === "other") {
     return `<span class="muted">Not managed here (${escapeHtml(c.typeLabel)})</span>`;
   }
-  const edit = `<details class="inline-edit"><summary>Edit</summary>
-    <form method="POST" action="${CHANNELS_PATH}/${id}/edit" class="stack">${csrf}${baselineInputs(c)}
-      <label>Name <input type="text" name="name" value="${name}" maxlength="${CHANNEL_LIMITS.nameMax}" required${off}></label>
-      ${fieldRows(c, p, tree, off)}
+  const f = formView(p.refusedForm, channelEditForm(c.id));
+  const edit = `<details class="inline-edit"${f.open()}><summary>Edit</summary>
+    <form method="POST" action="${CHANNELS_PATH}/${id}/edit" class="stack">${csrf}${baselineInputs(c, f)}
+      <label>Name <input type="text" name="name" value="${escapeHtml(f.value("name", c.name))}" maxlength="${CHANNEL_LIMITS.nameMax}" required${off}${f.attrs("name")}></label>${f.error("name")}
+      ${fieldRows(c, p, tree, off, f)}
       <button type="submit" class="btn btn-primary"${off}>Save changes</button>
     </form></details>`;
   const del = `<a class="btn btn-sm btn-danger" href="${CHANNELS_PATH}/${id}/delete" aria-label="Delete ${name}">Delete…</a>`;
@@ -225,18 +242,22 @@ function categoryCard(
 
 function createCard(p: ChannelManagerProps, tree: ChannelTree): string {
   const off = p.botCanManage ? "" : " disabled";
+  const f = formView(p.refusedForm, CHANNEL_CREATE_FORM);
+  // Only a refused form marks an option: a fresh one leaves the browser default.
+  const type = f.refused ? f.selected("type") : "";
+  const chosen = (value: string): string => (type === value ? " selected" : "");
   return `<div class="card">
   <h2>Create</h2>
   <form method="POST" action="${CHANNELS_PATH}/create" class="stack">${csrfInput(p.csrfToken)}
     <label>Type
-      <select name="type"${off}>
-        <option value="text">Text channel</option>
-        <option value="voice">Voice channel</option>
-        <option value="category">Category</option>
+      <select name="type"${off}${f.attrs("type")}>
+        <option value="text"${chosen("text")}>Text channel</option>
+        <option value="voice"${chosen("voice")}>Voice channel</option>
+        <option value="category"${chosen("category")}>Category</option>
       </select>
-    </label>
-    <label>Name <input type="text" name="name" maxlength="${CHANNEL_LIMITS.nameMax}" required${off}></label>
-    ${fieldRows(null, p, tree, off)}
+    </label>${f.error("type")}
+    <label>Name <input type="text" name="name" maxlength="${CHANNEL_LIMITS.nameMax}" required${off}${f.valueAttr("name")}${f.attrs("name")}></label>${f.error("name")}
+    ${fieldRows(null, p, tree, off, f)}
     <p class="muted">A new channel gets no permission overrides of its own; set those in Discord. Categories ignore the topic, limit, bitrate and category fields.</p>
     <button type="submit" class="btn btn-primary"${off}>Create</button>
   </form>

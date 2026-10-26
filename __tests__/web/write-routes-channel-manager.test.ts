@@ -59,9 +59,15 @@ let channels: ManagedChannelView[] = [];
 let protection = new Map<string, string[]>();
 let canManage = true;
 let protectionFails = false;
+let channelReads = 0;
+let failChannelReadsFrom: number | null = null;
 let recent: unknown = [];
 jest.unstable_mockModule("../../src/web/channel-manager-data.js", () => ({
   fetchChannelViews: async () => {
+    channelReads++;
+    if (failChannelReadsFrom !== null && channelReads >= failChannelReadsFrom) {
+      throw new Error("channels unreadable");
+    }
     return channels;
   },
   maxBitrateOf: () => 96000,
@@ -167,6 +173,29 @@ async function mount(client: Client = makeClient()): Promise<void> {
 const flashOf = (res: Response) =>
   parseFlashRedirect(res.headers.get("location"));
 
+/**
+ * A refusal about fields (#1523): the page again with 422, every marked control
+ * and each error line by its id.
+ */
+async function refusal(res: Response): Promise<{
+  html: string;
+  invalid: string[];
+  lines: Record<string, string>;
+}> {
+  expect(res.status).toBe(422);
+  const html = await res.text();
+  const invalid = [...html.matchAll(/<[^>]*aria-invalid="true"[^>]*>/g)].map(
+    (m) => /id="([^"]+)"/.exec(m[0])?.[1] ?? "",
+  );
+  const lines: Record<string, string> = {};
+  for (const m of html.matchAll(
+    /<p class="kb-field__error" id="([^"]+)">([^<]*)<\/p>/g,
+  )) {
+    lines[m[1]] = m[2].replaceAll("&#39;", "'");
+  }
+  return { html, invalid, lines };
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   channels = [
@@ -186,6 +215,8 @@ beforeEach(() => {
   protection = new Map();
   canManage = true;
   protectionFails = false;
+  channelReads = 0;
+  failChannelReadsFrom = null;
   recent = [];
   liveFlags = {};
   fetchMissing = false;
@@ -315,47 +346,89 @@ describe("POST /channels/create", () => {
   });
 
   it.each([
-    ["an unknown type", { type: "forum", name: "x" }, "Pick"],
-    ["an empty name", { type: "text", name: "   " }, "name"],
-    ["a 101-character name", { type: "text", name: "x".repeat(101) }, "100"],
+    ["an unknown type", { type: "forum", name: "x" }, "type", "Pick"],
+    ["an empty name", { type: "text", name: "   " }, "name", "name"],
+    [
+      "a 101-character name",
+      { type: "text", name: "x".repeat(101) },
+      "name",
+      "100",
+    ],
     [
       "a 1025-character topic",
       { type: "text", name: "x", topic: "t".repeat(1025) },
+      "topic",
       "1024",
     ],
     [
       "a user limit above 99",
       { type: "voice", name: "x", userLimit: "100" },
+      "userLimit",
       "99",
     ],
     [
       "a bitrate above the server maximum",
       { type: "voice", name: "x", bitrate: "97" },
+      "bitrate",
       "kbps",
     ],
     [
       "a bitrate below 8 kbps",
       { type: "voice", name: "x", bitrate: "7" },
+      "bitrate",
       "kbps",
     ],
     [
       "a parent that is not a category",
       { type: "text", name: "x", parent: TEXT },
+      "parent",
       "category",
     ],
     [
       "a parent that doesn't exist",
       { type: "text", name: "x", parent: "199999999999999999" },
+      "parent",
       "category",
     ],
-  ])("rejects %s before calling Discord", async (_label, body, fragment) => {
+  ])(
+    "rejects %s before calling Discord, marking its field",
+    async (_label, body, field, fragment) => {
+      await mount();
+      const r = await refusal(await harness.post("/channels/create", body));
+      expect(r.invalid).toEqual([`channel-create-${field}`]);
+      expect(r.lines[`channel-create-${field}-error`]).toContain(fragment);
+      expect(mockCreate).not.toHaveBeenCalled();
+      expect(mockRecordAudit).toHaveBeenCalledTimes(1);
+      expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+        action: "channels.create",
+        result: "failure",
+      });
+    },
+  );
+
+  it("marks every refused field at once and keeps what was typed", async () => {
     await mount();
-    const res = await harness.post("/channels/create", body);
-    const flash = flashOf(res);
-    expect(flash.type).toBe("err");
-    expect(flash.msg).toContain(fragment);
+    const r = await refusal(
+      await harness.post("/channels/create", {
+        type: "voice",
+        name: "  ",
+        userLimit: " 100",
+        bitrate: "7",
+        parent: CAT,
+        topic: "kept <b>as typed</b>",
+      }),
+    );
+    expect(r.invalid).toEqual([
+      "channel-create-name",
+      "channel-create-userLimit",
+      "channel-create-bitrate",
+    ]);
+    // The type and category the admin picked, and the limit as typed.
+    expect(r.html).toContain('<option value="voice" selected>');
+    expect(r.html).toContain(`<option value="${CAT}" selected>`);
+    expect(r.html).toContain('value=" 100"');
+    expect(r.html).toContain("kept &lt;b&gt;as typed&lt;/b&gt;");
     expect(mockCreate).not.toHaveBeenCalled();
-    expect(mockRecordAudit).toHaveBeenCalledTimes(1);
   });
 
   it("refuses the 501st channel", async () => {
@@ -384,7 +457,8 @@ describe("POST /channels/create", () => {
       name: "x",
       parent: CAT,
     });
-    expect(flashOf(res).msg).toContain("50 per category");
+    const r = await refusal(res);
+    expect(r.lines["channel-create-parent-error"]).toContain("50 per category");
     expect(mockCreate).not.toHaveBeenCalled();
   });
 });
@@ -757,7 +831,10 @@ describe("POST /channels/:id/edit", () => {
       name: "general",
       parent: FULL,
     });
-    expect(flashOf(res).msg).toContain("50 per category");
+    const r = await refusal(res);
+    expect(r.lines[`channel-edit-${TEXT}-parent-error`]).toContain(
+      "50 per category",
+    );
     expect(mockEdit).not.toHaveBeenCalled();
   });
 
@@ -805,8 +882,104 @@ describe("POST /channels/:id/edit", () => {
     const res = await harness.post(`/channels/${TEXT}/edit`, {
       name: "x".repeat(101),
     });
-    expect(flashOf(res).type).toBe("err");
+    const r = await refusal(res);
+    expect(r.invalid).toEqual([`channel-edit-${TEXT}-name`]);
     expect(mockEdit).not.toHaveBeenCalled();
+  });
+});
+
+describe("a refused channel edit (#1523)", () => {
+  it("reopens that channel's Edit form, marks the fields and keeps what was typed and the baselines", async () => {
+    await mount();
+    const r = await refusal(
+      await harness.post(`/channels/${VOICE}/edit`, {
+        orig_name: "Hangout",
+        orig_userLimit: "4",
+        orig_bitrate: "64",
+        orig_bitrate_bps: "64000",
+        orig_parent: CAT,
+        name: " Hang out ",
+        userLimit: "100",
+        bitrate: "999",
+        parent: "",
+      }),
+    );
+    expect(r.invalid).toEqual([
+      `channel-edit-${VOICE}-userLimit`,
+      `channel-edit-${VOICE}-bitrate`,
+    ]);
+    expect(r.html).toContain('<details class="inline-edit" open>');
+    // Typed text stays as typed; the baselines are the ones posted.
+    expect(r.html).toContain('value=" Hang out "');
+    expect(r.html).toContain('value="100"');
+    expect(r.html).toContain(
+      '<input type="hidden" name="orig_userLimit" value="4">',
+    );
+    expect(r.html).toContain(
+      '<input type="hidden" name="orig_bitrate_bps" value="64000">',
+    );
+    expect(mockEdit).not.toHaveBeenCalled();
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      action: "channels.edit",
+      targetId: VOICE,
+      result: "failure",
+    });
+  });
+
+  it("keeps a topic as typed, including a leading blank line", async () => {
+    await mount();
+    const r = await refusal(
+      await harness.post(`/channels/${TEXT}/edit`, {
+        orig_name: "general",
+        orig_topic: "hi",
+        name: "general",
+        topic: "\n" + "t".repeat(1025),
+      }),
+    );
+    expect(r.invalid).toEqual([`channel-edit-${TEXT}-topic`]);
+    expect(r.html).toContain(
+      'aria-describedby="channel-edit-' + TEXT + '-topic-error">\n\n',
+    );
+  });
+
+  it("keeps a conflict made elsewhere a page flash", async () => {
+    await mount();
+    const res = await harness.post(`/channels/${TEXT}/edit`, {
+      orig_name: "was-called-this",
+      name: "renamed",
+    });
+    expect(res.status).toBe(303);
+    expect(flashOf(res).msg).toContain("changed elsewhere");
+  });
+
+  it("keeps an unreachable Discord a page flash", async () => {
+    await mount(makeClient({ guildFails: true }));
+    const res = await harness.post(`/channels/${TEXT}/edit`, {
+      name: "x".repeat(101),
+    });
+    expect(res.status).toBe(303);
+    expect(flashOf(res).msg).toContain("couldn't be reached");
+  });
+
+  it("says the channel is gone when it was deleted before the refusal", async () => {
+    await mount();
+    const res = await harness.post("/channels/199999999999999999/edit", {
+      name: "x".repeat(101),
+    });
+    expect(res.status).toBe(303);
+    expect(flashOf(res).msg).toBe("That channel no longer exists.");
+  });
+
+  it("falls back to the flash when the channels cannot be read to draw the page again", async () => {
+    // The write reads the channels once to check the edit; the page reads them
+    // again. If that second read fails, the refusal still comes back.
+    await mount();
+    failChannelReadsFrom = 2;
+    const res = await harness.post(`/channels/${TEXT}/edit`, {
+      name: "x".repeat(101),
+    });
+    expect(res.status).toBe(303);
+    expect(flashOf(res).msg).toMatch(/^Not saved\. The name is 101/);
   });
 });
 
