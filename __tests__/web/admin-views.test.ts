@@ -375,7 +375,7 @@ describe("renderSettingsPage", () => {
     expect(html).toContain('action="/admin/settings/save-section"');
     expect(html).toContain('name="category" value="quotes"');
     expect(html).toContain(
-      '<button type="submit" class="btn btn-primary">Save</button>',
+      '<button type="submit" class="kb-btn kb-btn--primary">Save</button>',
     );
     // Each row contributes its key via a hidden `keys` input so the
     // handler can enumerate the section without trusting `value_*` names.
@@ -1622,7 +1622,7 @@ describe("renderEventsPage", () => {
       rows: [],
     });
     expect(html).toContain("No events scheduled yet.");
-    expect(html).toContain("Events are disabled");
+    expect(html).toContain("Events feature is off.");
   });
 
   it("offers a repeat selector on the create form", () => {
@@ -2059,14 +2059,14 @@ describe("renderPollsPage", () => {
       roles: [],
     });
     // The disabled page explains the state instead of looking blank...
-    expect(html).toContain('class="notice warn feature-disabled"');
-    expect(html).toContain("Polls are disabled");
+    expect(html).toContain('class="kb-callout kb-callout--wrap"');
+    expect(html).toContain("Polls feature is off.");
     // ...and offers an inline enable that flips polls.enabled and returns here.
     expect(html).toContain('action="/admin/settings/set"');
     expect(html).toContain('name="key" value="polls.enabled"');
     expect(html).toContain('name="value" value="true"');
     expect(html).toContain('name="redirect" value="/admin/polls"');
-    expect(html).toContain("Open Settings");
+    expect(html).toContain(">All settings</a>");
   });
 
   it("omits the enable banner when polls are enabled (#610)", () => {
@@ -2081,9 +2081,8 @@ describe("renderPollsPage", () => {
       textChannels: [],
       roles: [],
     });
-    // The CSS rule for the banner is always present; assert on the rendered
-    // notice element rather than the bare class name.
-    expect(html).not.toContain('class="notice warn feature-disabled"');
+    expect(html).not.toContain("Polls feature is off.");
+    expect(html).not.toContain('name="key" value="polls.enabled"');
   });
 
   it("renders schedules and items with channel + role mentions", () => {
@@ -4061,7 +4060,7 @@ describe("renderDigestPage", () => {
       enabled: false,
       preview: null,
     });
-    expect(html).toContain("feature-disabled");
+    expect(html).toContain("Weekly digest feature is off.");
     expect(html).toMatch(
       /<button[^>]*name="preview"[^>]*disabled[^>]*>Preview digest<\/button>/,
     );
@@ -6110,7 +6109,7 @@ describe("renderLeaderboardRolesPage (#985)", () => {
     expect(on).not.toMatch(/disabled>Run now/);
     const off = render({ enabled: false });
     expect(off).toMatch(/disabled>Run now/);
-    expect(off).toContain("Leaderboard roles are disabled.");
+    expect(off).toContain("Leaderboard roles feature is off.");
   });
 
   it("warns when voice tracking is off", () => {

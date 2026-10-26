@@ -474,10 +474,6 @@ const STYLE = [
   ".notice.err{background:var(--err-bg);color:var(--err-text)}",
   // Disabled-feature banner (#610): explanatory text on the left, inline
   // enable action + Settings link on the right; wraps on narrow screens.
-  ".notice.feature-disabled{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;justify-content:space-between}",
-  ".notice.feature-disabled .fd-text{flex:1 1 280px}",
-  ".notice.feature-disabled .fd-actions{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}",
-  ".notice.feature-disabled form{margin:0}",
   "form.stack{display:flex;flex-direction:column;gap:.6rem}",
   "form.stack label{display:flex;flex-direction:column;gap:.25rem;font-size:.85rem;color:var(--text-secondary)}",
   "form.stack label.checkbox{flex-direction:row;align-items:center;gap:.5rem}",

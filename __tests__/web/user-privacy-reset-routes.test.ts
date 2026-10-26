@@ -656,6 +656,30 @@ describe("renderUserPrivacyBody reset card", () => {
     );
   });
 
+  it("renders the danger zone as a danger panel on kb- components (#1544)", () => {
+    const html = renderUserPrivacyBody({
+      ...base,
+      reset: { enabled: true, cooldownHours: 0, csrfToken: "tok" },
+    });
+    expect(html).toContain(
+      '<section id="reset" class="kb-panel kb-panel--danger" aria-labelledby="reset-title">',
+    );
+    expect(html).toContain(
+      '<h2 class="kb-panel__title" id="reset-title">Reset my data</h2>',
+    );
+    expect(html).not.toContain("border-color");
+    expect(html).toContain(
+      'data-confirm="Reset all of your KoolBot data on this server? This cannot be undone."',
+    );
+    expect(html).toContain('<label class="kb-label" for="reset-confirm">');
+    expect(html).toMatch(
+      /<input class="kb-input" type="text" id="reset-confirm" name="confirm"[^>]* required>/,
+    );
+    expect(html).toContain(
+      '<button class="kb-btn kb-btn--danger" type="submit">Reset my data</button>',
+    );
+  });
+
   it("omits the cooldown line when the cooldown is off", () => {
     const html = renderUserPrivacyBody({
       ...base,

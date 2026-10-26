@@ -907,3 +907,76 @@ describe("edits and focus while a save is in flight", () => {
     return picker();
   }
 });
+
+describe("save bar buttons (#1544)", () => {
+  it("renders Discard and Save on the same kb-btn base", () => {
+    const doc = new DOMParser().parseFromString(
+      `<form>${renderSaveBar("Save settings", "Quotes")}</form>`,
+      "text/html",
+    );
+    const save = doc.querySelector('button[type="submit"]');
+    const discard = doc.querySelector("[data-savebar-discard]");
+    expect(save?.className).toBe("kb-btn kb-btn--primary");
+    expect(save?.textContent).toBe("Save settings");
+    expect(discard?.className).toBe("kb-btn kb-btn--ghost");
+    expect(doc.querySelector(".btn")).toBeNull();
+  });
+});
+
+describe("All settings danger zone (#1544)", () => {
+  const html = renderSettingsPage({
+    csrfToken: "csrf",
+    remainingMs: 60_000,
+    groups: [],
+    textChannels: [],
+    voiceChannels: [],
+    categoryChannels: [],
+    roles: [],
+    guildId: "123",
+    guildName: "Test <Guild>",
+  });
+  const doc = new DOMParser().parseFromString(html, "text/html");
+
+  it("is a danger panel with a head, not a styled card", () => {
+    const panel = doc.querySelector("section#danger-zone");
+    expect(panel?.className).toBe("kb-panel kb-panel--danger");
+    expect(panel?.getAttribute("aria-labelledby")).toBe("danger-zone-title");
+    expect(panel?.querySelector("h2.kb-panel__title")?.textContent).toBe(
+      "Danger zone",
+    );
+    expect(panel?.getAttribute("style")).toBeNull();
+  });
+
+  it("says Environment settings, not Bootstrap", () => {
+    const text = doc.querySelector("#danger-zone")?.textContent ?? "";
+    expect(text).toContain("Environment settings");
+    expect(text).not.toContain("Bootstrap");
+    const attr =
+      doc
+        .querySelector(
+          '#danger-zone form[action="/admin/settings/reset-defaults"]',
+        )
+        ?.getAttribute("data-confirm-list") ?? "";
+    expect(attr).not.toContain("Bootstrap");
+  });
+
+  it("keeps the typed-name confirm and the confirm list", () => {
+    const form = doc.querySelector(
+      '#danger-zone form[action="/admin/settings/reset-defaults"]',
+    );
+    expect(form?.getAttribute("method")).toBe("POST");
+    expect(form?.getAttribute("data-confirm")).toBe(
+      "Reset ALL settings to their defaults? This cannot be undone.",
+    );
+    expect(
+      JSON.parse(form?.getAttribute("data-confirm-list") ?? "[]"),
+    ).toHaveLength(4);
+    const input = form?.querySelector('input[name="confirm"]');
+    expect(input?.hasAttribute("required")).toBe(true);
+    expect(input?.getAttribute("placeholder")).toBe("Test <Guild>");
+    expect(form?.querySelector("label")?.getAttribute("for")).toBe(input?.id);
+    expect(form?.querySelector("button")?.className).toBe(
+      "kb-btn kb-btn--danger",
+    );
+  });
+});

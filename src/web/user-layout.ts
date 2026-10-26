@@ -1590,8 +1590,9 @@ function renderPrivacyResetCard(
       ? `<p class="muted">You can reset once every ${reset.cooldownHours} hour${reset.cooldownHours === 1 ? "" : "s"}.</p>`
       : "";
   return [
-    '<div id="reset" class="card" style="border-color:var(--err-bg)">',
-    "<h2>Reset my data</h2>",
+    '<section id="reset" class="kb-panel kb-panel--danger" aria-labelledby="reset-title">',
+    '<header class="kb-panel__head"><h2 class="kb-panel__title" id="reset-title">Reset my data</h2></header>',
+    '<div class="kb-panel__body kb-stack">',
     "<p>Wipes what KoolBot has stored about you on this server — voice history, activity " +
       "counters, achievements, poll participation, Rewind, reminders, RSVPs and the rest of " +
       "the collections listed above — then signs you out. It cannot be undone.</p>",
@@ -1605,19 +1606,22 @@ function renderPrivacyResetCard(
     "<li><strong>Your preferences go back to defaults.</strong> Timezone, notification opt-ins " +
       "and voice presets are cleared; every DM goes back to off.</li>",
     "</ul>",
-    '<div class="form-actions">',
-    '<a class="btn" href="/me/privacy/export" download>Download my data first (JSON)</a>',
+    '<div class="kb-row">',
+    '<a class="kb-btn" href="/me/privacy/export" download>Download my data first (JSON)</a>',
     "</div>",
     cooldown,
-    `<form method="POST" action="/me/privacy/delete" class="stack" data-confirm="Reset all of your KoolBot data on this server? This cannot be undone.">`,
+    `<form method="POST" action="/me/privacy/delete" class="kb-stack" data-confirm="Reset all of your KoolBot data on this server? This cannot be undone.">`,
     `<input type="hidden" name="_csrf" value="${escapeHtml(reset.csrfToken)}">`,
-    `<label>Type <code>${word}</code> to confirm: ` +
-      `<input type="text" name="confirm" autocomplete="off" placeholder="${word}" required></label>`,
-    '<div class="form-actions">',
-    '<button class="btn-danger" type="submit">Reset my data</button>',
+    '<div class="kb-field">',
+    `<label class="kb-label" for="reset-confirm">Type <code>${word}</code> to confirm</label>`,
+    `<input class="kb-input" type="text" id="reset-confirm" name="confirm" autocomplete="off" placeholder="${word}" required>`,
+    "</div>",
+    '<div class="kb-row">',
+    '<button class="kb-btn kb-btn--danger" type="submit">Reset my data</button>',
     "</div>",
     "</form>",
     "</div>",
+    "</section>",
   ].join("");
 }
 
