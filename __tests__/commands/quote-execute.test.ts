@@ -301,7 +301,7 @@ describe("/quote add after the quote was saved", () => {
     expect(it_.editReply).toHaveBeenCalledWith(
       errorEmbedPayload({
         title: "Your quote was saved",
-        description: expect.stringContaining("before adding it again"),
+        description: expect.stringContaining("before doing this again"),
       }),
     );
     expect(JSON.stringify(it_.editReply.mock.calls)).not.toMatch(/Try again/i);

@@ -221,6 +221,29 @@ describe("/lfg", () => {
     );
   });
 
+  // createPost() stores a new post on every call, so once it has succeeded no
+  // reply may tell the member to try again.
+  it("says the post was made, with no retry advice, when the confirmation fails", async () => {
+    const it_ = interaction({ strings: { game: "Valorant" } });
+    it_.editReply.mockRejectedValueOnce(new Error("Unknown interaction"));
+    await expect(execute(it_)).resolves.toBeUndefined();
+    expect(mockCreatePost).toHaveBeenCalledTimes(1);
+    expect(it_.editReply).toHaveBeenLastCalledWith(
+      errorEmbedPayload({
+        title: "Your LFG was posted",
+        description: expect.stringContaining("before doing this again"),
+      }),
+    );
+    expect(JSON.stringify(it_.editReply.mock.calls)).not.toMatch(/try again/i);
+  });
+
+  it("does not throw when the confirmation and the error reply both fail", async () => {
+    const it_ = interaction({ strings: { game: "Valorant" } });
+    it_.editReply.mockRejectedValue(new Error("Unknown interaction"));
+    await expect(execute(it_)).resolves.toBeUndefined();
+    expect(mockCreatePost).toHaveBeenCalledTimes(1);
+  });
+
   it("explains the one-post cap instead of silently doing nothing", async () => {
     mockCreatePost.mockResolvedValue({ status: "at_limit", limit: 1 });
     const it_ = interaction({ strings: { game: "Valorant" } });

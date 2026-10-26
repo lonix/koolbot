@@ -9,6 +9,7 @@ import { ModerationService } from "../services/moderation-service.js";
 import logger from "../utils/logger.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import {
+  afterWrite,
   replyWithError,
   replyWithUnexpectedError,
 } from "../utils/error-reply.js";
@@ -41,10 +42,6 @@ export const data = new SlashCommandBuilder()
 export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
-  // Set once the warning is stored. `logWarn` inserts a new entry on every
-  // call, so after that point the reply must not tell the moderator to retry.
-  let recorded = false;
-
   try {
     if (!interaction.guildId) {
       await replyWithError(interaction, {
@@ -109,38 +106,39 @@ export async function execute(
       moderatorId: interaction.user.id,
       reason,
     });
-    recorded = true;
 
-    const total = await moderationService.countHistory(
-      interaction.guildId,
-      targetUser.id,
+    // `logWarn` inserts a new entry on every call, so from here on a failure
+    // must not tell the moderator to try again.
+    const guildId = interaction.guildId;
+    await afterWrite(
+      interaction,
+      { done: "The warning was recorded", check: "`/modlog`" },
+      async () => {
+        const total = await moderationService.countHistory(
+          guildId,
+          targetUser.id,
+        );
+
+        const embed = new EmbedBuilder()
+          .setColor(embedColor("warn"))
+          .setTitle("⚠️ Warning recorded")
+          .setDescription(
+            `**${escapeDisplayText(targetUser.tag)}** has been warned.\nThey now have **${total}** entr${
+              total === 1 ? "y" : "ies"
+            } in the moderation log.`,
+          )
+          .addFields({ name: "Reason", value: reason })
+          .setFooter({ text: `Use /modlog to view history` })
+          .setTimestamp();
+
+        // Ephemeral (set at the deferral above) so the moderator gets a clear
+        // confirmation without posting a public call-out; the durable record
+        // lives in the moderation log.
+        await interaction.editReply({ embeds: [embed] });
+      },
     );
-
-    const embed = new EmbedBuilder()
-      .setColor(embedColor("warn"))
-      .setTitle("⚠️ Warning recorded")
-      .setDescription(
-        `**${escapeDisplayText(targetUser.tag)}** has been warned.\nThey now have **${total}** entr${
-          total === 1 ? "y" : "ies"
-        } in the moderation log.`,
-      )
-      .addFields({ name: "Reason", value: reason })
-      .setFooter({ text: `Use /modlog to view history` })
-      .setTimestamp();
-
-    // Ephemeral (set at the deferral above) so the moderator gets a clear
-    // confirmation without posting a public call-out; the durable record
-    // lives in the moderation log.
-    await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error in warn command:", error);
-    if (recorded) {
-      await replyWithError(interaction, {
-        title: "The warning was recorded",
-        next: "I couldn't show the confirmation. Don't run this again — check `/modlog`.",
-      });
-    } else {
-      await replyWithUnexpectedError(interaction);
-    }
+    await replyWithUnexpectedError(interaction);
   }
 }

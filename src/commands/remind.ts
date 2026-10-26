@@ -21,6 +21,7 @@ import {
 } from "../utils/discord-limits.js";
 import logger from "../utils/logger.js";
 import {
+  afterWrite,
   replyWithError,
   replyWithUnexpectedError,
 } from "../utils/error-reply.js";
@@ -267,13 +268,21 @@ async function handleSet(
     return;
   }
 
-  const zoneNote = when.timezone ? ` (read in ${when.timezone})` : "";
-  await interaction.editReply(
-    [
-      `⏰ Reminder set for ${discordTimestamp(when.remindAt)} — ${discordTimestamp(when.remindAt, "R")}${zoneNote}.`,
-      "I'll DM you. If your DMs are closed I'll try to post here instead.",
-      `Cancel it with \`/remind cancel id:${result.reminder._id}\`.`,
-    ].join("\n"),
+  // The reminder is stored: a failing confirmation must not tell the member
+  // to try again, which would set a second one.
+  await afterWrite(
+    interaction,
+    { done: "Your reminder was saved", check: "`/remind list`" },
+    async () => {
+      const zoneNote = when.timezone ? ` (read in ${when.timezone})` : "";
+      await interaction.editReply(
+        [
+          `⏰ Reminder set for ${discordTimestamp(when.remindAt)} — ${discordTimestamp(when.remindAt, "R")}${zoneNote}.`,
+          "I'll DM you. If your DMs are closed I'll try to post here instead.",
+          `Cancel it with \`/remind cancel id:${result.reminder._id}\`.`,
+        ].join("\n"),
+      );
+    },
   );
 }
 
@@ -345,5 +354,11 @@ async function handleCancel(
     });
     return;
   }
-  await interaction.editReply("🗑️ Reminder cancelled.");
+  await afterWrite(
+    interaction,
+    { done: "Your reminder was cancelled", check: "`/remind list`" },
+    async () => {
+      await interaction.editReply("🗑️ Reminder cancelled.");
+    },
+  );
 }

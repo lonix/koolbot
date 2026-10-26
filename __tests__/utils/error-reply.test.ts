@@ -16,6 +16,8 @@ const {
   replyWithError,
   replyWithUnexpectedError,
   UNEXPECTED_ERROR,
+  afterWrite,
+  replyAfterWriteError,
 } = await import("../../src/utils/error-reply.js");
 const { embedColor } = await import("../../src/utils/embed-style.js");
 
@@ -223,5 +225,65 @@ describe("replyWithUnexpectedError", () => {
     await expect(replyWithUnexpectedError(interaction as never)).resolves.toBe(
       false,
     );
+  });
+});
+
+describe("afterWrite", () => {
+  const info = { done: "Your reminder was saved", check: "`/remind list`" };
+
+  beforeEach(() => {
+    mockLoggerError.mockClear();
+  });
+
+  it("runs the step and sends nothing when it succeeds", async () => {
+    const interaction = makeInteraction({ deferred: true });
+    const step = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+    await afterWrite(interaction as never, info, step);
+
+    expect(step).toHaveBeenCalledTimes(1);
+    expect(interaction.editReply).not.toHaveBeenCalled();
+  });
+
+  it("answers a failed step with the done title, where to check, and no retry advice", async () => {
+    const interaction = makeInteraction({ deferred: true });
+
+    await afterWrite(interaction as never, info, async () => {
+      throw new Error("Unknown interaction");
+    });
+
+    const payload = interaction.editReply.mock.calls[0][0] as {
+      embeds: { toJSON(): { title: string; description: string } }[];
+    };
+    const json = payload.embeds[0].toJSON();
+    expect(json.title).toBe("Your reminder was saved");
+    expect(json.description).toContain("`/remind list`");
+    expect(json.description).toContain("before doing this again");
+    expect(JSON.stringify(json)).not.toMatch(/try again/i);
+    expect(mockLoggerError).toHaveBeenCalledTimes(1);
+  });
+
+  it("never throws, even when the error reply fails for the same reason", async () => {
+    const interaction = makeInteraction({ deferred: true });
+    interaction.editReply.mockRejectedValue(new Error("10062") as never);
+
+    await expect(
+      afterWrite(interaction as never, info, async () => {
+        throw new Error("10062");
+      }),
+    ).resolves.toBeUndefined();
+    // One log for the failed step, one for the failed error reply.
+    expect(mockLoggerError).toHaveBeenCalledTimes(2);
+  });
+
+  it("replyAfterWriteError passes whenDeferred through", async () => {
+    const interaction = makeInteraction({ deferred: true });
+
+    await replyAfterWriteError(interaction as never, info, {
+      whenDeferred: "followUp",
+    });
+
+    expect(interaction.followUp).toHaveBeenCalledTimes(1);
+    expect(interaction.editReply).not.toHaveBeenCalled();
   });
 });

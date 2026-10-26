@@ -10,6 +10,7 @@ import { quoteService } from "../services/quote-service.js";
 import { QuoteChannelManager } from "../services/quote-channel-manager.js";
 import logger from "../utils/logger.js";
 import {
+  afterWrite,
   replyWithError,
   replyWithUnexpectedError,
   UNEXPECTED_ERROR,
@@ -198,17 +199,11 @@ async function handleAdd(
 
   // `addQuote` inserts a new row on every call, so a failure past this point
   // must not tell the member to try again.
-  try {
-    await postSavedQuote(interaction, quote);
-  } catch (error) {
-    logger.error(
-      `Quote ${String(quote._id)} was saved but finishing the add failed: ${describeDiscordError(error)}`,
-    );
-    await replyWithError(interaction, {
-      title: "Your quote was saved",
-      next: "I couldn't finish posting it. Check the quote channel before adding it again, and tell an admin if it isn't there; the details are in the bot's log.",
-    });
-  }
+  await afterWrite(
+    interaction,
+    { done: "Your quote was saved", check: "the quote channel" },
+    () => postSavedQuote(interaction, quote),
+  );
 }
 
 async function postSavedQuote(

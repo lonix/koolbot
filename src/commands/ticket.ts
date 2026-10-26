@@ -11,6 +11,7 @@ import {
 import type { ITicket } from "../models/ticket.js";
 import logger from "../utils/logger.js";
 import {
+  afterWrite,
   replyWithError,
   replyWithUnexpectedError,
   type ErrorMessage,
@@ -171,9 +172,17 @@ async function handleOpen(
     );
     return;
   }
-  await interaction.editReply({
-    content: `🎫 Your ticket is open: <#${result.ticket.channelId}>`,
-  });
+  // The ticket channel exists: a failing confirmation must not tell the
+  // member to try again, which would open a second one.
+  await afterWrite(
+    interaction,
+    { done: "Your ticket was opened", check: "the ticket channels" },
+    async () => {
+      await interaction.editReply({
+        content: `🎫 Your ticket is open: <#${result.ticket.channelId}>`,
+      });
+    },
+  );
 }
 
 /** Resolve the ticket a `close` / `claim` refers to: the `id` option, else this channel. */
@@ -228,8 +237,18 @@ async function handleStaffOrAuthor(
     await replyWithError(interaction, FAILURE_TEXT[result.reason]);
     return;
   }
-  await interaction.editReply({
-    content:
-      sub === "claim" ? "🙋 You claimed this ticket." : "🔒 Ticket closed.",
-  });
+  await afterWrite(
+    interaction,
+    {
+      done:
+        sub === "claim" ? "The ticket was claimed" : "The ticket was closed",
+      check: "the ticket channel",
+    },
+    async () => {
+      await interaction.editReply({
+        content:
+          sub === "claim" ? "🙋 You claimed this ticket." : "🔒 Ticket closed.",
+      });
+    },
+  );
 }

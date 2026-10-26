@@ -122,6 +122,30 @@ describe("/ticket", () => {
     });
   });
 
+  // openTicket() creates a channel on every call, so once it has succeeded no
+  // reply may tell the member to try again.
+  it("says the ticket was opened, with no retry advice, when the confirmation fails", async () => {
+    manager.openTicket.mockResolvedValue({
+      ok: true,
+      ticket: { channelId: "c9" },
+    });
+    const { interaction, editReply } = makeInteraction("open", {
+      subject: "help",
+    });
+    editReply.mockRejectedValueOnce(new Error("Unknown interaction"));
+
+    await expect(execute(interaction)).resolves.toBeUndefined();
+
+    expect(manager.openTicket).toHaveBeenCalledTimes(1);
+    expect(editReply).toHaveBeenLastCalledWith(
+      errorEmbedPayload({
+        title: "Your ticket was opened",
+        description: expect.stringContaining("the ticket channels"),
+      }),
+    );
+    expect(JSON.stringify(editReply.mock.calls)).not.toMatch(/try again/i);
+  });
+
   it("opens a ticket and links the channel", async () => {
     const { interaction, editReply } = makeInteraction("open", {
       subject: "help",

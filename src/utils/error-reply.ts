@@ -103,3 +103,52 @@ export function replyWithUnexpectedError(
 ): Promise<boolean> {
   return replyWithError(interaction, { ...UNEXPECTED_ERROR, ...options });
 }
+
+/** What a command already did, for a failure that happens after its write. */
+export interface WriteDone {
+  /** Says the write happened, as the title ("Your reminder was saved"). */
+  done: string;
+  /** Where the member can check, in the description ("`/remind list`"). */
+  check: string;
+}
+
+/**
+ * The error reply for a failure AFTER a command stored something. It says the
+ * work was done and where to check, and gives no retry advice: running the
+ * command again would create the same thing twice. Never throws; when the
+ * confirmation itself failed this reply may fail for the same reason, which is
+ * logged by `safeReply` and returned as `false`.
+ */
+export function replyAfterWriteError(
+  interaction: RepliableInteraction,
+  { done, check }: WriteDone,
+  options: ReplyWithErrorOptions = {},
+): Promise<boolean> {
+  return replyWithError(interaction, {
+    title: done,
+    next: `I couldn't finish the confirmation here. Check ${check} before doing this again; the details are in the bot's log.`,
+    ...options,
+  });
+}
+
+/**
+ * Run the steps of a command that come after its write (the confirmation, a
+ * follow-up read). A failure is logged and answered with
+ * {@link replyAfterWriteError}; it never reaches the command's catch-all, whose
+ * generic "try again" would repeat the write. Never throws.
+ */
+export async function afterWrite(
+  interaction: RepliableInteraction,
+  info: WriteDone,
+  step: () => Promise<void>,
+): Promise<void> {
+  try {
+    await step();
+  } catch (error) {
+    logger.error(
+      `A step after "${info.done}" failed for interaction ${interaction.id}: ${describeDiscordError(error)}`,
+      { stack: error instanceof Error ? error.stack : undefined },
+    );
+    await replyAfterWriteError(interaction, info);
+  }
+}

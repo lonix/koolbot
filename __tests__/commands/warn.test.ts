@@ -235,7 +235,7 @@ describe("Warn Command", () => {
       expect(interaction.editReply).toHaveBeenCalledWith(
         errorEmbedPayload({
           title: "The warning was recorded",
-          description: expect.stringContaining("check `/modlog`"),
+          description: expect.stringContaining("`/modlog`"),
         }),
       );
       expect(JSON.stringify(interaction.editReply.mock.calls)).not.toMatch(

@@ -203,6 +203,30 @@ describe("remind command gating", () => {
   });
 });
 
+describe("/remind set after the reminder was stored", () => {
+  // create() inserts a new reminder on every call, so once it has succeeded no
+  // reply may tell the member to try again.
+  it("says it was saved, with no retry advice, when the confirmation fails", async () => {
+    const interaction = makeInteraction("set", { message: "hi", in: "2h" });
+    interaction.editReply.mockRejectedValueOnce(
+      new Error("Unknown interaction") as never,
+    );
+
+    await expect(execute(interaction)).resolves.toBeUndefined();
+
+    expect(ReminderMock.create).toHaveBeenCalledTimes(1);
+    expect(interaction.editReply).toHaveBeenLastCalledWith(
+      errorEmbedPayload({
+        title: "Your reminder was saved",
+        description: expect.stringContaining("`/remind list`"),
+      }),
+    );
+    expect(JSON.stringify(interaction.editReply.mock.calls)).not.toMatch(
+      /try again/i,
+    );
+  });
+});
+
 describe("/remind set", () => {
   it("stores a reminder given a relative duration", async () => {
     const interaction = makeInteraction("set", {

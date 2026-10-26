@@ -12,6 +12,7 @@ import {
 } from "../services/lfg-service.js";
 import logger from "../utils/logger.js";
 import {
+  afterWrite,
   replyWithError,
   replyWithUnexpectedError,
 } from "../utils/error-reply.js";
@@ -130,13 +131,21 @@ export async function execute(
       return;
     }
 
+    // The post exists from here on: a failing confirmation must not tell the
+    // member to try again, which would post a second one.
     const { post } = result;
-    const link = post.messageId
-      ? `https://discord.com/channels/${post.guildId}/${post.channelId}/${post.messageId}`
-      : null;
-    await interaction.editReply(
-      `✅ Posted your LFG for **${game}** (${post.memberIds.length}/${post.partySize}).` +
-        (link ? `\n${link}` : ""),
+    await afterWrite(
+      interaction,
+      { done: "Your LFG was posted", check: "the LFG channel" },
+      async () => {
+        const link = post.messageId
+          ? `https://discord.com/channels/${post.guildId}/${post.channelId}/${post.messageId}`
+          : null;
+        await interaction.editReply(
+          `✅ Posted your LFG for **${game}** (${post.memberIds.length}/${post.partySize}).` +
+            (link ? `\n${link}` : ""),
+        );
+      },
     );
   } catch (error) {
     logger.error("Error in /lfg:", error);
