@@ -40,6 +40,7 @@ import { PermissionsService } from "../../src/services/permissions-service.js";
 import { EventService } from "../../src/services/event-service.js";
 import { ConfigService } from "../../src/services/config-service.js";
 import { WebAuditLog } from "../../src/models/web-audit-log.js";
+import { UserNotificationPrefsService } from "../../src/services/user-notification-prefs-service.js";
 import { Event } from "../../src/models/event.js";
 
 const SECRET = "test-secret-for-host-panel-routes";
@@ -98,6 +99,7 @@ let events: Record<string, FakeEvent> = {};
 let auditRows: Array<Record<string, unknown>> = [];
 let sessionRole: Role = "user";
 let sessionUser = CREATOR;
+let memberZone: string | null = null;
 let server: Server;
 let base = "";
 
@@ -180,6 +182,7 @@ beforeEach(() => {
   delete fakeClient.guilds;
   events = { [EVENT_ID]: makeEvent() };
   auditRows = [];
+  memberZone = "UTC";
 
   jest.spyOn(WebSessionService.getInstance(), "findById").mockImplementation(
     async () =>
@@ -198,7 +201,11 @@ beforeEach(() => {
     resolveWebScopes: async () => ["member", "host"],
   } as never);
   groupReport = null;
+  jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+    getTimezone: async () => memberZone,
+  } as never);
   jest.spyOn(EventService, "getInstance").mockReturnValue({
+    editsAllowed: async () => true,
     getEvent: async (id: string) => events[id] ?? null,
     getGroupChannelReport: () => groupReport,
     isEventBeingEnded: () => false,
@@ -222,6 +229,34 @@ afterEach(() => {
 const PANEL = `/me/events/${EVENT_ID}/host`;
 // The app mounts the router at /me, so requests go to the full path.
 const url = (path: string): string => path;
+
+describe("host panel times (#1538)", () => {
+  // 2030-01-01 19:00 UTC is 14:00 in New York (the event's zone) and
+  // 2030-01-02 08:00 in Auckland (the member's); the server runs in neither.
+  it("shows Starts in the member's zone, not the event's", async () => {
+    events[EVENT_ID] = makeEvent({ timezone: "America/New_York" });
+    memberZone = "Pacific/Auckland";
+    const r = await call(url(PANEL));
+    expect(r.status).toBe(200);
+    expect(r.text).toContain("2030-01-02 08:00 (Pacific/Auckland)");
+    expect(r.text).not.toContain("America/New_York");
+  });
+
+  it("keeps the read-only start on Edit event in the event's own zone, beside the fields that edit it", async () => {
+    // Started already, so Edit event shows the start as a fact, not as fields.
+    events[EVENT_ID] = makeEvent({
+      state: "active",
+      timezone: "America/New_York",
+      startTime: new Date("2020-01-01T19:00:00Z"),
+    });
+    memberZone = "Pacific/Auckland";
+    const r = await call(`${PANEL}/edit`);
+    expect(r.status).toBe(200);
+    expect(r.text).toContain("Started");
+    expect(r.text).toContain("2020-01-01 14:00 (America/New_York)");
+    expect(r.text).not.toContain("Pacific/Auckland");
+  });
+});
 
 describe("host panel access", () => {
   it("lets the creator, a non-admin member, open the panel", async () => {

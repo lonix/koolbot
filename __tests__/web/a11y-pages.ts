@@ -4913,7 +4913,7 @@ function settingsData(over: Partial<SettingsViewData> = {}): SettingsViewData {
       leaderLabel: "Captain",
       edits: [
         {
-          at: "2030-01-01T18:00:00.000Z",
+          at: "2030-01-01 19:00 (Europe/Oslo)",
           who: "Ana",
           text: 'renamed Red to "Rubies"',
         },
@@ -4930,7 +4930,7 @@ function hostEvent(over: Partial<HostPanelEvent>): HostPanelEvent {
     title: "Quiz night",
     description: "Bring a pen.",
     state: "scheduled",
-    when: "2030-01-01 19:00 (UTC)",
+    when: "2030-01-01 20:00 (Europe/Oslo)",
     durationMinutes: 90,
     recurrence: "weekly",
     channel: "quiz-night",
@@ -4988,7 +4988,7 @@ function yourEventRow(over: Partial<HostEventListRow>): HostEventListRow {
   return {
     id: "65a000000000000000000001",
     title: "Quiz night",
-    when: "2030-01-01 19:00 (UTC)",
+    when: "2030-01-01 20:00 (Europe/Oslo)",
     state: "scheduled",
     durationMinutes: 90,
     running: false,
@@ -5159,7 +5159,7 @@ export function userPages(): A11yPage[] {
             {
               id: "65a000000000000000000001",
               title: "Quiz night",
-              when: "2030-01-01 19:00 (UTC)",
+              when: "2030-01-01 20:00 (Europe/Oslo)",
               state: "scheduled",
               running: false,
             },

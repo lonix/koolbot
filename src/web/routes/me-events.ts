@@ -12,7 +12,8 @@
 import { Router } from "express";
 import logger from "../../utils/logger.js";
 import { ConfigService } from "../../services/config-service.js";
-import { formatEventWhen } from "../../services/event-service.js";
+import { formatDateTimeInZone } from "../../utils/timezone.js";
+import { readMemberZone } from "../member-timezone.js";
 import { listHostEvents, type HostEventRow } from "../event-host.js";
 import {
   renderHostEventsPage,
@@ -25,11 +26,12 @@ import { readSignedFlash } from "../http-flash.js";
 import { requireCsrf } from "../csrf.js";
 import type { AuthenticatedRequest } from "../session.js";
 
-function toListRow(e: HostEventRow): HostEventListRow {
+/** `zone` is the member's own (#1538), not the one the event was planned in. */
+function toListRow(e: HostEventRow, zone: string): HostEventListRow {
   return {
     id: e.id,
     title: e.title,
-    when: formatEventWhen(e),
+    when: formatDateTimeInZone(e.startTime, zone),
     state: e.state,
     durationMinutes: e.durationMinutes,
     running: e.running,
@@ -51,7 +53,7 @@ export function createMeEventsRouter(): Router {
     }
     const csrfToken = (req as { csrfToken?: string }).csrfToken ?? "";
     void (async (): Promise<void> => {
-      const [eventsEnabled, flags, found] = await Promise.all([
+      const [eventsEnabled, flags, found, zone] = await Promise.all([
         ConfigService.getInstance().getBooleanStrict("events.enabled", false),
         readMeSurfaceFlags(),
         listHostEvents(session.guildId, session.discordUserId).catch(
@@ -60,6 +62,7 @@ export function createMeEventsRouter(): Router {
             return null;
           },
         ),
+        readMemberZone(session.discordUserId, session.guildId),
       ]);
       res
         .set("Cache-Control", "no-store")
@@ -72,9 +75,9 @@ export function createMeEventsRouter(): Router {
               csrfToken,
               eventsEnabled,
               events: found && {
-                live: found.live.map(toListRow),
-                upcoming: found.upcoming.map(toListRow),
-                past: found.past.map(toListRow),
+                live: found.live.map((e) => toListRow(e, zone)),
+                upcoming: found.upcoming.map((e) => toListRow(e, zone)),
+                past: found.past.map((e) => toListRow(e, zone)),
               },
             }),
             csrfToken,
