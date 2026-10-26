@@ -58,6 +58,8 @@ const refuse = (
 
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_SHAPE = /^\d{2}:\d{2}$/;
+const TIME_IN_RANGE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const TIME_RANGE_MESSAGE = "Pick a time between 00:00 and 23:59.";
 
 /**
  * Validate the core fields. `requireFuture` is true for a new event and for an
@@ -110,6 +112,15 @@ export async function validateEventForm(
   const configuredTz = await config.getString("events.timezone", "");
   const timezone = tzInput || configuredTz;
 
+  // A clock value out of range names the time field, whatever the parser makes of it.
+  if (
+    !opts.startOverride &&
+    DATE_SHAPE.test(date) &&
+    TIME_SHAPE.test(time) &&
+    !TIME_IN_RANGE.test(time)
+  ) {
+    return refuse("time", TIME_RANGE_MESSAGE);
+  }
   const startTime =
     opts.startOverride ?? parseEventDateTime(date, time, timezone);
   if (!startTime) {
@@ -117,7 +128,9 @@ export async function validateEventForm(
       ? refuse("date", "Use the date format YYYY-MM-DD.")
       : !TIME_SHAPE.test(time)
         ? refuse("time", "Use 24-hour time as HH:MM, for example 19:30.")
-        : refuse("date", "That date and time do not exist. Pick another.");
+        : !TIME_IN_RANGE.test(time)
+          ? refuse("time", TIME_RANGE_MESSAGE)
+          : refuse("date", "That date and time do not exist. Pick another.");
   }
   if (opts.requireFuture && startTime.getTime() <= Date.now()) {
     // A start decided by the When choice has no date field to mark.

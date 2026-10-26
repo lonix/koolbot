@@ -62,6 +62,18 @@ describe("validateEventForm: the field a refusal is about", () => {
       "Use 24-hour time as HH:MM, for example 19:30.",
     ],
     [
+      "an hour past 23",
+      { time: "25:00" },
+      "time",
+      "Pick a time between 00:00 and 23:59.",
+    ],
+    [
+      "a minute past 59",
+      { time: "18:99" },
+      "time",
+      "Pick a time between 00:00 and 23:59.",
+    ],
+    [
       "a date that does not exist",
       { date: "2999-02-30" },
       "date",

@@ -455,6 +455,12 @@ describe("validation is the create form's", () => {
       "edit-description",
     ],
     [
+      "an hour past 23",
+      { time: "25:00" },
+      "Pick a time between 00:00 and 23:59.",
+      "edit-time",
+    ],
+    [
       "an impossible date",
       { date: "2099-02-30" },
       "That date and time do not exist. Pick another.",
