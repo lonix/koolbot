@@ -83,7 +83,7 @@ export interface HostPanelEvent {
   title: string;
   description: string;
   state: string;
-  /** Pre-formatted start line (`formatEventWhen`). */
+  /** Pre-formatted start line (`formatDateTimeInZone`, in the member's zone). */
   when: string;
   durationMinutes: number;
   /** Recurrence label (e.g. "weekly") or null for a one-off event. */

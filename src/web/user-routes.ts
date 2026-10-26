@@ -64,7 +64,11 @@ import {
   UserVoicePrefsService,
   VoicePrefsValidationError,
 } from "../services/user-voice-prefs-service.js";
-import { getServerTimezone } from "../utils/timezone.js";
+import {
+  formatDateTimeInZone,
+  formatInZone,
+  getServerTimezone,
+} from "../utils/timezone.js";
 import {
   RewindService,
   formatFunComparison,
@@ -101,7 +105,7 @@ import { createMeEventsRouter } from "./routes/me-events.js";
 import { createMeModerationRouter } from "./routes/me-moderation.js";
 import { createMeEventPresetsRouter } from "./routes/me-event-presets.js";
 import { listHostedEvents } from "./event-host.js";
-import { formatEventWhen } from "../services/event-service.js";
+import { readMemberZone } from "./member-timezone.js";
 
 // Everything on the `/me` surface may carry member-supplied strings, so every
 // audit row written from here is bounded first (#1142).
@@ -662,6 +666,8 @@ export function createUserRouter(
         return;
       }
       const flags = await readUserFeatureFlags();
+      // Times and dates on this page are the member's own (#1538).
+      const zone = await readMemberZone(session.discordUserId, session.guildId);
       // Only hosts see the card: its links lead to `/me/events*` (#1316).
       const hostedEvents = (
         hasScope(session, "host")
@@ -670,7 +676,7 @@ export function createUserRouter(
       ).map((e) => ({
         id: e.id,
         title: e.title,
-        when: formatEventWhen(e),
+        when: formatDateTimeInZone(e.startTime, zone),
         state: e.state,
       }));
 
@@ -699,7 +705,11 @@ export function createUserRouter(
                   thisYearVotes: pollParticipation.thisYearVotes,
                   thisWeekVotes: pollParticipation.thisWeekVotes,
                   lastVoted: pollParticipation.lastVoteAt
-                    ? pollParticipation.lastVoteAt.toISOString().slice(0, 10)
+                    ? formatInZone(
+                        pollParticipation.lastVoteAt,
+                        zone,
+                        "yyyy-MM-dd",
+                      )
                     : null,
                 }
               : null,
@@ -1191,13 +1201,13 @@ export function createUserRouter(
             emoji: a.emoji,
             name: a.name,
             description: a.description,
-            earnedAt: a.earnedAt.toISOString().slice(0, 10),
+            earnedAt: formatInZone(a.earnedAt, timezone, "yyyy-MM-dd"),
           })),
           achievements: summary.achievements.map((a) => ({
             emoji: a.emoji,
             name: a.name,
             description: a.description,
-            earnedAt: a.earnedAt.toISOString().slice(0, 10),
+            earnedAt: formatInZone(a.earnedAt, timezone, "yyyy-MM-dd"),
           })),
           annualRank: summary.annualRank,
           annualGuildMembers: summary.annualGuildMembers,
@@ -1933,11 +1943,12 @@ export function createUserRouter(
         result: "failure",
         errorMessage: "reset cooldown still active",
       });
+      const zone = await readMemberZone(userId, guildId);
       res.redirect(
         303,
         flashUrl("/me/privacy", {
           type: "err",
-          text: `You already reset your data recently. You can reset again after ${availableAt.toUTCString()}.`,
+          text: `You already reset your data recently. You can reset again after ${formatDateTimeInZone(availableAt, zone)}.`,
         }),
       );
       return;

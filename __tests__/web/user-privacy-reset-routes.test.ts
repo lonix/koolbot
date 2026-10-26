@@ -45,6 +45,8 @@ interface MockOptions {
   privacyEnabled?: boolean;
   resetEnabled?: boolean;
   cooldownHours?: number;
+  /** The member's stored timezone (`null`: none, so the server's). */
+  memberZone?: string | null;
   /** The latest intent row the cooldown lookup finds, if any. */
   lastReset?: Record<string, unknown> | null;
   /** A recorded failure after that intent, which lifts the cooldown. */
@@ -101,6 +103,12 @@ async function installMocks(opts: MockOptions = {}): Promise<void> {
     await import("../../src/services/permissions-service.js");
   jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
     checkCommandPermission: async () => true,
+  } as never);
+
+  const { UserNotificationPrefsService } =
+    await import("../../src/services/user-notification-prefs-service.js");
+  jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+    getTimezone: async () => opts.memberZone ?? null,
   } as never);
 
   const { ConfigService } =
@@ -538,6 +546,22 @@ describe("POST /me/privacy/delete", () => {
     expect(Date.now() - since.getTime()).toBeGreaterThanOrEqual(
       24 * 60 * 60 * 1000 - 1000,
     );
+  });
+
+  it("names when the member can reset again in their own timezone (#1538)", async () => {
+    // 2030-01-01 10:00 UTC plus 24 h is 2030-01-02 23:00 in Auckland (UTC+13).
+    await installMocks({
+      cooldownHours: 24,
+      memberZone: "Pacific/Auckland",
+      lastReset: { createdAt: new Date("2030-01-01T10:00:00Z") },
+    });
+    const { captured } = await post();
+
+    expect(purgeCalls).toEqual([]);
+    expect(flashText(captured)).toContain(
+      "You can reset again after 2030-01-02 23:00 (Pacific/Auckland).",
+    );
+    expect(flashText(captured)).not.toContain("GMT");
   });
 
   it("lets a member retry straight away after a recorded failed reset", async () => {

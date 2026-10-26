@@ -35,7 +35,6 @@ import { Client } from "discord.js";
 import logger from "../../utils/logger.js";
 import {
   EventService,
-  formatEventWhen,
   isRecurring,
   recurrenceLabel,
 } from "../../services/event-service.js";
@@ -47,7 +46,8 @@ import { boundAuditEntry, recordAudit, type AuditEntry } from "../audit.js";
 import { readMeSurfaceFlags } from "../me-surfaces.js";
 import { renderUserPage, type UserFlashMessage } from "../user-layout.js";
 import { formatInTimeZone } from "date-fns-tz";
-import { resolveTimezone } from "../../utils/timezone.js";
+import { formatDateTimeInZone, resolveTimezone } from "../../utils/timezone.js";
+import { readMemberZone } from "../member-timezone.js";
 import {
   EDIT_MESSAGES,
   editModeOf,
@@ -222,6 +222,8 @@ export interface HostSectionContext {
   session: WebSessionContext;
   csrfToken: string;
   actionPath: (name: string) => string;
+  /** The member's own zone, read once per request (#1538). */
+  zone: string;
 }
 
 /**
@@ -972,6 +974,7 @@ function describeEdit(details: Record<string, unknown>): string {
 async function recentLeaderEdits(
   client: Client,
   event: IEvent,
+  zone: string,
 ): Promise<LeaderEditView[]> {
   const edits: LeaderEditView[] = [];
   try {
@@ -986,7 +989,7 @@ async function recentLeaderEdits(
       .lean();
     for (const r of rows) {
       edits.push({
-        at: new Date(r.createdAt).toISOString(),
+        at: formatDateTimeInZone(new Date(r.createdAt), zone),
         who: cachedMemberName(client, event.guildId, r.discordUserId),
         text: describeEdit((r.details ?? {}) as Record<string, unknown>),
       });
@@ -1237,7 +1240,7 @@ async function buildSettingsView(
       hasGroups && fresh.captainsEnabled === true
         ? {
             leaderLabel: fresh.leaderLabel || "Leader",
-            edits: await recentLeaderEdits(client, fresh),
+            edits: await recentLeaderEdits(client, fresh, ctx.zone),
           }
         : undefined,
     groups: hasGroups
@@ -1475,7 +1478,11 @@ function registerSettingsActions(router: Router, client: Client): void {
   );
 }
 
-function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
+function toPanelEvent(
+  client: Client,
+  event: IEvent,
+  zone: string,
+): HostPanelEvent {
   const channelId = event.channelId ?? null;
   const channel = channelId
     ? client.guilds?.cache?.get(event.guildId)?.channels?.cache?.get(channelId)
@@ -1493,7 +1500,7 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
     title: event.title,
     description: event.description ?? "",
     state: event.state,
-    when: formatEventWhen(event),
+    when: formatDateTimeInZone(event.startTime, zone),
     durationMinutes: event.durationMinutes,
     recurrence: isRecurring(event) ? recurrenceLabel(event.recurrence) : null,
     channel: channelId ? (channelName ?? channelId) : null,
@@ -1674,6 +1681,12 @@ function registerEditRoutes(router: Router, client: Client): void {
     const csrfToken = getCsrfToken(req);
     const zone = zoneOf(event);
     void (async (): Promise<void> => {
+      // The date, time and timezone fields stay in the event's own zone, the
+      // one this form edits; the read-only start fact is the member's (#1538).
+      const memberZone = await readMemberZone(
+        session.discordUserId,
+        session.guildId,
+      );
       if (!(await service().editsAllowed())) {
         hostPanelRedirect(res, eventId, {
           type: "err",
@@ -1688,7 +1701,7 @@ function registerEditRoutes(router: Router, client: Client): void {
       const permissionNotice = await hostPermissionNotice(
         client,
         event.guildId,
-        toPanelEvent(client, event),
+        toPanelEvent(client, event, memberZone),
         event,
         (e) =>
           hostEditPermissionFeatures(
@@ -1718,7 +1731,7 @@ function registerEditRoutes(router: Router, client: Client): void {
                 timezone: zone,
                 date: formatInTimeZone(event.startTime, zone, "yyyy-MM-dd"),
                 time: formatInTimeZone(event.startTime, zone, "HH:mm"),
-                when: formatEventWhen(event),
+                when: formatDateTimeInZone(event.startTime, memberZone),
                 version: eventEditVersion(event, mode.mode),
                 mode: mode.mode,
                 startLocked,
@@ -2215,13 +2228,15 @@ export function createHostEventsRouter(client: Client): Router {
     const { hostEvent: event, hostSession: session } = req as HostRequest;
     const flash = readSignedFlash(req.query);
     const csrfToken = getCsrfToken(req);
-    const ctx: HostSectionContext = {
-      event,
-      session,
-      csrfToken,
-      actionPath: (action) => `${hostPanelPath(String(event._id))}/${action}`,
-    };
     void (async (): Promise<void> => {
+      const zone = await readMemberZone(session.discordUserId, session.guildId);
+      const ctx: HostSectionContext = {
+        event,
+        session,
+        csrfToken,
+        actionPath: (action) => `${hostPanelPath(String(event._id))}/${action}`,
+        zone,
+      };
       const flags = await readMeSurfaceFlags();
       const controls: Partial<Record<HostSectionId, string>> = {};
       if (hostControlsAvailable(event)) {
@@ -2232,7 +2247,7 @@ export function createHostEventsRouter(client: Client): Router {
           if (html !== undefined) controls[id] = html;
         }
       }
-      const panelEvent = toPanelEvent(client, event);
+      const panelEvent = toPanelEvent(client, event, zone);
       const permissionNotice = await hostPermissionNotice(
         client,
         event.guildId,
