@@ -236,3 +236,39 @@ describe("UserVoicePrefsService preset CRUD", () => {
     expect(doc.presets[0].isDefault).toBe(false);
   });
 });
+
+describe("UserVoicePrefsService.getSummary (#1508)", () => {
+  let service: UserVoicePrefsService;
+  const leanOf = (row: unknown): void => {
+    mockModel.findOne.mockReturnValue({
+      lean: jest.fn<() => Promise<unknown>>().mockResolvedValue(row),
+    } as never);
+  };
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service = UserVoicePrefsService.getInstance();
+  });
+
+  it("reads without creating a row for a member who never set anything", async () => {
+    leanOf(null);
+    expect(await service.getSummary("u1")).toEqual({
+      namePattern: null,
+      presetCount: 0,
+    });
+    expect(mockModel.findOne).toHaveBeenCalledWith({ userId: "u1" });
+    expect(mockModel.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(mockModel.create).not.toHaveBeenCalled();
+  });
+
+  it("returns the pattern and the number of presets", async () => {
+    leanOf({
+      userId: "u1",
+      namePattern: "[AMR] {name}",
+      presets: [{ name: "a" }, { name: "b" }],
+    });
+    expect(await service.getSummary("u1")).toEqual({
+      namePattern: "[AMR] {name}",
+      presetCount: 2,
+    });
+  });
+});

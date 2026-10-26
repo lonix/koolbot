@@ -706,26 +706,36 @@ describe("control sections supplied by later issues", () => {
 });
 
 describe("links to the host panel", () => {
-  it("lists the member's open events on the overview", async () => {
+  function stubOpenEvents(rows: Array<Record<string, unknown>>): void {
     jest.spyOn(Event, "find").mockReturnValue({
       sort: () => ({
         limit: () => ({
-          lean: async () => [
-            {
-              _id: EVENT_ID,
-              title: "Quiz <night>",
-              startTime: new Date("2030-01-01T19:00:00Z"),
-              timezone: "UTC",
-              state: "scheduled",
-            },
-          ],
+          lean: async () => rows,
         }),
       }),
     } as never);
+  }
+
+  it("leads the overview with a live event, linked to its host panel (#1508)", async () => {
+    stubOpenEvents([
+      {
+        _id: EVENT_ID,
+        title: "Quiz <night>",
+        startTime: new Date("2020-01-01T19:00:00Z"),
+        timezone: "UTC",
+        state: "active",
+      },
+    ]);
     const r = await call("/me/");
     expect(r.status).toBe(200);
     expect(r.text).toContain(`href="${PANEL}"`);
     expect(r.text).toContain("Quiz &lt;night&gt;");
+    expect(r.text).toContain('<span class="kb-badge kb-badge--on">Live</span>');
+    // The live event comes before the preference cards.
+    expect(r.text.indexOf("hosting-now-h")).toBeGreaterThan(-1);
+    expect(r.text.indexOf("hosting-now-h")).toBeLessThan(
+      r.text.indexOf("kb-features"),
+    );
     expect(Event.find).toHaveBeenCalledWith(
       expect.objectContaining({
         guildId: GUILD,
@@ -733,6 +743,38 @@ describe("links to the host panel", () => {
         state: { $in: ["scheduled", "active"] },
       }),
     );
+  });
+
+  it("reduces planned events to one line that links to Your events (#1508)", async () => {
+    stubOpenEvents([
+      {
+        _id: EVENT_ID,
+        title: "Quiz <night>",
+        startTime: new Date("2030-01-01T19:00:00Z"),
+        timezone: "UTC",
+        state: "scheduled",
+      },
+    ]);
+    const r = await call("/me/");
+    expect(r.status).toBe(200);
+    expect(r.text).toContain('<a href="/me/events">1 event</a>');
+    expect(r.text).not.toContain("hosting-now");
+    expect(r.text).not.toContain("Quiz");
+  });
+
+  it("does not call an active event that has not started yet Live (#1508)", async () => {
+    stubOpenEvents([
+      {
+        _id: EVENT_ID,
+        title: "Quiz night",
+        startTime: new Date("2999-01-01T19:00:00Z"),
+        timezone: "UTC",
+        state: "active",
+      },
+    ]);
+    const r = await call("/me/");
+    expect(r.text).not.toContain("kb-badge--on");
+    expect(r.text).toContain('<a href="/me/events">1 event</a>');
   });
 
   it("still renders the overview when the lookup fails", async () => {

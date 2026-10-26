@@ -19,7 +19,9 @@ import {
   BIRTHDAYS_SETTING_KEYS,
   envSettingFallback,
   readInvalidKeys,
+  createReadOnlyRouter,
 } from "../../src/web/read-only-routes.js";
+import { getFormPage } from "../../src/web/form-pages.js";
 import { createMockCollection } from "../test-utils.js";
 import { ConfigService } from "../../src/services/config-service.js";
 import { RoleGroupService } from "../../src/services/role-group-service.js";
@@ -968,5 +970,25 @@ describe("readInvalidKeys (#854)", () => {
 
   it("ignores a repeated param that arrives as an array", () => {
     expect(readInvalidKeys({ query: { invalid: ["a.b", "c.d"] } })).toEqual([]);
+  });
+});
+
+describe("refused-form pages (#1517)", () => {
+  it("registers a renderer for each page whose forms answer a refusal with 422", () => {
+    createReadOnlyRouter({} as never, (_req, _res, next) => next());
+    expect(getFormPage("/admin/announcements")).toBeInstanceOf(Function);
+    expect(getFormPage("/admin/polls")).toBeInstanceOf(Function);
+  });
+
+  it("registers a renderer for the Reaction roles, Notices, Quotes and Presence pages (#1520)", () => {
+    createReadOnlyRouter({} as never, (_req, _res, next) => next());
+    for (const path of [
+      "/admin/reaction-roles",
+      "/admin/notices",
+      "/admin/quotes",
+      "/admin/bot-status",
+    ]) {
+      expect(getFormPage(path)).toBeInstanceOf(Function);
+    }
   });
 });

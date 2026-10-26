@@ -19,6 +19,7 @@ import {
   parseFlashRedirect,
   type AdminHarness,
 } from "./admin-harness.js";
+import { refusal } from "./refused-form-test-utils.js";
 
 const mockRecordAudit = jest.fn(async () => undefined);
 const mockProvision = jest.fn<() => Promise<unknown>>();
@@ -50,10 +51,28 @@ const { createReactionRolesRouter } =
   await import("../../src/web/routes/write/reaction-roles.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
+const { registerFormPage } = await import("../../src/web/form-pages.js");
+const { renderReactionRolesPage } =
+  await import("../../src/web/admin-views.js");
 
 const client = { user: { id: "bot" } } as unknown as Client;
 const session = createTestSession();
 let harness: AdminHarness;
+
+// The real view stands in for the read router's renderer (#1520).
+registerFormPage("/admin/reaction-roles", async (_req, refused) =>
+  renderReactionRolesPage({
+    guildId: "guild-1",
+    csrfToken: "csrf",
+    remainingMs: 1000,
+    navFeatureStatus: {},
+    enabled: true,
+    configChannel: null,
+    active: [],
+    archived: [],
+    refusedForm: refused,
+  }),
+);
 
 beforeEach(async () => {
   jest.clearAllMocks();
@@ -120,13 +139,22 @@ describe("POST /reaction-roles/group/generate", () => {
     );
   });
 
-  it("rejects an unknown preset", async () => {
+  it("marks an unknown source and keeps the typed rows", async () => {
     const res = await harness.post("/reaction-roles/group/generate", {
       preset: "nope",
+      groupName: " Platform ",
+      mode: "toggle",
+      roleName: ["PC"],
+      emoji: ["🖥️"],
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
-      "Unknown preset.",
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["reaction-role-group-generate-preset"]);
+    expect(r.errorLines["reaction-role-group-generate-preset-error"]).toBe(
+      "Choose one of the listed sources.",
     );
+    expect(r.html).toContain('value=" Platform "');
+    expect(r.html).toContain('value="PC"');
+    expect(r.html).toContain('<option value="toggle" selected>');
     expect(mockProvision).not.toHaveBeenCalled();
   });
 
@@ -180,14 +208,19 @@ describe("POST /reaction-roles/group/generate", () => {
     });
   });
 
-  it("requires a name for a custom group", async () => {
+  it("marks a missing name for a custom group and keeps the chosen source", async () => {
     const res = await harness.post("/reaction-roles/group/generate", {
       preset: "custom",
       roleName: ["A"],
       emoji: ["🅰️"],
     });
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
-      "Group name is required.",
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["reaction-role-group-generate-groupName"]);
+    expect(r.errorLines["reaction-role-group-generate-groupName-error"]).toBe(
+      "Enter a name for the custom group.",
     );
+    expect(r.html).toContain('<option value="custom" selected>');
+    expect(r.html).toContain('value="A"');
+    expect(mockProvision).not.toHaveBeenCalled();
   });
 });

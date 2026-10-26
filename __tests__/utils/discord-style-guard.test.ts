@@ -7,6 +7,12 @@
  * 2. Times in Discord text go through `discordTimestamp()` (or `setTimestamp()`),
  *    never `toLocaleString()` and friends, which print one fixed timezone and
  *    format for every reader.
+ * 3. A failed slash command answers through `replyWithError` /
+ *    `replyWithUnexpectedError` (`utils/error-reply.ts`, #1509): an ephemeral
+ *    embed-danger embed that says what to do next. A reply `content` literal in
+ *    `src/commands/`, `src/handlers/` (buttons, menus, forms; #1510) or
+ *    `src/index.ts` that starts with `❌` or `⚠️`, or says "There was an error"
+ *    or "An error occurred while processing", fails.
  *
  * Plain string scan over the TypeScript sources (comments stripped); the Web UI
  * (`src/web/`) is HTML and out of scope. A file may only be listed in
@@ -65,7 +71,9 @@ const FOOTER_UNRESOLVED_ALLOWED: Record<string, string> = {};
 const SYSTEM_WORD = /\bSystem\b/;
 const ID_LABEL = /\bID:/;
 /** `${x._id}`, `${quoteId}`, `${noticeId}`, `${x.id}` inside a footer. */
-const ID_INTERPOLATION = /\$\{[^}]*(\b_id\b|\.id\b|\bid\b|Id\b)[^}]*\}/;
+const ID_INTERPOLATION = /\$\{[^}]*(\b_id\b|\.id\b|\bid\b|Id\b|Key\b)[^}]*\}/;
+/** A `ref <key>` label: a bot-internal marker, never member-visible (#1513). */
+const REF_LABEL = /\bref\s/;
 
 /**
  * Every expression a name is bound to in this file: its declaration
@@ -225,6 +233,9 @@ function footerProblems(source: string, file = "source.ts"): string[] {
       if (ID_INTERPOLATION.test(text)) {
         problems.push(`${line}: interpolates an id`);
       }
+      if (REF_LABEL.test(text)) {
+        problems.push(`${line}: contains a "ref " label`);
+      }
     }
     return [...new Set(problems)];
   });
@@ -299,6 +310,10 @@ describe("discord footer guard", () => {
       // a variable holding an interpolated id
       "const t = `ID: ${quoteId}`;\ne.setFooter({ text: t });",
       "const t = `KoolBot · Quotes · ${quote._id}`;\ne.setFooter({ text: t });",
+      // an operation key and a `ref ` label (#1513)
+      "e.setFooter({ text: `Remove your reaction · ref ${options.adoptionOpKey}` });",
+      "e.setFooter({ text: `Remove your reaction to lose the role${SEP}${options.adoptionOpKey}` });",
+      'e.setFooter({ text: "Remove your reaction · ref abc" });',
       // concatenation, conditionals, template spans and reassigned lets
       'const F = "KoolBot " + "System";\ne.setFooter({ text: F });',
       'const F = ok ? "KoolBot · Quotes" : "KoolBot System";\ne.setFooter({ text: F });',
@@ -392,6 +407,190 @@ describe("discord time guard", () => {
       }
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * Every string a reply text expression can produce: string and template
+ * literals, `+` concatenation, conditionals (both branches) and same-file
+ * constants. Calls and property reads are dynamic and yield nothing; the
+ * literals that feed them are checked where they are written.
+ */
+function replyTexts(
+  sf: ts.SourceFile,
+  expr: ts.Expression,
+  seen: string[] = [],
+): string[] {
+  if (ts.isParenthesizedExpression(expr) || ts.isAsExpression(expr)) {
+    return replyTexts(sf, expr.expression, seen);
+  }
+  if (ts.isStringLiteralLike(expr)) return [expr.text];
+  if (ts.isTemplateExpression(expr)) {
+    return [
+      expr.head.text +
+        expr.templateSpans.map((span) => "${}" + span.literal.text).join(""),
+    ];
+  }
+  if (
+    ts.isBinaryExpression(expr) &&
+    expr.operatorToken.kind === ts.SyntaxKind.PlusToken
+  ) {
+    // A dynamic side (a call, a property read) contributes no text.
+    const left = replyTexts(sf, expr.left, seen);
+    const right = replyTexts(sf, expr.right, seen);
+    return (left.length ? left : [""]).flatMap((l) =>
+      (right.length ? right : [""]).map((r) => l + r),
+    );
+  }
+  if (ts.isConditionalExpression(expr)) {
+    return [
+      ...replyTexts(sf, expr.whenTrue, seen),
+      ...replyTexts(sf, expr.whenFalse, seen),
+    ];
+  }
+  if (ts.isIdentifier(expr) && !seen.includes(expr.text)) {
+    return bindingsOf(sf, expr.text).flatMap((b) =>
+      replyTexts(sf, b, [...seen, expr.text]),
+    );
+  }
+  return [];
+}
+
+const REPLY_METHODS = new Set(["reply", "editReply", "followUp", "send"]);
+const CROSS_MARK = /^\s*❌/;
+/**
+ * A warning sign leading a reply is a failure too ("⚠️ The waiting room no
+ * longer exists"), but only outside `commands/`: `/quote add` still opens two
+ * purge-race outcomes with it (#1552 left them as they are), so widening the
+ * rule there is an owner decision.
+ */
+const WARNING_SIGN = /^\s*⚠️?/u;
+const GENERIC_FAILURE =
+  /There was an error|An error occurred while processing/i;
+
+/** The reply texts of a source: `content: x`, and `reply(x)` / `editReply(x)` with a bare string. */
+function replyTextExpressions(
+  sf: ts.SourceFile,
+): { line: number; expr: ts.Expression }[] {
+  const out: { line: number; expr: ts.Expression }[] = [];
+  const at = (n: ts.Node): number =>
+    sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
+  const visit = (n: ts.Node): void => {
+    if (
+      ts.isPropertyAssignment(n) &&
+      ts.isIdentifier(n.name) &&
+      n.name.text === "content"
+    ) {
+      out.push({ line: at(n), expr: n.initializer });
+    }
+    if (
+      ts.isCallExpression(n) &&
+      ts.isPropertyAccessExpression(n.expression) &&
+      REPLY_METHODS.has(n.expression.name.text) &&
+      n.arguments[0]
+    ) {
+      out.push({ line: at(n), expr: n.arguments[0] });
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+function errorReplyProblems(source: string, file = "commands/x.ts"): string[] {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const inCommands = file.startsWith("commands/");
+  return replyTextExpressions(sf).flatMap(({ line, expr }) => {
+    const problems: string[] = [];
+    for (const text of replyTexts(sf, expr)) {
+      if (CROSS_MARK.test(text) || (!inCommands && WARNING_SIGN.test(text))) {
+        problems.push(
+          `${line}: reply text starts with "❌" or "⚠️"; use replyWithError (utils/error-reply.ts)`,
+        );
+      }
+      if (GENERIC_FAILURE.test(text)) {
+        problems.push(
+          `${line}: reply text is a generic error line; use replyWithUnexpectedError (utils/error-reply.ts)`,
+        );
+      }
+    }
+    return [...new Set(problems)];
+  });
+}
+
+/** The sources that answer members in Discord: commands, component handlers, the dispatcher. */
+function errorReplyFiles(): string[] {
+  return [
+    ...walk(path.join(SRC, "commands")),
+    ...walk(path.join(SRC, "handlers")),
+    path.join(SRC, "index.ts"),
+  ];
+}
+
+describe("discord error reply guard (#1509, #1510)", () => {
+  it("scans the commands, the component handlers and the dispatcher (self-test)", () => {
+    const scanned = errorReplyFiles().map((f) => rel(f, SRC));
+    expect(scanned).toEqual(
+      expect.arrayContaining([
+        "index.ts",
+        "handlers/vc-control-button-handler.ts",
+        "handlers/lfg-button-handler.ts",
+        "commands/lfg.ts",
+      ]),
+    );
+  });
+
+  it("has no ❌ or generic-error reply text in src/commands, src/handlers or src/index.ts", () => {
+    const hits = errorReplyFiles().flatMap((file) =>
+      errorReplyProblems(fs.readFileSync(file, "utf8"), rel(file, SRC)).map(
+        (p) => `${rel(file, SRC)}:${p}`,
+      ),
+    );
+    expect(hits).toEqual([]);
+  });
+
+  it("catches the failure texts it is meant to catch (self-test)", () => {
+    for (const bad of [
+      'await interaction.reply({ content: "❌ Quote not found." });',
+      "await interaction.editReply({ content: `❌ Failed: ${why}` });",
+      'await interaction.editReply("❌ Tell me what you want to play.");',
+      'await safeReply(interaction, { content: "There was an error while executing this command!" });',
+      'await interaction.reply({ content: "there was an error posting your LFG." });',
+      'const m = "❌ nope";\nawait interaction.reply({ content: m });',
+      'await interaction.reply({ content: ok ? "Done" : "❌ nope" });',
+      'await interaction.reply({ content: "❌ " + reason });',
+      'await interaction.followUp("There was an error recording the warning.");',
+      'await safeReply(interaction, { content: "❌ An error occurred while processing your request." });',
+      'await safeReply(interaction, { content: "An error occurred while processing your request." });',
+    ]) {
+      expect(errorReplyProblems(bad)).not.toEqual([]);
+    }
+    // A warning sign leads a failure in a handler or the dispatcher.
+    for (const bad of [
+      'await interaction.reply({ content: "⚠️ The waiting room no longer exists.", flags });',
+      'await interaction.editReply({ content: "⚠ Gone", embeds: [], components: [] });',
+    ]) {
+      expect(errorReplyProblems(bad, "handlers/x.ts")).not.toEqual([]);
+      expect(errorReplyProblems(bad, "index.ts")).not.toEqual([]);
+      // ...but is left alone in commands/ (see WARNING_SIGN).
+      expect(errorReplyProblems(bad, "commands/x.ts")).toEqual([]);
+    }
+  });
+
+  it("leaves the texts it must not touch alone (self-test)", () => {
+    for (const fine of [
+      'await replyWithError(interaction, { title: "Couldn\'t post your LFG", next: "Try again." });',
+      "await replyWithUnexpectedError(interaction);",
+      'await interaction.editReply({ content: "✅ Quote updated successfully!" });',
+      "await interaction.reply({ content: `Posted for ${game}` });",
+      "// await interaction.reply({ content: '❌ old' });",
+      'logger.error("There was an error while executing this command!");',
+      "await interaction.editReply({ content: result.message });",
+      'await interaction.editReply({ content: "", embeds: [e], components: [] });',
+      'await safeReply(interaction, { content: "You\'re in — 2 spot(s) left." });',
+    ]) {
+      expect(errorReplyProblems(fine)).toEqual([]);
     }
   });
 });

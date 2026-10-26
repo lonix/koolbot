@@ -7,7 +7,10 @@ import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { discordTimestamp } from "../utils/discord-time.js";
 import { NO_MENTIONS } from "../utils/allowed-mentions.js";
 import logger from "../utils/logger.js";
-import { safeReply } from "../utils/safe-reply.js";
+import {
+  replyWithError,
+  replyWithUnexpectedError,
+} from "../utils/error-reply.js";
 import {
   HIDDEN_CHANNEL_LABEL,
   visibleChannelName,
@@ -29,7 +32,11 @@ export async function execute(
   try {
     const targetUser = interaction.options.getUser("user");
     if (!targetUser) {
-      await interaction.reply("Please specify a user to check.");
+      // Before the defer, so the helper replies ephemerally.
+      await replyWithError(interaction, {
+        title: "Couldn't check that user",
+        next: "Pick a user, then try again.",
+      });
       return;
     }
 
@@ -74,10 +81,8 @@ export async function execute(
     });
   } catch (error) {
     logger.error("Error in seen command:", error);
-    // Public on purpose: once deferred, visibility is fixed and safeReply
-    // edits the public placeholder, so an ephemeral flag would be a lie.
-    await safeReply(interaction, {
-      content: "There was an error while executing this command!",
-    });
+    // Public on purpose: once deferred, visibility is fixed and the helper
+    // edits the public placeholder, so it does not claim to be ephemeral.
+    await replyWithUnexpectedError(interaction);
   }
 }

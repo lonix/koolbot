@@ -298,7 +298,7 @@ describe("Privacy section visibility on /me pages (#1066)", () => {
 
     expect(captured.statusCode).toBe(200);
     expect(captured.body).toContain('href="/me/privacy"');
-    expect(captured.body).toContain("See what Koolbot stores about you");
+    expect(captured.body).toContain("See what KoolBot stores about you");
   });
 
   it("hides the nav entry and overview card when disabled", async () => {
@@ -307,7 +307,7 @@ describe("Privacy section visibility on /me pages (#1066)", () => {
 
     expect(captured.statusCode).toBe(200);
     expect(captured.body).not.toContain("/me/privacy");
-    expect(captured.body).not.toContain("See what Koolbot stores about you");
+    expect(captured.body).not.toContain("See what KoolBot stores about you");
   });
 
   it("hides the nav entry on other /me pages too", async () => {

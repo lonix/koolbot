@@ -20,6 +20,7 @@ import {
   parseFlashRedirect,
   type AdminHarness,
 } from "./admin-harness.js";
+import { refusal } from "./refused-form-test-utils.js";
 
 const mockRecordAudit = jest.fn(async () => undefined);
 const mockConfigGetBoolean = jest.fn<() => Promise<boolean>>();
@@ -88,6 +89,8 @@ const { createQuotesRouter } =
   await import("../../src/web/routes/write/quotes.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
+const { registerFormPage } = await import("../../src/web/form-pages.js");
+const { renderQuotesPage } = await import("../../src/web/admin-views.js");
 
 const client = { user: { id: "bot" } } as unknown as Client;
 const session = createTestSession();
@@ -105,8 +108,49 @@ const STORED = {
   postChannelId: "444444444444444444",
 };
 
+// The read router registers the page's renderer in the app (#1520); here the
+// real view stands in, with the stored quote on the page the request names, so
+// a refusal is checked as the markup the person gets.
+const registerPage = (): void =>
+  registerFormPage("/admin/quotes", async (req, refused) => {
+    const page = Number(req.query.page ?? 1) || 1;
+    return renderQuotesPage({
+      guildId: "guild-1",
+      csrfToken: "csrf",
+      remainingMs: 1000,
+      navFeatureStatus: {},
+      enabled: true,
+      channel: null,
+      headerMessageId: "",
+      settingRows: [],
+      maxLength: 1000,
+      rows:
+        page === 2
+          ? [
+              {
+                id: QUOTE_ID,
+                content: "old text",
+                authorId: AUTHOR,
+                authorLabel: "Ada",
+                addedByLabel: "Bo",
+                addedAt: "2026-01-01",
+                likes: 0,
+                dislikes: 0,
+                messageId: "m1",
+              },
+            ]
+          : [],
+      total: 26,
+      page,
+      pageSize: 25,
+      search: String(req.query.q ?? ""),
+      refusedForm: refused,
+    });
+  });
+
 beforeEach(async () => {
   jest.clearAllMocks();
+  registerPage();
   mockConfigGetBoolean.mockResolvedValue(true);
   mockConfigGetNumber.mockResolvedValue(1000);
   mockGetQuoteById.mockResolvedValue(STORED);
@@ -153,26 +197,54 @@ describe("POST /quotes/:id/edit", () => {
     expect(mockEditQuote).not.toHaveBeenCalled();
   });
 
-  it("requires the quote text", async () => {
-    const flash = parseFlashRedirect(
-      (await edit({ content: "", author_id: AUTHOR })).headers.get("location"),
+  const PAGE_2 = `/quotes/${QUOTE_ID}/edit?page=2`;
+
+  it("marks a missing quote text and says what to enter", async () => {
+    const res = await harness.post(PAGE_2, { content: "", author_id: AUTHOR });
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual([`quote-edit-${QUOTE_ID}-content`]);
+    expect(r.errorLines[`quote-edit-${QUOTE_ID}-content-error`]).toBe(
+      "Enter the quote.",
     );
-    expect(flash).toMatchObject({
-      path: "/admin/quotes",
-      type: "err",
-      msg: "Quote text is required.",
+    expect(mockEditQuote).not.toHaveBeenCalled();
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("marks an author that isn't a snowflake and keeps both typed values", async () => {
+    const res = await harness.post(PAGE_2, {
+      content: "  new text ",
+      author_id: " bob ",
     });
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual([`quote-edit-${QUOTE_ID}-author_id`]);
+    expect(r.errorLines[`quote-edit-${QUOTE_ID}-author_id-error`]).toBe(
+      "Enter the Discord user ID of the author: 17 to 20 digits.",
+    );
+    expect(r.html).toContain('value=" bob "');
+    expect(r.html).toContain("\n  new text </textarea>");
+    expect(r.html).toContain(
+      '<details class="helper edit-details" open><summary>Edit</summary>',
+    );
     expect(mockEditQuote).not.toHaveBeenCalled();
   });
 
-  it("rejects an author that isn't a snowflake", async () => {
-    const flash = parseFlashRedirect(
-      (await edit({ content: "new", author_id: "bob" })).headers.get(
-        "location",
-      ),
+  it("answers on the page the edit form was on, not only the first page", async () => {
+    // The form's action carries the page and the search, so the refusal draws
+    // the page that holds the quote. Without them the stand-in has no row and
+    // the refusal degrades to a flash.
+    const onPage1 = await harness.post(`/quotes/${QUOTE_ID}/edit`, {
+      content: "",
+      author_id: AUTHOR,
+    });
+    expect(onPage1.status).toBe(303);
+    expect(parseFlashRedirect(onPage1.headers.get("location")).msg).toBe(
+      "Not saved. Enter the quote.",
     );
-    expect(flash.msg).toContain("Discord user ID");
-    expect(mockEditQuote).not.toHaveBeenCalled();
+    const onPage2 = await harness.post(PAGE_2, {
+      content: "",
+      author_id: AUTHOR,
+    });
+    expect(onPage2.status).toBe(422);
   });
 
   it("accepts a mention-form author and stores the bare ID", async () => {
@@ -182,13 +254,61 @@ describe("POST /quotes/:id/edit", () => {
 
   it("rejects text past quotes.max_length before touching the post", async () => {
     mockConfigGetNumber.mockResolvedValue(5);
-    const flash = parseFlashRedirect(
-      (await edit({ content: "too long", author_id: AUTHOR })).headers.get(
-        "location",
-      ),
+    const res = await harness.post(PAGE_2, {
+      content: "too long",
+      author_id: AUTHOR,
+    });
+    const r = await refusal(res);
+    expect(r.errorLines[`quote-edit-${QUOTE_ID}-content-error`]).toBe(
+      "At most 5 characters.",
     );
-    expect(flash.msg).toContain("Maximum length is 5");
+    expect(r.html).toContain("\ntoo long</textarea>");
     expect(mockUpdateQuoteMessage).not.toHaveBeenCalled();
+    expect(mockEditQuote).not.toHaveBeenCalled();
+  });
+
+  it("still refuses a missing author when the config read fails", async () => {
+    mockConfigGetNumber.mockRejectedValue(new Error("config down"));
+    const res = await harness.post(PAGE_2, { content: "new", author_id: "x" });
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual([`quote-edit-${QUOTE_ID}-author_id`]);
+  });
+
+  it("reports a failed config read on a valid edit as a failure flash", async () => {
+    mockConfigGetNumber.mockRejectedValue(new Error("config down"));
+    const res = await edit({ content: "new", author_id: AUTHOR });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("config down");
+    expect(mockEditQuote).not.toHaveBeenCalled();
+  });
+
+  it("answers the not-found flash when a refused quote has been deleted", async () => {
+    mockGetQuoteById.mockResolvedValue(null);
+    const res = await harness.post(PAGE_2, { content: "", author_id: AUTHOR });
+    expect(res.status).toBe(303);
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
+      `Quote ${QUOTE_ID} not found.`,
+    );
+  });
+
+  it("answers the not-found flash for a refused edit of a malformed id", async () => {
+    const res = await harness.post("/quotes/not-an-id/edit", {
+      content: "",
+      author_id: AUTHOR,
+    });
+    expect(res.status).toBe(303);
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
+      "Quote not-an-id not found.",
+    );
+    expect(mockGetQuoteById).not.toHaveBeenCalled();
+  });
+
+  it("still answers the refusal when the existence lookup fails", async () => {
+    mockGetQuoteById.mockRejectedValue(new Error("db down"));
+    const res = await harness.post(PAGE_2, { content: "", author_id: AUTHOR });
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual([`quote-edit-${QUOTE_ID}-content`]);
     expect(mockEditQuote).not.toHaveBeenCalled();
   });
 

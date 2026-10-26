@@ -162,6 +162,36 @@ describe("safeReply", () => {
     ).resolves.toBe(false);
   });
 
+  it("followUp option sends a deferred interaction's answer as a followUp", async () => {
+    const interaction = makeInteraction({ deferred: true });
+
+    const delivered = await safeReply(
+      interaction as never,
+      { content: "boom", flags: MessageFlags.Ephemeral },
+      { followUp: true },
+    );
+
+    expect(delivered).toBe(true);
+    expect(interaction.followUp).toHaveBeenCalledWith({
+      content: "boom",
+      flags: MessageFlags.Ephemeral,
+    });
+    expect(interaction.editReply).not.toHaveBeenCalled();
+  });
+
+  it("followUp option changes nothing on a fresh interaction", async () => {
+    const interaction = makeInteraction();
+
+    await safeReply(
+      interaction as never,
+      { content: "boom" },
+      { followUp: true },
+    );
+
+    expect(interaction.reply).toHaveBeenCalledTimes(1);
+    expect(interaction.followUp).not.toHaveBeenCalled();
+  });
+
   it("swallows a non-Error rejection", async () => {
     const interaction = makeInteraction();
     interaction.reply.mockRejectedValue("string failure" as never);

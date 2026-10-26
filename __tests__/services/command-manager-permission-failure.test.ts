@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
+import { errorEmbedPayload } from "../test-utils.js";
 import { CommandManager } from "../../src/services/command-manager.js";
 import {
   PermissionCheckError,
@@ -87,9 +88,12 @@ describe("CommandManager.executeCommand permission availability (#836)", () => {
 
     expect(executeFunction).not.toHaveBeenCalled();
     expect(interaction.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("try again"),
-        flags: MessageFlags.Ephemeral,
+      expect.objectContaining({ flags: MessageFlags.Ephemeral }),
+    );
+    expect(interaction.reply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't check your permissions",
+        description: expect.stringContaining("Try again"),
       }),
     );
   });
@@ -101,8 +105,9 @@ describe("CommandManager.executeCommand permission availability (#836)", () => {
 
     expect(executeFunction).not.toHaveBeenCalled();
     expect(interaction.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("don't have permission"),
+      errorEmbedPayload({
+        title: "You can't use this command",
+        description: expect.stringContaining("don't have permission"),
       }),
     );
   });

@@ -1,5 +1,7 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import type { ChatInputCommandInteraction } from "discord.js";
+import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
+
+import { errorEmbedPayload, unexpectedErrorPayload } from "../test-utils.js";
 
 const mockGetActiveSession = jest.fn<() => unknown>();
 const mockGetUserLastSeen = jest.fn<() => Promise<Date | null>>();
@@ -56,7 +58,13 @@ function makeInteraction(
     replied: false,
     deferred: false,
     reply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    deferReply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    // Like discord.js: deferring marks the interaction, which is what makes a
+    // failure answer edit the deferred reply instead of replying again.
+    deferReply: jest
+      .fn<() => Promise<void>>()
+      .mockImplementation(async function (this: unknown) {
+        (this as { deferred: boolean }).deferred = true;
+      }),
     editReply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
   } as unknown as MockInteraction;
 }
@@ -245,8 +253,15 @@ describe("Seen Command", () => {
       await execute(interaction);
 
       expect(interaction.deferReply).not.toHaveBeenCalled();
+      // Ephemeral: it runs before the defer, so nothing is public yet.
       expect(interaction.reply).toHaveBeenCalledWith(
-        "Please specify a user to check.",
+        expect.objectContaining({ flags: MessageFlags.Ephemeral }),
+      );
+      expect(interaction.reply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "Couldn't check that user",
+          description: "Pick a user, then try again.",
+        }),
       );
     });
 
@@ -261,9 +276,7 @@ describe("Seen Command", () => {
 
       expect(interaction.reply).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: "There was an error while executing this command!",
-        }),
+        unexpectedErrorPayload(),
       );
     });
   });
