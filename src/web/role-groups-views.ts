@@ -6,6 +6,7 @@ import {
   type NavFeatureStatus,
 } from "./admin-layout.js";
 import { renderFlash, type FlashMessage } from "./admin-views.js";
+import { formView, type FormView, type RefusedForm } from "./form-errors.js";
 import { renderAdoptionDiff } from "./adoption-diff.js";
 import { roleMention } from "./discord-labels.js";
 import {
@@ -94,26 +95,52 @@ export interface RoleGroupsPageProps {
   globalPolicy: string;
   /** Id of a running/finished apply the page should report on. */
   jobId?: string | null;
+  /** The create or edit form the last save refused (#1523). */
+  refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
 }
 
+/** Form id of the Add group form (#1523). */
+export const ROLE_GROUP_CREATE_FORM = "role-group-create";
+
+/** Form id of one group's Edit form (#1523). */
+export const roleGroupEditForm = (groupId: string): string =>
+  `role-group-edit-${groupId}`;
+
+/**
+ * The key a ticked capability or permission box has in a refused form's values
+ * (`capability-admin`, `perm-BanMembers`): the submission is a list, a form
+ * view holds one string per name.
+ */
+export const roleGroupBoxKey = (
+  kind: "capability" | "perm",
+  value: string,
+): string => `${kind}-${value}`;
+
 const PERMISSION_NAMES = Object.keys(PermissionsBitField.Flags);
 
-function permissionChecks(bits: string | null): string {
+function permissionChecks(bits: string | null, f: FormView): string {
   const set = new PermissionsBitField(BigInt(bits ?? "0"));
   return PERMISSION_NAMES.map((name) => {
     const flag = PermissionsBitField.Flags[
       name as keyof typeof PermissionsBitField.Flags
     ] as bigint;
-    return `<label class="check"><input type="checkbox" name="perm" value="${escapeHtml(name)}"${set.has(flag) ? " checked" : ""}> ${escapeHtml(name)}</label>`;
+    const on = f.checked(roleGroupBoxKey("perm", name), set.has(flag));
+    return `<label class="check"><input type="checkbox" name="perm" value="${escapeHtml(name)}"${on ? " checked" : ""}> ${escapeHtml(name)}</label>`;
   }).join(" ");
 }
 
-function capabilityChecks(caps: readonly string[], disabled: boolean): string {
-  return ROLE_GROUP_CAPABILITIES.map(
-    (c) =>
-      `<label class="check"><input type="checkbox" name="capability" value="${c}"${caps.includes(c) ? " checked" : ""}${disabled ? " disabled" : ""}> ${escapeHtml(capabilityLabel(c))}</label>`,
-  ).join(" ");
+function capabilityChecks(
+  caps: readonly string[],
+  disabled: boolean,
+  f: FormView,
+): string {
+  return ROLE_GROUP_CAPABILITIES.map((c, i) => {
+    const on = f.checked(roleGroupBoxKey("capability", c), caps.includes(c));
+    // The error belongs to the group of boxes; the first box carries it.
+    const refused = i === 0 ? f.attrs("capability") : "";
+    return `<label class="check"><input type="checkbox" name="capability" value="${c}"${on ? " checked" : ""}${disabled ? " disabled" : ""}${refused}> ${escapeHtml(capabilityLabel(c))}</label>`;
+  }).join(" ");
 }
 
 const presetSelect = (): string =>
@@ -194,29 +221,45 @@ function roleCell(g: RoleGroupRow): string {
   return `${name} <span class="mono muted">${escapeHtml(g.roleId)}</span> ${badges}`;
 }
 
-function editForm(g: RoleGroupRow, csrf: string, globalPolicy: string): string {
+function editForm(
+  g: RoleGroupRow,
+  csrf: string,
+  globalPolicy: string,
+  refused?: RefusedForm | null,
+): string {
+  const f = formView(refused, roleGroupEditForm(g.id));
   const locked = g.gateOnly || g.roleLock !== null;
-  return `<details><summary>Edit</summary>
+  return `<details${f.open()}><summary>Edit</summary>
 <form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/edit" class="stack">
 ${csrf}
-<label>Name <input type="text" name="name" value="${escapeHtml(g.name)}" maxlength="100" required></label>
-<fieldset><legend>Capabilities</legend>${capabilityChecks(g.capabilities, g.gateOnly)}
+<label>Name <input type="text" name="name" value="${escapeHtml(f.value("name", g.name))}" maxlength="100" required${f.attrs("name")}></label>${f.error("name")}
+<fieldset><legend>Capabilities</legend>${capabilityChecks(g.capabilities, g.gateOnly, f)}${f.error("capability")}
 <p class="muted">Features ask for capabilities instead of role ids. <strong>Admin</strong> also counts as <strong>Moderator</strong> and <strong>Event host</strong>. <strong>Event host</strong> lets members open the host panel of events they created, from <code>/me</code>; <strong>Moderator</strong> opens the moderation pages in <code>/me</code>; neither opens the admin console. <strong>Bot</strong> groups only ever match bot accounts.</p></fieldset>
 ${
   locked
     ? `<p class="muted">The role is ${g.gateOnly ? "integration-managed" : "locked"}, so its permissions and colour are not edited.</p>`
     : `${presetSelect()}
 <fieldset><legend>Permissions${g.permissions === null ? " (currently left as they are)" : ""}</legend>
-<label class="check"><input type="checkbox" name="editPermissions" value="1"${g.permissions !== null ? " checked" : ""}> Set the role's permissions to the selection below</label>
-${permissionChecks(g.permissions)}</fieldset>
-<label>Colour <input type="text" name="colour" value="${escapeHtml(formatColour(g.colour))}" placeholder="#RRGGBB (empty = leave as is)" maxlength="7"></label>`
+<label class="check"><input type="checkbox" name="editPermissions" value="1"${f.checked("editPermissions", g.permissions !== null) ? " checked" : ""}> Set the role's permissions to the selection below</label>
+${permissionChecks(g.permissions, f)}</fieldset>
+<label>Colour <input type="text" name="colour" value="${escapeHtml(f.value("colour", formatColour(g.colour)))}" placeholder="#RRGGBB (empty = leave as is)" maxlength="7"${f.attrs("colour")}></label>${f.error("colour")}`
 }
-<label>When its Discord role changes <select name="syncPolicy"><option value=""${g.syncPolicy === null ? " selected" : ""}>Use the global setting (${escapeHtml(POLICY_LABELS[resolvePolicy({ syncPolicy: null }, globalPolicy)] ?? globalPolicy)})</option>${ROLE_GROUP_SYNC_POLICIES.map(
-    (p) =>
-      `<option value="${p}"${g.syncPolicy === p ? " selected" : ""}>${escapeHtml(POLICY_LABELS[p])}</option>`,
-  ).join("")}</select></label>
+<label>When its Discord role changes <select name="syncPolicy">${syncPolicyOptions(g.syncPolicy, globalPolicy, f)}</select></label>
 <button type="submit" class="btn btn-primary">Save group</button>
 </form></details>`;
+}
+
+/** The options of the sync-policy select; a refused form keeps the chosen one. */
+function syncPolicyOptions(
+  stored: string | null,
+  globalPolicy: string,
+  f: FormView,
+): string {
+  const chosen = f.selected("syncPolicy", stored ?? "");
+  return `<option value=""${chosen === "" ? " selected" : ""}>Use the global setting (${escapeHtml(POLICY_LABELS[resolvePolicy({ syncPolicy: null }, globalPolicy)] ?? globalPolicy)})</option>${ROLE_GROUP_SYNC_POLICIES.map(
+    (p) =>
+      `<option value="${p}"${chosen === p ? " selected" : ""}>${escapeHtml(POLICY_LABELS[p])}</option>`,
+  ).join("")}`;
 }
 
 function deleteForm(g: RoleGroupRow, csrf: string): string {
@@ -332,7 +375,7 @@ function renderGroups(props: RoleGroupsPageProps, csrf: string): string {
 <td>${g.memberCount === null ? `<span class="muted">?</span>` : g.memberCount}</td>
 <td>${caps}</td>
 <td>${move("up", i === 0)} ${move("down", i === last)}</td>
-<td>${editForm(g, csrf, props.globalPolicy)} ${deleteForm(g, csrf)}</td>
+<td>${editForm(g, csrf, props.globalPolicy, props.refusedForm)} ${deleteForm(g, csrf)}</td>
 </tr>`;
     })
     .join("");
@@ -341,6 +384,8 @@ function renderGroups(props: RoleGroupsPageProps, csrf: string): string {
 }
 
 function renderAddForm(props: RoleGroupsPageProps, csrf: string): string {
+  const f = formView(props.refusedForm, ROLE_GROUP_CREATE_FORM);
+  const pickedRole = f.selected("roleId", "");
   const options = props.roleOptions
     .map((r) => {
       const disabled =
@@ -354,20 +399,20 @@ function renderAddForm(props: RoleGroupsPageProps, csrf: string): string {
         : usedNote || (r.lock ? ROLE_LOCK_LABELS[r.lock] : "");
       const count =
         r.memberCount === null ? "" : ` · ${r.memberCount} member(s)`;
-      return `<option value="${escapeHtml(r.id)}"${disabled ? " disabled" : ""}>@${escapeHtml(r.name)}${escapeHtml(count)}${note ? ` — ${escapeHtml(note)}` : ""}</option>`;
+      return `<option value="${escapeHtml(r.id)}"${disabled ? " disabled" : ""}${r.id === pickedRole ? " selected" : ""}>@${escapeHtml(r.name)}${escapeHtml(count)}${note ? ` — ${escapeHtml(note)}` : ""}</option>`;
     })
     .join("");
   return `<form method="POST" action="/admin/role-groups/create" class="stack">
 ${csrf}
-<label>Backing role <select name="roleId"><option value="">Create a new role</option>${options}</select></label>
+<label>Backing role <select name="roleId"${f.attrs("roleId")}><option value="">Create a new role</option>${options}</select></label>${f.error("roleId")}
 <p class="muted">Linking an existing role keeps its members and never changes its permissions unless you edit them. Integration-managed roles (Server Booster, subscriptions) become gate-only groups: they can be used for gating but are never edited.</p>
-<label>Name <input type="text" name="name" maxlength="100" placeholder="(a linked role's own name if empty)"></label>
-<fieldset><legend>Capabilities</legend>${capabilityChecks([], false)}</fieldset>
+<label>Name <input type="text" name="name" maxlength="100" placeholder="(a linked role's own name if empty)"${f.valueAttr("name")}${f.attrs("name")}></label>${f.error("name")}
+<fieldset><legend>Capabilities</legend>${capabilityChecks([], false, f)}${f.error("capability")}</fieldset>
 ${presetSelect()}
 <fieldset><legend>Permissions (new roles; an existing role is left alone unless you tick below)</legend>
-<label class="check"><input type="checkbox" name="editPermissions" value="1"> Set the role's permissions to the selection below</label>
-${permissionChecks(null)}</fieldset>
-<label>Colour <input type="text" name="colour" placeholder="#RRGGBB (optional)" maxlength="7"></label>
+<label class="check"><input type="checkbox" name="editPermissions" value="1"${f.checked("editPermissions") ? " checked" : ""}> Set the role's permissions to the selection below</label>
+${permissionChecks(null, f)}</fieldset>
+<label>Colour <input type="text" name="colour" placeholder="#RRGGBB (optional)" maxlength="7"${f.valueAttr("colour")}${f.attrs("colour")}></label>${f.error("colour")}
 <button type="submit" class="btn btn-primary">Add group</button>
 </form>`;
 }

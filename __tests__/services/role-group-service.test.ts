@@ -311,6 +311,12 @@ describe("writes", () => {
     expect(dup).toMatchObject({
       ok: false,
       error: expect.stringMatching(/already backs/),
+      field: "roleId",
+    });
+    // A refusal names the field it is about (#1523).
+    expect(await svc.create(G, { name: "low" })).toMatchObject({
+      ok: false,
+      field: "name",
     });
   });
 
@@ -325,7 +331,7 @@ describe("writes", () => {
       name: "Boost",
       capabilities: ["staff"],
     });
-    expect(bad.ok).toBe(false);
+    expect(bad).toMatchObject({ ok: false, field: "capability" });
     const ok = await svc.update(G, created.group.id, {
       name: "Booster",
       permissions: "8",

@@ -2732,37 +2732,45 @@ export function createReadOnlyRouter(
   );
 
   // ---------- Role Groups (#1020) ----------
+  const renderRoleGroups = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const session = req.webSession;
+    if (!session) throw new Error("requireSession middleware must run first");
+    const jobParam = req.query.job;
+    const data = await loadRoleGroupsPage(
+      client,
+      common.guildId,
+      session.discordUserId,
+    );
+    // Role groups have no switch: they are in use once the server has one.
+    const permissionNotice = await loadPermissionNotice({
+      client,
+      guildId: common.guildId,
+      enabled: data.groups.length > 0,
+      filter: (f) => f.area === "Role groups" || f.id === "log-role-groups",
+    });
+    return renderRoleGroupsPage({
+      refusedForm,
+      ...common,
+      ...data,
+      permissionNotice,
+      jobId:
+        typeof jobParam === "string" && /^[0-9a-f-]{36}$/i.test(jobParam)
+          ? jobParam
+          : null,
+      flash: readFlash(req),
+    });
+  };
+  registerFormPage("/admin/role-groups", (req, refused) =>
+    renderRoleGroups(req as AuthenticatedRequest, refused),
+  );
   router.get(
     "/role-groups",
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
-      const session = req.webSession;
-      if (!session) throw new Error("requireSession middleware must run first");
-      const jobParam = req.query.job;
-      const data = await loadRoleGroupsPage(
-        client,
-        common.guildId,
-        session.discordUserId,
-      );
-      // Role groups have no switch: they are in use once the server has one.
-      const permissionNotice = await loadPermissionNotice({
-        client,
-        guildId: common.guildId,
-        enabled: data.groups.length > 0,
-        filter: (f) => f.area === "Role groups" || f.id === "log-role-groups",
-      });
-      res.type("text/html").send(
-        renderRoleGroupsPage({
-          ...common,
-          ...data,
-          permissionNotice,
-          jobId:
-            typeof jobParam === "string" && /^[0-9a-f-]{36}$/i.test(jobParam)
-              ? jobParam
-              : null,
-          flash: readFlash(req),
-        }),
-      );
+      res.type("text/html").send(await renderRoleGroups(req, null));
     }),
   );
 
