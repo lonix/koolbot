@@ -298,13 +298,16 @@ describe("/quote edit", () => {
   });
 
   it("acknowledges before it reads the quote (#842)", async () => {
+    mockGetQuoteById.mockResolvedValue(null);
     const it_ = interaction(base);
-    mockGetQuoteById.mockImplementation(async () => {
-      expect(it_.deferReply).toHaveBeenCalledTimes(1);
-      return null;
-    });
     await execute(it_);
+    // Compare call order after execute(): an expect inside a mock
+    // implementation would be swallowed by the command's try/catch.
+    expect(it_.deferReply).toHaveBeenCalledTimes(1);
     expect(mockGetQuoteById).toHaveBeenCalledTimes(1);
+    expect(it_.deferReply.mock.invocationCallOrder[0]).toBeLessThan(
+      mockGetQuoteById.mock.invocationCallOrder[0],
+    );
   });
 
   it("finishes a successful edit with editReply", async () => {
