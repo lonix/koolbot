@@ -950,6 +950,26 @@ describe("BirthdayService", () => {
       expect(await svc.getBirthday("u1", "g1")).toBeNull();
     });
 
+    it("getBirthdayStrict maps a row and reads a missing one as null (#1508)", async () => {
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      mockBirthdayFindOne.mockResolvedValue(null);
+      expect(await svc.getBirthdayStrict("u1", "g1")).toBeNull();
+      mockBirthdayFindOne.mockResolvedValue({ month: 4, day: 2, year: 1990 });
+      expect(await svc.getBirthdayStrict("u1", "g1")).toEqual({
+        month: 4,
+        day: 2,
+        year: 1990,
+      });
+    });
+
+    it("getBirthdayStrict throws on a read error instead of reading as not set (#1508)", async () => {
+      mockBirthdayFindOne.mockRejectedValue(new Error("db down"));
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      await expect(svc.getBirthdayStrict("u1", "g1")).rejects.toThrow(
+        "db down",
+      );
+    });
+
     it("upserts a valid birthday and resets lastAnnouncedYear", async () => {
       mockBirthdayFindOne.mockResolvedValue(null);
       mockBirthdayFindOneAndUpdate.mockResolvedValue({

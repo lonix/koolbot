@@ -3667,15 +3667,15 @@ existing achievements award detection. `celebrations.enabled` depends on
 
 ### User self-service (`/me/*`, both admin and user roles)
 
-| Page                                    | What it's for                                                                                                                                             |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                                      |
-| **Notifications** (`/me/notifications`) | Opt in to DM nudges (achievements, weekly digest, Rewind). Off by default — Koolbot never DMs you until you opt in here. Records a `WebAuditLog` row.     |
-| **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete). Gated by `voicechannels.presets.enabled`.           |
-| **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in with a searchable select (_Server default_ clears it); also used for your birthday.                  |
-| **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row. |
-| **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.     |
-| **Privacy** (`/me/privacy`)             | See what Koolbot stores about you, download it as one JSON file, and (if `privacy.delete.enabled`) reset it. Gated by `privacy.enabled`; audited.         |
+| Page                                    | What it's for                                                                                                                                                                                                                             |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Overview** (`/me/`)                   | Opens with a live event you host (a panel linking to its host panel, with a _Live_ badge), then one card per available preference showing how it is set now, then your poll participation and your account ids as one line of fine print. |
+| **Notifications** (`/me/notifications`) | Opt in to DM nudges (achievements, weekly digest, Rewind) with a switch per message. Off by default — KoolBot never DMs you until you opt in here. Records a `WebAuditLog` row.                                                           |
+| **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete). Gated by `voicechannels.presets.enabled`.                                                                                           |
+| **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in with a searchable select (_Server default_ clears it); also used for your birthday.                                                                                                  |
+| **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row.                                                                                 |
+| **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.                                                                                     |
+| **Privacy** (`/me/privacy`)             | See what Koolbot stores about you, download it as one JSON file, and (if `privacy.delete.enabled`) reset it. Gated by `privacy.enabled`; audited.                                                                                         |
 
 **A switched-off feature is not shown on `/me/*` (#1292, extending #1066).**
 Voice, Birthday, Rewind and Privacy each follow their feature switch
@@ -3690,9 +3690,16 @@ cannot be read (a database error) the page answers an error rather than a
 `404`, so a hiccup never takes away a page that is on. The one list of what
 gates `/me` is `GATED_ME_SURFACES` in `src/web/me-surfaces.ts`.
 
+The **Overview** cards (a FeatureCard each, see `docs/design/components.md`) say how a preference is set without opening it. Notifications shows
+how many of the offered DMs are on ("2 of 3 on"). Timezone shows the zone and the time there ("Europe/Oslo · 10:59 now", or "Server default (UTC) · 10:59
+now"). Voice shows the name pattern or "Server default naming" and the number of presets. Birthday shows the date or "Not set". Privacy shows
+"Tracking on" or "Opted out of tracking". Rewind shows no value: its figures need a heavy read that has a rate limit of its own on the Rewind page. Only a
+running event is _Live_ and gets a panel; events that are planned are one line with a count that links to **Your events**. A card whose value could not
+be read shows no value line.
+
 When `polls.participation.enabled` is on and you have voted on at least
 one poll, the **Overview** page also shows a read-only **Poll
-participation** card — lifetime votes, this-year votes, this-week votes,
+participation** panel of tiles — lifetime votes, this-year votes, this-week votes,
 and when you last voted (#655, #816). The same per-year count surfaces on
 **Rewind** as the **Poll votes cast** stat, hidden in any year you cast no
 votes. The weekly figure comes from per-ISO-week buckets kept for

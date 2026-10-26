@@ -18,6 +18,8 @@ import {
   renderTimezoneSelect,
 } from "./setting-pickers.js";
 import { hostPanelPath } from "./host-panel-shared.js";
+import { icon, type IconName } from "./icons.js";
+import { renderSwitch } from "./setting-controls.js";
 import type { MeSurfaceFlags } from "./me-surfaces.js";
 import {
   SESSION_LOW_MS,
@@ -172,9 +174,6 @@ const STYLE = [
   ".prefs-table th,.prefs-table td{text-align:left;padding:.6rem .5rem;vertical-align:top;border-bottom:1px solid var(--chrome)}",
   ".prefs-table th{font-weight:600;color:var(--text-secondary);font-size:.85rem;text-transform:uppercase;letter-spacing:.04em}",
   ".prefs-table tr:last-child td{border-bottom:0}",
-  ".prefs-table .toggle{display:flex;align-items:center;gap:.4rem;font-size:.85rem;color:var(--muted)}",
-  ".prefs-table .pref-desc{color:var(--muted);font-size:.85rem;margin-top:.15rem}",
-  ".prefs-table .pref-soon{display:block;color:var(--warn);font-size:.75rem;font-style:italic;margin-top:.15rem}",
   // Control borders use --control (3.97:1); the hairline --border was 1.58:1 (#855).
   `select.tz-select{width:100%;max-width:28rem;background:var(--bg);color:var(--text);border:1px solid var(--control);border-radius:4px;padding:.45rem .5rem;font-size:.9rem}`,
   ".tz-preview{margin-top:.75rem;font-size:.9rem;color:var(--text-secondary)}",
@@ -195,14 +194,6 @@ const STYLE = [
   ".preset-actions{display:flex;gap:.5rem;margin-top:.5rem}",
   ".preset-actions form{display:inline;margin:0}",
   ".form-actions{margin-top:1rem;display:flex;gap:.5rem;align-items:center}",
-  ".feature-list{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:.75rem}",
-  ".feature-list li{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.75rem 1rem}",
-  ".feature-list .feature-name{font-weight:600;display:block;margin-bottom:.2rem;color:var(--text)}",
-  ".feature-list .feature-desc{font-size:.8rem;color:var(--muted)}",
-  ".page-nav{display:flex;gap:.5rem;flex-wrap:wrap;margin:0 0 1.5rem}",
-  ".page-nav a{padding:.35rem .75rem;border-radius:4px;background:var(--surface);border:1px solid var(--border);color:var(--text-secondary);font-size:.85rem;font-weight:600}",
-  ".page-nav a:hover{background:var(--chrome);text-decoration:none;color:var(--on-primary)}",
-  ".page-nav a.active{background:var(--info-bg);border-color:var(--info-bg);color:var(--on-primary)}",
   ".rw-hero{background:linear-gradient(135deg,var(--lore-deep) 0%,var(--lore) 100%);border:1px solid var(--lore-fill);border-radius:8px;padding:1.5rem;margin:0 0 1rem;text-align:center}",
   ".rw-hero .total{font-size:2.5rem;font-weight:700;color:var(--on-primary);line-height:1.1}",
   ".rw-hero .compare{margin-top:.4rem;color:var(--lore-text);font-size:1rem}",
@@ -259,7 +250,6 @@ const STYLE = [
   // Keyboard focus (WCAG 2.4.7, #855): a visible ring on every interactive
   // element, with the nav / button hover surfaces mirrored for focus.
   `a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}`,
-  ".page-nav a:focus-visible{background:var(--chrome);text-decoration:none;color:var(--on-primary)}",
   `.skip-link{position:absolute;left:-999px;top:0;z-index:100;background:var(--primary);color:var(--on-primary);padding:.5rem .75rem;border-radius:0 0 4px 0;font-weight:600}`,
   ".skip-link:focus{left:0;text-decoration:none}",
   // Reflow (WCAG 1.4.10, #855): tighter gutters on narrow viewports.
@@ -328,7 +318,12 @@ export function renderUserPage(opts: UserPageOptions): string {
           privacyEnabled: opts.privacyEnabled,
         })
       : "";
-  const inner = `${renderScopeWhy(viewer, opts.active)}${tabs}${renderFlash(opts.flash)}${opts.body}`;
+  // The tabs get the Stack's gap to what follows; a page without tabs (the
+  // sidebar scopes) keeps its markup as it was.
+  const flash = renderFlash(opts.flash);
+  const inner = tabs
+    ? `${renderScopeWhy(viewer, opts.active)}<div class="kb-stack">${tabs}${flash}<div>${opts.body}</div></div>`
+    : `${renderScopeWhy(viewer, opts.active)}${flash}${opts.body}`;
   const content = sideNav
     ? `<div class="kb-shell">${sideNav}<main id="main" class="kb-main" tabindex="-1">${inner}</main></div>`
     : `<div class="shell"><main id="main" tabindex="-1">${inner}</main></div>`;
@@ -338,7 +333,7 @@ export function renderUserPage(opts: UserPageOptions): string {
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width,initial-scale=1">',
     '<meta name="referrer" content="strict-origin-when-cross-origin">',
-    `<title>${escapeHtml(opts.title)} — Koolbot</title>`,
+    `<title>${escapeHtml(opts.title)} — KoolBot</title>`,
     // tokens.css + kb.css first, so this page-local sheet can still override them.
     designStylesheetLinks("/me"),
     `<style>${STYLE}</style>`,
@@ -377,14 +372,13 @@ function renderPageNav(active: string, flags: UserFeatureFlags): string {
       const isActive =
         item.href === active ||
         (item.href === "/me/" && (active === "/me" || active === "/me/"));
-      const cls = isActive ? ' class="active"' : "";
       const current = isActive ? ' aria-current="page"' : "";
-      return `<a href="${escapeHtml(item.href)}"${cls}${current}>${escapeHtml(item.label)}</a>`;
+      return `<a href="${escapeHtml(item.href)}"${current}>${escapeHtml(item.label)}</a>`;
     })
     .join("");
   // Named so it stays distinguishable from a page body's own nav (the
   // Rewind year picker) — axe `landmark-unique`, #856.
-  return `<nav class="page-nav" aria-label="My preferences sections">${items}</nav>`;
+  return `<nav class="kb-tabs" aria-label="My preferences sections">${items}</nav>`;
 }
 
 function renderFlash(flash?: UserFlashMessage | null): string {
@@ -439,7 +433,19 @@ export function renderUserIndexBody(opts: {
     title: string;
     when: string;
     state: string;
+    /** `isEventRunning`: active and the start has arrived. */
+    running: boolean;
   }>;
+  /**
+   * How each preference is set now, as one short line for its card ("Europe/Oslo ·
+   * 10:59 now"). Plain text. A missing entry leaves the line out.
+   */
+  preferenceValues?: Partial<
+    Record<
+      "notifications" | "timezone" | "voice" | "birthday" | "privacy",
+      string
+    >
+  >;
   // The member's poll-participation summary (#655), or null/undefined when
   // poll-participation capture is off or the member has never voted. When
   // present, a small read-only "Poll participation" card surfaces their
@@ -455,114 +461,154 @@ export function renderUserIndexBody(opts: {
   } | null;
 }): string {
   const greeting = opts.isAdmin
-    ? `<p class="subtitle">Signed in as an administrator viewing your own preferences. Use the <em>Admin console</em> link above to manage the server.</p>`
-    : `<p class="subtitle">These pages are scoped to <strong>you</strong> — what you see and change here only affects your own data on this server.</p>`;
-  // A card per surface that is switched on; the rest are left out (#1292).
+    ? "Signed in as an administrator viewing your own preferences. Use the <em>Admin console</em> link above to manage the server."
+    : "These pages are scoped to <strong>you</strong> — what you see and change here only affects your own data on this server.";
+  const header =
+    '<header class="kb-pagehead"><div class="kb-pagehead__text">' +
+    '<h1 class="kb-pagehead__title">My preferences</h1>' +
+    `<p class="kb-pagehead__sub">${greeting}</p></div></header>`;
+
+  // One FeatureCard per preference the server has switched on (#1292), each
+  // saying how it is set now. `value` is plain text, escaped here; a missing
+  // value leaves the line out rather than printing a placeholder.
   const featureCard = (
-    surface: keyof MeSurfaceFlags,
+    surface: keyof MeSurfaceFlags | null,
     href: string,
+    iconName: IconName,
     label: string,
     desc: string,
+    value: string | undefined,
   ): string =>
-    isSurfaceOn(opts, surface)
-      ? `<li><span class="feature-name"><a href="${href}">${label}</a></span>` +
-        `<span class="feature-desc">${desc}</span></li>`
+    surface === null || isSurfaceOn(opts, surface)
+      ? '<div class="kb-feature">' +
+        `<div class="kb-feature__icon">${icon(iconName)}</div>` +
+        '<div class="kb-feature__body">' +
+        `<a class="kb-feature__name" href="${href}">${label}</a>` +
+        `<p class="kb-feature__desc">${desc}</p>` +
+        (value ? `<p class="kb-feature__value">${escapeHtml(value)}</p>` : "") +
+        "</div>" +
+        `<div class="kb-feature__aside">${icon("chevron-right", { className: "kb-chev" })}</div>` +
+        "</div>"
       : "";
-  const voiceCard = featureCard(
-    "presetsEnabled",
-    "/me/voice",
-    "Voice",
-    "Manage your channel name pattern and saved voice-channel presets.",
-  );
-  const birthdayCard = featureCard(
-    "birthdayEnabled",
-    "/me/birthday",
-    "Birthday",
-    "Set your birthday (the year is optional) so Koolbot can celebrate it on the day — in your own timezone.",
-  );
-  const rewindCard = featureCard(
-    "rewindEnabled",
-    "/me/rewind",
-    "Rewind",
-    "Your personal year-in-review of voice activity, top voice companions, peak day, and badges earned.",
-  );
-  const privacyCard = featureCard(
-    "privacyEnabled",
-    "/me/privacy",
-    "Privacy",
-    "See what Koolbot stores about you — and download all of it as a single JSON file.",
-  );
-  // Events the member created (#1189): one link per event to its host panel.
+  const values = opts.preferenceValues ?? {};
+  const featureCards = [
+    featureCard(
+      null,
+      "/me/notifications",
+      "bell",
+      "Notifications",
+      "Opt in or out of DM nudges from KoolBot.",
+      values.notifications,
+    ),
+    featureCard(
+      null,
+      "/me/timezone",
+      "clock",
+      "Timezone",
+      "Choose the timezone KoolBot uses when it shows you times, such as in <code>/voicestats</code>.",
+      values.timezone,
+    ),
+    featureCard(
+      "presetsEnabled",
+      "/me/voice",
+      "mic",
+      "Voice",
+      "Manage your channel name pattern and saved voice-channel presets.",
+      values.voice,
+    ),
+    featureCard(
+      "birthdayEnabled",
+      "/me/birthday",
+      "cake",
+      "Birthday",
+      "Set your birthday (the year is optional) so KoolBot can celebrate it on the day — in your own timezone.",
+      values.birthday,
+    ),
+    featureCard(
+      "rewindEnabled",
+      "/me/rewind",
+      "history",
+      "Rewind",
+      "Your personal year-in-review of voice activity, top voice companions, peak day, and badges earned.",
+      undefined,
+    ),
+    featureCard(
+      "privacyEnabled",
+      "/me/privacy",
+      "shield-check",
+      "Privacy",
+      "See what KoolBot stores about you — and download all of it as a single JSON file.",
+      values.privacy,
+    ),
+  ].join("");
+
+  // Events the member created (#1189). What is live right now leads the page
+  // (a Panel linking to each host panel, with the state as a word badge); the
+  // events still ahead are one line with a count that links to Your events.
+  // Only a running event is "Live": the words match `stateBadge` in
+  // `me-events-page.ts` (not imported, it would make an import cycle).
   const hosted = opts.hostedEvents ?? [];
-  const hostedCard =
-    hosted.length > 0
-      ? [
-          '<div class="card">',
-          "<h2>Events you host</h2>",
-          '<ul class="feature-list">',
-          ...hosted.map(
+  const live = hosted.filter((e) => e.running);
+  const upcoming = hosted.length - live.length;
+  const livePanel =
+    live.length > 0
+      ? '<section class="kb-panel" aria-labelledby="hosting-now-h">' +
+        '<header class="kb-panel__head">' +
+        `<h2 class="kb-panel__title" id="hosting-now-h">${live.length === 1 ? "Your event is live" : "Your events are live"}</h2></header>` +
+        '<div class="kb-panel__body kb-stack">' +
+        live
+          .map(
             (e) =>
-              `<li><span class="feature-name"><a href="${escapeHtml(hostPanelPath(e.id))}">Host panel: ${escapeHtml(e.title)}</a></span>` +
-              `<span class="feature-desc">${escapeHtml(e.when)} · ${escapeHtml(e.state)}</span></li>`,
-          ),
-          "</ul>",
-          "</div>",
-        ].join("")
+              '<div class="kb-row">' +
+              '<span class="kb-badge kb-badge--on">Live</span>' +
+              `<strong>${escapeHtml(e.title)}</strong>` +
+              `<span class="kb-muted">${escapeHtml(e.when)}</span>` +
+              `<a class="kb-btn kb-btn--sm kb-btn--primary" href="${escapeHtml(hostPanelPath(e.id))}" aria-label="Open the host panel for ${escapeHtml(e.title)}">Host panel</a>` +
+              "</div>",
+          )
+          .join("") +
+        "</div></section>"
       : "";
+  const upcomingLine =
+    upcoming > 0
+      ? `<p class="kb-help"><a href="/me/events">${upcoming} ${upcoming === 1 ? "event" : "events"}</a> you host ${upcoming === 1 ? "is" : "are"} planned.</p>`
+      : "";
+
   // Read-only poll-participation summary (#655). Only rendered when the
   // route supplies a summary (capture on + the member has a tracking row).
   const poll = opts.pollParticipation;
-  const pollCard = poll
-    ? [
-        '<div class="card">',
-        "<h2>Poll participation</h2>",
-        '<p class="muted">Your votes on server polls.' +
-          // Names Rewind only while it is on (#1292).
-          (isSurfaceOn(opts, "rewindEnabled")
-            ? " Capture this and you'll see your yearly tally on Rewind too."
-            : "") +
-          "</p>",
-        '<div class="rw-grid">',
-        '<div class="rw-stat"><div class="label">Votes cast (all time)</div>' +
-          `<div class="value">${poll.totalVotes}</div></div>`,
-        '<div class="rw-stat"><div class="label">Votes cast this year</div>' +
-          `<div class="value">${poll.thisYearVotes}</div></div>`,
-        typeof poll.thisWeekVotes === "number"
-          ? '<div class="rw-stat"><div class="label">Votes cast this week</div>' +
-            `<div class="value">${poll.thisWeekVotes}</div></div>`
-          : "",
-        '<div class="rw-stat"><div class="label">Last voted</div>' +
-          (poll.lastVoted
-            ? `<div class="value">${escapeHtml(poll.lastVoted)}</div></div>`
-            : '<div class="value">—</div></div>'),
-        "</div>",
-        "</div>",
-      ].join("")
+  const tile = (label: string, value: string): string =>
+    '<div class="kb-tile">' +
+    `<div class="kb-tile__top"><p class="kb-overline">${label}</p></div>` +
+    `<div class="kb-tile__value">${value}</div></div>`;
+  const pollPanel = poll
+    ? '<section class="kb-panel" aria-labelledby="poll-participation-h">' +
+      '<header class="kb-panel__head"><h2 class="kb-panel__title" id="poll-participation-h">Poll participation</h2></header>' +
+      '<div class="kb-panel__body kb-stack">' +
+      '<p class="kb-help">Your votes on server polls.' +
+      // Names Rewind only while it is on (#1292).
+      (isSurfaceOn(opts, "rewindEnabled")
+        ? " Capture this and you'll see your yearly tally on Rewind too."
+        : "") +
+      "</p>" +
+      '<div class="kb-tiles">' +
+      tile("Votes cast (all time)", String(poll.totalVotes)) +
+      tile("Votes cast this year", String(poll.thisYearVotes)) +
+      (typeof poll.thisWeekVotes === "number"
+        ? tile("Votes cast this week", String(poll.thisWeekVotes))
+        : "") +
+      tile("Last voted", poll.lastVoted ? escapeHtml(poll.lastVoted) : "—") +
+      "</div></div></section>"
     : "";
 
   return [
-    "<h1>My preferences</h1>",
-    greeting,
-    '<div class="card">',
-    "<h2>What you can manage</h2>",
-    `<p>Self-service settings scoped to you on this server.</p>`,
-    '<ul class="feature-list">',
-    '<li><span class="feature-name"><a href="/me/notifications">Notifications</a></span>' +
-      '<span class="feature-desc">Opt in or out of DM nudges from Koolbot.</span></li>',
-    '<li><span class="feature-name"><a href="/me/timezone">Timezone</a></span>' +
-      '<span class="feature-desc">Choose the timezone Koolbot uses when it shows you times, such as in <code>/voicestats</code>.</span></li>',
-    voiceCard,
-    birthdayCard,
-    rewindCard,
-    privacyCard,
-    "</ul>",
-    "</div>",
-    hostedCard,
-    pollCard,
-    '<div class="card">',
-    "<h2>Account context</h2>",
-    `<p class="mono">User: ${escapeHtml(opts.discordUserId)} · Guild: ${escapeHtml(opts.guildId)}</p>`,
-    "<p>To sign in as a different user, run <code>/me</code> in Discord with that account.</p>",
+    '<div class="kb-stack">',
+    header,
+    livePanel,
+    upcomingLine,
+    `<div class="kb-features">${featureCards}</div>`,
+    pollPanel,
+    `<p class="kb-help">User <span class="kb-mono">${escapeHtml(opts.discordUserId)}</span> · Server <span class="kb-mono">${escapeHtml(opts.guildId)}</span>. To sign in as someone else, run <span class="kb-mono">/me</span> with that account.</p>`,
     "</div>",
   ].join("");
 }
@@ -1107,7 +1153,7 @@ export function renderUserBirthdayBody(opts: BirthdayPageBodyOptions): string {
   const hasBirthday = opts.selected !== null;
   return [
     "<h1>Birthday</h1>",
-    `<p class="subtitle">Set your birthday so Koolbot can celebrate it on the day — evaluated in your own timezone (set that on the <a href="/me/timezone">Timezone</a> page). The year is optional; leave it blank to share the date without your age.</p>`,
+    `<p class="subtitle">Set your birthday so KoolBot can celebrate it on the day — evaluated in your own timezone (set that on the <a href="/me/timezone">Timezone</a> page). The year is optional; leave it blank to share the date without your age.</p>`,
     '<form method="POST" action="/me/birthday">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
     '<div class="card">',
@@ -1162,7 +1208,7 @@ const TZ_PREVIEW_SCRIPT =
 export function renderUserTimezoneBody(opts: TimezonePageBodyOptions): string {
   return [
     "<h1>Timezone</h1>",
-    `<p class="subtitle">Koolbot renders the times it shows you, such as in <code>/voicestats</code>, in this zone. Leave it on <em>Server default</em> to use the server's timezone (<span class="mono">${escapeHtml(opts.serverTimezone)}</span>).</p>`,
+    `<p class="subtitle">KoolBot renders the times it shows you, such as in <code>/voicestats</code>, in this zone. Leave it on <em>Server default</em> to use the server's timezone (<span class="mono">${escapeHtml(opts.serverTimezone)}</span>).</p>`,
     '<form method="POST" action="/me/timezone">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
     '<div class="card">',
@@ -1217,54 +1263,51 @@ export function renderUserNotificationsBody(
       // EmptyState (docs/design/components.md): what is missing, then how it
       // fills up.
       '<div class="kb-empty"><p class="kb-empty__title">No direct messages to offer</p>' +
-        '<p class="kb-empty__text">Koolbot has no direct messages to offer you on this server right now. Options appear here when the server turns a feature on.</p></div>',
+        '<p class="kb-empty__text">KoolBot has no direct messages to offer you on this server right now. Options appear here when the server turns a feature on.</p></div>',
     ].join("");
   }
   const rows = opts.rows
     .map((row) => {
+      const nameId = `notify-${row.key}-name`;
+      const descId = `notify-${row.key}-desc`;
       const soon = row.comingSoon
-        ? `<span class="pref-soon">${escapeHtml(row.comingSoon)}</span>`
+        ? `<div class="kb-setting__extra"><p class="kb-help">${escapeHtml(row.comingSoon)}</p></div>`
         : "";
       return [
-        "<tr>",
-        "<td>",
-        `<strong>${escapeHtml(row.label)}</strong>`,
-        `<div class="pref-desc">${escapeHtml(row.description)}</div>`,
-        soon,
-        "</td>",
-        '<td class="toggle">',
+        '<div class="kb-setting">',
+        "<div>",
+        `<p class="kb-setting__name" id="${nameId}">${escapeHtml(row.label)}</p>`,
+        `<p class="kb-setting__desc" id="${descId}">${escapeHtml(row.description)}</p>`,
+        "</div>",
+        '<div class="kb-setting__control">',
         // Mirrors the admin "checkbox + hidden flag" pattern: when the
-        // checkbox is unchecked the browser submits nothing for that
-        // name, so the hidden `submitted` flag lets the server tell
-        // "explicitly off" from "key not in form".
+        // switch is off the browser submits nothing for that name, so the
+        // hidden `submitted` flag lets the server tell "explicitly off" from
+        // "key not in form". The switch posts `value="true"` when on.
         `<input type="hidden" name="submitted_${escapeHtml(row.key)}" value="1">`,
-        `<label><input type="checkbox" name="${escapeHtml(row.key)}" value="true"${row.enabled ? " checked" : ""}> Enabled</label>`,
-        "</td>",
-        "</tr>",
+        renderSwitch(row.key, row.enabled, {
+          labelledBy: nameId,
+          describedBy: descId,
+        }),
+        "</div>",
+        soon,
+        "</div>",
       ].join("");
     })
     .join("");
   return [
     "<h1>Notifications</h1>",
-    `<p class="subtitle">Choose which DMs Koolbot may send you on this server. Every channel is off until you turn it on — Koolbot never DMs you unprompted. Untoggling a row stops the matching DM immediately.</p>`,
+    `<p class="subtitle">Choose which DMs KoolBot may send you on this server. Every channel is off until you turn it on — KoolBot never DMs you unprompted. Switch a message off and save, and the bot stops sending it.</p>`,
     '<form method="POST" action="/me/notifications">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
-    '<div class="card">',
-    '<table class="prefs-table">',
-    // A caption must be the table's first child; hidden visually because the
-    // page heading already says it (#855).
-    '<caption class="visually-hidden">Direct-message notification channels and whether each is on</caption>',
-    "<thead><tr>",
-    '<th scope="col">Notification</th>',
-    '<th scope="col">Current state</th>',
-    "</tr></thead><tbody>",
-    rows,
-    "</tbody></table>",
+    '<section class="kb-panel" aria-label="Direct-message notification channels">',
+    `<div class="kb-panel__body"><div class="kb-settings">${rows}</div>`,
     '<div class="form-actions">',
     '<button class="btn" type="submit">Save preferences</button>',
     '<span class="muted">DMs are opt-in: every channel starts off until you enable it here.</span>',
     "</div>",
     "</div>",
+    "</section>",
     "</form>",
   ].join("");
 }
@@ -1449,7 +1492,7 @@ function renderTrackingOptOutCard(
       '<div id="tracking" class="card">',
       "<h2>Activity tracking</h2>",
       `<p><strong>You are opted out</strong> (since ${escapeHtml(optOut.optedOutAt.toISOString().slice(0, 10))}). ` +
-        "Koolbot does not record your messages, reactions, poll votes or voice sessions, " +
+        "KoolBot does not record your messages, reactions, poll votes or voice sessions, " +
         "and no longer adds you to other members' voice history. Older entries in other " +
         "members' records can still mention you.</p>",
       '<p class="muted">What was stored before you opted out is still there, and still shows on ' +
@@ -1468,7 +1511,7 @@ function renderTrackingOptOutCard(
   return [
     '<div id="tracking" class="card">',
     "<h2>Activity tracking</h2>",
-    "<p>Koolbot records your messages, reactions, poll votes and time in voice channels " +
+    "<p>KoolBot records your messages, reactions, poll votes and time in voice channels " +
       "to power stats, leaderboards, achievements, digests and Rewind. You can opt out.</p>",
     "<ul>",
     "<li>Nothing new is recorded about you from the moment you opt out, and you are no " +
@@ -1478,7 +1521,7 @@ function renderTrackingOptOutCard(
       (resetAvailable
         ? " until you reset it. Opting out and then resetting is a real deletion.</li>"
         : ". Only a data reset removes it, and this server has not enabled one.</li>"),
-    "<li>Koolbot has to remember that you opted out, so the opt-out itself is stored — it is " +
+    "<li>KoolBot has to remember that you opted out, so the opt-out itself is stored — it is " +
       "the one thing a reset does not remove. Opting back in deletes it.</li>",
     "</ul>",
     '<form method="POST" action="/me/privacy/tracking" class="stack">',
@@ -1507,10 +1550,10 @@ function renderPrivacyResetCard(
   // #918: only an opted-out member's reset is a deletion — for everyone
   // else the trackers start writing again, and the copy has to say so.
   const tracking = optOut?.optedOutAt
-    ? "<li><strong>This is a deletion.</strong> You have opted out of tracking, so Koolbot " +
+    ? "<li><strong>This is a deletion.</strong> You have opted out of tracking, so KoolBot " +
       "will not start recording again. The opt-out itself is kept — it is the one thing a " +
       "reset does not remove — until you opt back in.</li>"
-    : "<li><strong>This is a reset, not a deletion.</strong> Koolbot starts recording again the " +
+    : "<li><strong>This is a reset, not a deletion.</strong> KoolBot starts recording again the " +
       "next time you send a message, react or join a voice channel." +
       (optOut?.offered
         ? ' <a href="#tracking">Opt out of tracking</a> first to make it a deletion.'
@@ -1524,7 +1567,7 @@ function renderPrivacyResetCard(
   return [
     '<div id="reset" class="card" style="border-color:var(--err-bg)">',
     "<h2>Reset my data</h2>",
-    "<p>Wipes what Koolbot has stored about you on this server — voice history, activity " +
+    "<p>Wipes what KoolBot has stored about you on this server — voice history, activity " +
       "counters, achievements, poll participation, Rewind, reminders, RSVPs and the rest of " +
       "the collections listed above — then signs you out. It cannot be undone.</p>",
     "<p>Before you go ahead, know that:</p>",
@@ -1541,7 +1584,7 @@ function renderPrivacyResetCard(
     '<a class="btn" href="/me/privacy/export" download>Download my data first (JSON)</a>',
     "</div>",
     cooldown,
-    `<form method="POST" action="/me/privacy/delete" class="stack" data-confirm="Reset all of your Koolbot data on this server? This cannot be undone.">`,
+    `<form method="POST" action="/me/privacy/delete" class="stack" data-confirm="Reset all of your KoolBot data on this server? This cannot be undone.">`,
     `<input type="hidden" name="_csrf" value="${escapeHtml(reset.csrfToken)}">`,
     `<label>Type <code>${word}</code> to confirm: ` +
       `<input type="text" name="confirm" autocomplete="off" placeholder="${word}" required></label>`,
@@ -1596,11 +1639,11 @@ export function renderUserPrivacyBody(opts: PrivacyPageBodyOptions): string {
     : "";
   return [
     "<h1>Privacy</h1>",
-    '<p class="subtitle">What Koolbot stores about you on this server, and how to get a copy of it.</p>',
+    '<p class="subtitle">What KoolBot stores about you on this server, and how to get a copy of it.</p>',
     disabledNotice,
     '<div class="card">',
     "<h2>Download your data</h2>",
-    "<p>One JSON file with every row Koolbot holds that is about <strong>you</strong> — " +
+    "<p>One JSON file with every row KoolBot holds that is about <strong>you</strong> — " +
       "your voice history, activity counters, preferences, quotes, RSVPs and reminders. " +
       "It is a record" +
       (opts.rewindEnabled === false
@@ -1625,7 +1668,7 @@ export function renderUserPrivacyBody(opts: PrivacyPageBodyOptions): string {
     "</div>",
     '<div class="card">',
     "<h2>What's not in it</h2>",
-    "<p>Some things Koolbot stores are deliberately out of reach of this download.</p>",
+    "<p>Some things KoolBot stores are deliberately out of reach of this download.</p>",
     renderPrivacyTable(
       "Collections deliberately excluded from your export.",
       opts.excluded,
