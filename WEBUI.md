@@ -3554,15 +3554,14 @@ categories and channels. Every row defaults to **Leave alone**; nothing is touch
   `reactionroles.message_channel_id` after the preview makes it a different plan (preview again).
   Each mapping carries the step that made it, so a plan only ever removes its own picker: a mapping another plan or the
   Reaction Roles page made is reused, not owned. A rollback also recovers a registration saved before a crash that was never recorded
-  (looked up by the step's key, never posted again). The picker shows no key to members. A picker posted before its
-  mapping was saved is found again by what it is: sent by KoolBot, newer than the snapshot, showing the role in its text
-  and used by no mapping. A retry completes it instead of posting a second one, and a rollback deletes it. If two
-  messages match, the step refuses and changes nothing, so delete the extra one by hand. Pickers posted by an earlier
-  version still carry the key in their footer; that is still recognised and the footer is left as it is until the
-  picker is removed.
-  The search reads the channel back to when the snapshot was created (and says so, changing nothing, if it can't finish).
-  Deletions run under the guild lock until they finish, and a retry also removes this step's own unsaved picker when it
-  finds another plan's mapping for the same pair.
+  (looked up by the step's key, never posted again). The picker shows no key to members.
+  If a crash leaves a picker posted but not yet saved as a mapping, that picker does nothing (reactions on it grant no
+  role), and a retry posts a new one. Delete the left-over message by hand; a rollback only removes pickers it can prove
+  are its own. Pickers posted by an earlier version still carry the key in their footer; those are still recognised, so
+  a retry completes them and a rollback deletes them, and the footer is left as it is until the picker is removed.
+  Looking for an old-footer picker reads the channel back to when the snapshot was created (and says so, changing nothing,
+  if it can't finish). Deletions run under the guild lock until they finish, and a retry also removes this step's own
+  unsaved old-footer picker when it finds another plan's mapping for the same pair.
   A rollback deletes only the picker this plan posted, from the channel it was posted to, never the role or the category; if Discord fails while deleting it,
   the rollback step fails and stays open for a retry (only "unknown channel" or "unknown message" count as already gone). If another mapping was added to
   the picker since (on the Reaction Roles page), the picker is kept and only this mapping and its reaction are removed.
