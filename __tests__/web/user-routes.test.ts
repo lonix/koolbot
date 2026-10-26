@@ -175,6 +175,12 @@ describe("createUserRouter / index page", () => {
       memberZone?: string | null;
       /** Events the member created, as `Event.find().lean()` returns them. */
       hostedEvents?: Array<Record<string, unknown>>;
+      /**
+       * The test stubbed (or restored) `UserNotificationPrefsService` itself
+       * for the preference values (#1508); a stub must then provide
+       * `getTimezone` as well.
+       */
+      keepNotificationPrefsService?: boolean;
     } = {},
   ): Promise<string> {
     const now = Date.now();
@@ -214,10 +220,12 @@ describe("createUserRouter / index page", () => {
 
     const { UserNotificationPrefsService } =
       await import("../../src/services/user-notification-prefs-service.js");
-    jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
-      getTimezone: async () =>
-        opts.memberZone === undefined ? "UTC" : opts.memberZone,
-    } as never);
+    if (!opts.keepNotificationPrefsService) {
+      jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+        getTimezone: async () =>
+          opts.memberZone === undefined ? "UTC" : opts.memberZone,
+      } as never);
+    }
 
     if (opts.hostedEvents) {
       const { Event } = await import("../../src/models/event.js");
@@ -315,7 +323,7 @@ describe("createUserRouter / index page", () => {
     // tracker, so assert the rendered stat and its value.
     expect(html).toContain("Votes cast this week");
     expect(html).toContain(
-      '<div class="label">Votes cast this week</div><div class="value">3</div>',
+      '<p class="kb-overline">Votes cast this week</p></div><div class="kb-tile__value">3</div>',
     );
   });
 
@@ -341,22 +349,23 @@ describe("createUserRouter / index page", () => {
   });
 
   it("shows hosted events in the member's zone, not the event's (#1538)", async () => {
-    // 2030-01-01 19:00 UTC: 14:00 in New York (the event's zone), 2030-01-02
-    // 08:00 in Auckland (the member's).
+    // 2020-01-01 19:00 UTC: 14:00 in New York (the event's zone), 2020-01-02
+    // 08:00 in Auckland (the member's). The event is running, so the Overview
+    // lists it with its start (planned events are only a count, #1508).
     const html = await dispatchIndex("user", {
       memberZone: "Pacific/Auckland",
       hostedEvents: [
         {
           _id: "65a000000000000000000001",
           title: "Quiz night",
-          startTime: new Date("2030-01-01T19:00:00Z"),
+          startTime: new Date("2020-01-01T19:00:00Z"),
           timezone: "America/New_York",
-          state: "scheduled",
+          state: "active",
         },
       ],
     });
     expect(html).toContain("Quiz night");
-    expect(html).toContain("2030-01-02 08:00 (Pacific/Auckland)");
+    expect(html).toContain("2020-01-02 08:00 (Pacific/Auckland)");
     expect(html).not.toContain("America/New_York");
   });
 
@@ -375,8 +384,99 @@ describe("createUserRouter / index page", () => {
 
     const html = await dispatchIndex("user");
     expect(html).toContain(
-      '<div class="label">Votes cast this week</div><div class="value">0</div>',
+      '<p class="kb-overline">Votes cast this week</p></div><div class="kb-tile__value">0</div>',
     );
+  });
+
+  it("shows how each preference is set on its card (#1508)", async () => {
+    const { ConfigService } =
+      await import("../../src/services/config-service.js");
+    jest
+      .spyOn(ConfigService, "getInstance")
+      .mockReturnValue(
+        meConfigStub({ "voicechannels.presets.enabled": true }) as never,
+      );
+    const { UserNotificationPrefsService } =
+      await import("../../src/services/user-notification-prefs-service.js");
+    jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+      getTimezone: async () => "Europe/Oslo",
+      getPrefsWithTimezoneStrict: async () => ({
+        prefs: { achievements: true, digest: false, rewind: false },
+        timezone: "Europe/Oslo",
+      }),
+    } as never);
+    const { UserVoicePrefsService } =
+      await import("../../src/services/user-voice-prefs-service.js");
+    jest.spyOn(UserVoicePrefsService, "getInstance").mockReturnValue({
+      getSummary: async () => ({ namePattern: "[AMR] {name}", presetCount: 2 }),
+    } as never);
+
+    const html = await dispatchIndex("user", {
+      keepNotificationPrefsService: true,
+    });
+    expect(html).toMatch(
+      /<p class="kb-feature__value">Europe\/Oslo · \d\d:\d\d now<\/p>/,
+    );
+    expect(html).toContain(
+      '<p class="kb-feature__value">[AMR] {name} · 2 presets</p>',
+    );
+  });
+
+  it("still renders the page when a value cannot be read (#1508)", async () => {
+    const { UserNotificationPrefsService } =
+      await import("../../src/services/user-notification-prefs-service.js");
+    jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+      getTimezone: async () => "Europe/Oslo",
+      getPrefsWithTimezoneStrict: async () => {
+        throw new Error("db down");
+      },
+    } as never);
+
+    const html = await dispatchIndex("user", {
+      keepNotificationPrefsService: true,
+    });
+    expect(html).toContain("My preferences");
+    expect(html).toContain('href="/me/timezone"');
+    // The unreadable values leave their lines out; other cards are unaffected.
+    expect(html).not.toContain("Server default (");
+    expect(html).not.toMatch(/ now<\/p>/);
+  });
+
+  it("omits the notifications, timezone and birthday values when their model queries fail (#1508)", async () => {
+    const { ConfigService } =
+      await import("../../src/services/config-service.js");
+    jest
+      .spyOn(ConfigService, "getInstance")
+      .mockReturnValue(meConfigStub({ "birthdays.enabled": true }) as never);
+    const { UserNotificationPrefs } =
+      await import("../../src/models/user-notification-prefs.js");
+    const { UserBirthday } = await import("../../src/models/user-birthday.js");
+    const prefsSpy = jest
+      .spyOn(UserNotificationPrefs, "findOne")
+      .mockRejectedValue(new Error("db down") as never);
+    const birthdaySpy = jest
+      .spyOn(UserBirthday, "findOne")
+      .mockRejectedValue(new Error("db down") as never);
+    const { UserNotificationPrefsService } =
+      await import("../../src/services/user-notification-prefs-service.js");
+    jest.spyOn(UserNotificationPrefsService, "getInstance").mockRestore();
+    const { BirthdayService } =
+      await import("../../src/services/birthday-service.js");
+    jest.spyOn(BirthdayService, "getInstance").mockRestore();
+
+    let html: string;
+    try {
+      html = await dispatchIndex("user", {
+        keepNotificationPrefsService: true,
+      });
+    } finally {
+      prefsSpy.mockRestore();
+      birthdaySpy.mockRestore();
+    }
+    expect(html).toContain("My preferences");
+    expect(html).not.toContain("None of");
+    expect(html).not.toContain("Server default (");
+    expect(html).not.toContain("Not set");
   });
 
   it("omits the poll-participation card when the member has never voted (#655)", async () => {
@@ -597,9 +697,7 @@ describe("/me/notifications", () => {
     const out = await dispatch({ method: "GET" });
     expect(out.body).not.toContain("#483");
     expect(out.body).not.toContain("#484");
-    // The `pref-soon` style is still defined in the layout CSS for
-    // future rows; assert no row actually uses it.
-    expect(out.body).not.toContain('<span class="pref-soon">');
+    expect(out.body).not.toContain("pref-soon");
   });
 
   it("renders unchecked when stored prefs are off", async () => {
@@ -608,9 +706,13 @@ describe("/me/notifications", () => {
       prefs: { achievements: false, digest: true, rewind: false },
     });
     // achievements unchecked, digest checked
-    expect(out.body).toContain('name="achievements" value="true">');
+    expect(out.body).toMatch(
+      /name="achievements" value="true" aria-labelledby="notify-achievements-name"/,
+    );
     expect(out.body).toContain('name="digest" value="true" checked');
-    expect(out.body).toContain('name="rewind" value="true">');
+    expect(out.body).toMatch(
+      /name="rewind" value="true" aria-labelledby="notify-rewind-name"/,
+    );
   });
 
   it("rejects POST without a CSRF token", async () => {
@@ -730,7 +832,7 @@ describe("userWebErrorHandler", () => {
     expect(res.body).toContain('href="/me/"');
     // Shared error shell (#855): lang, viewport, landmark, /me title suffix.
     expect(res.body).toContain('<html lang="en">');
-    expect(res.body).toContain("<title>Forbidden — Koolbot</title>");
+    expect(res.body).toContain("<title>Forbidden — KoolBot</title>");
     expect(res.body).toContain("<main><h1>Forbidden</h1>");
     expect(next).not.toHaveBeenCalled();
   });

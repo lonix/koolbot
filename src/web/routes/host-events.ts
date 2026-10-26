@@ -258,7 +258,7 @@ function forbidden(res: Response): void {
       renderErrorPage({
         title: "Forbidden",
         heading: "Forbidden",
-        product: "Koolbot",
+        product: "KoolBot",
         bodyHtml:
           `<p>This event is not yours to host, or it does not exist. ` +
           `Back to <a href="/me/events">your events</a>.</p>`,

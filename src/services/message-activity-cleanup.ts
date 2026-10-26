@@ -226,7 +226,7 @@ export class MessageActivityCleanupService extends ScheduledService<IMessageClea
 
       await this.discordLogger.logError(
         error instanceof Error ? error : new Error(errorMessage),
-        "Message Activity Cleanup",
+        "message activity clean-up",
       );
 
       return {
