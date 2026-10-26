@@ -44,8 +44,16 @@ function stubConfig(values: ConfigValues): void {
   );
 }
 
-function makeClient(channels: Record<string, { send: jest.Mock }>): Client {
+function makeClient(
+  channels: Record<string, { send: jest.Mock }>,
+  guilds: Record<string, string> = {},
+): Client {
   return {
+    guilds: {
+      cache: new Map(
+        Object.entries(guilds).map(([id, name]) => [id, { id, name }]),
+      ),
+    },
     channels: {
       cache: new Map(
         Object.entries(channels).map(([id, ch]) => [
@@ -271,6 +279,254 @@ describe("DiscordLogger (#844)", () => {
           false,
         );
       }
+    });
+  });
+
+  // #1516: the posts follow docs/design/discord.md: sentence-case titles with
+  // no status emoji, plain field names, no field that repeats the title.
+  describe("copy (#1516)", () => {
+    interface Posted {
+      title?: string;
+      description?: string;
+      color?: number;
+      footer?: { text: string };
+      fields?: Array<{ name: string; value: string; inline?: boolean }>;
+    }
+
+    async function post(
+      category: string,
+      call: (l: InstanceType<typeof DiscordLogger>) => Promise<void>,
+      guilds: Record<string, string> = {},
+    ): Promise<Posted> {
+      const send = jest.fn(async () => undefined);
+      stubConfig({
+        [`core.${category}.enabled`]: true,
+        [`core.${category}.channel_id`]: "111",
+      });
+      const logger = DiscordLogger.getInstance(
+        makeClient({ "111": { send } }, guilds),
+      );
+      await logger.initialize();
+      await call(logger);
+      expect(send).toHaveBeenCalledTimes(1);
+      const payload = (send.mock.calls[0] as unknown[])[0] as {
+        embeds: Array<{ toJSON(): Posted }>;
+      };
+      return payload.embeds[0].toJSON();
+    }
+
+    const EMOJI = /\p{Extended_Pictographic}/u;
+    const TITLE_CASE = /^[A-Z][a-z]+( [A-Z][a-z]+)+$/;
+
+    function expectPlain(p: Posted): void {
+      expect(p.title).toBeTruthy();
+      expect(p.title).not.toMatch(EMOJI);
+      for (const f of p.fields ?? []) {
+        expect(f.name).not.toMatch(EMOJI);
+        expect(f.name).not.toMatch(TITLE_CASE);
+        expect(f.name).not.toBe("Status");
+        expect(f.value).not.toMatch(EMOJI);
+      }
+    }
+
+    const cases: Array<{
+      label: string;
+      category: string;
+      call: (l: InstanceType<typeof DiscordLogger>) => Promise<void>;
+      title: string;
+    }> = [
+      {
+        label: "startup",
+        category: "startup",
+        call: (l) => l.logBotStartup(),
+        title: "KoolBot started",
+      },
+      {
+        label: "shutdown",
+        category: "startup",
+        call: (l) => l.logBotShutdown(),
+        title: "KoolBot is shutting down",
+      },
+      {
+        label: "registration ok",
+        category: "startup",
+        call: (l) => l.logDiscordRegistrationSuccess(),
+        title: "Commands registered with Discord",
+      },
+      {
+        label: "registration failed",
+        category: "startup",
+        call: (l) => l.logDiscordRegistrationFailure("nope"),
+        title: "Couldn't register commands with Discord",
+      },
+      {
+        label: "reload ok",
+        category: "config",
+        call: (l) =>
+          l.logConfigReload({
+            success: true,
+            message: "m",
+            commandsUpdated: 3,
+          }),
+        title: "Settings reloaded",
+      },
+      {
+        label: "reload failed",
+        category: "config",
+        call: (l) => l.logConfigReload({ success: false, message: "m" }),
+        title: "Couldn't reload settings",
+      },
+      {
+        label: "service ok",
+        category: "startup",
+        call: (l) => l.logServiceInit("Quotes", true),
+        title: "Quotes started",
+      },
+      {
+        label: "service failed",
+        category: "startup",
+        call: (l) => l.logServiceInit("Quotes", false),
+        title: "Quotes failed to start",
+      },
+      {
+        label: "cleanup ok",
+        category: "cleanup",
+        call: (l) =>
+          l.logCleanupResults({
+            sessionsRemoved: 1,
+            dataAggregated: 2,
+            executionTime: 120,
+            errors: [],
+          }),
+        title: "Voice channel clean-up finished",
+      },
+      {
+        label: "cleanup with errors",
+        category: "cleanup",
+        call: (l) =>
+          l.logCleanupResults({
+            sessionsRemoved: 1,
+            dataAggregated: 2,
+            executionTime: 120,
+            errors: ["x"],
+          }),
+        title: "Voice channel clean-up finished",
+      },
+      {
+        label: "database ok",
+        category: "startup",
+        call: (l) => l.logDatabaseStatus(true),
+        title: "Connected to the database",
+      },
+      {
+        label: "database failed",
+        category: "startup",
+        call: (l) => l.logDatabaseStatus(false),
+        title: "Couldn't connect to the database",
+      },
+      {
+        label: "error",
+        category: "errors",
+        call: (l) => l.logError(new TypeError("boom"), "voice cleanup"),
+        title: "Error in voice cleanup",
+      },
+      {
+        label: "cron ok",
+        category: "cron",
+        call: (l) => l.logCronSuccess("Weekly digest"),
+        title: "Weekly digest ran",
+      },
+      {
+        label: "cron failed",
+        category: "cron",
+        call: (l) => l.logCronFailure("Weekly digest", "bad"),
+        title: "Weekly digest failed",
+      },
+    ];
+
+    it.each(cases)(
+      "$label: sentence-case title, no emoji, no Status field",
+      async ({ category, call, title }) => {
+        const p = await post(category, call);
+        expect(p.title).toBe(title);
+        expectPlain(p);
+        expect(p.footer?.text).toMatch(/^KoolBot · Logs · /);
+      },
+    );
+
+    it("never repeats the title as the description", async () => {
+      for (const c of cases) {
+        (DiscordLogger as unknown as { instance?: unknown }).instance =
+          undefined;
+        const p = await post(c.category, c.call);
+        expect(p.description ?? "").not.toMatch(/successfully/i);
+        expect(p.description ?? "").not.toMatch(/initialized/);
+      }
+    });
+
+    it("uses plain field names and a spaced run time", async () => {
+      const cleanup = await post("cleanup", (l) =>
+        l.logCleanupResults({
+          sessionsRemoved: 1,
+          dataAggregated: 2,
+          executionTime: 120,
+          errors: [],
+        }),
+      );
+      expect(cleanup.fields?.map((f) => f.name)).toEqual([
+        "Sessions removed",
+        "Data aggregated",
+        "Run time",
+      ]);
+      expect(cleanup.fields?.find((f) => f.name === "Run time")?.value).toBe(
+        "120 ms",
+      );
+
+      (DiscordLogger as unknown as { instance?: unknown }).instance = undefined;
+      const reload = await post("config", (l) =>
+        l.logConfigReload({ success: true, message: "m", commandsUpdated: 3 }),
+      );
+      expect(reload.fields?.map((f) => f.name)).toEqual(["Commands updated"]);
+
+      (DiscordLogger as unknown as { instance?: unknown }).instance = undefined;
+      const err = await post("errors", (l) =>
+        l.logError(new TypeError("boom"), "ctx"),
+      );
+      expect(err.fields?.map((f) => f.name)).toEqual([
+        "Context",
+        "Error type",
+        "Error message",
+      ]);
+
+      (DiscordLogger as unknown as { instance?: unknown }).instance = undefined;
+      const cron = await post("cron", (l) => l.logCronSuccess("Birthdays"));
+      expect(cron.fields?.map((f) => f.name)).toEqual(["Job"]);
+    });
+
+    it("tells the admin what to do when something failed", async () => {
+      const err = await post("errors", (l) =>
+        l.logError(new Error("boom"), "ctx"),
+      );
+      expect(err.description).toBe("Check the bot's log for the full error.");
+    });
+
+    it("shows the server name with the id in code, falling back to the id", async () => {
+      const named = await post(
+        "startup",
+        (l) => l.logDiscordRegistrationSuccess(),
+        { "guild-1": "Koolbot Dev" },
+      );
+      const server = named.fields?.find((f) => f.name === "Server");
+      expect(server?.value).toBe("Koolbot Dev `guild-1`");
+      expect(named.fields?.some((f) => f.name === "Guild")).toBe(false);
+
+      (DiscordLogger as unknown as { instance?: unknown }).instance = undefined;
+      const uncached = await post("startup", (l) =>
+        l.logDiscordRegistrationSuccess(),
+      );
+      expect(uncached.fields?.find((f) => f.name === "Server")?.value).toBe(
+        "`guild-1`",
+      );
     });
   });
 });
