@@ -108,3 +108,120 @@ const SCRIPT_LINES = [
 ];
 
 export const CONFIRM_FETCH_SCRIPT = SCRIPT_LINES.join("");
+
+/**
+ * Fetch-and-upgrade for confirmation LINKS (#1536): Channel manager's
+ * *Delete…* and Adoption history's *Restore…*.
+ *
+ * Both are plain links to a server-rendered confirmation page, and that page
+ * stays the no-JavaScript route, unchanged in behaviour. With JavaScript (and
+ * `<dialog>.showModal()`), a link marked `data-confirm-link="<kind>"` is
+ * fetched with GET instead, so the verdict, the consequences and any signed
+ * token are as fresh as that page, and the answer is shown in the shared
+ * `kb-dialog` (`CONFIRM_SCRIPT`, event `kb-confirm-request`).
+ *
+ * The answer is used only if it is the expected confirmation page: status 200,
+ * HTML, the response header `CONFIRM_PAGE_HEADER` equal to the link's kind
+ * (the routes set it only on the confirmable variant; a refusal says
+ * `<kind>-refused` and is shown, reason only, in a dialog with no confirm
+ * button), a section of that kind holding a POST form to the SAME path on this origin
+ * whose fields are exactly the kind's allowlist, and at least one consequence.
+ * Anything else (a redirect, a changed page, a failed request) navigates to the link,
+ * so the admin sees today's page; nothing is ever posted from a page that did
+ * not pass. Only the dialog's confirm button posts, with the page's own
+ * `_csrf` (which must equal this page's) and its own fields, plus each option
+ * ticked in the dialog (a checkbox the script adds to the shared dialog).
+ */
+
+/** What each kind of confirmation page may carry in its form. */
+export const CONFIRM_LINK_KINDS = {
+  "channel-delete": {
+    hidden: ["_csrf", "confirm"],
+    boxes: [] as string[],
+    refusal: true,
+  },
+  "snapshot-restore": {
+    hidden: ["_csrf"],
+    boxes: ["deleteCreatedRoles"],
+    refusal: false,
+  },
+} as const;
+
+export type ConfirmLinkKind = keyof typeof CONFIRM_LINK_KINDS;
+
+/** Attribute (leading space) that upgrades a confirmation link. */
+export function confirmLinkAttr(kind: ConfirmLinkKind): string {
+  return ` data-confirm-link="${kind}"`;
+}
+
+/** Marker (leading space) of the section of a confirmation page the script reads. */
+export function confirmLinkPageAttr(kind: ConfirmLinkKind): string {
+  return ` data-confirm-link-page="${kind}"`;
+}
+
+const LINK_SCRIPT_LINES = [
+  "(function(){",
+  `var HEAD=${JSON.stringify(CONFIRM_PAGE_HEADER.toLowerCase())},KINDS=${JSON.stringify(CONFIRM_LINK_KINDS)},inflight=null;`,
+  "function usable(){var d=document.createElement('dialog');",
+  "return typeof d.showModal==='function'&&typeof fetch==='function'&&typeof DOMParser==='function'",
+  "&&typeof URL==='function'&&typeof CustomEvent==='function'}",
+  "function text(n){return(n.textContent||'').replace(/\\s+/g,' ').trim()}",
+  "function urlOf(raw){try{return new URL(raw||'',location.href)}catch(x){return null}}",
+  "function read(html,kind,link,refused){var doc=new DOMParser().parseFromString(html,'text/html');",
+  // A refusal (a channel that may not be deleted, and why) has no form: the
+  // reason is shown in the dialog with no confirm button.
+  "if(refused){var rf=doc.querySelector('[data-confirm-refusal]'),rt=rf&&rf.getAttribute('data-confirm-title'),rm=rf&&text(rf);",
+  "return rt&&rm?{refusal:true,title:rt,items:[rm],verb:'',boxes:[]}:null}",
+  "var sec=doc.querySelector('[data-confirm-link-page]');",
+  "if(!sec||sec.getAttribute('data-confirm-link-page')!==kind)return null;",
+  "var f=sec.querySelector('form[data-confirm-form]');if(!f)return null;",
+  "if((f.getAttribute('method')||'').toLowerCase()!=='post')return null;",
+  "var u=urlOf(f.getAttribute('action'));",
+  "if(!u||u.origin!==location.origin||u.pathname!==link.pathname)return null;",
+  "var spec=KINDS[kind],named=f.querySelectorAll('input[name],select[name],textarea[name]'),fields=[],boxes=[],seen={};",
+  "for(var i=0;i<named.length;i++){var n=named[i],name=n.getAttribute('name');if(seen[name])return null;seen[name]=1;",
+  "if(n.tagName==='INPUT'&&n.type==='hidden'&&spec.hidden.indexOf(name)>=0){fields.push([name,n.value]);continue}",
+  "if(n.tagName==='INPUT'&&n.type==='checkbox'&&spec.boxes.indexOf(name)>=0){var lab=n.closest('label');",
+  "if(!lab||!text(lab))return null;boxes.push({name:name,value:n.value||'on',label:text(lab)});continue}",
+  "return null}",
+  "for(var j=0;j<spec.hidden.length;j++)if(!seen[spec.hidden[j]])return null;",
+  "var mine=document.querySelector('input[name=_csrf]'),csrf=fields.filter(function(p){return p[0]==='_csrf'})[0];",
+  "if(!mine||!csrf||!csrf[1]||csrf[1]!==mine.value)return null;",
+  "var items=[].map.call(sec.querySelectorAll('[data-confirm-item]'),function(x){return x.getAttribute('data-confirm-item')||text(x)}).filter(Boolean);",
+  "var title=f.getAttribute('data-confirm-title'),b=f.querySelector('button[type=submit]'),verb=b?text(b):'';",
+  "if(!items.length||!title||!verb)return null;",
+  "return{title:title,items:items,verb:verb,action:u.pathname,fields:fields,boxes:boxes}}",
+  // 'ask' (the confirmation page), 'refuse' (its refusal, for kinds that have one) or null.
+  "function which(r,kind){if(r.status!==200||r.redirected||r.type==='opaqueredirect')return null;",
+  "if((r.headers.get('content-type')||'').toLowerCase().indexOf('text/html')!==0)return null;",
+  "var h=r.headers.get(HEAD);if(h===kind)return'ask';",
+  "return KINDS[kind].refusal&&h===kind+'-refused'?'refuse':null}",
+  "function post(page,chosen){var g=document.createElement('form');g.method='POST';g.action=page.action;g.hidden=true;",
+  "page.fields.concat(chosen.map(function(c){return[c.name,c.value]})).forEach(function(p){var i=document.createElement('input');",
+  "i.type='hidden';i.name=p[0];i.value=p[1];g.appendChild(i)});document.body.appendChild(g);g.submit()}",
+  "document.addEventListener('click',function(e){",
+  "var a=e.target&&e.target.closest?e.target.closest('a[data-confirm-link]'):null;",
+  "if(!a||e.defaultPrevented||e.button!==0||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey||!usable())return;",
+  "var kind=a.getAttribute('data-confirm-link');if(!Object.prototype.hasOwnProperty.call(KINDS,kind))return;",
+  "var link=urlOf(a.getAttribute('href'));if(!link||link.origin!==location.origin)return;",
+  "e.preventDefault();if(inflight)return;inflight=a;var to=link.pathname+link.search;",
+  "fetch(to,{method:'GET',headers:{'Accept':'text/html'},credentials:'same-origin'}).then(function(r){",
+  "var w=which(r,kind);if(!w)return null;return r.text().then(function(h){return read(h,kind,link,w==='refuse')})",
+  "}).catch(function(){return null}).then(function(page){inflight=null;",
+  "if(!page){location.assign(to);return}",
+  // The shared dialog (`CONFIRM_SCRIPT`) shows title, items and verb. An
+  // Options dialog adds its checkboxes to that same dialog's body here (labels
+  // as text nodes), so the shared script stays as it is on every page; `go`
+  // reads them when the confirm button runs it.
+  "var done=false,boxes=[],d={title:page.title,items:page.items,verb:page.verb,trigger:a,",
+  "go:function(){if(done)return;done=true;post(page,page.boxes.filter(function(b,i){return boxes[i]&&boxes[i].checked}))},handled:false};",
+  "document.dispatchEvent(new CustomEvent('kb-confirm-request',{detail:d}));",
+  "if(!d.handled){location.assign(to);return}",
+  "var dlg=document.querySelector('dialog.kb-dialog'),body=dlg&&dlg.querySelector('.kb-dialog__body');",
+  "if(page.refusal){var ok=dlg&&dlg.querySelectorAll('.kb-dialog__foot button')[1];if(ok)ok.parentNode.removeChild(ok);return}",
+  "page.boxes.forEach(function(b){var l=document.createElement('label'),c=document.createElement('input'),w=document.createElement('div');",
+  "c.type='checkbox';l.appendChild(c);l.appendChild(document.createTextNode(' '+b.label));w.appendChild(l);if(body)body.appendChild(w);boxes.push(c)})})},false)",
+  "})();",
+];
+
+export const CONFIRM_LINK_SCRIPT = LINK_SCRIPT_LINES.join("");
