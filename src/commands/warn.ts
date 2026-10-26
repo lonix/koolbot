@@ -41,6 +41,10 @@ export const data = new SlashCommandBuilder()
 export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
+  // Set once the warning is stored. `logWarn` inserts a new entry on every
+  // call, so after that point the reply must not tell the moderator to retry.
+  let recorded = false;
+
   try {
     if (!interaction.guildId) {
       await replyWithError(interaction, {
@@ -105,6 +109,7 @@ export async function execute(
       moderatorId: interaction.user.id,
       reason,
     });
+    recorded = true;
 
     const total = await moderationService.countHistory(
       interaction.guildId,
@@ -129,6 +134,13 @@ export async function execute(
     await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error in warn command:", error);
-    await replyWithUnexpectedError(interaction);
+    if (recorded) {
+      await replyWithError(interaction, {
+        title: "The warning was recorded",
+        next: "I couldn't show the confirmation. Don't run this again — check `/modlog`.",
+      });
+    } else {
+      await replyWithUnexpectedError(interaction);
+    }
   }
 }

@@ -196,6 +196,25 @@ async function handleAdd(
     interaction.id,
   );
 
+  // `addQuote` inserts a new row on every call, so a failure past this point
+  // must not tell the member to try again.
+  try {
+    await postSavedQuote(interaction, quote);
+  } catch (error) {
+    logger.error(
+      `Quote ${String(quote._id)} was saved but finishing the add failed: ${describeDiscordError(error)}`,
+    );
+    await replyWithError(interaction, {
+      title: "Your quote was saved",
+      next: "I couldn't finish posting it. Check the quote channel before adding it again, and tell an admin if it isn't there; the details are in the bot's log.",
+    });
+  }
+}
+
+async function postSavedQuote(
+  interaction: ChatInputCommandInteraction,
+  quote: Awaited<ReturnType<typeof quoteService.addQuote>>,
+): Promise<void> {
   // Post to quote channel
   const quoteChannelManager = QuoteChannelManager.getInstance(
     interaction.client,

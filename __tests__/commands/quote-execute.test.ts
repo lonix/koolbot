@@ -286,6 +286,31 @@ describe("/quote add", () => {
   });
 });
 
+describe("/quote add after the quote was saved", () => {
+  // addQuote() inserts a new row on every call, so once it has succeeded no
+  // reply may tell the member to try again.
+  it("says the quote was saved, with no retry advice, when posting throws", async () => {
+    mockPostQuote.mockRejectedValue(new Error("Missing Access"));
+    const it_ = interaction({
+      subcommand: "add",
+      strings: { text: "Hello" },
+      users: { author: { id: "author-1" } },
+    });
+    await expect(execute(it_)).resolves.toBeUndefined();
+    expect(mockAddQuote).toHaveBeenCalledTimes(1);
+    expect(it_.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Your quote was saved",
+        description: expect.stringContaining("before adding it again"),
+      }),
+    );
+    expect(JSON.stringify(it_.editReply.mock.calls)).not.toMatch(/Try again/i);
+    expect(JSON.stringify(it_.editReply.mock.calls)).not.toContain(
+      "Missing Access",
+    );
+  });
+});
+
 describe("/quote edit", () => {
   const base: MockCommandOptions = {
     subcommand: "edit",

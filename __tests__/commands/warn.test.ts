@@ -221,6 +221,27 @@ describe("Warn Command", () => {
         unexpectedErrorPayload(),
       );
     });
+
+    // logWarn() inserts a new entry on every call, so once it has succeeded the
+    // reply must not tell the moderator to try again.
+    it("says the warning was recorded, with no retry advice, when only the follow-up read fails", async () => {
+      mockLogWarn.mockResolvedValue({});
+      mockCountHistory.mockRejectedValue(new Error("boom"));
+      const interaction = makeInteraction();
+
+      await execute(interaction);
+
+      expect(mockLogWarn).toHaveBeenCalledTimes(1);
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "The warning was recorded",
+          description: expect.stringContaining("check `/modlog`"),
+        }),
+      );
+      expect(JSON.stringify(interaction.editReply.mock.calls)).not.toMatch(
+        /Try again/i,
+      );
+    });
   });
   // Discord's maxLength doesn't stop a whitespace-only reason; it trims to "",
   // which records a warning with no reason and then fails to render the
