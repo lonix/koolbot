@@ -88,6 +88,8 @@ const { PermissionsService } =
 const { EventService } = await import("../../src/services/event-service.js");
 const { ConfigService } = await import("../../src/services/config-service.js");
 const { WebAuditLog } = await import("../../src/models/web-audit-log.js");
+const { UserNotificationPrefsService } =
+  await import("../../src/services/user-notification-prefs-service.js");
 const { setMoverDepsForTests } =
   await import("../../src/services/event-member-moves.js");
 const { resetMoveGuardForTests } =
@@ -175,6 +177,7 @@ let auditRows: Array<Record<string, unknown>> = [];
 let eventsEnabled = true;
 let botMayMove = true;
 let sessionUser = CREATOR;
+let memberZone: string | null = null;
 let voice = new Map<string, string | null>();
 let server: Server;
 let base = "";
@@ -351,6 +354,7 @@ beforeEach(() => {
   eventsEnabled = true;
   botMayMove = true;
   sessionUser = CREATOR;
+  memberZone = "UTC";
   patchGate = null;
   patchReached = () => undefined;
   voice = new Map<string, string | null>([
@@ -401,6 +405,9 @@ beforeEach(() => {
     checkCommandPermission: async () => true,
     resolveWebScopes: async () => ["member", "host"],
   } as never);
+  jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+    getTimezone: async () => memberZone,
+  } as never);
   jest.spyOn(EventService, "getInstance").mockReturnValue({
     getEvent: async (id: string) => (store.get(id) as unknown) ?? null,
     getGroupChannelReport: () => null,
@@ -420,6 +427,19 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.restoreAllMocks();
+});
+
+describe("host panel start line (#1538)", () => {
+  it("shows the start in the member's zone, not the event's, on a leaders event", async () => {
+    // 2030-01-01 19:00 UTC: 14:00 in New York (the event's zone), 2030-01-02
+    // 08:00 in Auckland (the member's).
+    store.set(EVENT_ID, makeEvent({ timezone: "America/New_York" }));
+    memberZone = "Pacific/Auckland";
+    const r = await call(PANEL);
+    expect(r.status).toBe(200);
+    expect(r.text).toContain("2030-01-02 08:00 (Pacific/Auckland)");
+    expect(r.text).not.toContain("America/New_York");
+  });
 });
 
 describe("leaders on the board", () => {

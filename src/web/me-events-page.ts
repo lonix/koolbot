@@ -24,7 +24,7 @@ export const HOST_START_NOW_PATH = `${HOST_NEW_EVENT_PATH}?when=now`;
 export interface HostEventListRow {
   id: string;
   title: string;
-  /** Pre-formatted start line with its zone (`formatEventWhen`). */
+  /** Pre-formatted start line with its zone (`formatDateTimeInZone`, in the member's zone). */
   when: string;
   state: string;
   durationMinutes: number;

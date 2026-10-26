@@ -73,6 +73,8 @@ const { PermissionsService } =
 const { EventService } = await import("../../src/services/event-service.js");
 const { ConfigService } = await import("../../src/services/config-service.js");
 const { WebAuditLog } = await import("../../src/models/web-audit-log.js");
+const { UserNotificationPrefsService } =
+  await import("../../src/services/user-notification-prefs-service.js");
 
 const SECRET = "test-secret-for-host-customise-routes";
 const GUILD = "guild-1";
@@ -125,6 +127,7 @@ const groupOf = (key: string): CGroup =>
 
 let auditRows: Array<Record<string, unknown>> = [];
 let leaderEditRows: Array<Record<string, unknown>> = [];
+let memberZone: string | null = null;
 let sessionUser = CREATOR;
 let eventsOn = true;
 let server: Server;
@@ -220,6 +223,7 @@ beforeEach(() => {
   seed();
   auditRows = [];
   leaderEditRows = [];
+  memberZone = "UTC";
   sessionUser = CREATOR;
   eventsOn = true;
   syncGroupNames.mockClear();
@@ -239,6 +243,9 @@ beforeEach(() => {
     isAdministrator: async () => false,
     checkCommandPermission: async () => true,
     resolveWebScopes: async () => ["member", "host"],
+  } as never);
+  jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+    getTimezone: async () => memberZone,
   } as never);
   jest.spyOn(EventService, "getInstance").mockReturnValue({
     getEvent: async (id: string) => {
@@ -305,8 +312,11 @@ describe("the board's reset (#1196, #1424)", () => {
         },
       },
     ];
+    // The event is in UTC; the member reads Auckland time (UTC+13 in January).
+    memberZone = "Pacific/Auckland";
     const res = await call(`${PANEL}`);
-    expect(res.text).toContain("2030-01-01T19:30:00.000Z");
+    expect(res.text).toContain("2030-01-02 08:30 (Pacific/Auckland)");
+    expect(res.text).not.toContain("2030-01-01T19:30:00.000Z");
     expect(res.text).toContain("&lt;script&gt;x&lt;/script&gt;");
     expect(res.text).not.toContain("<script>x</script>");
     expect(res.text).toContain("tag &quot;RED&quot; to &quot;CRM&quot;");

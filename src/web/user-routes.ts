@@ -64,7 +64,12 @@ import {
   UserVoicePrefsService,
   VoicePrefsValidationError,
 } from "../services/user-voice-prefs-service.js";
-import { getServerTimezone } from "../utils/timezone.js";
+import {
+  formatDateTimeInZone,
+  formatInZone,
+  getServerTimezone,
+  resolveTimezone,
+} from "../utils/timezone.js";
 import {
   RewindService,
   formatFunComparison,
@@ -101,6 +106,7 @@ import { createMeEventsRouter } from "./routes/me-events.js";
 import { createMeModerationRouter } from "./routes/me-moderation.js";
 import { createMeEventPresetsRouter } from "./routes/me-event-presets.js";
 import { listHostedEvents } from "./event-host.js";
+import { readMemberZone } from "./member-timezone.js";
 import {
   birthdayValue,
   notificationsValue,
@@ -108,7 +114,6 @@ import {
   timezoneValue,
   voiceValue,
 } from "./me-preference-values.js";
-import { formatEventWhen } from "../services/event-service.js";
 
 // Everything on the `/me` surface may carry member-supplied strings, so every
 // audit row written from here is bounded first (#1142).
@@ -413,6 +418,8 @@ async function readPreferenceValues(
   client: Client,
   session: WebSessionContext,
   flags: Required<UserFeatureFlags>,
+  /** The member's preference row, read once by the caller; `null`: it failed. */
+  prefsRead: { prefs: NotificationPrefs; timezone: string | null } | null,
 ): Promise<Partial<Record<PreferenceValueKey, string>>> {
   const { discordUserId: userId, guildId } = session;
   const out: Partial<Record<PreferenceValueKey, string>> = {};
@@ -431,11 +438,9 @@ async function readPreferenceValues(
   };
   await Promise.all([
     attempt("notifications", async () => {
-      const { prefs, timezone } =
-        await UserNotificationPrefsService.getInstance().getPrefsWithTimezoneStrict(
-          userId,
-          guildId,
-        );
+      // A failed read (logged by the caller) leaves both lines out.
+      if (!prefsRead) return undefined;
+      const { prefs, timezone } = prefsRead;
       // The same row read gives the timezone card its value too, so it does
       // not depend on the availability read below.
       out.timezone = timezoneValue(timezone, getServerTimezone(), new Date());
@@ -745,6 +750,24 @@ export function createUserRouter(
         return;
       }
       const flags = await readUserFeatureFlags();
+      // One read of the member's preference row serves the cards' values and
+      // the zone the times below are shown in (#1538). A failed read leaves
+      // the value lines out and shows the times in the server's zone.
+      let prefsRead: Awaited<
+        ReturnType<UserNotificationPrefsService["getPrefsWithTimezoneStrict"]>
+      > | null = null;
+      try {
+        prefsRead =
+          await UserNotificationPrefsService.getInstance().getPrefsWithTimezoneStrict(
+            session.discordUserId,
+            session.guildId,
+          );
+      } catch (err) {
+        logger.warn(
+          `Could not read the notification preferences for the /me overview: ${sanitizeForLog(String(err))}`,
+        );
+      }
+      const zone = resolveTimezone(prefsRead?.timezone);
       // Only hosts see the card: its links lead to `/me/events*` (#1316).
       const hostedEvents = (
         hasScope(session, "host")
@@ -753,7 +776,7 @@ export function createUserRouter(
       ).map((e) => ({
         id: e.id,
         title: e.title,
-        when: formatEventWhen(e),
+        when: formatDateTimeInZone(e.startTime, zone),
         state: e.state,
         running: e.running,
       }));
@@ -771,6 +794,7 @@ export function createUserRouter(
         client,
         session,
         flags,
+        prefsRead,
       );
 
       res.type("text/html").send(
@@ -790,7 +814,11 @@ export function createUserRouter(
                   thisYearVotes: pollParticipation.thisYearVotes,
                   thisWeekVotes: pollParticipation.thisWeekVotes,
                   lastVoted: pollParticipation.lastVoteAt
-                    ? pollParticipation.lastVoteAt.toISOString().slice(0, 10)
+                    ? formatInZone(
+                        pollParticipation.lastVoteAt,
+                        zone,
+                        "yyyy-MM-dd",
+                      )
                     : null,
                 }
               : null,
@@ -1287,13 +1315,13 @@ export function createUserRouter(
             emoji: a.emoji,
             name: a.name,
             description: a.description,
-            earnedAt: a.earnedAt.toISOString().slice(0, 10),
+            earnedAt: formatInZone(a.earnedAt, timezone, "yyyy-MM-dd"),
           })),
           achievements: summary.achievements.map((a) => ({
             emoji: a.emoji,
             name: a.name,
             description: a.description,
-            earnedAt: a.earnedAt.toISOString().slice(0, 10),
+            earnedAt: formatInZone(a.earnedAt, timezone, "yyyy-MM-dd"),
           })),
           annualRank: summary.annualRank,
           annualGuildMembers: summary.annualGuildMembers,
@@ -2029,11 +2057,12 @@ export function createUserRouter(
         result: "failure",
         errorMessage: "reset cooldown still active",
       });
+      const zone = await readMemberZone(userId, guildId);
       res.redirect(
         303,
         flashUrl("/me/privacy", {
           type: "err",
-          text: `You already reset your data recently. You can reset again after ${availableAt.toUTCString()}.`,
+          text: `You already reset your data recently. You can reset again after ${formatDateTimeInZone(availableAt, zone)}.`,
         }),
       );
       return;
