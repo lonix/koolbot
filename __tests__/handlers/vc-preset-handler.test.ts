@@ -98,8 +98,13 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
       user: { id: "user1" } as any,
       guild: mockGuild as Guild,
       reply: jest.fn().mockResolvedValue(undefined),
-      deferReply: jest.fn().mockResolvedValue(undefined),
-      deferUpdate: jest.fn().mockResolvedValue(undefined),
+      // Like discord.js, acknowledging flips `deferred`
+      deferReply: jest.fn(async function (this: any) {
+        this.deferred = true;
+      }),
+      deferUpdate: jest.fn(async function (this: any) {
+        this.deferred = true;
+      }),
       editReply: jest.fn().mockResolvedValue(undefined),
       update: jest.fn().mockResolvedValue(undefined),
       followUp: jest.fn().mockResolvedValue(undefined),
@@ -241,10 +246,11 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
       await handleVCPresetButton(mockInteraction as ButtonInteraction);
 
       expect(mockService.deletePreset).not.toHaveBeenCalled();
-      expect(mockInteraction.reply).toHaveBeenCalledWith({
+      expect(mockInteraction.editReply).toHaveBeenCalledWith({
         content:
           "❌ Your presets changed since this panel was opened — reopen it and try again.",
-        flags: expect.anything(),
+        embeds: [],
+        components: [],
       });
     });
 
@@ -255,7 +261,7 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
       await handleVCPresetButton(mockInteraction as ButtonInteraction);
 
       expect(mockService.deletePreset).not.toHaveBeenCalled();
-      expect(mockInteraction.reply).toHaveBeenCalledWith(
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
         expect.objectContaining({
           content:
             "❌ Your presets changed since this panel was opened — reopen it and try again.",
@@ -306,7 +312,7 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
       await handleVCPresetButton(mockInteraction as ButtonInteraction);
 
       expect(mockService.setDefault).not.toHaveBeenCalled();
-      expect(mockInteraction.reply).toHaveBeenCalledWith(
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
         expect.objectContaining({
           content:
             "❌ Your presets changed since this panel was opened — reopen it and try again.",
@@ -316,12 +322,12 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
   });
 
   describe("rename button", () => {
-    it("embeds the name fingerprint in the rename modal custom ID", async () => {
-      setPresets([squadNight]);
+    it("builds the rename modal id from the button's name tag, without a database read", async () => {
       mockInteraction.customId = `vc_preset_rename_0_${presetNameTag("Squad Night")}_chan1_user1`;
 
       await handleVCPresetButton(mockInteraction as ButtonInteraction);
 
+      expect(mockFindOne).not.toHaveBeenCalled();
       expect(mockInteraction.showModal).toHaveBeenCalledTimes(1);
       const modal = (mockInteraction.showModal as jest.Mock).mock
         .calls[0][0] as { data: { custom_id?: string } };
@@ -330,19 +336,179 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
       );
     });
 
-    it("refuses to open the modal from a stale rename button", async () => {
-      setPresets([other]);
-      mockInteraction.customId = `vc_preset_rename_0_${presetNameTag("Squad Night")}_chan1_user1`;
+    it("keeps the modal custom id within Discord's 100-character limit in the longest case", async () => {
+      const snowflake = "9".repeat(20);
+      mockIsRoomOwner.mockReturnValue(true);
+      mockInteraction.user = { id: snowflake } as any;
+      mockInteraction.customId = `vc_preset_rename_24_${presetNameTag("x")}_${snowflake}_${snowflake}`;
+
+      await handleVCPresetButton(mockInteraction as ButtonInteraction);
+
+      const modal = (mockInteraction.showModal as jest.Mock).mock
+        .calls[0][0] as { data: { custom_id: string } };
+      expect(modal.data.custom_id.length).toBeLessThanOrEqual(100);
+    });
+
+    it("refuses a legacy tag-less rename button, which the submit could not verify", async () => {
+      mockInteraction.customId = "vc_preset_rename_0_chan1_user1";
 
       await handleVCPresetButton(mockInteraction as ButtonInteraction);
 
       expect(mockInteraction.showModal).not.toHaveBeenCalled();
+      expect(mockFindOne).not.toHaveBeenCalled();
       expect(mockInteraction.reply).toHaveBeenCalledWith(
         expect.objectContaining({
-          content:
-            "❌ Your presets changed since this panel was opened — reopen it and try again.",
+          content: expect.stringContaining("reopen it and try again"),
         }),
       );
+    });
+  });
+
+  describe("acknowledgement before slow work (#1537)", () => {
+    let order: string[];
+
+    beforeEach(() => {
+      order = [];
+      setPresets([squadNight, other]);
+      mockFindOne.mockImplementation((async () => {
+        order.push("loadPrefs");
+        return { presets: [squadNight, other] };
+      }) as never);
+      mockService.setDefault.mockImplementation((async () => {
+        order.push("write");
+        return { name: "Squad Night", isDefault: true };
+      }) as never);
+      mockService.deletePreset.mockImplementation((async () => {
+        order.push("write");
+        return { name: "Squad Night", remaining: 1 };
+      }) as never);
+      (mockInteraction.deferUpdate as jest.Mock).mockImplementation(
+        async function (this: any) {
+          order.push("ack");
+          this.deferred = true;
+        } as never,
+      );
+      (mockInteraction.deferReply as jest.Mock).mockImplementation(
+        async function (this: any) {
+          order.push("ack");
+          this.deferred = true;
+        } as never,
+      );
+      (mockGuild.channels!.fetch as jest.Mock).mockImplementation((async () => {
+        order.push("fetch");
+        return mockChannel;
+      }) as never);
+    });
+
+    const tag = presetNameTag("Squad Night");
+    it.each([
+      ["back", "vc_preset_back_chan1_user1"],
+      ["manage", "vc_preset_manage_chan1_user1"],
+      ["default", `vc_preset_default_0_${tag}_chan1_user1`],
+      ["delete", `vc_preset_delete_0_${tag}_chan1_user1`],
+    ])("%s defers the update before any read or write", async (_n, id) => {
+      mockInteraction.customId = id;
+
+      await handleVCPresetButton(mockInteraction as ButtonInteraction);
+
+      expect(order[0]).toBe("ack");
+      expect(mockInteraction.deferUpdate).toHaveBeenCalledTimes(1);
+      expect(mockInteraction.update).not.toHaveBeenCalled();
+      expect(mockInteraction.editReply).toHaveBeenCalled();
+    });
+
+    it("open defers an ephemeral reply before any read, then edits it", async () => {
+      mockInteraction.customId = "vc_preset_open_chan1_user1";
+
+      await handleVCPresetButton(mockInteraction as ButtonInteraction);
+
+      expect(order[0]).toBe("ack");
+      expect(mockInteraction.deferReply).toHaveBeenCalledWith({
+        flags: expect.anything(),
+      });
+      expect(mockInteraction.reply).not.toHaveBeenCalled();
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        expect.objectContaining({ embeds: expect.any(Array) }),
+      );
+    });
+
+    it("sends the set-default and delete confirmations as follow-ups", async () => {
+      mockInteraction.customId = `vc_preset_default_0_${tag}_chan1_user1`;
+      await handleVCPresetButton(mockInteraction as ButtonInteraction);
+      mockInteraction.customId = `vc_preset_delete_0_${tag}_chan1_user1`;
+      await handleVCPresetButton(mockInteraction as ButtonInteraction);
+
+      expect(mockInteraction.followUp).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+      ["save", "vc_preset_save_chan1_user1"],
+      ["rename", `vc_preset_rename_0_${tag}_chan1_user1`],
+    ])(
+      "%s shows the modal without reading or writing presets",
+      async (_n, id) => {
+        mockInteraction.customId = id;
+
+        await handleVCPresetButton(mockInteraction as ButtonInteraction);
+
+        expect(mockInteraction.showModal).toHaveBeenCalledTimes(1);
+        expect(mockFindOne).not.toHaveBeenCalled();
+        expect(UserVoicePreferences.create).not.toHaveBeenCalled();
+        expect(mockInteraction.deferUpdate).not.toHaveBeenCalled();
+        expect(mockInteraction.deferReply).not.toHaveBeenCalled();
+      },
+    );
+
+    it("save does not check the preset limit (the submit does)", async () => {
+      jest.spyOn(ConfigService.prototype, "getNumber").mockResolvedValue(1);
+      mockInteraction.customId = "vc_preset_save_chan1_user1";
+
+      await handleVCPresetButton(mockInteraction as ButtonInteraction);
+
+      expect(mockInteraction.showModal).toHaveBeenCalledTimes(1);
+      expect(mockInteraction.reply).not.toHaveBeenCalled();
+    });
+
+    it("replaces the panel with the error when a read fails after the defer", async () => {
+      mockFindOne.mockImplementation((async () => {
+        throw new Error("db down");
+      }) as never);
+      mockInteraction.customId = `vc_preset_delete_0_${tag}_chan1_user1`;
+
+      await handleVCPresetButton(mockInteraction as ButtonInteraction);
+
+      expect(mockInteraction.editReply).toHaveBeenCalledWith({
+        content: "❌ An error occurred while processing your request.",
+        embeds: [],
+        components: [],
+      });
+      expect(mockInteraction.reply).not.toHaveBeenCalled();
+    });
+
+    it("replaces the panel when presets are disabled after the defer", async () => {
+      jest
+        .spyOn(ConfigService.prototype, "getBoolean")
+        .mockResolvedValue(false);
+      mockInteraction.customId = "vc_preset_manage_chan1_user1";
+
+      await handleVCPresetButton(mockInteraction as ButtonInteraction);
+
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: "❌ Presets are disabled on this server.",
+        }),
+      );
+      expect(order).not.toContain("loadPrefs");
+    });
+
+    it("does not acknowledge or read for a non-owner", async () => {
+      mockIsRoomOwner.mockReturnValue(false);
+      mockInteraction.customId = "vc_preset_back_chan1_user1";
+
+      await handleVCPresetButton(mockInteraction as ButtonInteraction);
+
+      expect(order).toEqual([]);
+      expect(mockInteraction.reply).toHaveBeenCalled();
     });
   });
 
@@ -392,7 +558,7 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
 
       await handleVCPresetButton(i);
 
-      const panel = (i.reply as jest.Mock).mock.calls[0][0] as Panel;
+      const panel = (i.editReply as jest.Mock).mock.calls[0][0] as Panel;
       expectEscaped(panel.embeds[0].data.description);
       expectPlainSelect(panel);
     });
@@ -461,7 +627,7 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
       } as unknown as ButtonInteraction;
       await handleVCPresetButton(i);
       expectEscaped(
-        ((i.reply as jest.Mock).mock.calls[0][0] as Embedded).embeds[0].data
+        ((i.editReply as jest.Mock).mock.calls[0][0] as Embedded).embeds[0].data
           .description,
       );
     });
