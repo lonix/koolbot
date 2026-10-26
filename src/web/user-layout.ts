@@ -391,10 +391,12 @@ function renderFlash(flash?: UserFlashMessage | null): string {
   if (!flash) return "";
   const cls =
     flash.type === "ok" ? "ok" : flash.type === "warn" ? "warn" : "err";
-  // role="status" + tabindex="-1" + data-flash: a polite live region that the
-  // layout's FLASH_FOCUS_SCRIPT focuses on load so the outcome of a
-  // post-redirect save is actually announced (WCAG 4.1.3, #855).
-  return `<div class="notice ${cls}" role="status" tabindex="-1" data-flash>${escapeHtml(flash.text)}</div>`;
+  // tabindex="-1" + data-flash: the layout's FLASH_FOCUS_SCRIPT focuses it on
+  // load so the outcome of a post-redirect save is actually announced
+  // (WCAG 4.1.3, #855). A result is a polite status; a failure is an alert
+  // (#1517).
+  const role = flash.type === "err" ? "alert" : "status";
+  return `<div class="notice ${cls}" role="${role}" tabindex="-1" data-flash>${escapeHtml(flash.text)}</div>`;
 }
 
 /**
