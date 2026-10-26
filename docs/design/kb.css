@@ -113,6 +113,8 @@ a.kb-pill:hover { background: var(--fill-hover); color: var(--on-primary); text-
 .kb-callout__title { margin: 0; font-weight: 600; font-size: var(--type-panel-title-size); }
 .kb-callout__text { margin: 0.1rem 0 0; font-size: var(--type-description-size); }
 .kb-callout__actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; align-self: center; }
+.kb-callout--wrap { flex-wrap: wrap; }
+.kb-callout--wrap > .kb-callout__body { flex: 1 1 16rem; }
 .kb-callout--ok { background: var(--ok-bg); color: var(--ok-text); }
 .kb-callout--warn { background: var(--warn-bg); color: var(--warn-text); }
 .kb-callout--err { background: var(--err-bg); color: var(--err-text); }

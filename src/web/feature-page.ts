@@ -120,7 +120,7 @@ export function renderFeatureDisabledCallout(opts: {
   const verbLabel = escapeHtml(
     opts.label.charAt(0).toLowerCase() + opts.label.slice(1),
   );
-  return `<div class="kb-callout" role="status">
+  return `<div class="kb-callout kb-callout--wrap" role="status">
   ${toneIcon("")}<div class="kb-callout__body"><p class="kb-callout__title">${label} feature is off.</p><p class="kb-callout__text">You can still change things below; they take effect once it is on.</p></div>
   <div class="kb-callout__actions">
     <form method="POST" action="/admin/settings/set">

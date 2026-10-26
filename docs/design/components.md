@@ -386,6 +386,7 @@ A message about the page or the last action, with an optional action on the righ
 - Title states the fact; text says the impact; the action fixes it (_Review_, _Enable_).
 - Put a warning callout at the top of the page only when something needs a decision; never for "everything is fine".
 - Results of a save (flash messages) use `--ok` or `--err` and say what changed: "Saved. 3 settings changed."
+- `kb-callout--wrap` lets the actions drop to their own row when the text needs the width (long action labels on a narrow screen).
 - The disabled-feature banner (#610) is a plain callout with _Enable_ (primary, small) and a _Settings_ link.
 
 ### IssueRow

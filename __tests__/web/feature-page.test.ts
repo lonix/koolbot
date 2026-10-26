@@ -979,13 +979,13 @@ describe("renderFeatureDisabledCallout (#1544)", () => {
     });
     const doc = new DOMParser().parseFromString(html, "text/html");
     const callout = doc.querySelector("div.kb-callout");
-    expect(callout?.className).toBe("kb-callout");
+    expect(callout?.className).toBe("kb-callout kb-callout--wrap");
     expect(callout?.querySelector("svg.kb-icon")).not.toBeNull();
     expect(callout?.querySelector(".kb-callout__title")?.textContent).toBe(
       `${label} feature is off.`,
     );
     expect(html).not.toContain("are disabled");
-    expect(html).not.toContain("class=\"notice");
+    expect(html).not.toContain('class="notice');
     expect(callout?.querySelector(".kb-callout__text")?.textContent).toBe(
       "You can still change things below; they take effect once it is on.",
     );
@@ -1038,5 +1038,16 @@ describe("renderFeatureDisabledCallout (#1544)", () => {
     expect(labels).toHaveLength(LABELS.length);
     for (const l of labels)
       expect(l).toBe(l.charAt(0) + l.slice(1).toLowerCase());
+  });
+});
+
+describe("callout wrap modifier (#1544)", () => {
+  const css = readFileSync("docs/design/kb.css", "utf8");
+
+  it("lets the actions wrap below a text body that keeps a minimum width", () => {
+    expect(css).toMatch(/\.kb-callout--wrap \{ flex-wrap: wrap; \}/);
+    expect(css).toMatch(
+      /\.kb-callout--wrap > \.kb-callout__body \{ flex: 1 1 16rem; \}/,
+    );
   });
 });

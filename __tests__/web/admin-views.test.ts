@@ -2045,7 +2045,7 @@ describe("renderPollsPage", () => {
       roles: [],
     });
     // The disabled page explains the state instead of looking blank...
-    expect(html).toContain('class="kb-callout"');
+    expect(html).toContain('class="kb-callout kb-callout--wrap"');
     expect(html).toContain("Polls feature is off.");
     // ...and offers an inline enable that flips polls.enabled and returns here.
     expect(html).toContain('action="/admin/settings/set"');
