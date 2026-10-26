@@ -3679,9 +3679,9 @@ existing achievements award detection. `celebrations.enabled` depends on
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Overview** (`/me/`)                   | Opens with a live event you host (a panel linking to its host panel, with a _Live_ badge), then one card per available preference showing how it is set now, then your poll participation and your account ids as one line of fine print. |
 | **Notifications** (`/me/notifications`) | Opt in to DM nudges (achievements, weekly digest, Rewind) with a switch per message. Off by default — KoolBot never DMs you until you opt in here. Records a `WebAuditLog` row.                                                           |
-| **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete). Gated by `voicechannels.presets.enabled`.                                                                                           |
+| **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete; delete asks first). Gated by `voicechannels.presets.enabled`.                                                                        |
 | **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in with a searchable select (_Server default_ clears it); also used for your birthday.                                                                                                  |
-| **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row.                                                                                 |
+| **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row; removing asks first.                                                            |
 | **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.                                                                                     |
 | **Privacy** (`/me/privacy`)             | See what Koolbot stores about you, download it as one JSON file, and (if `privacy.delete.enabled`) reset it. Gated by `privacy.enabled`; audited.                                                                                         |
 
@@ -3729,7 +3729,11 @@ The **Birthday** page (`#657`) stores a month/day and an optional year
 per `(userId, guildId)`. The year is optional by design — many people
 share the date but not the age — and when omitted no age is computed or
 shown. The page is gated by `birthdays.enabled` and answers `404` while it
-is off. A "Remove my birthday" button clears the stored date. The daily birthday
+is off. A "Remove my birthday" button clears the stored date; it is a danger button that
+opens the confirmation dialog first, listing what the removal does (the saved date, a birthday
+role you hold, the bot's birthday posts about you, and the wait before a birthday can be set
+again when `birthdays.change_cooldown_seconds` is above 0). Without JavaScript the form posts at
+once. The daily birthday
 announcement itself is evaluated in the member's `/me/timezone`
 preference so it fires on their local day (`#524`).
 
@@ -3748,7 +3752,7 @@ naming) and your **saved presets**. Presets themselves are still _created_
 in Discord by snapshotting a live channel (control panel → Presets → Save
 current as preset); the web page lets you **edit** a preset's name, channel
 name, user limit, and bitrate, **set-default** (the default auto-applies on
-your next lobby spawn), and **delete**. Every write goes through the same
+your next lobby spawn), and **delete** (which asks first in the confirmation dialog, naming the preset). Every write goes through the same
 `UserVoicePrefsService` validation as the Discord modal — so the
 max-per-user cap, name/limit/bitrate bounds, and name-pattern length are
 identical on both surfaces — and records a `WebAuditLog` row
