@@ -520,9 +520,11 @@ describe("POST /me/events/new: a refused form (#1531)", () => {
     const date = control(html, "new-event-date");
     expect(date).toContain('aria-invalid="true"');
     expect(date).toContain('aria-describedby="new-event-date-error"');
-    expect(html).toContain(
-      '<p class="kb-field__error" id="new-event-date-error">Pick a time in the future.</p>',
-    );
+    expect(
+      /<p class="kb-field__error" id="new-event-date-error"[^>]*>(?:<svg.*?<\/svg>)?Pick a time in the future\.<\/p>/.test(
+        html,
+      ),
+    ).toBe(true);
     expect(noScripts(html).match(/aria-invalid="true"/g)).toHaveLength(1);
     expect(html).toContain("kb-callout--err");
     expect(html).toContain(`name="_csrf" value="${TEST_CSRF_TOKEN}"`);

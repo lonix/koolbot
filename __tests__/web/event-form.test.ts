@@ -138,8 +138,8 @@ describe("markField and renderRefusalCallout", () => {
     const m = markField(refusal, "duration", "d");
     expect(m.invalid).toBe(true);
     expect(m.attrs).toBe(' aria-invalid="true" aria-describedby="d-error"');
-    expect(m.line).toBe(
-      '<p class="kb-field__error" id="d-error">At most 1440 minutes.</p>',
+    expect(m.line).toMatch(
+      /^<p class="kb-field__error" id="d-error"><svg[^>]*aria-hidden="true".*<\/svg>At most 1440 minutes\.<\/p>$/,
     );
     const other = markField(refusal, "title", "t");
     expect(other).toMatchObject({

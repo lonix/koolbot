@@ -10,6 +10,7 @@
  */
 
 import { escapeHtml } from "./html.js";
+import { toneIcon } from "./icons.js";
 
 /**
  * The fields a refusal can name. `groups` is the Groups section as a whole (its
@@ -70,7 +71,7 @@ export function markField(
     };
   }
   const errorId = `${id}-error`;
-  const line = `<p class="kb-field__error" id="${escapeHtml(errorId)}"${field === "groups" ? " data-field-error-target" : ""}>${escapeHtml(refusal.message)}</p>`;
+  const line = `<p class="kb-field__error" id="${escapeHtml(errorId)}"${field === "groups" ? " data-field-error-target" : ""}>${toneIcon("err")}${escapeHtml(refusal.message)}</p>`;
   return {
     invalid: true,
     errorId,
@@ -92,7 +93,7 @@ export function renderRefusalCallout(
   const text = refusal.field
     ? "Check the field marked below, change it and try again."
     : refusal.message;
-  return `<div class="kb-callout kb-callout--err" role="alert"><div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(heading)}</p><p class="kb-callout__text">${escapeHtml(text)}</p></div></div>`;
+  return `<div class="kb-callout kb-callout--err" role="alert">${toneIcon("err")}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(heading)}</p><p class="kb-callout__text">${escapeHtml(text)}</p></div></div>`;
 }
 
 /**

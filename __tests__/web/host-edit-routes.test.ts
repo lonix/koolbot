@@ -422,6 +422,13 @@ describe("who may edit", () => {
 });
 
 /** The markup without script bodies (the focus script names the attribute too). */
+/** The text of the error line with this id (its icon has no text). */
+const errorLine = (html: string, id: string): string | null => {
+  const m = new RegExp(
+    `<p class="kb-field__error" id="${id}-error"[^>]*>(.*?)</p>`,
+  ).exec(html);
+  return m ? m[1].replace(/<[^>]*>/g, "") : null;
+};
 const noScripts = (html: string): string =>
   html.replace(/<script[\s\S]*?<\/script>/g, "");
 
@@ -486,9 +493,7 @@ describe("validation is the create form's", () => {
       ).exec(r.text);
       expect(field?.[0]).toContain('aria-invalid="true"');
       expect(field?.[0]).toContain(`aria-describedby="${id}-error"`);
-      expect(r.text).toContain(
-        `<p class="kb-field__error" id="${id}-error">${msg}</p>`,
-      );
+      expect(errorLine(r.text, id)).toBe(msg);
       expect(r.text).toContain("kb-callout--err");
       // Exactly one field is marked.
       expect(noScripts(r.text).match(/aria-invalid="true"/g)).toHaveLength(1);

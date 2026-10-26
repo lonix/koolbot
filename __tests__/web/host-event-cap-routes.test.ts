@@ -171,8 +171,9 @@ beforeEach(() => {
 
 /**
  * The outcome of a post, as a flash. A create opens the host panel with an "ok"
- * flash; a refusal is the form itself (#1531, status 422) and its reason is the
- * callout text, so it reads as an "err" on the New event page.
+ * flash; a refusal is the form itself (#1531, status 422): it reads as an "err"
+ * only when the page carries the error callout, its path is the form's action
+ * and its message is the callout's text.
  */
 const flashOf = async (
   body: Record<string, string>,
@@ -182,10 +183,14 @@ const flashOf = async (
     return parseFlashRedirect(res.headers.get("location"));
   }
   const html = await res.text();
+  const callout =
+    /<div class="kb-callout kb-callout--err"[\s\S]*?<p class="kb-callout__text">([^<]*)<\/p>/.exec(
+      html,
+    );
   return {
-    path: "/me/events/new",
-    type: "err",
-    msg: /kb-callout__text">([^<]*)</.exec(html)?.[1] ?? null,
+    path: /<form method="POST" action="([^"]+)"[^>]*data-event-form/.exec(html)?.[1] ?? "",
+    type: callout ? "err" : "",
+    msg: callout?.[1] ?? null,
     invalid: [],
     settings: null,
   };
