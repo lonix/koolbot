@@ -1977,6 +1977,14 @@ same Groups block, without **Repeat** (a host's events do not repeat) and withou
 from the form), the scope is checked on every request, and the host reaches only events they created. Both forms use one create pipeline
 (`src/web/event-create.ts`), and every create is audited as `event.create` with `via` (`admin` or `host`) and `when`.
 
+**A refused form keeps what was typed** (#1531). When the server refuses **New event** or **Edit event**, the answer is the form itself
+(status 422, no redirect): the title, date, time, timezone, duration and Groups rows come back as posted, the field the refusal is about gets
+`aria-invalid="true"` and an error line linked by `aria-describedby` that says what to change, a short error callout sits at the top, and
+focus moves to the marked field. A Groups error shows above the Groups block. A refusal that is not about one field (the open-event limit,
+a Discord failure) shows its reason in the callout only. The edit form comes back with the version, mode and CSRF token it was posted with,
+so a stale form is still refused on the next save. Other refusals on the edit page (a conflict, an event that has started) still return to a
+fresh page with a message. The admin Events form is not changed yet.
+
 **Limit on open events** (#1408). `events.max_active_per_host` (Settings, Events) is the most events a host who is not an administrator may
 have open at once; `0`, the default, means no limit. Open means scheduled or running, the same events **Your events** lists under Live now
 and Upcoming; ended and cancelled events do not count, nor do events an admin adopted. A host at the limit who tries **New event** or
@@ -3679,9 +3687,9 @@ existing achievements award detection. `celebrations.enabled` depends on
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Overview** (`/me/`)                   | Opens with a live event you host (a panel linking to its host panel, with a _Live_ badge), then one card per available preference showing how it is set now, then your poll participation and your account ids as one line of fine print. |
 | **Notifications** (`/me/notifications`) | Opt in to DM nudges (achievements, weekly digest, Rewind) with a switch per message. Off by default — KoolBot never DMs you until you opt in here. Records a `WebAuditLog` row.                                                           |
-| **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete). Gated by `voicechannels.presets.enabled`.                                                                                           |
+| **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete; delete asks first). Gated by `voicechannels.presets.enabled`.                                                                        |
 | **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in with a searchable select (_Server default_ clears it); also used for your birthday.                                                                                                  |
-| **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row.                                                                                 |
+| **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row; removing asks first.                                                            |
 | **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.                                                                                     |
 | **Privacy** (`/me/privacy`)             | See what Koolbot stores about you, download it as one JSON file, and (if `privacy.delete.enabled`) reset it. Gated by `privacy.enabled`; audited.                                                                                         |
 
@@ -3736,7 +3744,11 @@ The **Birthday** page (`#657`) stores a month/day and an optional year
 per `(userId, guildId)`. The year is optional by design — many people
 share the date but not the age — and when omitted no age is computed or
 shown. The page is gated by `birthdays.enabled` and answers `404` while it
-is off. A "Remove my birthday" button clears the stored date. The daily birthday
+is off. A "Remove my birthday" button clears the stored date; it is a danger button that
+opens the confirmation dialog first, listing what the removal does (the saved date, a birthday
+role you hold, the bot's birthday posts about you, and the wait before a birthday can be set
+again when `birthdays.change_cooldown_seconds` is above 0). Without JavaScript the form posts at
+once. The daily birthday
 announcement itself is evaluated in the member's `/me/timezone`
 preference so it fires on their local day (`#524`).
 
@@ -3755,7 +3767,7 @@ naming) and your **saved presets**. Presets themselves are still _created_
 in Discord by snapshotting a live channel (control panel → Presets → Save
 current as preset); the web page lets you **edit** a preset's name, channel
 name, user limit, and bitrate, **set-default** (the default auto-applies on
-your next lobby spawn), and **delete**. Every write goes through the same
+your next lobby spawn), and **delete** (which asks first in the confirmation dialog, naming the preset). Every write goes through the same
 `UserVoicePrefsService` validation as the Discord modal — so the
 max-per-user cap, name/limit/bitrate bounds, and name-pattern length are
 identical on both surfaces — and records a `WebAuditLog` row

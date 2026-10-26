@@ -60,6 +60,7 @@ import {
 } from "../../services/event-edit.js";
 import {
   renderEventEditBody,
+  type EventEditRefused,
   type EventEditCover,
 } from "../event-edit-view.js";
 import {
@@ -1671,19 +1672,94 @@ function registerEditRoutes(router: Router, client: Client): void {
     );
   const zoneOf = (event: IEvent): string => resolveTimezone(event.timezone);
 
-  router.get("/edit", (req, res, next: NextFunction) => {
+  // The form, for a fresh page (GET) and for a refused save (#1531), which is
+  // answered in the same response so what was typed is not lost. `shown` is
+  // what the form is rendered in: the stored state on GET, the posted version,
+  // mode and start fields on a refusal, so the stale-form checks still see them.
+  const sendEditForm = async (
+    req: Request,
+    res: Response,
+    shown: {
+      mode: "full" | "limited";
+      version: string;
+      startLocked: boolean;
+    },
+    refused?: EventEditRefused,
+  ): Promise<void> => {
     const { hostEvent: event, hostSession: session } = req as HostRequest;
+    const eventId = String(event._id);
+    const csrfToken = getCsrfToken(req);
+    const zone = zoneOf(event);
+    const flags = await readMeSurfaceFlags();
+    const permissionNotice = await hostPermissionNotice(
+      client,
+      event.guildId,
+      // The panel event's start line is not shown here, so the event's own
+      // zone does (#1538).
+      toPanelEvent(client, event, zone),
+      event,
+      (e) =>
+        hostEditPermissionFeatures(
+          e,
+          !!event.announcementChannelId && !!event.announcementMessageId,
+        ),
+    );
+    res
+      .set("Cache-Control", "no-store")
+      .type("text/html")
+      .send(
+        renderUserPage({
+          title: `Edit event: ${event.title}`,
+          active: "/me/events",
+          body: renderEventEditBody({
+            permissionNotice,
+            canLinkToPermissions: session.role === "admin",
+            cover: coverViewOf(event),
+            ...(session.role === "admin"
+              ? { adminEventsHref: "/admin/events" }
+              : {}),
+            event: {
+              id: eventId,
+              title: event.title,
+              description: event.description ?? "",
+              durationMinutes: event.durationMinutes,
+              timezone: zone,
+              date: formatInTimeZone(event.startTime, zone, "yyyy-MM-dd"),
+              time: formatInTimeZone(event.startTime, zone, "HH:mm"),
+              when: formatEventWhen(event),
+              version: shown.version,
+              mode: shown.mode,
+              startLocked: shown.startLocked,
+              ...(isSeriesRow(event)
+                ? {
+                    series: {
+                      cadence: isRecurring(event)
+                        ? recurrenceLabel(event.recurrence)
+                        : "regularly",
+                    },
+                  }
+                : {}),
+            },
+            csrfToken,
+            ...(refused ? { refused } : {}),
+          }),
+          csrfToken,
+          remainingMs: getDisplayedRemainingMs(session),
+          isAdmin: session.role === "admin",
+          flash: refused ? null : readSignedFlash(req.query),
+          ...flags,
+        }),
+      );
+  };
+
+  router.get("/edit", (req, res, next: NextFunction) => {
+    const { hostEvent: event } = req as HostRequest;
     const eventId = String(event._id);
     const mode = edit(event);
     if (mode.mode === "refused") {
       hostPanelRedirect(res, eventId, { type: "err", text: mode.message });
       return;
     }
-    const csrfToken = getCsrfToken(req);
-    // Edit event stays in the event's own zone throughout (#1538): the date,
-    // time and timezone fields edit that zone, and the read-only start fact
-    // beside them is shown in it too. The panel's start is the member's.
-    const zone = zoneOf(event);
     void (async (): Promise<void> => {
       if (!(await service().editsAllowed())) {
         hostPanelRedirect(res, eventId, {
@@ -1695,65 +1771,11 @@ function registerEditRoutes(router: Router, client: Client): void {
       // A running Discord event keeps its start: show it as text, not a field.
       const startLocked =
         mode.mode === "full" && !(await service().startMayMove(event));
-      const flags = await readMeSurfaceFlags();
-      const permissionNotice = await hostPermissionNotice(
-        client,
-        event.guildId,
-        // The panel event's start line is not shown here, so the event's own
-        // zone does.
-        toPanelEvent(client, event, zone),
-        event,
-        (e) =>
-          hostEditPermissionFeatures(
-            e,
-            !!event.announcementChannelId && !!event.announcementMessageId,
-          ),
-      );
-      res
-        .set("Cache-Control", "no-store")
-        .type("text/html")
-        .send(
-          renderUserPage({
-            title: `Edit event: ${event.title}`,
-            active: "/me/events",
-            body: renderEventEditBody({
-              permissionNotice,
-              canLinkToPermissions: session.role === "admin",
-              cover: coverViewOf(event),
-              ...(session.role === "admin"
-                ? { adminEventsHref: "/admin/events" }
-                : {}),
-              event: {
-                id: eventId,
-                title: event.title,
-                description: event.description ?? "",
-                durationMinutes: event.durationMinutes,
-                timezone: zone,
-                date: formatInTimeZone(event.startTime, zone, "yyyy-MM-dd"),
-                time: formatInTimeZone(event.startTime, zone, "HH:mm"),
-                when: formatEventWhen(event),
-                version: eventEditVersion(event, mode.mode),
-                mode: mode.mode,
-                startLocked,
-                ...(isSeriesRow(event)
-                  ? {
-                      series: {
-                        cadence: isRecurring(event)
-                          ? recurrenceLabel(event.recurrence)
-                          : "regularly",
-                      },
-                    }
-                  : {}),
-              },
-              csrfToken,
-            }),
-            csrfToken,
-            remainingMs: getDisplayedRemainingMs(session),
-            isAdmin: session.role === "admin",
-            flash: readSignedFlash(req.query),
-            ...flags,
-          }),
-        );
+      await sendEditForm(req, res, {
+        mode: mode.mode,
+        version: eventEditVersion(event, mode.mode),
+        startLocked,
+      });
     })().catch(next);
   });
 
@@ -1868,7 +1890,44 @@ function registerEditRoutes(router: Router, client: Client): void {
         { requireFuture: !startUnchanged },
       );
       if (!parsed.ok) {
-        await fail(parsed.error);
+        // A field refusal answers with the form itself (#1531): the posted
+        // values back in their fields, the refused one marked. It is rendered
+        // with the version, mode and start fields it was posted with, so the
+        // stale-form checks above still decide the next save.
+        await recordAudit(
+          session,
+          boundAuditEntry({
+            action: "event.edit",
+            targetId: eventId,
+            result: "failure",
+            errorMessage: parsed.error,
+          }),
+        );
+        res.status(422);
+        await sendEditForm(
+          req,
+          res,
+          {
+            mode: rendered,
+            version: field("version"),
+            startLocked: full && !offeredStart,
+          },
+          {
+            refusal: {
+              message: parsed.error,
+              ...(parsed.field ? { field: parsed.field } : {}),
+            },
+            values: {
+              title: full ? field("title") : event.title,
+              description: field("description"),
+              duration: field("duration"),
+              date: editStart ? date : shown.date,
+              time: editStart ? time : shown.time,
+              timezone: editStart ? timezone : zone,
+              scope: field("scope"),
+            },
+          },
+        );
         return;
       }
       let result: Awaited<ReturnType<EventService["editEvent"]>>;

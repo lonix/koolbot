@@ -3233,7 +3233,13 @@ export function renderGroupsSection(
   presetsHref = "/admin/events/presets",
   // The host's last setup (#1406), already validated against today's limits by
   // `loadGroupPrefill`; `resetHref` reloads the form with the normal defaults.
-  remembered: { prefill: GroupFormPrefill; resetHref: string } | null = null,
+  // A `resetHref` of null is a refused form's own rows: no "prefilled" note.
+  remembered: {
+    prefill: GroupFormPrefill;
+    resetHref: string | null;
+    /** The switch's own state; absent means on whenever there is a prefill. */
+    enabled?: boolean;
+  } | null = null,
   // A missing bot permission next to the field it breaks (#1478), already
   // rendered by `splitEventFormNotice`; absent or "" leaves the markup as it was.
   permissionInline: Partial<EventFormInline> = {},
@@ -3261,7 +3267,7 @@ export function renderGroupsSection(
   const rows = Array.from({ length: rowCount }, (_, i) =>
     renderGroupRow(String(i), String(i + 1), prefill?.rows[i]),
   ).join("\n      ");
-  const rememberedNote = remembered
+  const rememberedNote = remembered?.resetHref
     ? `<p class="kb-help" data-prefilled>Prefilled from your last event. <a href="${escapeHtml(remembered.resetHref)}">Start from the defaults instead</a></p>`
     : "";
   // The quick builder's own fields belong to no form (`form="none"`): they
@@ -3281,7 +3287,7 @@ export function renderGroupsSection(
   return `<fieldset data-groups-section>
       <legend${hideLegend ? ' class="kb-visually-hidden"' : ""}>Groups</legend>${rememberedNote ? `\n      ${rememberedNote}` : ""}
       <div class="kb-groupopt">
-        <label class="kb-switch"><input type="checkbox" role="switch" name="${GROUP_FORM_FIELDS.enabled}" value="1"${prefill ? " checked" : ""} aria-describedby="groups-enabled-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Split into groups (teams, squads, rooms…)</label>
+        <label class="kb-switch"><input type="checkbox" role="switch" name="${GROUP_FORM_FIELDS.enabled}" value="1"${(remembered?.enabled ?? prefill !== null) ? " checked" : ""} aria-describedby="groups-enabled-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Split into groups (teams, squads, rooms…)</label>
         <p class="kb-help" id="groups-enabled-help">Each group gets its own voice channel next to the event's channel, made at the channel creation time and removed when the event is over. Leave it off for a plain event.</p>
       </div>${inline(permissionInline.groups)}
       <div data-groups-body class="kb-stack">
