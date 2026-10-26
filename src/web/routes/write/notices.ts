@@ -60,12 +60,13 @@ export function createNoticesRouter(client: Client): Router {
     title: string;
     content: string;
     category: string;
-    order: number | null;
+    /** 0 when refused: only used once `errors` is empty. */
+    order: number;
   } => {
     const title = getString(req, "title");
     const content = getString(req, "content");
     const category = getString(req, "category");
-    const order = parseIntInRange(
+    const parsedOrder = parseIntInRange(
       getString(req, "order") || blankOrder,
       ORDER_MIN,
       ORDER_MAX,
@@ -96,7 +97,7 @@ export function createNoticesRouter(client: Client): Router {
     } else if (!NOTICE_CATEGORY_KEYS.has(category)) {
       addFieldError(errors, "category", "Choose one of the listed categories.");
     }
-    if (order === null) {
+    if (parsedOrder === null) {
       addFieldError(
         errors,
         "order",
@@ -114,7 +115,7 @@ export function createNoticesRouter(client: Client): Router {
       title,
       content,
       category,
-      order,
+      order: parsedOrder ?? 0,
     };
   };
 
@@ -133,8 +134,7 @@ export function createNoticesRouter(client: Client): Router {
       ) {
         return;
       }
-      const { title, content, category } = form;
-      const order = form.order as number;
+      const { title, content, category, order } = form;
 
       try {
         const enabled = await ConfigService.getInstance().getBoolean(
@@ -233,8 +233,7 @@ export function createNoticesRouter(client: Client): Router {
       ) {
         return;
       }
-      const { title, content, category } = form;
-      const order = form.order as number;
+      const { title, content, category, order } = form;
 
       try {
         const notice = await Notice.findById(id);

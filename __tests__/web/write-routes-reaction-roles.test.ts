@@ -295,7 +295,7 @@ describe("POST /reaction-roles/bind and /remove-mapping", () => {
   it("leaves a refusal from Discord as a page flash", async () => {
     mockBindReactionRole.mockResolvedValue({
       success: false,
-      message: "That role is above the bot's highest role.",
+      message: "Role `role-1` was not found in this server.",
     });
     const res = await harness.post("/reaction-roles/bind", {
       roleId: "role-1",
@@ -304,7 +304,7 @@ describe("POST /reaction-roles/bind and /remove-mapping", () => {
     expect(res.status).toBe(303);
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.type).toBe("err");
-    expect(flash.msg).toBe("That role is above the bot's highest role.");
+    expect(flash.msg).toBe("Role `role-1` was not found in this server.");
   });
 
   it("binds to a new message when no message id was supplied", async () => {

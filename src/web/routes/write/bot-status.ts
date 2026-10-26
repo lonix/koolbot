@@ -108,8 +108,8 @@ export function createBotStatusRouter(client: Client): Router {
       const errors: FormErrors = {};
       const problem = statusTextProblem(pool, text);
       if (problem) addFieldError(errors, "text", problem);
-      const order = parseIntInRange(orderRaw || "0", -1000, 10000);
-      if (order === null) {
+      const parsedOrder = parseIntInRange(orderRaw || "0", -1000, 10000);
+      if (parsedOrder === null) {
         addFieldError(
           errors,
           "order",
@@ -129,8 +129,8 @@ export function createBotStatusRouter(client: Client): Router {
       ) {
         return;
       }
-      // Not reached with a bad order: it was refused above. Narrows the type.
-      if (order === null) return;
+      // A bad order was refused above, so 0 is never stored.
+      const order = parsedOrder ?? 0;
       try {
         const entry = await new BotStatusMessage({
           guildId: session.guildId,
