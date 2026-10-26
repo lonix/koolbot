@@ -5,6 +5,8 @@ import {
 } from "discord.js";
 import { embedColor } from "./embed-style.js";
 import { safeReply } from "./safe-reply.js";
+import logger from "./logger.js";
+import { describeDiscordError } from "./log-sanitize.js";
 
 /**
  * The one shape of a failed or refused answer in Discord (#1509, epic #1314):
@@ -70,11 +72,23 @@ export async function replyWithError(
   interaction: RepliableInteraction,
   { title, next, whenDeferred = "edit" }: ErrorMessage & ReplyWithErrorOptions,
 ): Promise<boolean> {
+  // Building the embed (design tokens, embed builder) is inside the no-throw
+  // boundary too: callers use this from their last catch block.
+  let embed: EmbedBuilder;
+  try {
+    embed = errorEmbed({ title, next });
+  } catch (error) {
+    logger.error(
+      `Failed to build the error embed for interaction ${interaction.id}: ${describeDiscordError(error)}`,
+      { stack: error instanceof Error ? error.stack : undefined },
+    );
+    return false;
+  }
   return safeReply(
     interaction,
     {
       content: "",
-      embeds: [errorEmbed({ title, next })],
+      embeds: [embed],
       components: [],
       flags: MessageFlags.Ephemeral,
     },
