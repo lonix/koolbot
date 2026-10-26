@@ -10,7 +10,9 @@
  * 3. A failed slash command answers through `replyWithError` /
  *    `replyWithUnexpectedError` (`utils/error-reply.ts`, #1509): an ephemeral
  *    embed-danger embed that says what to do next. A reply `content` literal in
- *    `src/commands/` that starts with `❌` or says "There was an error" fails.
+ *    `src/commands/`, `src/handlers/` (buttons, menus, forms; #1510) or
+ *    `src/index.ts` that starts with `❌` or `⚠️`, or says "There was an error"
+ *    or "An error occurred while processing", fails.
  *
  * Plain string scan over the TypeScript sources (comments stripped); the Web UI
  * (`src/web/`) is HTML and out of scope. A file may only be listed in
@@ -448,7 +450,15 @@ function replyTexts(
 
 const REPLY_METHODS = new Set(["reply", "editReply", "followUp", "send"]);
 const CROSS_MARK = /^\s*❌/;
-const GENERIC_FAILURE = /There was an error/i;
+/**
+ * A warning sign leading a reply is a failure too ("⚠️ The waiting room no
+ * longer exists"), but only outside `commands/`: `/quote add` still opens two
+ * purge-race outcomes with it (#1552 left them as they are), so widening the
+ * rule there is an owner decision.
+ */
+const WARNING_SIGN = /^\s*⚠️?/u;
+const GENERIC_FAILURE =
+  /There was an error|An error occurred while processing/i;
 
 /** The reply texts of a source: `content: x`, and `reply(x)` / `editReply(x)` with a bare string. */
 function replyTextExpressions(
@@ -481,17 +491,18 @@ function replyTextExpressions(
 
 function errorReplyProblems(source: string, file = "commands/x.ts"): string[] {
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const inCommands = file.startsWith("commands/");
   return replyTextExpressions(sf).flatMap(({ line, expr }) => {
     const problems: string[] = [];
     for (const text of replyTexts(sf, expr)) {
-      if (CROSS_MARK.test(text)) {
+      if (CROSS_MARK.test(text) || (!inCommands && WARNING_SIGN.test(text))) {
         problems.push(
-          `${line}: reply text starts with "❌"; use replyWithError (utils/error-reply.ts)`,
+          `${line}: reply text starts with "❌" or "⚠️"; use replyWithError (utils/error-reply.ts)`,
         );
       }
       if (GENERIC_FAILURE.test(text)) {
         problems.push(
-          `${line}: reply text says "There was an error"; use replyWithUnexpectedError (utils/error-reply.ts)`,
+          `${line}: reply text is a generic error line; use replyWithUnexpectedError (utils/error-reply.ts)`,
         );
       }
     }
@@ -499,10 +510,30 @@ function errorReplyProblems(source: string, file = "commands/x.ts"): string[] {
   });
 }
 
-describe("discord error reply guard (#1509)", () => {
-  it("has no ❌ or generic-error reply text in src/commands", () => {
-    const commands = path.join(SRC, "commands");
-    const hits = walk(commands).flatMap((file) =>
+/** The sources that answer members in Discord: commands, component handlers, the dispatcher. */
+function errorReplyFiles(): string[] {
+  return [
+    ...walk(path.join(SRC, "commands")),
+    ...walk(path.join(SRC, "handlers")),
+    path.join(SRC, "index.ts"),
+  ];
+}
+
+describe("discord error reply guard (#1509, #1510)", () => {
+  it("scans the commands, the component handlers and the dispatcher (self-test)", () => {
+    const scanned = errorReplyFiles().map((f) => rel(f, SRC));
+    expect(scanned).toEqual(
+      expect.arrayContaining([
+        "index.ts",
+        "handlers/vc-control-button-handler.ts",
+        "handlers/lfg-button-handler.ts",
+        "commands/lfg.ts",
+      ]),
+    );
+  });
+
+  it("has no ❌ or generic-error reply text in src/commands, src/handlers or src/index.ts", () => {
+    const hits = errorReplyFiles().flatMap((file) =>
       errorReplyProblems(fs.readFileSync(file, "utf8"), rel(file, SRC)).map(
         (p) => `${rel(file, SRC)}:${p}`,
       ),
@@ -521,8 +552,20 @@ describe("discord error reply guard (#1509)", () => {
       'await interaction.reply({ content: ok ? "Done" : "❌ nope" });',
       'await interaction.reply({ content: "❌ " + reason });',
       'await interaction.followUp("There was an error recording the warning.");',
+      'await safeReply(interaction, { content: "❌ An error occurred while processing your request." });',
+      'await safeReply(interaction, { content: "An error occurred while processing your request." });',
     ]) {
       expect(errorReplyProblems(bad)).not.toEqual([]);
+    }
+    // A warning sign leads a failure in a handler or the dispatcher.
+    for (const bad of [
+      'await interaction.reply({ content: "⚠️ The waiting room no longer exists.", flags });',
+      'await interaction.editReply({ content: "⚠ Gone", embeds: [], components: [] });',
+    ]) {
+      expect(errorReplyProblems(bad, "handlers/x.ts")).not.toEqual([]);
+      expect(errorReplyProblems(bad, "index.ts")).not.toEqual([]);
+      // ...but is left alone in commands/ (see WARNING_SIGN).
+      expect(errorReplyProblems(bad, "commands/x.ts")).toEqual([]);
     }
   });
 
@@ -535,6 +578,8 @@ describe("discord error reply guard (#1509)", () => {
       "// await interaction.reply({ content: '❌ old' });",
       'logger.error("There was an error while executing this command!");',
       "await interaction.editReply({ content: result.message });",
+      'await interaction.editReply({ content: "", embeds: [e], components: [] });',
+      'await safeReply(interaction, { content: "You\'re in — 2 spot(s) left." });',
     ]) {
       expect(errorReplyProblems(fine)).toEqual([]);
     }

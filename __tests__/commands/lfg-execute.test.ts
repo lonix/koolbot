@@ -9,8 +9,10 @@
  */
 
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import { MessageFlags } from "discord.js";
 import {
   errorEmbedPayload,
+  unexpectedErrorPayload,
   createMockChatInputInteraction,
   createMockButtonInteraction,
   type MockChatInputInteraction,
@@ -388,17 +390,39 @@ describe("LFG buttons", () => {
     await handleLfgButton(btn);
 
     expect(mockMarkRenderPending).toHaveBeenCalledWith(POST_ID);
-    expect(
-      (btn.followUp.mock.calls[0][0] as { content: string }).content,
-    ).toContain("error updating this LFG post");
+    expect(btn.followUp).toHaveBeenCalledWith(unexpectedErrorPayload());
+    // The only edit is the post's own render attempt: the error never lands
+    // on the public post (#1510).
+    expect(btn.editReply).toHaveBeenCalledTimes(1);
+    expect(btn.editReply).toHaveBeenCalledWith({ content: "refreshed" });
   });
 
   it.each([
-    ["closed", "no longer open"],
-    ["already_joined", "already on this roster"],
-    ["full", "already full"],
-  ])("answers a %s join without touching the post", async (status, text) => {
-    mockJoinPost.mockResolvedValue({ status, post: post() });
+    ["closed", "This LFG post is closed"],
+    ["full", "This party is full"],
+  ])(
+    "answers a %s join with an ephemeral error and leaves the post alone",
+    async (status, title) => {
+      mockJoinPost.mockResolvedValue({ status, post: post() });
+      const btn = buttonInteraction(`lfg_join_${POST_ID}`);
+
+      await handleLfgButton(btn);
+
+      expect(btn.editReply).not.toHaveBeenCalled();
+      expect(btn.followUp).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title,
+          description: expect.stringContaining("`/lfg`"),
+        }),
+      );
+      expect(btn.followUp).toHaveBeenCalledWith(
+        expect.objectContaining({ flags: MessageFlags.Ephemeral }),
+      );
+    },
+  );
+
+  it("answers an already-joined click with a plain private note", async () => {
+    mockJoinPost.mockResolvedValue({ status: "already_joined", post: post() });
     const btn = buttonInteraction(`lfg_join_${POST_ID}`);
 
     await handleLfgButton(btn);
@@ -406,7 +430,19 @@ describe("LFG buttons", () => {
     expect(btn.editReply).not.toHaveBeenCalled();
     expect(
       (btn.followUp.mock.calls[0][0] as { content: string }).content,
-    ).toContain(text);
+    ).toContain("already on this roster");
+  });
+
+  it("answers a leave on a closed post with an ephemeral error", async () => {
+    mockLeavePost.mockResolvedValue({ status: "closed", post: post() });
+    const btn = buttonInteraction(`lfg_leave_${POST_ID}`);
+
+    await handleLfgButton(btn);
+
+    expect(btn.editReply).not.toHaveBeenCalled();
+    expect(btn.followUp).toHaveBeenCalledWith(
+      errorEmbedPayload({ title: "This LFG post is closed" }),
+    );
   });
 
   it("sends the host to Close rather than letting them leave", async () => {
@@ -450,9 +486,12 @@ describe("LFG buttons", () => {
     await handleLfgButton(btn);
 
     expect(btn.editReply).not.toHaveBeenCalled();
-    expect(
-      (btn.followUp.mock.calls[0][0] as { content: string }).content,
-    ).toContain("Only the host");
+    expect(btn.followUp).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Only the host can close this LFG post",
+        description: expect.stringContaining("host"),
+      }),
+    );
   });
 
   // A post outlives the feature switch: closing them all is best-effort, and
@@ -467,9 +506,13 @@ describe("LFG buttons", () => {
     // The click is still acknowledged first: the feature check is itself a
     // config read that can reach Mongo, so it must not precede the ACK.
     expect(btn.deferUpdate).toHaveBeenCalled();
-    expect(
-      (btn.followUp.mock.calls[0][0] as { content: string }).content,
-    ).toContain("switched off");
+    expect(btn.editReply).not.toHaveBeenCalled();
+    expect(btn.followUp).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "LFG is switched off on this server",
+        description: expect.stringContaining("admin"),
+      }),
+    );
   });
 
   it("rejects a malformed customId without acknowledging or calling the service", async () => {
@@ -481,9 +524,12 @@ describe("LFG buttons", () => {
     expect(mockJoinPost).not.toHaveBeenCalled();
     expect(mockLeavePost).not.toHaveBeenCalled();
     expect(mockCloseByHost).not.toHaveBeenCalled();
-    expect(
-      (btn.reply.mock.calls[0][0] as { content: string }).content,
-    ).toContain("Invalid LFG button");
+    expect(btn.reply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "This LFG button is out of date",
+        description: expect.stringContaining("`/lfg`"),
+      }),
+    );
   });
 
   it("always answers the click, even when the service throws", async () => {
@@ -492,9 +538,45 @@ describe("LFG buttons", () => {
 
     await handleLfgButton(btn);
 
-    expect(
-      (btn.followUp.mock.calls[0][0] as { content: string }).content,
-    ).toContain("error updating this LFG post");
+    expect(btn.followUp).toHaveBeenCalledWith(unexpectedErrorPayload());
+  });
+
+  // The click was acknowledged with deferUpdate() on the PUBLIC post, so the
+  // deferred response is the post itself: editing it with an error would
+  // overwrite the LFG post for everyone (#1510). Every failure path sends an
+  // ephemeral follow-up and never edits.
+  it.each([
+    [
+      "the service throws",
+      () => mockJoinPost.mockRejectedValue(new Error("x")),
+    ],
+    [
+      "the post is closed",
+      () => mockJoinPost.mockResolvedValue({ status: "closed", post: post() }),
+    ],
+    [
+      "the party is full",
+      () => mockJoinPost.mockResolvedValue({ status: "full", post: post() }),
+    ],
+    [
+      "LFG is switched off",
+      () => mockConfigGetBoolean.mockResolvedValue(false),
+    ],
+  ])("an error never edits the public post when %s", async (_name, arrange) => {
+    arrange();
+    const btn = buttonInteraction(`lfg_join_${POST_ID}`);
+
+    await handleLfgButton(btn);
+
+    expect(btn.deferUpdate).toHaveBeenCalledTimes(1);
+    expect(btn.editReply).not.toHaveBeenCalled();
+    expect(btn.followUp).toHaveBeenCalledTimes(1);
+    expect(btn.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flags: MessageFlags.Ephemeral,
+        embeds: [expect.anything()],
+      }),
+    );
   });
 });
 

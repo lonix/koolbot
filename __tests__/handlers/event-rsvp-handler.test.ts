@@ -6,7 +6,11 @@
  */
 
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import { createMockButtonInteraction } from "../test-utils.js";
+import {
+  createMockButtonInteraction,
+  errorEmbedPayload,
+  unexpectedErrorPayload,
+} from "../test-utils.js";
 
 const mockSetRsvp = jest.fn<() => Promise<unknown>>();
 const mockBuildAnnouncementPayload = jest.fn(() => ({ content: "refreshed" }));
@@ -44,8 +48,9 @@ describe("event RSVP button handler", () => {
     const it_ = createMockButtonInteraction("vc_control_rename");
     await handleEventRsvpButton(it_);
     expect(it_.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("Invalid RSVP button"),
+      errorEmbedPayload({
+        title: "This RSVP button is out of date",
+        description: expect.stringContaining("Interested"),
       }),
     );
     expect(mockSetRsvp).not.toHaveBeenCalled();
@@ -55,9 +60,7 @@ describe("event RSVP button handler", () => {
     const it_ = createMockButtonInteraction("event_rsvp_event-1_perhaps");
     await handleEventRsvpButton(it_);
     expect(it_.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("Unknown RSVP option"),
-      }),
+      errorEmbedPayload({ title: "This RSVP button is out of date" }),
     );
     expect(mockSetRsvp).not.toHaveBeenCalled();
   });
@@ -93,8 +96,9 @@ describe("event RSVP button handler", () => {
     await handleEventRsvpButton(it_);
     expect(it_.update).not.toHaveBeenCalled();
     expect(it_.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("no longer accepting RSVPs"),
+      errorEmbedPayload({
+        title: "This event is no longer taking RSVPs here",
+        description: expect.stringContaining("Events list"),
       }),
     );
   });
@@ -105,11 +109,7 @@ describe("event RSVP button handler", () => {
       message: { id: "msg-1" },
     });
     await expect(handleEventRsvpButton(it_)).resolves.toBeUndefined();
-    expect(it_.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("error recording your RSVP"),
-      }),
-    );
+    expect(it_.reply).toHaveBeenCalledWith(unexpectedErrorPayload());
   });
 
   it("follows up (rather than re-replying) on an already-acknowledged interaction", async () => {
@@ -119,10 +119,36 @@ describe("event RSVP button handler", () => {
     });
     await handleEventRsvpButton(it_);
     expect(it_.reply).not.toHaveBeenCalled();
-    expect(it_.followUp).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("error recording your RSVP"),
+    expect(it_.followUp).toHaveBeenCalledWith(unexpectedErrorPayload());
+  });
+
+  it("never edits the announcement when the click was deferred (#1534)", async () => {
+    // A deferred click's response IS the public announcement: an error must be
+    // a separate ephemeral follow-up, not an edit.
+    mockSetRsvp.mockRejectedValue(new Error("mongo down"));
+    const it_ = createMockButtonInteraction("event_rsvp_event-1_going", {
+      deferred: true,
+    });
+    await handleEventRsvpButton(it_);
+    expect(it_.editReply).not.toHaveBeenCalled();
+    expect(it_.followUp).toHaveBeenCalledWith(unexpectedErrorPayload());
+  });
+
+  it("says the RSVP was recorded, with no retry advice, when the refresh fails", async () => {
+    mockSetRsvp.mockResolvedValue({ _id: "event-1" });
+    const it_ = createMockButtonInteraction("event_rsvp_event-1_going", {
+      message: { id: "msg-1" },
+      update: jest.fn(async () => {
+        throw new Error("10062 Unknown interaction");
       }),
-    );
+    });
+    await handleEventRsvpButton(it_);
+    expect(mockSetRsvp).toHaveBeenCalledTimes(1);
+    expect(it_.editReply).not.toHaveBeenCalled();
+    const sent = (it_.reply as jest.Mock).mock.calls[0][0] as {
+      embeds: { data: { title: string; description: string } }[];
+    };
+    expect(sent.embeds[0].data.title).toBe("Your RSVP was recorded");
+    expect(sent.embeds[0].data.description).not.toMatch(/try again/i);
   });
 });

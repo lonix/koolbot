@@ -19,13 +19,17 @@ jest.mock("../../src/models/user-voice-preferences.js", () => ({
 // Import after mocks
 import { ConfigService } from "../../src/services/config-service.js";
 import { UserVoicePreferences } from "../../src/models/user-voice-preferences.js";
-import { UserVoicePrefsService } from "../../src/services/user-voice-prefs-service.js";
+import {
+  UserVoicePrefsService,
+  VoicePrefsValidationError,
+} from "../../src/services/user-voice-prefs-service.js";
 import { VoiceChannelManager } from "../../src/services/voice-channel-manager.js";
 import {
   handleVCPresetSelect,
   handleVCPresetButton,
   presetNameTag,
 } from "../../src/handlers/vc-preset-handler.js";
+import { errorEmbedPayload, unexpectedErrorPayload } from "../test-utils.js";
 
 const mockFindOne = UserVoicePreferences.findOne as unknown as jest.Mock;
 
@@ -97,11 +101,24 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
     mockInteraction = {
       user: { id: "user1" } as any,
       guild: mockGuild as Guild,
-      reply: jest.fn().mockResolvedValue(undefined),
-      deferReply: jest.fn().mockResolvedValue(undefined),
-      deferUpdate: jest.fn().mockResolvedValue(undefined),
+      // Like discord.js, acknowledging flips the state that decides whether a
+      // failure is a fresh reply, an edit of the deferred panel, or a
+      // follow-up (#1510).
+      replied: false,
+      deferred: false,
+      reply: jest.fn(async () => {
+        (mockInteraction as any).replied = true;
+      }),
+      deferReply: jest.fn(async () => {
+        (mockInteraction as any).deferred = true;
+      }),
+      deferUpdate: jest.fn(async () => {
+        (mockInteraction as any).deferred = true;
+      }),
       editReply: jest.fn().mockResolvedValue(undefined),
-      update: jest.fn().mockResolvedValue(undefined),
+      update: jest.fn(async () => {
+        (mockInteraction as any).replied = true;
+      }),
       followUp: jest.fn().mockResolvedValue(undefined),
       showModal: jest.fn().mockResolvedValue(undefined),
     } as any;
@@ -111,9 +128,10 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
     mockFindOne.mockResolvedValue({ presets } as never);
 
   describe("apply preset", () => {
+    // The same object (not a spread copy), so the acknowledgement state the
+    // fake tracks is the one the handler sees.
     const applyInteraction = (): StringSelectMenuInteraction =>
-      ({
-        ...mockInteraction,
+      Object.assign(mockInteraction, {
         customId: "vc_preset_apply_chan1_user1",
         values: ["0"],
       }) as unknown as StringSelectMenuInteraction;
@@ -157,10 +175,14 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
 
       expect((mockChannel as any).setName).not.toHaveBeenCalled();
       expect((mockChannel as any).setUserLimit).not.toHaveBeenCalled();
+      // The panel is replaced (deferUpdate on the ephemeral panel).
       expect(i.editReply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: expect.stringContaining("current channel owner"),
+        errorEmbedPayload({
+          title: "Only the room owner can use these controls",
         }),
+      );
+      expect(i.editReply).toHaveBeenCalledWith(
+        expect.objectContaining({ components: [] }),
       );
     });
 
@@ -203,8 +225,9 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
 
       expect(mockService.deletePreset).not.toHaveBeenCalled();
       expect(mockInteraction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: expect.stringContaining("current channel owner"),
+        errorEmbedPayload({
+          title: "Only the room owner can use these controls",
+          description: expect.stringContaining("start your own room"),
         }),
       );
     });
@@ -241,11 +264,12 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
       await handleVCPresetButton(mockInteraction as ButtonInteraction);
 
       expect(mockService.deletePreset).not.toHaveBeenCalled();
-      expect(mockInteraction.reply).toHaveBeenCalledWith({
-        content:
-          "❌ Your presets changed since this panel was opened — reopen it and try again.",
-        flags: expect.anything(),
-      });
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "Your presets changed",
+          description: expect.stringContaining("Reopen the presets panel"),
+        }),
+      );
     });
 
     it("refuses when the preset index no longer exists", async () => {
@@ -256,10 +280,7 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
 
       expect(mockService.deletePreset).not.toHaveBeenCalled();
       expect(mockInteraction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content:
-            "❌ Your presets changed since this panel was opened — reopen it and try again.",
-        }),
+        errorEmbedPayload({ title: "Your presets changed" }),
       );
     });
 
@@ -307,10 +328,182 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
 
       expect(mockService.setDefault).not.toHaveBeenCalled();
       expect(mockInteraction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content:
-            "❌ Your presets changed since this panel was opened — reopen it and try again.",
+        errorEmbedPayload({ title: "Your presets changed" }),
+      );
+    });
+  });
+
+  describe("failure replies (#1510)", () => {
+    const click = (customId: string): Promise<void> => {
+      mockInteraction.customId = customId;
+      return handleVCPresetButton(mockInteraction as ButtonInteraction);
+    };
+    const sentEmbed = (
+      mock: jest.Mock,
+    ): { title: string; description: string } =>
+      (
+        mock.mock.calls[0][0] as {
+          embeds: { data: { title: string; description: string } }[];
+        }
+      ).embeds[0].data;
+
+    it("relays a VoicePrefsValidationError message, escaped, as the description", async () => {
+      setPresets([squadNight]);
+      mockService.setDefault.mockRejectedValue(
+        new VoicePrefsValidationError("Preset no longer exists."),
+      );
+
+      await click(
+        `vc_preset_default_0_${presetNameTag("Squad Night")}_chan1_user1`,
+      );
+
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "Couldn't change the default preset",
+          description: "Preset no longer exists.",
         }),
+      );
+    });
+
+    it("keeps any other error's message out of the reply", async () => {
+      setPresets([squadNight]);
+      mockService.deletePreset.mockRejectedValue(
+        new Error("MongoServerError: secret connection string"),
+      );
+
+      await click(
+        `vc_preset_delete_0_${presetNameTag("Squad Night")}_chan1_user1`,
+      );
+
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        unexpectedErrorPayload(),
+      );
+      expect(
+        JSON.stringify((mockInteraction.reply as jest.Mock).mock.calls),
+      ).not.toContain("secret");
+    });
+
+    it("says the default was changed, with no retry advice, when the panel refresh fails after the write", async () => {
+      setPresets([squadNight]);
+      mockService.setDefault.mockResolvedValue({
+        name: "Squad Night",
+        isDefault: true,
+      } as never);
+      (mockInteraction.update as jest.Mock).mockRejectedValue(
+        new Error("10062 Unknown interaction"),
+      );
+
+      await click(
+        `vc_preset_default_0_${presetNameTag("Squad Night")}_chan1_user1`,
+      );
+
+      // Pressing the button again would flip the default back.
+      expect(mockService.setDefault).toHaveBeenCalledTimes(1);
+      const embed = sentEmbed(mockInteraction.reply as jest.Mock);
+      expect(embed.title).toBe("Your default preset was changed");
+      expect(embed.description).not.toMatch(/try again/i);
+    });
+
+    it("says the preset was deleted, with no retry advice, when the confirmation fails after the write", async () => {
+      setPresets([squadNight, other]);
+      mockService.deletePreset.mockResolvedValue({
+        name: "Squad Night",
+        remaining: 1,
+      } as never);
+      (mockInteraction.followUp as jest.Mock)
+        .mockRejectedValueOnce(new Error("10062 Unknown interaction"))
+        .mockResolvedValue(undefined);
+
+      await click(
+        `vc_preset_delete_0_${presetNameTag("Squad Night")}_chan1_user1`,
+      );
+
+      expect(mockService.deletePreset).toHaveBeenCalledTimes(1);
+      // calls[0] is the confirmation that rejected; the error embed is the last.
+      const calls = (mockInteraction.followUp as jest.Mock).mock.calls;
+      const embed = (
+        calls[calls.length - 1][0] as {
+          embeds: { data: { title: string; description: string } }[];
+        }
+      ).embeds[0].data;
+      expect(embed.title).toBe("Your preset was deleted");
+      expect(embed.description).not.toMatch(/try again/i);
+    });
+
+    it.each([
+      [
+        "presets are switched off",
+        "vc_preset_open_chan1_user1",
+        false,
+        "Presets are switched off",
+      ],
+      [
+        "the action is unknown",
+        "vc_preset_bogus_chan1_user1",
+        true,
+        "This control is out of date",
+      ],
+      [
+        "the custom id cannot be read",
+        "vc_preset",
+        true,
+        "This control is out of date",
+      ],
+    ])("answers when %s", async (_name, customId, enabled, title) => {
+      jest
+        .spyOn(ConfigService.prototype, "getBoolean")
+        .mockResolvedValue(enabled);
+      setPresets([squadNight]);
+
+      await click(customId);
+
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        errorEmbedPayload({ title }),
+      );
+    });
+
+    it("tells a member with no presets what to do instead of opening Manage", async () => {
+      setPresets([]);
+
+      await click("vc_preset_manage_chan1_user1");
+
+      expect(mockInteraction.update).not.toHaveBeenCalled();
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "You have no presets yet",
+          description: expect.stringContaining("Save current as preset"),
+        }),
+      );
+    });
+
+    it("replaces the apply panel when the chosen preset is gone", async () => {
+      setPresets([]);
+      const i = Object.assign(mockInteraction, {
+        customId: "vc_preset_apply_chan1_user1",
+        values: ["0"],
+      }) as unknown as StringSelectMenuInteraction;
+
+      await handleVCPresetSelect(i);
+
+      expect(i.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({ title: "That preset no longer exists" }),
+      );
+      expect(i.editReply).toHaveBeenCalledWith(
+        expect.objectContaining({ components: [] }),
+      );
+    });
+
+    it("answers the catch-all after the panel was acknowledged with a follow-up", async () => {
+      setPresets([squadNight]);
+      (mockInteraction.update as jest.Mock).mockImplementation(async () => {
+        (mockInteraction as any).replied = true;
+        throw new Error("boom");
+      });
+
+      await click("vc_preset_back_chan1_user1");
+
+      expect(mockInteraction.followUp).toHaveBeenCalledWith(
+        unexpectedErrorPayload(),
       );
     });
   });
@@ -338,10 +531,7 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
 
       expect(mockInteraction.showModal).not.toHaveBeenCalled();
       expect(mockInteraction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content:
-            "❌ Your presets changed since this panel was opened — reopen it and try again.",
-        }),
+        errorEmbedPayload({ title: "Your presets changed" }),
       );
     });
   });

@@ -16,7 +16,11 @@ import {
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
-import { safeReply } from "../utils/safe-reply.js";
+import {
+  afterWrite,
+  replyWithError,
+  replyWithUnexpectedError,
+} from "../utils/error-reply.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 import { ConfigService } from "../services/config-service.js";
 import {
@@ -29,6 +33,12 @@ import {
   VoicePrefsValidationError,
 } from "../services/user-voice-prefs-service.js";
 import { embedColor } from "../utils/embed-style.js";
+import {
+  VC_CHANNEL_GONE,
+  VC_NOT_OWNER,
+  VC_OUT_OF_DATE,
+  VC_PRESETS_OFF,
+} from "./vc-errors.js";
 
 const configService = ConfigService.getInstance();
 
@@ -270,18 +280,12 @@ async function ensureOwnership(
       parsed.channelId,
     )
   ) {
-    await interaction.reply({
-      content: "❌ Only the current channel owner can use these controls.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithError(interaction, VC_NOT_OWNER);
     return null;
   }
   const channel = await interaction.guild?.channels.fetch(parsed.channelId);
   if (!channel || channel.type !== ChannelType.GuildVoice) {
-    await interaction.reply({
-      content: "❌ Voice channel not found.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithError(interaction, VC_CHANNEL_GONE);
     return null;
   }
   return channel as VoiceChannel;
@@ -291,19 +295,13 @@ export async function handleVCPresetButton(
   interaction: ButtonInteraction,
 ): Promise<void> {
   if (!(await presetsEnabled())) {
-    await interaction.reply({
-      content: "❌ Presets are disabled on this server.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithError(interaction, VC_PRESETS_OFF);
     return;
   }
 
   const parsed = parseCustomId(interaction.customId);
   if (!parsed) {
-    await interaction.reply({
-      content: "❌ Invalid preset interaction.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithError(interaction, VC_OUT_OF_DATE);
     return;
   }
 
@@ -327,17 +325,11 @@ export async function handleVCPresetButton(
       case "delete":
         return await deletePreset(interaction, parsed);
       default:
-        await interaction.reply({
-          content: "❌ Unknown preset action.",
-          flags: MessageFlags.Ephemeral,
-        });
+        await replyWithError(interaction, VC_OUT_OF_DATE);
     }
   } catch (error) {
     logger.error("Error handling VC preset button:", error);
-    await safeReply(interaction, {
-      content: "❌ An error occurred while processing your request.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithUnexpectedError(interaction);
   }
 }
 
@@ -345,19 +337,13 @@ export async function handleVCPresetSelect(
   interaction: StringSelectMenuInteraction,
 ): Promise<void> {
   if (!(await presetsEnabled())) {
-    await interaction.reply({
-      content: "❌ Presets are disabled on this server.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithError(interaction, VC_PRESETS_OFF);
     return;
   }
 
   const parsed = parseCustomId(interaction.customId);
   if (!parsed) {
-    await interaction.reply({
-      content: "❌ Invalid preset interaction.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithError(interaction, VC_OUT_OF_DATE);
     return;
   }
 
@@ -367,10 +353,7 @@ export async function handleVCPresetSelect(
   try {
     const idx = Number(interaction.values[0]);
     if (!Number.isInteger(idx) || idx < 0) {
-      await interaction.reply({
-        content: "❌ Invalid preset selected.",
-        flags: MessageFlags.Ephemeral,
-      });
+      await replyWithError(interaction, VC_OUT_OF_DATE);
       return;
     }
 
@@ -381,16 +364,10 @@ export async function handleVCPresetSelect(
       return await switchToManage(interaction, parsed, idx);
     }
 
-    await interaction.reply({
-      content: "❌ Unknown preset action.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithError(interaction, VC_OUT_OF_DATE);
   } catch (error) {
     logger.error("Error handling VC preset select:", error);
-    await safeReply(interaction, {
-      content: "❌ An error occurred while processing your request.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithUnexpectedError(interaction);
   }
 }
 
@@ -431,9 +408,9 @@ async function switchToManage(
 ): Promise<void> {
   const prefs = await loadPrefs(parsed.ownerId);
   if (prefs.presets.length === 0) {
-    await interaction.reply({
-      content: "❌ You don't have any presets yet.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "You have no presets yet",
+      next: "Set up your channel, then use Save current as preset.",
     });
     return;
   }
@@ -454,9 +431,9 @@ async function openSaveModal(
   const prefs = await loadPrefs(parsed.ownerId);
   const max = await maxPerUser();
   if (prefs.presets.length >= max) {
-    await interaction.reply({
-      content: `❌ You already have ${max} presets (the configured maximum). Delete one first.`,
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "You have reached the preset limit",
+      next: `You already have ${max} presets, the most this server allows. Delete one first.`,
     });
     return;
   }
@@ -497,10 +474,9 @@ async function resolveTargetPreset(
     !preset ||
     (parsed.nameTag !== null && presetNameTag(preset.name) !== parsed.nameTag)
   ) {
-    await interaction.reply({
-      content:
-        "❌ Your presets changed since this panel was opened — reopen it and try again.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "Your presets changed",
+      next: "Reopen the presets panel and try again.",
     });
     return null;
   }
@@ -512,9 +488,9 @@ async function openRenameModal(
   parsed: ParsedId,
 ): Promise<void> {
   if (parsed.presetIndex === null) {
-    await interaction.reply({
-      content: "❌ No preset selected.",
-      flags: MessageFlags.Ephemeral,
+    await replyWithError(interaction, {
+      title: "No preset selected",
+      next: "Pick a preset in the panel first.",
     });
     return;
   }
@@ -561,22 +537,34 @@ async function toggleDefault(
     // reply here; unexpected errors (DB/Discord) propagate to the outer
     // handler so they're logged and surfaced generically.
     if (error instanceof VoicePrefsValidationError) {
-      await safeReply(interaction, {
-        content: `❌ ${error.message}`,
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Couldn't change the default preset",
+        next: escapeDisplayText(error.message),
       });
       return;
     }
     throw error;
   }
 
-  await switchToManage(interaction, parsed, parsed.presetIndex);
-  await interaction.followUp({
-    content: result.isDefault
-      ? `⭐ **${escapeDisplayText(result.name)}** will auto-apply on your next channel.`
-      : `⭐ **${escapeDisplayText(result.name)}** is no longer the default.`,
-    flags: MessageFlags.Ephemeral,
-  });
+  // The default is stored. A failing panel refresh or confirmation must not
+  // fall into the catch-all's "try again": pressing again would flip it back.
+  const presetIndex = parsed.presetIndex;
+  await afterWrite(
+    interaction,
+    {
+      done: "Your default preset was changed",
+      check: "the presets panel under Manage",
+    },
+    async () => {
+      await switchToManage(interaction, parsed, presetIndex);
+      await interaction.followUp({
+        content: result.isDefault
+          ? `⭐ **${escapeDisplayText(result.name)}** will auto-apply on your next channel.`
+          : `⭐ **${escapeDisplayText(result.name)}** is no longer the default.`,
+        flags: MessageFlags.Ephemeral,
+      });
+    },
+  );
 }
 
 async function deletePreset(
@@ -597,24 +585,35 @@ async function deletePreset(
     // As in toggleDefault: translate only the known validation/missing case;
     // rethrow unexpected errors for the outer handler to log and report.
     if (error instanceof VoicePrefsValidationError) {
-      await safeReply(interaction, {
-        content: `❌ ${error.message}`,
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Couldn't delete the preset",
+        next: escapeDisplayText(error.message),
       });
       return;
     }
     throw error;
   }
 
-  if (removed.remaining === 0) {
-    await switchToApply(interaction, parsed);
-  } else {
-    await switchToManage(interaction, parsed, null);
-  }
-  await interaction.followUp({
-    content: `🗑️ Deleted preset **${escapeDisplayText(removed.name)}**.`,
-    flags: MessageFlags.Ephemeral,
-  });
+  // The preset is deleted. A failing panel refresh or confirmation must not
+  // fall into the catch-all's "try again".
+  await afterWrite(
+    interaction,
+    {
+      done: "Your preset was deleted",
+      check: "the presets panel",
+    },
+    async () => {
+      if (removed.remaining === 0) {
+        await switchToApply(interaction, parsed);
+      } else {
+        await switchToManage(interaction, parsed, null);
+      }
+      await interaction.followUp({
+        content: `🗑️ Deleted preset **${escapeDisplayText(removed.name)}**.`,
+        flags: MessageFlags.Ephemeral,
+      });
+    },
+  );
 }
 
 async function applyPreset(
@@ -630,10 +629,9 @@ async function applyPreset(
   const prefs = await loadPrefs(parsed.ownerId);
   const preset = prefs.presets[index];
   if (!preset) {
-    await interaction.editReply({
-      content: "❌ Preset no longer exists.",
-      embeds: [],
-      components: [],
+    await replyWithError(interaction, {
+      title: "That preset no longer exists",
+      next: "Reopen the presets panel and pick another one.",
     });
     return;
   }
@@ -654,11 +652,7 @@ async function applyPreset(
     },
   );
   if (!ran) {
-    await interaction.editReply({
-      content: "❌ Only the current channel owner can use these controls.",
-      embeds: [],
-      components: [],
-    });
+    await replyWithError(interaction, VC_NOT_OWNER);
     return;
   }
 
