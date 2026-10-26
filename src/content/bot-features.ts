@@ -1,6 +1,6 @@
 /**
  * Display copy (emoji, label, one-line blurb) and the listing decision for the
- * auto-maintained "KoolBot Features & Commands" notice (#1007).
+ * auto-maintained "What KoolBot can do here" notice (#1007).
  *
  * Keyed by the feature prefix of a top-level `<feature>.enabled` config key.
  * The notice lists a feature only when it has an entry here with
@@ -25,34 +25,34 @@ export interface BotFeatureInfo {
 export const BOT_FEATURES: Readonly<Record<string, BotFeatureInfo>> = {
   voicechannels: {
     emoji: "🎤",
-    label: "Voice Channels",
+    label: "Voice channels",
     description: "Dynamic voice channels — join the lobby to create your own",
     listed: true,
   },
   voicetracking: {
     emoji: "📊",
-    label: "Voice Tracking",
+    label: "Voice tracking",
     description: "Track your voice activity with `/voicestats`",
     listed: true,
   },
   // Not member-facing: passive, nothing a member acts on (owner, #1131).
   messagetracking: {
     emoji: "💬",
-    label: "Message Tracking",
+    label: "Message tracking",
     description: "Text-message activity counts toward your stats",
     listed: false,
   },
   // Passive, like message tracking.
   reactiontracking: {
     emoji: "😀",
-    label: "Reaction Tracking",
+    label: "Reaction tracking",
     description: "Reactions given and received count toward your stats",
     listed: false,
   },
   quotes: {
     emoji: "📝",
     label: "Quotes",
-    description: 'Save memorable quotes with `/quote text:"..." author:@user`',
+    description: "Save memorable quotes with `/quote add`",
     listed: true,
   },
   // Owner decision (#1131): hidden, the poll posts are self-evident.
@@ -71,7 +71,7 @@ export const BOT_FEATURES: Readonly<Record<string, BotFeatureInfo>> = {
   },
   lfg: {
     emoji: "🎮",
-    label: "Looking for Group",
+    label: "Looking for group",
     description: "Find people to play with right now using `/lfg`",
     listed: true,
   },
@@ -83,7 +83,7 @@ export const BOT_FEATURES: Readonly<Record<string, BotFeatureInfo>> = {
   },
   tickets: {
     emoji: "🎫",
-    label: "Support Tickets",
+    label: "Support tickets",
     description: "Get private help from staff with `/ticket open`",
     listed: true,
   },
@@ -110,7 +110,7 @@ export const BOT_FEATURES: Readonly<Record<string, BotFeatureInfo>> = {
   // Owner: only visible as the resulting posts and roles.
   leaderboard_roles: {
     emoji: "🥇",
-    label: "Leaderboard Roles",
+    label: "Leaderboard roles",
     description: "Top members on the leaderboard earn reward roles",
     listed: false,
   },
@@ -130,7 +130,7 @@ export const BOT_FEATURES: Readonly<Record<string, BotFeatureInfo>> = {
   // Owner decision (#1131): hidden, the role messages are self-evident.
   reactionroles: {
     emoji: "⭐",
-    label: "Reaction Roles",
+    label: "Reaction roles",
     description: "Pick your own roles from the server's role messages",
     listed: false,
   },
@@ -157,14 +157,14 @@ export const BOT_FEATURES: Readonly<Record<string, BotFeatureInfo>> = {
   },
   privacy: {
     emoji: "🔒",
-    label: "Data Export",
+    label: "Data export",
     description: "Download the data KoolBot stores about you from the Web UI",
     listed: true,
   },
   // Not something a member acts on.
   ratelimit: {
     emoji: "🚦",
-    label: "Rate Limiting",
+    label: "Rate limiting",
     description: "Commands are rate-limited to keep things fair",
     listed: false,
   },
@@ -178,14 +178,14 @@ export const BOT_FEATURES: Readonly<Record<string, BotFeatureInfo>> = {
   // The accept button is obvious where it appears.
   rules: {
     emoji: "📜",
-    label: "Server Rules",
+    label: "Server rules",
     description: "Accept the server rules with a button to unlock the rest",
     listed: false,
   },
   namehistory: {
     emoji: "🪪",
-    label: "Name History",
-    description: "See what a member used to be called with `/aka @user`",
+    label: "Name history",
+    description: "See what a member used to be called with `/aka`",
     listed: true,
   },
   // Owner decision (#1131, comment): show ping.

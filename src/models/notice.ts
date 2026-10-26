@@ -6,6 +6,8 @@ export interface INotice extends Document {
   category: string;
   order: number;
   messageId?: string; // Discord message ID
+  /** Bot version the auto-maintained features notice was last posted for (#1511); unset on every other notice. */
+  botVersion?: string;
   createdBy: string; // User ID
   createdAt: Date;
   updatedAt: Date;
@@ -35,6 +37,10 @@ const NoticeSchema = new Schema<INotice>(
       default: 0,
     },
     messageId: {
+      type: String,
+      required: false,
+    },
+    botVersion: {
       type: String,
       required: false,
     },

@@ -33,6 +33,14 @@ const CLEANUP_INTERVAL_MINUTES = 5;
 // Mirrors the `maxlength` on `Notice.content` (models/notice.ts).
 const NOTICE_CONTENT_MAX_LENGTH = 4000;
 
+/**
+ * Title of the auto-maintained features notice in the help category, and the
+ * title it had before #1511. The record is found by either, and a record with
+ * the old title is renamed, so an upgrade never posts a second notice.
+ */
+export const BOT_INFO_TITLE = "What KoolBot can do here";
+export const LEGACY_BOT_INFO_TITLE = "KoolBot Features & Commands";
+
 // Discord API error code for "Unknown Message": the message is already gone.
 const UNKNOWN_MESSAGE_CODE = 10008;
 
@@ -82,7 +90,7 @@ export function getListedFeature(key: string): BotFeatureInfo | undefined {
 
 /** One notice line for a listed feature (see `getListedFeature`). */
 export function formatFeatureLine(info: BotFeatureInfo): string {
-  return `**${info.emoji} ${info.label}** - ${info.description}`;
+  return `- ${info.emoji} ${info.label}: ${info.description}`;
 }
 
 export class NoticesChannelManager {
@@ -559,17 +567,24 @@ export class NoticesChannelManager {
 
       // Check if a bot info notice already exists
       const existingNotice = await Notice.findOne({
-        title: "KoolBot Features & Commands",
+        title: { $in: [BOT_INFO_TITLE, LEGACY_BOT_INFO_TITLE] },
         category: "help",
       });
+      const version = getBotVersion();
 
       // Generate current bot info content
       const botInfoContent = await this.generateBotInfoContent();
       if (generation !== this.generation) return;
 
       if (existingNotice) {
-        // Update existing notice if content changed
-        if (existingNotice.content !== botInfoContent) {
+        // Re-post when the copy, the title (a record from before #1511 still
+        // has the old one) or the bot version changed. The version is shown
+        // in the footer, so it is stored beside the content to decide this.
+        if (
+          existingNotice.content !== botInfoContent ||
+          existingNotice.title !== BOT_INFO_TITLE ||
+          existingNotice.botVersion !== version
+        ) {
           // The generation was checked just above, with no await since: once
           // stop() has landed, leave the old message and the stored content
           // alone. The next start reposts from the saved content.
@@ -580,12 +595,18 @@ export class NoticesChannelManager {
           // succeeded: saving it first would make a failed post look like an
           // up-to-date notice and suppress every later retry.
           const previousContent = existingNotice.content;
+          const previousTitle = existingNotice.title;
+          const previousVersion = existingNotice.botVersion;
           const previousUpdatedAt = existingNotice.updatedAt;
           const previousMessageId = existingNotice.messageId;
-          existingNotice.content = botInfoContent; // postNotice reads it
+          existingNotice.content = botInfoContent; // postNotice reads these
+          existingNotice.title = BOT_INFO_TITLE;
+          existingNotice.botVersion = version;
           const messageId = await this.postNotice(existingNotice);
           if (!messageId) {
             existingNotice.content = previousContent;
+            existingNotice.title = previousTitle;
+            existingNotice.botVersion = previousVersion;
             return;
           }
 
@@ -600,6 +621,8 @@ export class NoticesChannelManager {
             // Content and id are stored together or not at all: take the new
             // message back down so the old one stays the single status post.
             existingNotice.content = previousContent;
+            existingNotice.title = previousTitle;
+            existingNotice.botVersion = previousVersion;
             existingNotice.messageId = previousMessageId;
             existingNotice.updatedAt = previousUpdatedAt;
             if (!(await this.deleteNoticeMessage(messageId))) {
@@ -617,8 +640,9 @@ export class NoticesChannelManager {
       } else {
         // Create new bot info notice
         const botInfoNotice = new Notice({
-          title: "KoolBot Features & Commands",
+          title: BOT_INFO_TITLE,
           content: botInfoContent,
+          botVersion: version,
           category: "help",
           order: -1000, // Display first in help category
           createdBy: this.client.user?.id || "system",
@@ -640,7 +664,7 @@ export class NoticesChannelManager {
   }
 
   /**
-   * Generate bot info content: the running version plus every enabled feature
+   * Generate bot info content: every enabled feature
    * that is classified as member-facing and worth knowing about (#1131). The
    * candidates come from the schema's top-level `<feature>.enabled` keys
    * (#1007); `BOT_FEATURES` decides which of them are listed, and a drift test
@@ -657,22 +681,11 @@ export class NoticesChannelManager {
       }
     }
 
-    let content = `🤖 **KoolBot v${getBotVersion()}**\n\n`;
-    content +=
-      "Welcome! Here are the features currently available on this server:\n\n";
-
-    if (features.length > 0) {
-      content += features.join("\n");
-      content += "\n**❓ Help** - Use `/help` to see all available commands";
-    } else {
-      content += "**❓ Help** - Use `/help` to see all available commands\n\n";
-      content += "*More features can be enabled by server administrators.*";
-    }
-
-    content += "\n\n📚 **Getting Started:**\n";
-    content += "• Use `/help` to see detailed command information\n";
-    content += "• Commands are organized by feature category\n";
-    content += "• Some features may require specific roles or permissions";
+    const closing = "Use `/help` to see every command.";
+    let content =
+      features.length > 0
+        ? `${features.join("\n")}\n\n${closing}`
+        : `No features are switched on yet. Admins switch features on in the Web UI.\n\n${closing}`;
 
     // Notice.content is capped at 4000 chars; never let a long feature list
     // make the save fail and leave the notice stale.
@@ -815,13 +828,17 @@ export class NoticesChannelManager {
 
       const categoryInfo =
         NOTICE_CATEGORIES[notice.category as keyof typeof NOTICE_CATEGORIES];
+      // The features notice is the one notice that carries the bot version
+      // (docs/design/discord.md: version only on help and about messages).
+      const footerText =
+        notice.category === "help" && notice.title === BOT_INFO_TITLE
+          ? `KoolBot · Notices · ${categoryInfo.label} · v${getBotVersion()}`
+          : `KoolBot · Notices · ${categoryInfo.label}`;
       const embed = new EmbedBuilder()
         .setColor(categoryInfo.color)
         .setTitle(`${categoryInfo.emoji} ${notice.title}`)
         .setDescription(notice.content)
-        .setFooter({
-          text: `KoolBot · Notices · ${categoryInfo.label}`,
-        })
+        .setFooter({ text: footerText })
         .setTimestamp(notice.createdAt);
 
       const message = await channel.send({ embeds: [embed] });

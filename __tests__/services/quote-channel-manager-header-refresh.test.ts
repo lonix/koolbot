@@ -34,7 +34,8 @@ jest.unstable_mockModule("../../src/services/quote-service.js", () => ({
   quoteService: {},
 }));
 
-const HEADER_TITLE = "📝 Welcome to the Quote Channel!";
+const HEADER_TITLE = "📝 Quotes";
+const LEGACY_TITLE = "📝 Welcome to the Quote Channel!";
 const SHARED_FOOTER = "KoolBot · Quotes";
 const LEGACY_FOOTER = "KoolBot Quote System";
 const OLD_DESCRIPTION =
@@ -56,7 +57,7 @@ async function loadManager() {
 
 /** The header as posted before #1348: old footer text, older copy. */
 const OLD_HEADER_EMBED = {
-  title: HEADER_TITLE,
+  title: LEGACY_TITLE,
   description: OLD_DESCRIPTION,
   footer: { text: LEGACY_FOOTER },
   fields: [
@@ -321,6 +322,89 @@ describe("QuoteChannelManager - existing header copy is kept current (#1357)", (
 
       expect(legacy.edit).not.toHaveBeenCalled();
       expect(channel.send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("old-title headers are still recognised (#1511)", () => {
+    /** The header as posted before #1511: old title, shared footer. */
+    const OLD_TITLE_EMBED = {
+      title: LEGACY_TITLE,
+      description: OLD_DESCRIPTION,
+      footer: { text: SHARED_FOOTER },
+      fields: [{ name: "📥 How to Add a Quote", value: "old", inline: false }],
+    };
+
+    it("finds a header by the old title alone", async () => {
+      const manager = await loadManager();
+      const old = {
+        id: "old1",
+        author: { id: "bot123" },
+        embeds: [OLD_TITLE_EMBED],
+      };
+      const channel = {
+        messages: {
+          fetchPinned: jest.fn(async () => [old]),
+          fetch: jest.fn(async () => []),
+        },
+      };
+
+      expect(await manager.findExistingHeader(channel)).toEqual({ id: "old1" });
+    });
+
+    it("rewrites an old-title header in place to the current copy, once", async () => {
+      const manager = await loadManager();
+      const existing = storedMessage(OLD_TITLE_EMBED);
+      existing.edit.mockImplementation(async (...args: unknown[]) => {
+        const payload = args[0] as { embeds: { toJSON(): unknown }[] };
+        existing.embeds = [payload.embeds[0].toJSON() as any];
+      });
+      const channel = channelWith(existing);
+
+      await manager.ensureHeaderPost(channel);
+      await manager.ensureHeaderPost(channel);
+
+      expect(existing.edit).toHaveBeenCalledTimes(1);
+      const sent = existing.embeds[0] as any;
+      expect(sent.title).toBe(HEADER_TITLE);
+      expect(channel.send).not.toHaveBeenCalled();
+      expect(existing.delete).not.toHaveBeenCalled();
+    });
+
+    it("adopts a lost-id old-title header instead of posting a second one", async () => {
+      mockGetString.mockResolvedValue("");
+      const manager = await loadManager();
+      const old = storedMessage(OLD_TITLE_EMBED);
+      const channel = {
+        send: jest.fn(),
+        messages: {
+          fetchPinned: jest.fn(async () => [old]),
+          fetch: jest.fn(async () => old),
+        },
+      };
+
+      await manager.ensureHeaderPost(channel);
+
+      expect(channel.send).not.toHaveBeenCalled();
+      expect(old.edit).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("header copy (#1511)", () => {
+    it("follows the message rules and points at /quote add", async () => {
+      const manager = await loadManager();
+      const json = manager.buildHeaderEmbed().toJSON();
+      expect(json.title).toBe("📝 Quotes");
+      expect(json.description).toContain("`/quote add`");
+      const text = JSON.stringify(json);
+      expect(text).not.toMatch(/Welcome|managed by|•|text:|author:/);
+      expect(json.fields!.map((f: any) => f.name)).toEqual([
+        "Add a quote",
+        "Vote",
+        "Good to know",
+      ]);
+      for (const f of json.fields!) {
+        expect(f.name).not.toMatch(/\p{Extended_Pictographic}/u);
+      }
     });
   });
 
