@@ -78,6 +78,9 @@ jest.unstable_mockModule(
 const { createEventPresetsRouter } =
   await import("../../src/web/routes/write/event-presets.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
+const { registerFormPage } = await import("../../src/web/form-pages.js");
+const { renderEventPresetsPage } =
+  await import("../../src/web/event-presets-page.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
 
 const OID = "0123456789abcdef01234567";
@@ -481,5 +484,169 @@ describe("the Captains lobby tick (#1263)", () => {
       group_2_kind: "leads",
     });
     expect(groupsOf().map((g) => g.kind)).toEqual(["team", "team"]);
+  });
+});
+
+let presetGone = false;
+
+describe("a refused preset editor (#1523)", () => {
+  // The read router registers the page's renderer in the app; here the real
+  // view stands in. The editor is drawn from what was typed, and for an edit
+  // the stored preset is only named in the heading.
+  beforeEach(() => {
+    presetGone = false;
+    registerFormPage("/admin/events/presets", async (_req, refused) =>
+      renderEventPresetsPage({
+        csrfToken: "csrf",
+        remainingMs: 1000,
+        entries: [],
+        state: "ok",
+        maxCount: 4,
+        defaultCount: 2,
+        editing:
+          refused.values.preset_id && !presetGone
+            ? { id: refused.values.preset_id, label: "Stored name" }
+            : null,
+        values: refused.values,
+        prefillNote: null,
+        refusedForm: refused,
+      }),
+    );
+  });
+  afterEach(() => {
+    registerFormPage("/admin/events/presets", async () => {
+      throw new Error("no page");
+    });
+  });
+
+  const lines = (html: string): Record<string, string> =>
+    Object.fromEntries(
+      [
+        ...html.matchAll(
+          /<p class="kb-field__error" id="([^"]+)">([^<]*)<\/p>/g,
+        ),
+      ].map((m) => [
+        m[1],
+        m[2].replaceAll("&#39;", "'").replaceAll("&quot;", '"'),
+      ]),
+    );
+
+  it("marks the name and a group's size, each with its own line, and keeps every typed value", async () => {
+    const res = await harness.post("/events/presets/save", {
+      ...goodBody,
+      preset_name: "  ",
+      group_0_size: "500",
+      group_1_name: "  Logi  ",
+      group_1_tag: "LG",
+      groups_tags: "1",
+    });
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    expect(Object.keys(lines(html))).toEqual([
+      "event-preset-preset_name-error",
+      "event-preset-group_0_size-error",
+    ]);
+    expect(lines(html)["event-preset-preset_name-error"]).toBe(
+      "A name is required.",
+    );
+    expect(html).toContain(
+      'id="event-preset-preset_name" aria-invalid="true" aria-describedby="event-preset-preset_name-error"',
+    );
+    expect(html).toMatch(
+      /name="group_0_size"[^>]* value="500" id="event-preset-group_0_size" aria-invalid="true"/,
+    );
+    // Raw echo: the spaces typed around the second group's name stay.
+    expect(html).toContain('value="  Logi  "');
+    expect(html).toContain('value="Squad"');
+    expect(html).toMatch(/name="groups_tags" value="1" checked/);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("marks the group label and the lead time", async () => {
+    const res = await harness.post("/events/presets/save", {
+      ...goodBody,
+      groups_label: "x".repeat(60),
+      groups_lead_minutes: "9999999",
+    });
+    expect(res.status).toBe(422);
+    expect(Object.keys(lines(await res.text()))).toEqual([
+      "event-preset-groups_label-error",
+      "event-preset-groups_lead_minutes-error",
+    ]);
+  });
+
+  it("puts a refusal that is about no one field above the group rows", async () => {
+    const res = await harness.post("/events/presets/save", {
+      preset_name: "Clan match",
+    });
+    expect(res.status).toBe(422);
+    expect(lines(await res.text())).toEqual({
+      "event-preset-groups-error": "Add at least one group, each with a name.",
+    });
+  });
+
+  it("keeps an edit an edit: the refused editor still posts the preset's id", async () => {
+    const res = await harness.post("/events/presets/save", {
+      ...goodBody,
+      preset_id: `lib:${OID}`,
+      preset_name: "",
+    });
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    expect(html).toContain(`name="preset_id" value="lib:${OID}"`);
+    expect(html).toMatch(/<h2>Edit .{1,6}Stored name.{1,6}<\/h2>/);
+  });
+
+  it("does not draw an Add form for an edit whose preset is gone: the flash goes back to the editor", async () => {
+    // Saving that form would create a new preset instead of retrying the edit.
+    presetGone = true;
+    const res = await harness.post("/events/presets/save", {
+      ...goodBody,
+      preset_id: `lib:${OID}`,
+      preset_name: "",
+    });
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toContain(
+      `?edit=${encodeURIComponent(`lib:${OID}`)}&flash=err`,
+    );
+  });
+
+  it("points a refusal about no one field at the first group's name", async () => {
+    const res = await harness.post("/events/presets/save", {
+      preset_name: "Clan match",
+    });
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    expect(html).toMatch(
+      /name="group_0_name"[^>]* id="event-preset-group_0_name" aria-invalid="true" aria-describedby="event-preset-groups-error"/,
+    );
+  });
+
+  it("marks the name when it is taken, rather than redirecting", async () => {
+    mockCreate.mockResolvedValue({
+      ok: false,
+      error:
+        "A preset with that name already exists (names are compared ignoring case).",
+    });
+    const res = await harness.post("/events/presets/save", goodBody);
+    expect(res.status).toBe(422);
+    expect(Object.keys(lines(await res.text()))).toEqual([
+      "event-preset-preset_name-error",
+    ]);
+  });
+
+  it("keeps a failure that is not about a field a flash back to the editor", async () => {
+    mockUpdate.mockResolvedValue({
+      ok: false,
+      error: "That preset was not found.",
+    });
+    const res = await harness.post("/events/presets/save", {
+      ...goodBody,
+      preset_id: `lib:${OID}`,
+    });
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toContain(
+      `?edit=${encodeURIComponent(`lib:${OID}`)}&flash=err`,
+    );
   });
 });

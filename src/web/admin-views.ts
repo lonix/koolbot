@@ -2691,8 +2691,13 @@ export interface EventsProps extends CommonProps {
   groupPresetsNotice?: string | null;
   /** The host's last group setup, to prefill the form (#1406); absent = defaults. */
   groupRemembered?: { prefill: GroupFormPrefill; resetHref: string } | null;
+  /** The Schedule form, when the last save was refused (#1523). */
+  refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
 }
+
+/** Form id of the Schedule a new event form on the Events page (#1523). */
+export const EVENT_CREATE_FORM = "event-create";
 
 export function renderFlash(flash?: FlashMessage | null, id = ""): string {
   if (!flash) return "";
@@ -3075,6 +3080,12 @@ export interface GroupRowOptions {
   requireName?: boolean;
   /** Markup inside the row, after the grid: hidden shown-value fields, a note. Built by the caller (escaped there). */
   extra?: string;
+  /**
+   * Extra attributes for a column's control, by column, for a refused field:
+   * ` id="..." aria-invalid="true" aria-describedby="..."` from `FormView.attrs`
+   * (#1523). Built by the caller (escaped there).
+   */
+  attrs?: Partial<Record<"marker" | "name" | "size" | "tag" | "kind", string>>;
 }
 
 /**
@@ -3114,15 +3125,15 @@ export function renderGroupRow(
   return `<div data-group-row role="group" aria-label="Group ${position}" class="kb-grouprows__item">
         <div class="kb-grouprow">
           <div data-marker-wrap class="kb-emoji-wrap">
-            <input type="text" data-marker-input class="kb-input kb-input--sm" name="${field("marker")}" aria-label="Group ${position} marker (optional, e.g. a coloured circle)" maxlength="${GROUP_MARKER_MAX_CHARS * 2}" value="${escapeHtml(group?.marker ?? "")}">
+            <input type="text" data-marker-input class="kb-input kb-input--sm" name="${field("marker")}" aria-label="Group ${position} marker (optional, e.g. a coloured circle)" maxlength="${GROUP_MARKER_MAX_CHARS * 2}" value="${escapeHtml(group?.marker ?? "")}"${options?.attrs?.marker ?? ""}>
             <button type="button" data-marker-btn class="kb-emoji-btn kb-emoji-btn--sm" aria-haspopup="true" aria-expanded="false" aria-label="Group ${position} marker: choose one" hidden>+</button>
           </div>
-          <input type="text" class="kb-input kb-input--sm" name="${field("name")}"${options?.requireName ? " required" : ""} aria-label="Group ${position} name" maxlength="${GROUP_NAME_MAX}" value="${escapeHtml(group?.name ?? "")}">
-          <input type="number" class="kb-input kb-input--sm" name="${field("size")}" aria-label="Group ${position} size (1 to ${GROUP_SIZE_MAX}, empty = no limit)" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" value="${escapeHtml(group?.size ?? "")}">
+          <input type="text" class="kb-input kb-input--sm" name="${field("name")}"${options?.requireName ? " required" : ""} aria-label="Group ${position} name" maxlength="${GROUP_NAME_MAX}" value="${escapeHtml(group?.name ?? "")}"${options?.attrs?.name ?? ""}>
+          <input type="number" class="kb-input kb-input--sm" name="${field("size")}" aria-label="Group ${position} size (1 to ${GROUP_SIZE_MAX}, empty = no limit)" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" value="${escapeHtml(group?.size ?? "")}"${options?.attrs?.size ?? ""}>
           ${
             options?.noTag
               ? `<input type="text" class="kb-input kb-input--sm" aria-label="Group ${position} tag (only a team carries a tag)" title="Only a team carries a tag" disabled>`
-              : `<input type="text" class="kb-input kb-input--sm" name="${field("tag")}" aria-label="Group ${position} tag (optional, up to ${GROUP_TAG_MAX} characters)" maxlength="${GROUP_TAG_MAX}" value="${escapeHtml(group?.tag ?? "")}">`
+              : `<input type="text" class="kb-input kb-input--sm" name="${field("tag")}" aria-label="Group ${position} tag (optional, up to ${GROUP_TAG_MAX} characters)" maxlength="${GROUP_TAG_MAX}" value="${escapeHtml(group?.tag ?? "")}"${options?.attrs?.tag ?? ""}>`
           }${
             options?.fixedKind
               ? ""
@@ -3135,7 +3146,7 @@ export function renderGroupRow(
             : `
         <div data-kind-panel class="kb-grouprows__more">
           <label class="kb-label">Group ${position} kind
-            <select class="kb-select kb-input--sm" name="${field("kind")}">${kinds}</select>
+            <select class="kb-select kb-input--sm" name="${field("kind")}"${options?.attrs?.kind ?? ""}>${kinds}</select>
           </label>
         </div>`
         }${options?.extra ?? ""}
@@ -3575,6 +3586,18 @@ export function renderEventsPage(props: EventsProps): string {
     props.groupLimits?.maxCount ?? 15,
   );
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+  const create = formView(props.refusedForm, EVENT_CREATE_FORM);
+  // A refused form also says so at the top (when no flash is already there).
+  // That notice is what makes the Groups section put back the rows the admin
+  // had filled in: its draft is restored whenever the page comes back with an
+  // error notice (#1523).
+  const refusedNotice =
+    create.refused && !props.flash
+      ? renderFlash({
+          type: "err",
+          text: "Not saved. Check the fields marked below.",
+        })
+      : "";
 
   const renderEventRow = (e: EventRow, cols: EventCols): string => {
     const finished = e.state === "cancelled" || e.state === "ended";
@@ -3710,7 +3733,7 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
   const body = `
 <h1>Events</h1>
 <p class="subtitle">Schedule events that spin up a temporary voice channel shortly before they start, are announced with a Discord event link members can mark Interested on, remind attendees, and clean themselves up afterward.</p>
-${renderPageFlash(props.flash)}
+${renderPageFlash(props.flash)}${refusedNotice}
 ${renderFeatureDisabledNotice({
   enabled: props.enabled,
   label: "Events",
@@ -3731,37 +3754,44 @@ ${permissionNote}
   <form method="POST" action="/admin/events/create" class="stack" data-event-form>
     ${csrfInput}
     <label>Title
-      <input type="text" name="title" required maxlength="100" placeholder="Game Night">
-    </label>
+      <input type="text" name="title" required maxlength="100" placeholder="Game Night"${create.valueAttr("title")}${create.attrs("title")}>
+    </label>${create.error("title")}
     <label>Description
-      <textarea name="description" rows="3" maxlength="1000" placeholder="What's happening?"></textarea>
-    </label>
+      <textarea name="description" rows="3" maxlength="1000" placeholder="What's happening?"${create.attrs("description")}>${create.textareaContent("description")}</textarea>
+    </label>${create.error("description")}
     <label>When
-      <select name="when" data-when>
-        ${EVENT_WHEN_CHOICES.map((w) => `<option value="${w}"${w === "pick" ? " selected" : ""}>${EVENT_WHEN_LABELS[w]}</option>`).join("")}
+      <select name="when" data-when${create.attrs("when")}>
+        ${EVENT_WHEN_CHOICES.map((w) => `<option value="${w}"${w === create.selected("when", "pick") ? " selected" : ""}>${EVENT_WHEN_LABELS[w]}</option>`).join("")}
       </select>
     </label>
     <label data-when-pick>Date
-      <input type="date" name="date" pattern="\\d{4}-\\d{2}-\\d{2}" placeholder="YYYY-MM-DD">
-    </label>
+      <input type="date" name="date" pattern="\\d{4}-\\d{2}-\\d{2}" placeholder="YYYY-MM-DD"${create.valueAttr("date")}${create.attrs("date")}>
+    </label>${create.error("date")}
     <label data-when-pick>Time
-      <input type="time" name="time" pattern="\\d{2}:\\d{2}" placeholder="HH:MM">
-    </label>
+      <input type="time" name="time" pattern="\\d{2}:\\d{2}" placeholder="HH:MM"${create.valueAttr("time")}${create.attrs("time")}>
+    </label>${create.error("time")}
     <label>Duration (minutes, optional)
-      <input type="number" name="duration" min="1" max="1440" placeholder="120">
-    </label>
+      <input type="number" name="duration" min="1" max="1440" placeholder="120"${create.valueAttr("duration")}${create.attrs("duration")}>
+    </label>${create.error("duration")}
     <div>
       <label for="admin-event-timezone">Timezone (optional)</label>
-      ${renderTimezoneSelect("timezone", "", { id: "admin-event-timezone", defaultZone: props.timezone, blank: true })}
+      ${renderTimezoneSelect("timezone", create.value("timezone"), { id: "admin-event-timezone", defaultZone: props.timezone, blank: true })}
     </div>
     <label>Repeat
-      <select name="recurrence">
-        <option value="none" selected>Does not repeat</option>
-        <option value="weekly">Weekly</option>
-        <option value="biweekly">Every 2 weeks</option>
-        <option value="monthly">Monthly</option>
+      <select name="recurrence"${create.attrs("recurrence")}>
+        ${[
+          ["none", "Does not repeat"],
+          ["weekly", "Weekly"],
+          ["biweekly", "Every 2 weeks"],
+          ["monthly", "Monthly"],
+        ]
+          .map(
+            ([value, label]) =>
+              `<option value="${value}"${value === create.selected("recurrence", "none") ? " selected" : ""}>${label}</option>`,
+          )
+          .join("\n        ")}
       </select>
-    </label>
+    </label>${create.error("recurrence")}
     ${renderGroupsSection(groupLimits, props.groupPresets, props.groupPresetsNotice ?? null, undefined, props.groupRemembered ?? null, permissionInline)}
     <button type="submit" class="btn btn-primary">Schedule event</button>
   </form>
@@ -4860,8 +4890,14 @@ export interface BirthdaysProps extends CommonProps {
   total: number;
   page: number;
   pageSize: number;
+  /** The edit form the last save refused (#1523). */
+  refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
 }
+
+/** Form id of one member's Edit form on the Birthdays page (#1523). */
+export const birthdayEditForm = (userId: string): string =>
+  `birthday-edit-${userId}`;
 
 /**
  * A rendered birthday message as HTML: escaped, with the sample member's
@@ -4907,8 +4943,9 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
   const rowsHtml = props.rows
     .map((b) => {
       const id = escapeHtml(b.userId);
+      const f = formView(props.refusedForm, birthdayEditForm(b.userId));
       const clearYear = b.hasYear
-        ? `<label class="checkbox"><input type="checkbox" name="clear_year" value="1"> Remove the birth year (the post stops showing an age)</label>`
+        ? `<label class="checkbox"><input type="checkbox" name="clear_year" value="1"${f.checked("clear_year") ? " checked" : ""}> Remove the birth year (the post stops showing an age)</label>`
         : "";
       return `<tr>
 <td title="${id}">${escapeHtml(b.userLabel)}<div class="muted mono">${id}</div></td>
@@ -4918,10 +4955,10 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
 <td>${b.roleGranted ? '<span class="tag tag-on">granted</span>' : '<span class="muted">—</span>'}</td>
 <td class="muted">${b.lastAnnouncedYear ?? "—"}</td>
 <td class="actions">
-  <details class="helper edit-details"><summary>Edit</summary>
+  <details class="helper edit-details"${f.open()}><summary>Edit</summary>
     <form method="POST" action="/admin/birthdays/${id}/edit" class="stack">${csrfInput}
-      <label>Month<select name="month" required>${monthOptions(b.month)}</select></label>
-      <label>Day<select name="day" required>${dayOptions(b.day)}</select></label>
+      <label>Month<select name="month" required${f.attrs("month")}>${monthOptions(Number(f.selected("month", String(b.month))))}</select></label>${f.error("month")}
+      <label>Day<select name="day" required${f.attrs("day")}>${dayOptions(Number(f.selected("day", String(b.day))))}</select></label>${f.error("day")}
       ${clearYear}
       <button type="submit" class="btn btn-primary">Save changes</button>
     </form>
@@ -5957,8 +5994,21 @@ export interface LeaderboardRolesProps extends CommonProps {
   dependencyState?: ReadonlyMap<string, boolean>;
   /** The stored config could not be read; the card renders a notice. */
   settingsUnavailable?: boolean;
+  /** The tiers form the last save refused (#1523). */
+  refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
 }
+
+/** Form id of the tier editor on the Leaderboard roles page (#1523). */
+export const LEADERBOARD_TIERS_FORM = "leaderboard-tiers";
+
+/**
+ * Field name of one editor row's control in a refused tiers form, for example
+ * `topN-2`. The inputs themselves keep the names `topN` / `roleId` (parallel
+ * arrays); this is the key of the error, the typed value and the element id.
+ */
+export const tierFieldKey = (field: "topN" | "roleId", index: number): string =>
+  `${field}-${index}`;
 
 // Progressive enhancement for the tier editor: "Add tier" clones the blank
 // row template and each row's "Remove" drops it. Both buttons render hidden
@@ -5989,10 +6039,16 @@ const LEADERBOARD_TIER_EDITOR_SCRIPT =
 function renderTierEditorRow(
   roles: RoleOption[],
   tier: { topN: number; roleId: string } | null,
+  refused?: { view: FormView; index: number; topN: string; roleId: string },
 ): string {
+  const topNKey = refused ? tierFieldKey("topN", refused.index) : "";
+  const roleKey = refused ? tierFieldKey("roleId", refused.index) : "";
+  const view = refused?.view;
+  const topN = refused ? refused.topN : tier ? String(tier.topN) : "";
+  const roleId = refused ? refused.roleId : tier?.roleId;
   return `<tr>
-<td><input type="number" name="topN" min="1" max="${Math.max(MAX_TIER_TOP_N, tier?.topN ?? 0)}" step="1" inputmode="numeric" aria-label="Top N" value="${tier ? tier.topN : ""}" style="width:6rem"></td>
-<td><select name="roleId" aria-label="Role">${roleOptionsHtml(roles, tier?.roleId)}</select></td>
+<td><input type="number" name="topN" min="1" max="${Math.max(MAX_TIER_TOP_N, tier?.topN ?? 0)}" step="1" inputmode="numeric" aria-label="Top N" value="${escapeHtml(topN)}" style="width:6rem"${view?.attrs(topNKey) ?? ""}>${view?.error(topNKey) ?? ""}</td>
+<td><select name="roleId" aria-label="Role"${view?.attrs(roleKey) ?? ""}>${roleOptionsHtml(roles, roleId)}</select>${view?.error(roleKey) ?? ""}</td>
 <td><button type="button" class="btn lb-tier-remove" hidden>Remove</button></td>
 </tr>`;
 }
@@ -6067,11 +6123,26 @@ export function renderLeaderboardRolesPage(
             ", ",
           )}. They are not shown below, and saving a change removes them.</div>`;
 
-  const editorRows = [
-    ...props.tiers.map((t) => renderTierEditorRow(props.roles, t)),
-    // One spare row, so a tier can be added without JavaScript.
-    renderTierEditorRow(props.roles, null),
-  ].join("");
+  const tiersForm = formView(props.refusedForm, LEADERBOARD_TIERS_FORM);
+  // A refused save draws the rows as submitted, so a row that was added (and
+  // never stored) keeps its typed values and its error line (#1523).
+  const submittedRows = tiersForm.refused
+    ? Math.max(0, Number(tiersForm.value("rows")) || 0)
+    : 0;
+  const editorRows = tiersForm.refused
+    ? Array.from({ length: submittedRows }, (_, i) =>
+        renderTierEditorRow(props.roles, null, {
+          view: tiersForm,
+          index: i,
+          topN: tiersForm.value(tierFieldKey("topN", i)),
+          roleId: tiersForm.value(tierFieldKey("roleId", i)),
+        }),
+      ).join("")
+    : [
+        ...props.tiers.map((t) => renderTierEditorRow(props.roles, t)),
+        // One spare row, so a tier can be added without JavaScript.
+        renderTierEditorRow(props.roles, null),
+      ].join("");
 
   const runDisabled = !props.enabled;
   const runHint = !props.enabled
@@ -6413,8 +6484,18 @@ export interface ModerationProps extends CommonProps {
   dependencyState?: ReadonlyMap<string, boolean>;
   /** The stored config could not be read; the card renders a notice. */
   settingsUnavailable?: boolean;
+  /** The open-case or decision form the last save refused (#1523). */
+  refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
 }
+
+/** Form id of the Open case form of one log row (#1523). */
+export const moderationCaseOpenForm = (entryId: string): string =>
+  `moderation-case-open-${entryId}`;
+
+/** Form id of the decision form of one case (#1523). */
+export const moderationCaseDecideForm = (caseId: string): string =>
+  `moderation-case-decide-${caseId}`;
 
 /** Display words for log actions; shared with Discord (`utils/moderation-labels.ts`). */
 export const MODERATION_ACTION_LABELS: Record<string, string> = ACTION_WORDS;
@@ -6470,13 +6551,23 @@ function renderRowCaseCell(row: ModerationRow, props: ModerationProps): string {
   if (row.action !== "kick" && row.action !== "ban") {
     return '<span class="muted">—</span>';
   }
-  return `<details class="helper edit-details"><summary>Open case</summary>
+  const f = formView(props.refusedForm, moderationCaseOpenForm(row.entryId));
+  // The log is paged and filtered by the query string; a refused save has no
+  // query, so the form hands its page's query back to draw the same rows.
+  const query = buildModerationQueryString(
+    props.filters,
+    Math.min(
+      Math.max(1, props.page),
+      Math.max(1, Math.ceil(props.total / props.pageSize)),
+    ),
+  );
+  return `<details class="helper edit-details"${f.open()}><summary>Open case</summary>
     <form method="POST" action="/admin/moderation/cases/open" class="stack">
       <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
-      <input type="hidden" name="entry_id" value="${escapeHtml(row.entryId)}">
-      <label>Review in (days)<input type="number" name="review_in_days" min="1" max="3650" value="${props.defaultReviewDays ?? 90}"></label>
+      <input type="hidden" name="entry_id" value="${escapeHtml(row.entryId)}">${query ? `\n      <input type="hidden" name="view_query" value="${escapeHtml(query)}">` : ""}
+      <label>Review in (days)<input type="number" name="review_in_days" min="1" max="3650" value="${escapeHtml(f.value("review_in_days", String(props.defaultReviewDays ?? 90)))}"${f.attrs("review_in_days", "")}></label>${f.error("review_in_days")}
       <p class="muted">Clear the days for a case with no review date.</p>
-      <label>Note<input type="text" name="note" maxlength="500"></label>
+      <label>Note<input type="text" name="note" maxlength="500"${f.valueAttr("note")}${f.attrs("note")}></label>${f.error("note")}
       <button type="submit" class="btn btn-primary btn-sm">Open case</button>
     </form>
   </details>`;
@@ -6517,10 +6608,11 @@ function renderCaseEvents(c: CaseView): string {
 function renderCaseActions(c: CaseView, props: ModerationProps): string {
   const base = `/admin/moderation/cases/${encodeURIComponent(c.id)}`;
   const days = props.defaultReviewDays ?? 90;
+  const f = formView(props.refusedForm, moderationCaseDecideForm(c.id));
   return `<form method="POST" action="${base}/uphold" class="stack">
       <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
-      <label>Next review in (days)<input type="number" name="next_review_in_days" min="1" max="3650" value="${days}"></label>
-      <label>Note<input type="text" name="note" maxlength="500"></label>
+      <label>Next review in (days)<input type="number" name="next_review_in_days" min="1" max="3650" value="${escapeHtml(f.value("next_review_in_days", String(days)))}"${f.attrs("next_review_in_days")}></label>${f.error("next_review_in_days")}
+      <label>Note<input type="text" name="note" maxlength="500"${f.valueAttr("note")}${f.attrs("note")}></label>${f.error("note")}
       <div class="inline-form">
         <button type="submit" class="btn btn-sm">${DECISION_LABELS.uphold}</button>
         <button type="submit" class="btn btn-sm" formaction="${base}/extend">${DECISION_LABELS.extend}</button>

@@ -206,6 +206,66 @@ export function groupRowField(
   return `group_${index}_${field}`;
 }
 
+/**
+ * Which form field each message of {@link validateGroupSetup} is about
+ * (#1523), keyed by the field's form name (`group_2_size`, `groups_label`,
+ * `groups_lead_minutes`), the first message per field, worded to read under
+ * that field ("At most 40 characters."). Messages that are about no one field
+ * (the group count, "add at least one group") come back in `rest`, as does
+ * anything for a `skipPositions` row, for a caller that appended a row of its
+ * own to the list (a carried captains lobby) that has no control on the page.
+ */
+export function groupErrorFields(
+  errors: readonly string[],
+  skipPositions: ReadonlySet<number> = new Set(),
+): { fields: Record<string, string>; rest: string[] } {
+  const fields: Record<string, string> = {};
+  const rest: string[] = [];
+  const lift = (text: string): string =>
+    `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+  const put = (name: string, text: string): void => {
+    if (!Object.prototype.hasOwnProperty.call(fields, name)) {
+      fields[name] = lift(text);
+    }
+  };
+  for (const message of errors) {
+    const row = /^Group (\d+) (name|kind|size|tag|marker): (.+)$/s.exec(
+      message,
+    );
+    if (row) {
+      const position = Number(row[1]);
+      if (skipPositions.has(position)) {
+        rest.push(message);
+      } else {
+        put(
+          groupRowField(
+            position - 1,
+            row[2] as "name" | "kind" | "size" | "tag" | "marker",
+          ),
+          row[3],
+        );
+      }
+      continue;
+    }
+    const label = /^(Group|Leader) label: (.+)$/s.exec(message);
+    if (label) {
+      put(
+        label[1] === "Group"
+          ? GROUP_FORM_FIELDS.label
+          : GROUP_FORM_FIELDS.leaderLabel,
+        label[2],
+      );
+      continue;
+    }
+    if (message.startsWith("Channel creation time must")) {
+      put(GROUP_FORM_FIELDS.leadMinutes, message);
+      continue;
+    }
+    rest.push(message);
+  }
+  return { fields, rest };
+}
+
 /** Read the group section from a posted urlencoded body. */
 export function parseGroupForm(body: unknown): GroupSetupInput {
   const source = (body ?? {}) as Record<string, unknown>;

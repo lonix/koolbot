@@ -10,18 +10,41 @@
 import { Router } from "express";
 import { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
-import { BirthdayService } from "../../../services/birthday-service.js";
+import {
+  BirthdayService,
+  isValidMonthDay,
+} from "../../../services/birthday-service.js";
 import { recordAudit } from "../../audit.js";
 import {
   flashRedirect,
   getCheckbox,
   getString,
+  getRawString,
   parseIntInRange,
   requireSessionContext,
   asyncHandler,
+  refuseForm,
+  rowIsGone,
 } from "./helpers.js";
+import { addFieldError, type FormErrors } from "../../form-errors.js";
+import { birthdayEditForm } from "../../admin-views.js";
 
 const BIRTHDAYS_PAGE = "/admin/birthdays";
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
 
 /** A Discord snowflake: 17–20 digits. */
 const SNOWFLAKE = /^\d{17,20}$/;
@@ -45,13 +68,53 @@ export function createBirthdaysRouter(client: Client): Router {
         });
         return;
       }
-      if (month === null || day === null) {
+      const errors: FormErrors = {};
+      if (month === null) addFieldError(errors, "month", "Choose a month.");
+      if (day === null) addFieldError(errors, "day", "Choose a day.");
+      // The selects allow 31 April and 30 February (29 February is a real
+      // birth date): mark the day, so the choice and the box stay put.
+      if (month !== null && day !== null && !isValidMonthDay(month, day)) {
+        addFieldError(
+          errors,
+          "day",
+          `${MONTH_NAMES[month - 1]} has no day ${day}. Choose another day.`,
+        );
+      }
+      // A refusal is drawn in the member's own row. A member whose birthday was
+      // removed in another tab has none: say so, as the save itself would.
+      if (
+        Object.keys(errors).length > 0 &&
+        (await rowIsGone(
+          async () =>
+            (
+              await BirthdayService.getInstance(client).listBirthdays(
+                session.guildId,
+              )
+            ).some((e) => e.userId === userId),
+          "Birthday",
+        ))
+      ) {
         flashRedirect(res, BIRTHDAYS_PAGE, {
           type: "err",
-          text: "Choose a month and a day.",
+          text: `No birthday is stored for ${userId}.`,
         });
         return;
       }
+      if (
+        await refuseForm(req, res, {
+          page: BIRTHDAYS_PAGE,
+          formId: birthdayEditForm(userId),
+          errors,
+          values: {
+            month: getRawString(req, "month"),
+            day: getRawString(req, "day"),
+            clear_year: clearYear ? "1" : "",
+          },
+        })
+      ) {
+        return;
+      }
+      if (month === null || day === null) return;
 
       try {
         // A strict read: `getBirthday` turns a read error into "not set",

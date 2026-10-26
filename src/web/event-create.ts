@@ -73,6 +73,11 @@ export type CreateEventResult =
       error: string;
       /** The form field the refusal is about; absent for one that is not (the open-event cap, a Discord failure). */
       field?: EventFormField;
+      /**
+       * A refusal about a field the validator does not name (the Repeat
+       * choice, #1523), by form field, for the admin form to mark.
+       */
+      fields?: Record<string, string>;
     };
 
 function field(body: Record<string, unknown>, name: string): string {
@@ -235,11 +240,9 @@ async function createEventUnlocked(
   const recurrence = recurrenceRaw as EventRecurrence;
   const impromptu = when === "now";
   if (impromptu && recurrence !== "none") {
-    return {
-      ok: false,
-      error:
-        'An event that starts now cannot repeat. Choose "Pick date & time" for a repeating event.',
-    };
+    const error =
+      'An event that starts now cannot repeat. Choose "Pick date & time" for a repeating event.';
+    return { ok: false, error, fields: { recurrence: error } };
   }
 
   // The date and time fields are read only for "Pick date & time". The other

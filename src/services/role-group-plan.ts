@@ -141,42 +141,69 @@ export interface GroupInput {
   gateOnly?: boolean;
 }
 
+/** The form field a group problem is about (#1523). */
+export type GroupField = "name" | "capability" | "colour";
+
 /**
  * Validate a create/edit payload. Returns the first problem in plain
- * language, or null. `existing` are the guild's other groups (the one being
+ * language and the form field it is about (`null` when it is about no one
+ * field, or about a value only a crafted request can send), or null when the
+ * input is fine. `existing` are the guild's other groups (the one being
  * edited excluded) and drive the duplicate-name check.
  */
-export function validateGroupInput(
+export function checkGroupInput(
   input: GroupInput,
   existing: ReadonlyArray<Pick<GroupSpec, "name">>,
-): string | null {
+): { field: GroupField | null; message: string } | null {
   const name = input.name.trim();
-  if (!name) return "A group needs a name.";
+  if (!name) return { field: "name", message: "A group needs a name." };
   if (name.length > MAX_NAME_LENGTH) {
-    return `A group name can be at most ${MAX_NAME_LENGTH} characters (Discord's role-name limit).`;
+    return {
+      field: "name",
+      message: `A group name can be at most ${MAX_NAME_LENGTH} characters (Discord's role-name limit).`,
+    };
   }
   if (existing.some((g) => g.name.toLowerCase() === name.toLowerCase())) {
-    return `A group called "${name}" already exists.`;
+    return {
+      field: "name",
+      message: `A group called "${name}" already exists.`,
+    };
   }
   if (existing.length >= MAX_GROUPS_PER_GUILD) {
-    return `At most ${MAX_GROUPS_PER_GUILD} groups are supported.`;
+    return {
+      field: null,
+      message: `At most ${MAX_GROUPS_PER_GUILD} groups are supported.`,
+    };
   }
   if (
     input.permissions !== undefined &&
     input.permissions !== null &&
     !isValidPermissions(input.permissions)
   ) {
-    return "Permissions must be a valid Discord permission bitfield.";
+    return {
+      field: null,
+      message: "Permissions must be a valid Discord permission bitfield.",
+    };
   }
   for (const cap of input.capabilities ?? []) {
-    if (!isCapability(cap)) return `Unknown capability "${cap}".`;
+    if (!isCapability(cap)) {
+      return { field: "capability", message: `Unknown capability "${cap}".` };
+    }
   }
   const caps = input.capabilities ?? [];
   if (input.gateOnly && caps.length > 0) {
-    return "A gate-only group (a managed role such as Server Booster) can't carry capabilities.";
+    return {
+      field: "capability",
+      message:
+        "A gate-only group (a managed role such as Server Booster) can't carry capabilities.",
+    };
   }
   if (caps.includes("bot") && caps.some((c) => c !== "bot")) {
-    return "The bot capability can't be combined with other capabilities: humans can't join a bot group.";
+    return {
+      field: "capability",
+      message:
+        "The bot capability can't be combined with other capabilities: humans can't join a bot group.",
+    };
   }
   if (
     input.colour !== undefined &&
@@ -185,15 +212,32 @@ export function validateGroupInput(
       input.colour < 0 ||
       input.colour > 0xffffff)
   ) {
-    return "Colour must be between #000000 and #FFFFFF.";
+    return {
+      field: "colour",
+      message: "Colour must be between #000000 and #FFFFFF.",
+    };
   }
   if (
     input.rank !== undefined &&
     (!Number.isInteger(input.rank) || input.rank < 0 || input.rank > 10_000)
   ) {
-    return "Rank must be a whole number between 0 and 10000.";
+    return {
+      field: null,
+      message: "Rank must be a whole number between 0 and 10000.",
+    };
   }
   return null;
+}
+
+/**
+ * {@link checkGroupInput} as the sentence alone: the first problem in plain
+ * language, or null.
+ */
+export function validateGroupInput(
+  input: GroupInput,
+  existing: ReadonlyArray<Pick<GroupSpec, "name">>,
+): string | null {
+  return checkGroupInput(input, existing)?.message ?? null;
 }
 
 /** Parse "#RRGGBB" / "RRGGBB" to a number; "" → null; garbage → undefined. */

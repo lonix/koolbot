@@ -79,6 +79,8 @@ jest.unstable_mockModule(
 const { createModerationRouter } =
   await import("../../src/web/routes/write/moderation.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
+const { registerFormPage } = await import("../../src/web/form-pages.js");
+const { renderModerationPage } = await import("../../src/web/admin-views.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
 
 const client = { user: { id: "bot" } } as unknown as Client;
@@ -91,6 +93,10 @@ const DAY = 24 * 60 * 60 * 1000;
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  // No page to draw a refusal on, unless a test registers one: the flash.
+  registerFormPage("/admin/moderation", async () => {
+    throw new Error("page unavailable");
+  });
   mockIsEnabled.mockResolvedValue(true);
   mockOpenCase.mockResolvedValue({ _id: CASE, caseNumber: 14 });
   mockDecide.mockResolvedValue({
@@ -315,6 +321,234 @@ describe("POST /moderation/cases/:id/<decision>", () => {
     );
     expect(flashOf(await decide("permanent")).msg).toBe(
       'Case #14 changed while you were looking: it is now "let back in".',
+    );
+  });
+});
+
+describe("a refused case form (#1523)", () => {
+  // The read router registers the page's renderer in the app; here the real
+  // view stands in with one kick in the log and one case waiting for a decision.
+  const registerPage = (pageNumber = 1): void =>
+    registerFormPage("/admin/moderation", async (req, refused) => {
+      // The real renderer takes the log's query from `view_query`.
+      const query = new globalThis.URLSearchParams(
+        String((req.body as Record<string, unknown>)?.view_query ?? ""),
+      );
+      return renderModerationPage({
+        guildId: "guild-1",
+        csrfToken: "csrf",
+        remainingMs: 1000,
+        navFeatureStatus: {},
+        enabled: true,
+        actionOptions: ["kick", "ban"],
+        userOptions: [],
+        filters: { action: query.get("action") ?? "", userId: "" },
+        rows: [
+          {
+            entryId: ENTRY,
+            caseNumber: null,
+            caseStatus: null,
+            createdAt: "2026-01-01 10:00",
+            userId: "1",
+            userLabel: "Alice",
+            moderatorId: null,
+            moderatorLabel: null,
+            action: "kick",
+            reason: null,
+            source: "command",
+          },
+        ],
+        total: 100,
+        page: pageNumber,
+        pageSize: 50,
+        casesEnabled: true,
+        defaultReviewDays: 90,
+        caseGroups: {
+          overdue: [
+            {
+              id: CASE,
+              caseNumber: 14,
+              userId: "1",
+              userLabel: "Alice",
+              action: "kick",
+              status: "under_review",
+              reviewAt: null,
+              openedAt: "2026-01-01T10:00:00.000Z",
+              openedByLabel: "Mod",
+              originModeratorLabel: null,
+              reason: null,
+              events: [],
+              history: [],
+              live: true,
+            },
+          ],
+          dueSoon: [],
+          scheduled: [],
+          indefinite: [],
+          recentlyResolved: [],
+        },
+        settingRows: [],
+        refusedForm: refused,
+      });
+    });
+  beforeEach(() => registerPage());
+
+  const lines = (html: string): Record<string, string> =>
+    Object.fromEntries(
+      [
+        ...html.matchAll(
+          /<p class="kb-field__error" id="([^"]+)">([^<]*)<\/p>/g,
+        ),
+      ].map((m) => [m[1], m[2]]),
+    );
+
+  it("opens the row's Open case form with the days marked and the typed note kept", async () => {
+    const res = await harness.post("/moderation/cases/open", {
+      entry_id: ENTRY,
+      review_in_days: " 0",
+      note: " keep me ",
+    });
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    expect(html).toContain(
+      '<details class="helper edit-details" open><summary>Open case</summary>',
+    );
+    expect(html).toContain(
+      `<input type="number" name="review_in_days" min="1" max="3650" value=" 0" id="moderation-case-open-${ENTRY}-review_in_days" aria-invalid="true" aria-describedby="moderation-case-open-${ENTRY}-review_in_days-error">`,
+    );
+    expect(lines(html)).toEqual({
+      [`moderation-case-open-${ENTRY}-review_in_days-error`]:
+        "Review days must be a whole number from 1 to 3650.",
+    });
+    expect(html).toContain('value=" keep me "');
+    expect(mockOpenCase).not.toHaveBeenCalled();
+  });
+
+  it("marks an over-long note and keeps the cleared days", async () => {
+    const res = await harness.post("/moderation/cases/open", {
+      entry_id: ENTRY,
+      review_in_days: "",
+      note: "x".repeat(501),
+    });
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    expect(Object.keys(lines(html))).toEqual([
+      `moderation-case-open-${ENTRY}-note-error`,
+    ]);
+    // Cleared days mean "no review date" and stay cleared.
+    expect(html).toMatch(/name="review_in_days"[^>]* value="" id=/);
+  });
+
+  it("hands the page's own query back, so the refused row is on the page it drew", async () => {
+    // The row is on page 2 of the ban log; the POST has no query of its own.
+    const res = await harness.post("/moderation/cases/open", {
+      entry_id: ENTRY,
+      review_in_days: "0",
+      view_query: "?action=kick&page=2",
+    });
+    expect(res.status).toBe(422);
+    expect(await res.text()).toContain(
+      "moderation-case-open-" + ENTRY + "-review_in_days-error",
+    );
+  });
+
+  it("answers the flash for a log row that is no longer on the page", async () => {
+    const res = await harness.post("/moderation/cases/open", {
+      entry_id: "f".repeat(24),
+      review_in_days: "0",
+    });
+    expect(res.status).toBe(303);
+    expect(flashOf(res).msg).toBe(
+      "Not saved. Review days must be a whole number from 1 to 3650.",
+    );
+  });
+
+  it("keeps cases being off a flash even when a field is wrong", async () => {
+    mockIsEnabled.mockResolvedValue(false);
+    const res = await harness.post("/moderation/cases/open", {
+      entry_id: ENTRY,
+      review_in_days: "0",
+    });
+    expect(res.status).toBe(303);
+    expect(flashOf(res).msg).toBe("Moderation cases are turned off.");
+  });
+
+  it.each(["uphold", "extend", "permanent", "readmit"])(
+    "marks the %s decision's days and note in the case's form and audits the refusal",
+    async (decision) => {
+      const res = await harness.post(`/moderation/cases/${CASE}/${decision}`, {
+        next_review_in_days: "5000",
+        note: "x".repeat(501),
+      });
+      expect(res.status).toBe(422);
+      const html = await res.text();
+      expect(Object.keys(lines(html))).toEqual(
+        [
+          `moderation-case-decide-${CASE}-note-error`,
+          `moderation-case-decide-${CASE}-next_review_in_days-error`,
+        ].sort((a, b) => html.indexOf(a) - html.indexOf(b)),
+      );
+      expect(html).toContain('value="5000"');
+      expect(mockDecide).not.toHaveBeenCalled();
+      expect(lastAudit()).toMatchObject({
+        action: `moderation.case.${decision}`,
+        targetId: CASE,
+        result: "failure",
+        errorMessage: "Note must be 500 characters or fewer.",
+      });
+    },
+  );
+
+  it("marks the days of Decide later when they are cleared, and keeps the note", async () => {
+    const res = await harness.post(`/moderation/cases/${CASE}/extend`, {
+      next_review_in_days: "",
+      note: "keep me",
+    });
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    expect(Object.keys(lines(html))).toEqual([
+      `moderation-case-decide-${CASE}-next_review_in_days-error`,
+    ]);
+    expect(html).toContain('value="keep me"');
+    expect(mockDecide).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      action: "moderation.case.extend",
+      result: "failure",
+      errorMessage: "Deciding later needs a new review date.",
+    });
+  });
+
+  it.each(["uphold", "permanent", "readmit"])(
+    "lets %s go ahead with the days cleared",
+    async (decision) => {
+      const res = await harness.post(`/moderation/cases/${CASE}/${decision}`, {
+        next_review_in_days: "",
+      });
+      expect(res.status).toBe(303);
+      expect(mockDecide).toHaveBeenCalled();
+    },
+  );
+
+  it("lets a switched-off case lifecycle outrank a wrong field on a decision", async () => {
+    mockIsEnabled.mockResolvedValue(false);
+    const res = await harness.post(`/moderation/cases/${CASE}/uphold`, {
+      next_review_in_days: "0",
+    });
+    expect(res.status).toBe(303);
+    expect(flashOf(res).msg).toBe("Moderation cases are turned off.");
+    expect(lastAudit()).toMatchObject({ result: "failure" });
+  });
+
+  it("leaves a case that is gone from the page to the flash", async () => {
+    const res = await harness.post(
+      `/moderation/cases/${"c".repeat(24)}/uphold`,
+      {
+        next_review_in_days: "0",
+      },
+    );
+    expect(res.status).toBe(303);
+    expect(flashOf(res).msg).toBe(
+      "Not saved. Review days must be a whole number from 1 to 3650.",
     );
   });
 });

@@ -163,8 +163,10 @@ export function groupRowsScript(): string {
     "popFor=row;var w=wrapOf(row);w.appendChild(pop);pop.hidden=false;btn(row).setAttribute('aria-expanded','true');" +
     "var s=pop.querySelector('[data-emoji-search]');s.disabled=false;s.value='';s.dispatchEvent(new Event('input'));mark(input(row));s.focus()}" +
     "function enhance(row){if(!row||row.hasAttribute('data-enhanced'))return;row.setAttribute('data-enhanced','');" +
+    // The attribute name is split so a page that was not refused carries no
+    // `aria-invalid` text at all (its views assert exactly that).
     "var w=wrapOf(row),i=input(row),b=btn(row);" +
-    "if(w&&i&&b){if(!field(row))i.hidden=true;b.hidden=false;label(row);" +
+    "if(w&&i&&b){if(!field(row)&&i.getAttribute('aria-'+'invalid')!=='true')i.hidden=true;b.hidden=false;label(row);" +
     "b.addEventListener('click',function(){openPop(row)});" +
     // A value typed or restored by hand keeps the button in step.
     "i.addEventListener('input',function(){label(row)})}" +

@@ -56,6 +56,8 @@ import {
 } from "../../channel-manager-data.js";
 import {
   CHANNELS_PATH,
+  CHANNEL_CREATE_FORM,
+  channelEditForm,
   channelDeleteConfirmable,
   renderChannelDeleteConfirmPage,
   renderChannelManagerPage,
@@ -66,8 +68,15 @@ import {
   flashRedirect,
   getCsrfFromReq,
   navStatusForPage,
+  refuseForm,
   requireSessionContext,
 } from "./helpers.js";
+import {
+  addFieldError,
+  type FormErrors,
+  type RefusedForm,
+} from "../../form-errors.js";
+import { registerFormPage } from "../../form-pages.js";
 
 const DISCORD_UNKNOWN_CHANNEL = 10003;
 
@@ -76,6 +85,13 @@ interface Outcome {
   text: string;
   targetId?: string;
   details?: Record<string, unknown>;
+  /**
+   * A refusal about form fields (#1523): the form it came from and one message
+   * per field. `text` is the first of them. Everything else a refusal can be
+   * (Discord unreachable, a missing permission, a lost-update conflict) is not
+   * about a field and stays a page flash.
+   */
+  fields?: { formId: string; errors: FormErrors };
 }
 
 interface ActionContext {
@@ -104,6 +120,45 @@ const refuse = (text: string, extra: Partial<Outcome> = {}): Outcome => ({
   text,
   ...extra,
 });
+
+/** The fields the Channel manager forms post (and their `orig_*` baselines). */
+const POSTED_FIELDS = [
+  "type",
+  "name",
+  "topic",
+  "userLimit",
+  "bitrate",
+  "parent",
+  "orig_name",
+  "orig_topic",
+  "orig_userLimit",
+  "orig_bitrate",
+  "orig_bitrate_bps",
+  "orig_parent",
+] as const;
+
+/**
+ * What the form posted, as a refused form shows it: each known text field as
+ * typed, including the `orig_*` baselines the edit form carries, so the
+ * lost-update check still compares against what the admin was shown. Only the
+ * fixed names above are read and written, never a name taken from the request,
+ * so a hostile field name (`__proto__`, `constructor`) has no effect.
+ */
+export function postedValues(body: unknown): Record<string, string> {
+  const source = (body ?? {}) as Record<string, unknown>;
+  const values: Record<string, string> = {};
+  for (const key of POSTED_FIELDS) {
+    const value = Object.prototype.hasOwnProperty.call(source, key)
+      ? source[key]
+      : undefined;
+    if (typeof value === "string") values[key] = value;
+  }
+  return values;
+}
+
+/** A refusal about the fields of one form. */
+const refuseFields = (formId: string, errors: FormErrors): Outcome =>
+  refuse(Object.values(errors)[0] ?? "", { fields: { formId, errors } });
 
 const KINDS = {
   text: ChannelType.GuildText,
@@ -214,6 +269,20 @@ export function createChannelManagerRouter(
         result: outcome.ok ? "success" : "failure",
         errorMessage: outcome.ok ? null : outcome.text,
       });
+      // A refusal about fields comes back as the page with the typed values.
+      // The page is drawn after the write lock is released: it reads Discord.
+      if (
+        !outcome.ok &&
+        outcome.fields &&
+        (await refuseForm(req, res, {
+          page: CHANNELS_PATH,
+          formId: outcome.fields.formId,
+          errors: outcome.fields.errors,
+          values: postedValues(req.body),
+        }))
+      ) {
+        return;
+      }
       flashRedirect(res, CHANNELS_PATH, {
         type: outcome.ok ? "ok" : "err",
         text: outcome.text,
@@ -235,49 +304,62 @@ export function createChannelManagerRouter(
     return target;
   }
 
+  // The page's GET handler and the renderer of a refused form (#1523). This
+  // page reads Discord and renders in this router rather than in the read-only
+  // one, so it registers its own renderer here.
+  const renderChannels = async (
+    req: Parameters<typeof requireSessionContext>[0],
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const session = requireSessionContext(req);
+    const base = await pageBase(req);
+    const flash = readSignedFlash(req.query);
+    const props = {
+      ...base,
+      refusedForm,
+      channels: null as ManagedChannelView[] | null,
+      tree: null as ReturnType<typeof buildChannelTree> | null,
+      protection: null as Map<string, string[]> | null,
+      botCanManage: false,
+      recentChanges: null as Awaited<ReturnType<typeof loadRecentChanges>>,
+      maxBitrate: 0,
+      error: undefined as string | undefined,
+      flash: flash
+        ? { type: flash.type, text: flash.text.slice(0, 500) }
+        : null,
+    };
+    const guild = await fetchGuild(session.guildId);
+    if (!guild) {
+      props.error = "Discord couldn't be reached.";
+    } else {
+      try {
+        props.channels = await fetchChannelViews(guild);
+        props.tree = buildChannelTree(props.channels);
+        props.maxBitrate = maxBitrateOf(guild);
+        props.botCanManage = await botCanManageChannels(guild);
+        props.protection = await loadProtection(guild, props.channels).catch(
+          (err) => {
+            logger.warn("channel manager: protection unavailable", err);
+            return null;
+          },
+        );
+      } catch (error) {
+        logger.warn("channel manager: could not read the server", error);
+        props.channels = null;
+        props.tree = null;
+        props.error = "The server's channels couldn't be read from Discord.";
+      }
+    }
+    props.recentChanges = await loadRecentChanges(session.guildId);
+    return renderChannelManagerPage(props);
+  };
+  registerFormPage(CHANNELS_PATH, (req, refused) =>
+    renderChannels(req as Parameters<typeof requireSessionContext>[0], refused),
+  );
   router.get(
     "/channels",
     asyncHandler(async (req, res) => {
-      const session = requireSessionContext(req);
-      const base = await pageBase(req);
-      const flash = readSignedFlash(req.query);
-      const props = {
-        ...base,
-        channels: null as ManagedChannelView[] | null,
-        tree: null as ReturnType<typeof buildChannelTree> | null,
-        protection: null as Map<string, string[]> | null,
-        botCanManage: false,
-        recentChanges: null as Awaited<ReturnType<typeof loadRecentChanges>>,
-        maxBitrate: 0,
-        error: undefined as string | undefined,
-        flash: flash
-          ? { type: flash.type, text: flash.text.slice(0, 500) }
-          : null,
-      };
-      const guild = await fetchGuild(session.guildId);
-      if (!guild) {
-        props.error = "Discord couldn't be reached.";
-      } else {
-        try {
-          props.channels = await fetchChannelViews(guild);
-          props.tree = buildChannelTree(props.channels);
-          props.maxBitrate = maxBitrateOf(guild);
-          props.botCanManage = await botCanManageChannels(guild);
-          props.protection = await loadProtection(guild, props.channels).catch(
-            (err) => {
-              logger.warn("channel manager: protection unavailable", err);
-              return null;
-            },
-          );
-        } catch (error) {
-          logger.warn("channel manager: could not read the server", error);
-          props.channels = null;
-          props.tree = null;
-          props.error = "The server's channels couldn't be read from Discord.";
-        }
-      }
-      props.recentChanges = await loadRecentChanges(session.guildId);
-      res.type("text/html").send(renderChannelManagerPage(props));
+      res.type("text/html").send(await renderChannels(req, null));
     }),
   );
 
@@ -352,36 +434,65 @@ export function createChannelManagerRouter(
     "/channels/create",
     write("create", async (ctx) => {
       const type = String(ctx.body.type ?? "");
+      const errors: FormErrors = {};
       if (type !== "text" && type !== "voice" && type !== "category") {
-        return refuse("Pick text channel, voice channel or category.");
+        addFieldError(
+          errors,
+          "type",
+          "Pick text channel, voice channel or category.",
+        );
       }
       const name = validateName(ctx.body.name);
-      if (!name.ok) return refuse(name.error);
-      const options: Record<string, unknown> = {
-        name: name.value,
-        type: KINDS[type],
-      };
+      if (!name.ok) addFieldError(errors, "name", name.error);
       let parentId: string | null = null;
       if (type !== "category") {
         const parent = resolveParent(ctx.channels, ctx.body.parent);
-        if (!parent.ok) return refuse(parent.error);
-        parentId = parent.value;
-        if (parentId) options.parent_id = parentId;
+        if (!parent.ok) addFieldError(errors, "parent", parent.error);
+        else parentId = parent.value;
       }
-      const room = checkCapacity(ctx.channels, { parentId, creating: true });
-      if (!room.ok) return refuse(room.error);
+      // The server-wide limit is not about a field; a full category is about
+      // the category field.
+      const room = checkCapacity(ctx.channels, {
+        parentId: null,
+        creating: true,
+      });
+      if (parentId) {
+        const category = checkCapacity(ctx.channels, {
+          parentId,
+          creating: false,
+        });
+        if (!category.ok) addFieldError(errors, "parent", category.error);
+      }
+      let topicValue = "";
       if (type === "text") {
         const topic = validateTopic(ctx.body.topic);
-        if (!topic.ok) return refuse(topic.error);
-        if (topic.value) options.topic = topic.value;
+        if (!topic.ok) addFieldError(errors, "topic", topic.error);
+        else topicValue = topic.value;
       }
+      let userLimit = 0;
+      let bitrateValue: number | undefined;
       if (type === "voice") {
         const limit = validateUserLimit(ctx.body.userLimit);
-        if (!limit.ok) return refuse(limit.error);
+        if (!limit.ok) addFieldError(errors, "userLimit", limit.error);
+        else userLimit = limit.value;
         const bitrate = validateBitrateKbps(ctx.body.bitrate, ctx.maxBitrate);
-        if (!bitrate.ok) return refuse(bitrate.error);
-        options.user_limit = limit.value;
-        if (bitrate.value !== undefined) options.bitrate = bitrate.value;
+        if (!bitrate.ok) addFieldError(errors, "bitrate", bitrate.error);
+        else bitrateValue = bitrate.value;
+      }
+      if (Object.keys(errors).length > 0) {
+        return refuseFields(CHANNEL_CREATE_FORM, errors);
+      }
+      if (!room.ok) return refuse(room.error);
+      if (!name.ok) return refuse(name.error);
+      const options: Record<string, unknown> = {
+        name: name.value,
+        type: KINDS[type as keyof typeof KINDS],
+      };
+      if (parentId) options.parent_id = parentId;
+      if (topicValue) options.topic = topicValue;
+      if (type === "voice") {
+        options.user_limit = userLimit;
+        if (bitrateValue !== undefined) options.bitrate = bitrateValue;
       }
       // A create is not idempotent: never retry it after a timeout.
       const created = (await ctx.call(
@@ -436,10 +547,13 @@ export function createChannelManagerRouter(
           /^\d*$/.test(b.trim()) &&
           Number(a.trim() || 0) === Number(b.trim() || 0));
 
+      // Every field the admin changed is checked, so one refusal can mark
+      // several of them (#1523).
+      const errors: FormErrors = {};
       if (posted("name") !== baseline("name", target.name)) {
         const name = validateName(posted("name"));
-        if (!name.ok) return refuse(name.error);
-        if (name.value !== target.name) {
+        if (!name.ok) addFieldError(errors, "name", name.error);
+        else if (name.value !== target.name) {
           if (target.name !== baseline("name", target.name)) stale.push("name");
           else changes.name = name.value;
         }
@@ -448,8 +562,8 @@ export function createChannelManagerRouter(
         const live = target.topic ?? "";
         if (!sameTopic(posted("topic"), baseline("topic", live))) {
           const topic = validateTopic(nl(posted("topic")));
-          if (!topic.ok) return refuse(topic.error);
-          if (topic.value !== live) {
+          if (!topic.ok) addFieldError(errors, "topic", topic.error);
+          else if (topic.value !== live) {
             if (!sameTopic(live, baseline("topic", live))) stale.push("topic");
             else changes.topic = topic.value;
           }
@@ -461,8 +575,8 @@ export function createChannelManagerRouter(
           !sameNumber(posted("userLimit"), baseline("userLimit", liveLimit))
         ) {
           const limit = validateUserLimit(posted("userLimit"));
-          if (!limit.ok) return refuse(limit.error);
-          if (limit.value !== (target.userLimit ?? 0)) {
+          if (!limit.ok) addFieldError(errors, "userLimit", limit.error);
+          else if (limit.value !== (target.userLimit ?? 0)) {
             if (!sameNumber(liveLimit, baseline("userLimit", liveLimit))) {
               stale.push("user limit");
             } else changes.userLimit = limit.value;
@@ -478,8 +592,11 @@ export function createChannelManagerRouter(
           posted("bitrate").trim() !== baseline("bitrate", liveShown).trim()
         ) {
           const bitrate = validateBitrateKbps(body.bitrate, ctx.maxBitrate);
-          if (!bitrate.ok) return refuse(bitrate.error);
-          if (bitrate.value !== undefined && bitrate.value !== target.bitrate) {
+          if (!bitrate.ok) addFieldError(errors, "bitrate", bitrate.error);
+          else if (
+            bitrate.value !== undefined &&
+            bitrate.value !== target.bitrate
+          ) {
             // Conflicts are judged on the exact bits per second the form was
             // drawn from (two values can round to the same kbps); a request
             // without it falls back to the rounded value.
@@ -499,8 +616,8 @@ export function createChannelManagerRouter(
         const liveParent = target.parentId ?? "";
         if (posted("parent").trim() !== baseline("parent", liveParent).trim()) {
           const parent = resolveParent(ctx.channels, body.parent);
-          if (!parent.ok) return refuse(parent.error);
-          if (parent.value !== target.parentId) {
+          if (!parent.ok) addFieldError(errors, "parent", parent.error);
+          else if (parent.value !== target.parentId) {
             if (liveParent !== baseline("parent", liveParent).trim()) {
               stale.push("category");
             } else {
@@ -509,13 +626,21 @@ export function createChannelManagerRouter(
                 creating: false,
                 movingFrom: target.parentId,
               });
-              if (!room.ok) return refuse(room.error);
-              changes.parent = parent.value;
-              // Moving must not rewrite the channel's permissions.
-              changes.lockPermissions = false;
+              if (!room.ok) {
+                addFieldError(errors, "parent", room.error);
+              } else {
+                changes.parent = parent.value;
+                // Moving must not rewrite the channel's permissions.
+                changes.lockPermissions = false;
+              }
             }
           }
         }
+      }
+      // A refused field comes first; a conflict is reported once the fields
+      // are right, since it needs the page reloaded anyway.
+      if (Object.keys(errors).length > 0) {
+        return refuseFields(channelEditForm(target.id), errors);
       }
       if (stale.length > 0) {
         return refuse(

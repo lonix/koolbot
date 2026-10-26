@@ -23,14 +23,27 @@ import {
   planRoleGroups,
   planIsApplicable,
 } from "../../../services/role-group-adoption.js";
-import { ROLE_GROUP_SYNC_POLICIES } from "../../../models/role-group.js";
+import {
+  ROLE_GROUP_CAPABILITIES,
+  ROLE_GROUP_SYNC_POLICIES,
+} from "../../../models/role-group.js";
 import { ServerAdoptionService } from "../../../services/server-adoption-service.js";
 import {
   parseColour,
   roleLockReason,
 } from "../../../services/role-group-plan.js";
 import { recordAudit } from "../../audit.js";
-import { ROLE_DELETE_REVIEW_MINUTES } from "../../role-groups-views.js";
+import {
+  ROLE_DELETE_REVIEW_MINUTES,
+  ROLE_GROUP_CREATE_FORM,
+  roleGroupBoxKey,
+  roleGroupEditForm,
+} from "../../role-groups-views.js";
+import {
+  addFieldError,
+  type FormErrors,
+  type FormValues,
+} from "../../form-errors.js";
 import { verifyRoleDeleteReview } from "../../review-token.js";
 import {
   asyncHandler,
@@ -38,6 +51,7 @@ import {
   getCheckbox,
   getRawString,
   getString,
+  refuseForm,
   requireSessionContext,
 } from "./helpers.js";
 
@@ -57,6 +71,34 @@ export function permissionsFromNames(names: string[]): string | null {
     bits |= flag;
   }
   return bits.toString();
+}
+
+/**
+ * What the Add group and Edit forms submitted, as a refused form shows it
+ * (#1523): text as typed, and each ticked capability or permission under its
+ * own key (`capability-admin`, `perm-BanMembers`).
+ */
+function groupFormValues(req: Parameters<typeof getString>[0]): FormValues {
+  const body = (req.body as Record<string, unknown> | undefined) ?? {};
+  const values: FormValues = {
+    name: getRawString(req, "name"),
+    roleId: getString(req, "roleId"),
+    colour: getRawString(req, "colour"),
+    editPermissions: getCheckbox(req, "editPermissions") ? "1" : "",
+    syncPolicy: getString(req, "syncPolicy"),
+  };
+  // Only names the form offers become keys: never a name taken from the request.
+  for (const c of ROLE_GROUP_CAPABILITIES) {
+    if (toArray(body["capability"]).includes(c)) {
+      values[roleGroupBoxKey("capability", c)] = "1";
+    }
+  }
+  for (const p of Object.keys(PermissionsBitField.Flags)) {
+    if (toArray(body["perm"]).includes(p)) {
+      values[roleGroupBoxKey("perm", p)] = "1";
+    }
+  }
+  return values;
 }
 
 export function createRoleGroupsRouter(client: Client): Router {
@@ -79,11 +121,18 @@ export function createRoleGroupsRouter(client: Client): Router {
       const body = (req.body as Record<string, unknown> | undefined) ?? {};
       const roleId = getString(req, "roleId");
       const colour = parseColour(getString(req, "colour"));
-      if (colour === undefined) {
-        flashRedirect(res, PAGE, {
-          type: "err",
-          text: "Colour must look like #RRGGBB.",
+      const refuse = (field: string, message: string): Promise<boolean> => {
+        const errors: FormErrors = {};
+        addFieldError(errors, field, message);
+        return refuseForm(req, res, {
+          page: PAGE,
+          formId: ROLE_GROUP_CREATE_FORM,
+          errors,
+          values: groupFormValues(req),
         });
+      };
+      if (colour === undefined) {
+        await refuse("colour", "Colour must look like #RRGGBB.");
         return;
       }
       const capabilities = toArray(body["capability"]);
@@ -118,13 +167,12 @@ export function createRoleGroupsRouter(client: Client): Router {
           me.roles.highest.position,
         );
         if (lock === "everyone" || lock === "hierarchy") {
-          flashRedirect(res, PAGE, {
-            type: "err",
-            text:
-              lock === "everyone"
-                ? "@everyone can't be a group."
-                : "That role is at or above the bot's own role, so it can't be linked.",
-          });
+          await refuse(
+            "roleId",
+            lock === "everyone"
+              ? "@everyone can't be a group."
+              : "That role is at or above the bot's own role, so it can't be linked.",
+          );
           return;
         }
         gateOnly = lock === "managed";
@@ -157,6 +205,10 @@ export function createRoleGroupsRouter(client: Client): Router {
         result: result.ok ? "success" : "failure",
         errorMessage: result.ok ? null : result.error,
       });
+      if (!result.ok && result.field) {
+        await refuse(result.field, result.error);
+        return;
+      }
       flashRedirect(
         res,
         PAGE,
@@ -221,11 +273,18 @@ export function createRoleGroupsRouter(client: Client): Router {
         return;
       }
       const colour = parseColour(getString(req, "colour"));
-      if (colour === undefined) {
-        flashRedirect(res, PAGE, {
-          type: "err",
-          text: "Colour must look like #RRGGBB.",
+      const refuse = (field: string, message: string): Promise<boolean> => {
+        const errors: FormErrors = {};
+        addFieldError(errors, field, message);
+        return refuseForm(req, res, {
+          page: PAGE,
+          formId: roleGroupEditForm(id),
+          errors,
+          values: groupFormValues(req),
         });
+      };
+      if (colour === undefined) {
+        await refuse("colour", "Colour must look like #RRGGBB.");
         return;
       }
       let permissions: string | null | undefined;
@@ -274,6 +333,10 @@ export function createRoleGroupsRouter(client: Client): Router {
         result: result.ok ? "success" : "failure",
         errorMessage: result.ok ? null : result.error,
       });
+      if (!result.ok && result.field) {
+        await refuse(result.field, result.error);
+        return;
+      }
       flashRedirect(
         res,
         PAGE,

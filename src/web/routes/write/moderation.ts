@@ -18,17 +18,21 @@ import { recordAudit } from "../../audit.js";
 import {
   CASE_DECISIONS,
   auditCaseFailure,
+  checkCaseFields,
   decideCase,
-  parseReviewDate,
 } from "../../moderation-case-actions.js";
 import {
-  TEXT_LIMITS,
   asyncHandler,
-  firstLengthError,
   flashRedirect,
+  getRawString,
   getString,
+  refuseForm,
   requireSessionContext,
 } from "./helpers.js";
+import {
+  moderationCaseDecideForm,
+  moderationCaseOpenForm,
+} from "../../admin-views.js";
 
 const MODERATION_PAGE = "/admin/moderation";
 export function createModerationRouter(client: Client): Router {
@@ -42,7 +46,8 @@ export function createModerationRouter(client: Client): Router {
       const session = requireSessionContext(req);
       const entryId = getString(req, "entry_id");
       const note = getString(req, "note");
-      const review = parseReviewDate((name) => getString(req, name), "review");
+      const checked = checkCaseFields((name) => getString(req, name), "review");
+      const review = checked.review;
 
       if (!(await cases().isEnabled())) {
         flashRedirect(res, MODERATION_PAGE, {
@@ -51,13 +56,17 @@ export function createModerationRouter(client: Client): Router {
         });
         return;
       }
-      const lengthError = firstLengthError([
-        { label: "Note", value: note, max: TEXT_LIMITS.caseNote },
-      ]);
-      if (lengthError || !review.ok) {
-        flashRedirect(res, MODERATION_PAGE, {
-          type: "err",
-          text: lengthError ?? (review.ok ? "" : review.reason),
+      if (checked.reason !== null || !review.ok) {
+        // A refusal is drawn in the row's own form. A row that is gone from
+        // the page (or an `_at` date, which has no control) answers the flash.
+        await refuseForm(req, res, {
+          page: MODERATION_PAGE,
+          formId: moderationCaseOpenForm(entryId),
+          errors: checked.errors,
+          values: {
+            review_in_days: getRawString(req, "review_in_days"),
+            note: getRawString(req, "note"),
+          },
         });
         return;
       }
@@ -95,10 +104,56 @@ export function createModerationRouter(client: Client): Router {
       `/moderation/cases/:id/${decision}`,
       asyncHandler(async (req, res) => {
         const session = requireSessionContext(req);
+        const caseId = String(req.params.id);
+        const checked = checkCaseFields(
+          (name) => getString(req, name),
+          "next_review",
+        );
+        // "Decide later" needs a new review date, and an empty days box is a
+        // valid answer to the other decisions: the date check is this one's.
+        const errors: Record<string, string> = { ...checked.errors };
+        let reason = checked.reason;
+        if (
+          decision === "extend" &&
+          checked.review.ok &&
+          !checked.review.date
+        ) {
+          errors.next_review_in_days =
+            "Deciding later needs a new review date.";
+          reason ??= errors.next_review_in_days;
+        }
+        if (reason !== null) {
+          // Cases switched off, or the switch unreadable, outrank a bad field:
+          // `decideCase` words those and audits them.
+          const on = await cases()
+            .isEnabledStrict()
+            .catch(() => false);
+          if (on) {
+            await recordAudit(session, {
+              action: `moderation.case.${decision}`,
+              targetId: caseId,
+              result: "failure",
+              errorMessage: reason,
+            });
+            if (
+              await refuseForm(req, res, {
+                page: MODERATION_PAGE,
+                formId: moderationCaseDecideForm(caseId),
+                errors,
+                values: {
+                  next_review_in_days: getRawString(req, "next_review_in_days"),
+                  note: getRawString(req, "note"),
+                },
+              })
+            ) {
+              return;
+            }
+          }
+        }
         const result = await decideCase({
           client,
           session,
-          caseId: String(req.params.id),
+          caseId,
           decision,
           get: (name) => getString(req, name),
           audit: recordAudit,

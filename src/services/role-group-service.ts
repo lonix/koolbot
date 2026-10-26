@@ -10,7 +10,8 @@ import { ReactionRoleConfig } from "../models/reaction-role-config.js";
 import { ConfigService } from "./config-service.js";
 import { ROLE_GRANTING_SETTINGS } from "./role-grants.js";
 import {
-  validateGroupInput,
+  checkGroupInput,
+  type GroupField,
   type GroupInput,
   type GroupSpec,
 } from "./role-group-plan.js";
@@ -77,8 +78,29 @@ function toView(doc: IRoleGroup): RoleGroupView {
   };
 }
 
+/**
+ * A refusal says what is wrong; `field` names the form field it is about when
+ * it is about one (#1523), so a page can mark that field.
+ */
 export type GroupResult =
-  { ok: true; group: RoleGroupView } | { ok: false; error: string };
+  | { ok: true; group: RoleGroupView }
+  | { ok: false; error: string; field?: GroupField | "roleId" };
+
+/**
+ * Which unique index a duplicate-key error (code 11000) came from, by the
+ * driver's `keyPattern` (or `keyValue`): the name index or the backing-role
+ * index. Null when the error does not say, so the caller shows no field.
+ */
+export function duplicateKeyField(error: unknown): "name" | "roleId" | null {
+  const e = error as {
+    keyPattern?: Record<string, unknown>;
+    keyValue?: Record<string, unknown>;
+  };
+  const keys = Object.keys(e?.keyPattern ?? e?.keyValue ?? {});
+  if (keys.includes("roleId")) return "roleId";
+  if (keys.includes("name")) return "name";
+  return null;
+}
 
 export class RoleGroupService {
   private static instance: RoleGroupService | undefined;
@@ -290,14 +312,24 @@ export class RoleGroupService {
     },
   ): Promise<GroupResult> {
     const existing = await this.list(guildId);
-    const problem = validateGroupInput(input, existing);
-    if (problem) return { ok: false, error: problem };
+    const problem = checkGroupInput(input, existing);
+    if (problem) {
+      return {
+        ok: false,
+        error: problem.message,
+        ...(problem.field ? { field: problem.field } : {}),
+      };
+    }
     if (input.roleId && existing.some((g) => g.roleId === input.roleId)) {
-      return { ok: false, error: "That role already backs another group." };
+      return {
+        ok: false,
+        error: "That role already backs another group.",
+        field: "roleId",
+      };
     }
     if (input.roleId) {
       const used = await this.featureUseMessage(guildId, input.roleId);
-      if (used) return { ok: false, error: used };
+      if (used) return { ok: false, error: used, field: "roleId" };
     }
     // New groups go on top unless a rank is given.
     const rank = input.rank ?? (existing.length ? existing[0].rank + 1 : 1);
@@ -320,7 +352,17 @@ export class RoleGroupService {
       return { ok: true, group: toView(doc) };
     } catch (error) {
       if ((error as { code?: number }).code === 11000) {
-        return { ok: false, error: "That name or role is already in use." };
+        const field = duplicateKeyField(error);
+        return {
+          ok: false,
+          error:
+            field === "roleId"
+              ? "That role already backs another group."
+              : field === "name"
+                ? "That name is already in use."
+                : "That name or role is already in use.",
+          ...(field ? { field } : {}),
+        };
       }
       throw error;
     } finally {
@@ -336,15 +378,22 @@ export class RoleGroupService {
     const all = await this.list(guildId);
     const current = all.find((g) => g.id === groupId);
     if (!current) return { ok: false, error: "That group no longer exists." };
-    const problem = validateGroupInput(
+    const problem = checkGroupInput(
       input,
       all.filter((g) => g.id !== groupId),
     );
-    if (problem) return { ok: false, error: problem };
+    if (problem) {
+      return {
+        ok: false,
+        error: problem.message,
+        ...(problem.field ? { field: problem.field } : {}),
+      };
+    }
     if (current.gateOnly && (input.capabilities ?? []).length > 0) {
       return {
         ok: false,
         error: "A gate-only group can't carry capabilities.",
+        field: "capability",
       };
     }
     const set: Record<string, unknown> = {
@@ -368,7 +417,12 @@ export class RoleGroupService {
       return { ok: true, group: toView(doc) };
     } catch (error) {
       if ((error as { code?: number }).code === 11000) {
-        return { ok: false, error: "That name is already in use." };
+        const field = duplicateKeyField(error);
+        return {
+          ok: false,
+          error: "That name is already in use.",
+          ...(field === "name" ? { field } : {}),
+        };
       }
       throw error;
     } finally {
