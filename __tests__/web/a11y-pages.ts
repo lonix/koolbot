@@ -2052,6 +2052,10 @@ export function adminPages(): A11yPage[] {
           ["r2", "Member"],
         ]),
         perCommand: new Map([["quote", ["r1"]]]),
+        // A group, "and above", and a reference to a deleted group exercise
+        // every row kind of the role Picker (#1547).
+        groups: [{ id: "g1", name: "Mods" }],
+        groupRefsPerCommand: new Map([["quote", ["group:g1+", "group:gone"]]]),
         flash: FLASH,
       }),
     },
@@ -2171,7 +2175,8 @@ export function adminPages(): A11yPage[] {
       name: "Setup wizard access",
       html: renderWizardAccessPage({
         ...COMMON,
-        selection: { admin: ["r-admin"], staff: ["r-mod"], host: [] },
+        // "r-gone" is a saved role that can no longer be picked (#1547).
+        selection: { admin: ["r-admin"], staff: ["r-mod", "r-gone"], host: [] },
         options: [
           { id: "r-admin", name: "Admins", managed: false, position: 8 },
           { id: "r-mod", name: "Moderator", managed: false, position: 5 },

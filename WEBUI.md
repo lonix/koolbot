@@ -1383,7 +1383,7 @@ in lockstep and can't drift apart.
 
 The wizard runs **Features, Access, Channels, Review** (#1321), with a step indicator on every page. The **Access**
 step comes right after you pick features and maps Discord roles to who can do what: one card each for Admins
-(`/config`), Moderators and Event hosts (`/me`), with what they can and cannot do and a multi-select of roles, and a
+(`/config`), Moderators and Event hosts (`/me`), with what they can and cannot do and a searchable role picker (the same one as All settings, #1547), and a
 Members card that points to Command permissions to narrow `/me`. Re-running the wizard shows the current mapping.
 It writes the same role groups as the Role groups page, with the `admin`, `staff` (shown as Moderator) and `host`
 capabilities, and only links existing roles: it does not change a role in Discord. The one role it can create is the

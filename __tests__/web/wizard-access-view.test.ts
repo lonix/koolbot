@@ -229,6 +229,66 @@ describe("renderWizardAccessPage", () => {
     });
     expect(html).toContain('<option value="404" selected>');
   });
+
+  describe("role Picker (#1547)", () => {
+    const options = [
+      { id: "r-admin", name: "Admins", managed: false, position: 8 },
+      { id: "r-mod", name: "Moderator", managed: false, position: 5 },
+    ];
+    const selectOf = (html: string, scope: string): string => {
+      const m = html.match(
+        new RegExp(
+          `<span class="kb-picker" data-picker[^>]*>(<select[^>]*name="roles_${scope}"[^>]*>[^]*?</select>)</span>`,
+        ),
+      );
+      expect(m).not.toBeNull();
+      return m![1];
+    };
+
+    it("renders each scope's roles through the multi-select Picker", () => {
+      const html = renderWizardAccessPage({
+        ...base,
+        selection: { admin: ["r-admin"], staff: [], host: [] },
+        options,
+      });
+      expect((html.match(/data-picker data-picker-meta=/g) ?? []).length).toBe(
+        3,
+      );
+      const admin = selectOf(html, "admin");
+      expect(admin).toContain("multiple");
+      expect(admin).toContain('<optgroup label="Roles">');
+      expect(admin).toContain('<option value="r-admin" selected>@Admins');
+      expect(admin).toContain('<option value="r-mod">@Moderator');
+      expect(selectOf(html, "staff")).not.toContain(" selected>");
+    });
+
+    it("keeps the label, the field name and the empty-state help", () => {
+      const html = renderWizardAccessPage({ ...base, options });
+      expect(html).toContain('<label class="kb-label" for="access-staff">');
+      expect(html).toContain('id="access-staff"');
+      expect(html).toContain('aria-describedby="access-staff-help"');
+      expect(html).toContain("Leave it empty for none.");
+    });
+
+    it("drops the Ctrl or Cmd hint", () => {
+      const html = renderWizardAccessPage({ ...base, options });
+      expect(html).not.toContain("Hold Ctrl");
+      expect(html).not.toContain("Cmd");
+    });
+
+    it("labels a saved role that is gone the way the Picker labels a missing one", () => {
+      const html = renderWizardAccessPage({
+        ...base,
+        selection: { admin: [], staff: ["404"], host: [] },
+        options,
+      });
+      expect(selectOf(html, "staff")).toContain(
+        '<option value="404" selected>⚠ 404 (unavailable)</option>',
+      );
+      expect(html).toContain('["missing","404",""]');
+      expect(html).not.toContain("Unavailable role");
+    });
+  });
 });
 
 describe("renderWizardConfirmPage Apply button", () => {

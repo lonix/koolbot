@@ -1002,6 +1002,40 @@ function rolesFor(
 }
 
 /**
+ * A role list as the multi-select Picker (#1547): `span.kb-picker[data-picker]`
+ * around a native `select multiple`, the same markup All settings uses for a
+ * `role_list` key. The Setup wizard's Access step and Command permissions both
+ * call it. The select keeps its name and options, so without JavaScript it
+ * posts exactly what it did before; a selected id that is not in `options`
+ * stays selected and is listed as unavailable (see {@link buildOptionsHtml}).
+ * The caller supplies the `<label for>` and any help text.
+ */
+export function renderRolePicker(opts: {
+  id: string;
+  name: string;
+  options: RoleOption[];
+  selected: Iterable<string>;
+  describedBy?: string;
+}): string {
+  const meta: PickerMeta[] = [];
+  const optionsHtml = buildOptionsHtml(
+    opts.options,
+    new Set(opts.selected),
+    false,
+    meta,
+  );
+  const describedBy = opts.describedBy
+    ? ` aria-describedby="${escapeHtml(opts.describedBy)}"`
+    : "";
+  return (
+    `<span class="kb-picker" data-picker data-picker-meta="${escapeHtml(JSON.stringify(meta))}">` +
+    `<select class="kb-select" id="${escapeHtml(opts.id)}" name="${escapeHtml(opts.name)}" multiple size="${Math.min(8, Math.max(3, opts.options.length))}"${describedBy}>` +
+    optionsHtml +
+    `</select></span>`
+  );
+}
+
+/**
  * Render a compact, readable summary of the currently-selected entries below a
  * multi-select. A `<select multiple>` buries its picks among unselected rows,
  * and a long voice-exclusion list otherwise reads as an unseparated blob
@@ -2008,43 +2042,38 @@ export function renderPermissionsPage(props: PermissionsProps): string {
         current.size === 0
           ? unrestrictedStatus(cmd)
           : `<span class="tag tag-warn">restricted</span>`;
-      const roleOptions =
-        props.allRoleIds.length === 0
-          ? `<option disabled>No roles available in this guild</option>`
-          : props.allRoleIds
-              .map((rid) => {
-                const name = props.roleNames.get(rid) ?? rid;
-                const sel = current.has(rid) ? " selected" : "";
-                return `<option value="${escapeHtml(rid)}"${sel}>${escapeHtml(name)}</option>`;
-              })
-              .join("");
       // Role groups (#1023): each group alone, or "and above" (that group
       // plus every group ranked higher). A reference to a group that has
-      // since been deleted stays visible so saving doesn't drop it silently.
-      const knownRefs = new Set(
-        groups.flatMap((g) => [`group:${g.id}`, `group:${g.id}+`]),
-      );
-      const groupOptionHtml = (ref: string, label: string): string =>
-        `<option value="${escapeHtml(ref)}"${current.has(ref) ? " selected" : ""}>${escapeHtml(label)}</option>`;
-      const groupOptions = [
+      // since been deleted stays selected so saving doesn't drop it silently;
+      // a stored role the guild no longer has is not offered, as before.
+      const options: RoleOption[] = [
         ...groups.flatMap((g) => [
-          groupOptionHtml(`group:${g.id}`, `${g.name} (group)`),
-          groupOptionHtml(`group:${g.id}+`, `${g.name} and above (group)`),
+          { id: `group:${g.id}`, name: `${g.name} (group)` },
+          { id: `group:${g.id}+`, name: `${g.name} and above (group)` },
         ]),
-        ...Array.from(current)
-          .filter((v) => v.startsWith("group:") && !knownRefs.has(v))
-          .map((v) => groupOptionHtml(v, groupRefLabel(v, groups))),
-      ].join("");
-      const options = groupOptions
-        ? `<optgroup label="Role groups">${groupOptions}</optgroup><optgroup label="Roles">${roleOptions}</optgroup>`
-        : roleOptions;
+        ...props.allRoleIds.map((rid) => ({
+          id: rid,
+          name: props.roleNames.get(rid) ?? rid,
+        })),
+      ];
+      const roleIdSet = new Set(props.allRoleIds);
+      const selected = Array.from(current).filter(
+        (v) => roleIdSet.has(v) || v.startsWith("group:"),
+      );
       // The role picker sits in a column headed "Allowed roles", which a
       // screen reader does not announce as the control's name. Give it a
-      // visually-hidden `<label for>` naming the command it governs, and link
-      // the "Hold Ctrl/⌘" hint beside it via `aria-describedby` (#854).
+      // visually-hidden `<label for>` naming the command it governs (#854).
       const escapedCmd = escapeHtml(cmd);
       const selectId = `perm-roles-${escapedCmd}`;
-      const hintId = `perm-hint-${escapedCmd}`;
+      const picker =
+        options.length === 0 && selected.length === 0
+          ? `<select class="kb-select" id="${selectId}" name="roleIds" multiple disabled><option disabled>No roles available in this guild</option></select>`
+          : renderRolePicker({
+              id: selectId,
+              name: "roleIds",
+              options,
+              selected,
+            });
       return `<tr>
 <th scope="row" class="mono">/${escapedCmd}</th>
 <td>${status}</td>
@@ -2053,11 +2082,8 @@ export function renderPermissionsPage(props: PermissionsProps): string {
     <input type="hidden" name="_csrf" value="${csrf}">
     <input type="hidden" name="command" value="${escapedCmd}">
     <label class="visually-hidden" for="${selectId}">Allowed roles for /${escapedCmd}</label>
-    <select id="${selectId}" name="roleIds" multiple size="3" style="min-width:14rem" aria-describedby="${hintId}">${options}</select>
-    <div style="display:flex;flex-direction:column;gap:.25rem">
-      <button type="submit" class="btn btn-primary btn-sm">Save</button>
-      <span class="muted" id="${hintId}" style="font-size:.7rem">Hold Ctrl/⌘<br>for multiple</span>
-    </div>
+    ${picker}
+    <button type="submit" class="btn btn-primary btn-sm">Save</button>
   </form>
 </td>
 </tr>`;

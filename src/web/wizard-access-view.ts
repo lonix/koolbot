@@ -1,5 +1,6 @@
 import { icon, toneIcon } from "./icons.js";
 import { roleMention } from "./discord-labels.js";
+import { renderRolePicker } from "./admin-views.js";
 import {
   escapeHtml,
   renderAdminPage,
@@ -139,25 +140,19 @@ function roleSelect(
   options: readonly AccessRole[],
   chosen: readonly string[],
 ): string {
-  const known = new Set(options.map((r) => r.id));
-  const picked = new Set(chosen);
   // A saved role that can no longer be picked (deleted, or moved above the bot)
-  // stays listed and selected, so saving does not silently drop it.
-  const missing = chosen
-    .filter((id) => !known.has(id))
-    .map(
-      (id) =>
-        `<option value="${escapeHtml(id)}" selected>Unavailable role ${escapeHtml(id)}</option>`,
-    );
-  const opts = options.map(
-    (r) =>
-      `<option value="${escapeHtml(r.id)}"${picked.has(r.id) ? " selected" : ""}>@${escapeHtml(r.name)}</option>`,
-  );
+  // stays selected and is listed as unavailable, so saving does not silently
+  // drop it.
   const id = `access-${scope}`;
-  const size = Math.min(8, Math.max(4, opts.length + missing.length));
   return `<label class="kb-label" for="${id}">Discord roles</label>
-<select class="kb-select" id="${id}" name="roles_${scope}" multiple size="${size}" aria-describedby="${id}-help">${[...missing, ...opts].join("")}</select>
-<p class="kb-help" id="${id}-help">Hold Ctrl or Cmd to pick more than one. Leave it empty for none.</p>`;
+${renderRolePicker({
+  id,
+  name: `roles_${scope}`,
+  options: options.map((r) => ({ id: r.id, name: r.name })),
+  selected: chosen,
+  describedBy: `${id}-help`,
+})}
+<p class="kb-help" id="${id}-help">Leave it empty for none.</p>`;
 }
 
 /**
