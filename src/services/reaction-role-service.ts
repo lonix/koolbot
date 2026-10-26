@@ -62,18 +62,29 @@ import {
 import { embedColor } from "../utils/embed-style.js";
 
 /**
- * A picker posted by a server-adoption step carries the step's key in its embed
- * footer. The message exists before its mapping is saved, so after a crash the
- * key is how a retry or a rollback finds (and proves ownership of) it.
+ * A picker posted by a server-adoption step exists before its mapping is saved,
+ * so after a crash a retry or a rollback has to find (and prove ownership of)
+ * it without a database record (#1022). Members never see a key (#1513): a
+ * message counts as the step's own when it is bot-authored, newer than the
+ * snapshot, shows `<@&roleId>` in its description and no mapping uses it. The
+ * guild lock rules out a second candidate; if one shows up anyway the search
+ * refuses. Pickers posted before #1513 carry the step key in their footer
+ * (`… · ref <key>`); that marker is still accepted, and those footers are left
+ * as they are until the picker is removed.
  */
 const PICKER_SEARCH_MAX_PAGES = 50;
 const PICKER_REF_SEPARATOR = " · ";
 const PICKER_REF_PREFIX = "ref ";
-const isMarkedPicker = (
-  message: {
-    author?: { id: string };
-    embeds?: Array<{ footer?: { text?: string } | null }>;
-  },
+type PickerMessage = {
+  id?: string;
+  author?: { id: string };
+  embeds?: Array<{
+    footer?: { text?: string } | null;
+    description?: string | null;
+  }>;
+};
+const hasLegacyMarker = (
+  message: PickerMessage,
   botId: string | undefined,
   ownerKey: string,
 ): boolean =>
@@ -84,6 +95,31 @@ const isMarkedPicker = (
       `${PICKER_REF_SEPARATOR}${PICKER_REF_PREFIX}${ownerKey}`,
     ),
   );
+/**
+ * The earliest time a picker for `ownerKey` can exist: the snapshot id is a
+ * Mongo ObjectId whose first four bytes are its creation time. Null when the
+ * key carries none.
+ */
+const stepBoundary = (ownerKey: string): number | null => {
+  const created = /^([0-9a-f]{24}):/i.exec(ownerKey);
+  return created ? parseInt(created[1].slice(0, 8), 16) * 1000 - 1000 : null;
+};
+/** Bot-authored, shows the role and is not older than the step. Unmapped is checked by the caller. */
+const looksLikeStepPicker = (
+  message: PickerMessage,
+  botId: string | undefined,
+  ownerKey: string,
+  roleId: string,
+): boolean => {
+  if (!botId || message.author?.id !== botId || !message.id) return false;
+  const boundary = stepBoundary(ownerKey);
+  if (boundary !== null && SnowflakeUtil.timestampFrom(message.id) < boundary) {
+    return false;
+  }
+  return (message.embeds ?? []).some((e) =>
+    (e.description ?? "").includes(`<@&${roleId}>`),
+  );
+};
 
 /**
  * customId prefixes for component-backed self-assign roles. Buttons encode the
@@ -2071,12 +2107,10 @@ export class ReactionRoleService {
         const embed = new EmbedBuilder()
           .setColor(embedColor("brand"))
           .setTitle(`${emoji} ${role.name}`)
-          .setDescription(`React with ${emoji} to get the <@&${role.id}> role!`)
-          .setFooter({
-            text: options.adoptionOpKey
-              ? `Remove your reaction to lose the role${PICKER_REF_SEPARATOR}${PICKER_REF_PREFIX}${options.adoptionOpKey}`
-              : "Remove your reaction to lose the role",
-          })
+          .setDescription(
+            `React with ${emoji} to get the <@&${role.id}> role!\n\nRemove your reaction to lose the role.`,
+          )
+          .setFooter({ text: "KoolBot · Reaction roles" })
           .setTimestamp();
         postedMessage = await messageChannel.send({ embeds: [embed] });
         targetMessage = postedMessage;
@@ -2315,6 +2349,7 @@ export class ReactionRoleService {
           guild,
           input.channelId,
           input.ownerKey,
+          role.id,
         );
         if (orphan && orphan.id !== existing.messageId) {
           const used = await ReactionRoleConfig.countDocuments({
@@ -2347,7 +2382,12 @@ export class ReactionRoleService {
     // mapping) instead of posting a second one. Only on a retry: the first
     // attempt needs no history read.
     const orphan = input.retry
-      ? await this.findMarkedPicker(guild, input.channelId, input.ownerKey)
+      ? await this.findMarkedPicker(
+          guild,
+          input.channelId,
+          input.ownerKey,
+          role.id,
+        )
       : null;
     // The lock is already held, so the unlocked bind is called directly.
     const bound = await this.bindReactionRoleUnlocked(
@@ -2371,11 +2411,17 @@ export class ReactionRoleService {
     };
   }
 
-  /** The most recent message in `channelId` carrying `ownerKey`'s marker. */
+  /**
+   * The picker a step posted for `roleId` in `channelId` before its mapping was
+   * saved, or null. A message with the step's old footer marker wins at once;
+   * otherwise the whole history back to the snapshot is read and the single
+   * unmapped candidate is returned. Two candidates throw (never a guess).
+   */
   private async findMarkedPicker(
     guild: Guild,
     channelId: string,
     ownerKey: string,
+    roleId: string,
   ): Promise<Message | null> {
     const api = CommandManager.getInstance(this.client);
     const channel = (await api.makeDiscordApiCall(
@@ -2392,10 +2438,25 @@ export class ReactionRoleService {
     // whose first four bytes are its creation time, and a picker can't be older
     // than the snapshot, so that is a durable boundary that needs no extra
     // record. An unreadable key has no boundary, so the page limit applies.
-    const created = /^([0-9a-f]{24}):/i.exec(ownerKey);
-    const boundary = created
-      ? parseInt(created[1].slice(0, 8), 16) * 1000 - 1000
-      : null;
+    const boundary = stepBoundary(ownerKey);
+    const candidates = new Map<string, Message>();
+    const settle = async (): Promise<Message | null> => {
+      const unmapped: Message[] = [];
+      for (const m of candidates.values()) {
+        const used = await ReactionRoleConfig.countDocuments({
+          guildId: guild.id,
+          messageId: m.id,
+          isArchived: false,
+        });
+        if (used === 0) unmapped.push(m);
+      }
+      if (unmapped.length > 1) {
+        throw new Error(
+          `More than one message in the reaction-role channel looks like the picker this step posted (message ids ${unmapped.map((m) => m.id).join(", ")}). Nothing was changed; delete the extra one by hand and try again.`,
+        );
+      }
+      return unmapped[0] ?? null;
+    };
     let before: string | undefined;
     for (let page = 0; page < PICKER_SEARCH_MAX_PAGES; page++) {
       const batch = await api.makeDiscordApiCall(
@@ -2407,10 +2468,15 @@ export class ReactionRoleService {
         `read messages in ${channelId}`,
       );
       const list = [...batch.values()];
-      const hit = list.find((m) => isMarkedPicker(m, botId, ownerKey));
+      const hit = list.find((m) => hasLegacyMarker(m, botId, ownerKey));
       if (hit) return hit;
+      for (const m of list) {
+        if (looksLikeStepPicker(m, botId, ownerKey, roleId)) {
+          candidates.set(m.id, m);
+        }
+      }
       // Fewer than a full page: the history is exhausted.
-      if (list.length < 100) return null;
+      if (list.length < 100) return settle();
       const oldest = list.reduce((a, b) =>
         BigInt(a.id) < BigInt(b.id) ? a : b,
       );
@@ -2418,13 +2484,13 @@ export class ReactionRoleService {
         boundary !== null &&
         SnowflakeUtil.timestampFrom(oldest.id) < boundary
       ) {
-        return null;
+        return settle();
       }
       before = oldest.id;
     }
     // Not found, but not proven absent either: never report "none".
     throw new Error(
-      `The history of the reaction-role channel is too long to search for an unsaved picker (${PICKER_SEARCH_MAX_PAGES} pages). Nothing was changed; delete any picker marked "${ownerKey}" by hand and try again.`,
+      `The history of the reaction-role channel is too long to search for an unsaved picker (${PICKER_SEARCH_MAX_PAGES} pages). Nothing was changed; delete the picker this step posted by hand and try again.`,
     );
   }
 
@@ -2463,7 +2529,7 @@ export class ReactionRoleService {
       });
       if (row) return row.messageId;
       // No mapping: the picker may still have been posted before the process
-      // died. Its footer marker proves it was this step's.
+      // died. findMarkedPicker decides whether one of them is this step's.
       const api = CommandManager.getInstance(this.client);
       const guild = await api.makeDiscordApiCall(
         () => this.client.guilds.fetch(guildId),
@@ -2473,6 +2539,7 @@ export class ReactionRoleService {
         guild,
         input.channelId,
         input.ownerKey,
+        this.normalizeRoleId(input.roleId),
       );
       return orphan ? orphan.id : null;
     });
@@ -2509,7 +2576,8 @@ export class ReactionRoleService {
       const api = CommandManager.getInstance(this.client);
       if (!config) {
         // No mapping (the step died before saving it): the picker is only ours
-        // to delete if its footer carries this step's marker.
+        // to delete if it is recognisably this step's (old footer marker, or
+        // bot-authored, newer than the snapshot and showing the role).
         const guildForOrphan = await api.makeDiscordApiCall(
           () => this.client.guilds.fetch(guildId),
           "fetch guild to remove picker",
@@ -2525,7 +2593,7 @@ export class ReactionRoleService {
           `fetch picker channel ${input.channelId}`,
         )) as TextChannel | null;
         if (!orphanChannel?.messages) return;
-        // The marker survives a mapping being unbound or another being added:
+        // A picker survives a mapping being unbound or another being added:
         // the guard that protects a shared picker applies here as well. The
         // lock is held, so no mapping can be added while this is decided.
         const sharedBy = await ReactionRoleConfig.countDocuments({
@@ -2546,7 +2614,11 @@ export class ReactionRoleService {
               }),
           `read orphan picker ${input.messageId}`,
         );
-        if (orphan && isMarkedPicker(orphan, botId, input.ownerKey)) {
+        if (
+          orphan &&
+          (hasLegacyMarker(orphan, botId, input.ownerKey) ||
+            looksLikeStepPicker(orphan, botId, input.ownerKey, input.roleId))
+        ) {
           await this.deleteMessageUnderLock(orphan);
         }
         return;

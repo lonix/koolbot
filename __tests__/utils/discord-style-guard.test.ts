@@ -65,7 +65,9 @@ const FOOTER_UNRESOLVED_ALLOWED: Record<string, string> = {};
 const SYSTEM_WORD = /\bSystem\b/;
 const ID_LABEL = /\bID:/;
 /** `${x._id}`, `${quoteId}`, `${noticeId}`, `${x.id}` inside a footer. */
-const ID_INTERPOLATION = /\$\{[^}]*(\b_id\b|\.id\b|\bid\b|Id\b)[^}]*\}/;
+const ID_INTERPOLATION = /\$\{[^}]*(\b_id\b|\.id\b|\bid\b|Id\b|Key\b)[^}]*\}/;
+/** A `ref <key>` label: a bot-internal marker, never member-visible (#1513). */
+const REF_LABEL = /\bref\s/;
 
 /**
  * Every expression a name is bound to in this file: its declaration
@@ -225,6 +227,9 @@ function footerProblems(source: string, file = "source.ts"): string[] {
       if (ID_INTERPOLATION.test(text)) {
         problems.push(`${line}: interpolates an id`);
       }
+      if (REF_LABEL.test(text)) {
+        problems.push(`${line}: contains a "ref " label`);
+      }
     }
     return [...new Set(problems)];
   });
@@ -299,6 +304,10 @@ describe("discord footer guard", () => {
       // a variable holding an interpolated id
       "const t = `ID: ${quoteId}`;\ne.setFooter({ text: t });",
       "const t = `KoolBot · Quotes · ${quote._id}`;\ne.setFooter({ text: t });",
+      // an operation key and a `ref ` label (#1513)
+      "e.setFooter({ text: `Remove your reaction · ref ${options.adoptionOpKey}` });",
+      "e.setFooter({ text: `Remove your reaction to lose the role${SEP}${options.adoptionOpKey}` });",
+      'e.setFooter({ text: "Remove your reaction · ref abc" });',
       // concatenation, conditionals, template spans and reassigned lets
       'const F = "KoolBot " + "System";\ne.setFooter({ text: F });',
       'const F = ok ? "KoolBot · Quotes" : "KoolBot System";\ne.setFooter({ text: F });',

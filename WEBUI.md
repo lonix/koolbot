@@ -3554,8 +3554,12 @@ categories and channels. Every row defaults to **Leave alone**; nothing is touch
   `reactionroles.message_channel_id` after the preview makes it a different plan (preview again).
   Each mapping carries the step that made it, so a plan only ever removes its own picker: a mapping another plan or the
   Reaction Roles page made is reused, not owned. A rollback also recovers a registration saved before a crash that was never recorded
-  (looked up by the step's key, never posted again). The picker's footer carries that key, so a picker posted before its
-  mapping was saved is found again: a retry completes it instead of posting a second one, and a rollback deletes it.
+  (looked up by the step's key, never posted again). The picker shows no key to members. A picker posted before its
+  mapping was saved is found again by what it is: sent by KoolBot, newer than the snapshot, showing the role in its text
+  and used by no mapping. A retry completes it instead of posting a second one, and a rollback deletes it. If two
+  messages match, the step refuses and changes nothing, so delete the extra one by hand. Pickers posted by an earlier
+  version still carry the key in their footer; that is still recognised and the footer is left as it is until the
+  picker is removed.
   The search reads the channel back to when the snapshot was created (and says so, changing nothing, if it can't finish).
   Deletions run under the guild lock until they finish, and a retry also removes this step's own unsaved picker when it
   finds another plan's mapping for the same pair.

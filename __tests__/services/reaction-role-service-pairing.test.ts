@@ -51,10 +51,15 @@ type Binder = {
 const spyBind = (service: unknown) =>
   jest.spyOn(service as Binder, "bindReactionRoleUnlocked");
 const MARK = ` · ref ${OWNER}`;
-const picker = (id: string, footer: string, authorId = "bot1") => ({
+const picker = (
+  id: string,
+  footer: string,
+  authorId = "bot1",
+  description = "",
+) => ({
   id,
   author: { id: authorId },
-  embeds: [{ footer: { text: footer } }],
+  embeds: [{ footer: { text: footer }, description }],
   delete: jest.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
 });
 const input = (over: Record<string, unknown> = {}) => ({
@@ -534,7 +539,7 @@ describe("pickers that exist before their mapping is saved (#1022)", () => {
     ...over,
   });
 
-  it("a picker posted by an adoption step carries the step key in its footer", async () => {
+  it("a picker posted by an adoption step shows no key; the instruction is in its description (#1513)", async () => {
     const { service, send } = build();
     // The mapping can't be saved under the global model mock; the post is what
     // matters here.
@@ -542,9 +547,24 @@ describe("pickers that exist before their mapping is saved (#1022)", () => {
       adoptionOpKey: OWNER,
     });
     const payload = send.mock.calls[0][0] as {
+      embeds: Array<{
+        data: { footer: { text: string }; description: string };
+      }>;
+    };
+    const { footer, description } = payload.embeds[0].data;
+    expect(footer.text).toBe("KoolBot · Reaction roles");
+    expect(JSON.stringify(payload)).not.toContain(OWNER);
+    expect(description).toContain("<@&role1>");
+    expect(description).toContain("Remove your reaction to lose the role");
+  });
+
+  it("a picker posted without an adoption key reads the same", async () => {
+    const { service, send } = build();
+    await service.bindReactionRole("guild1", "role1", "🎮");
+    const payload = send.mock.calls[0][0] as {
       embeds: Array<{ data: { footer: { text: string } } }>;
     };
-    expect(payload.embeds[0].data.footer.text.endsWith(MARK)).toBe(true);
+    expect(payload.embeds[0].data.footer.text).toBe("KoolBot · Reaction roles");
   });
 
   it("a retry completes the picker it posted before dying instead of posting a second one", async () => {
@@ -800,4 +820,128 @@ describe("recovery that holds up to history length, other owners and timeouts (#
       expect(Model.findOne).toHaveBeenCalled();
     },
   );
+});
+
+describe("finding a picker that carries no marker (#1513)", () => {
+  const BODY = "React with 🎮 to get the <@&role1> role!";
+  const FOOT = "KoolBot · Reaction roles";
+  const plain = (id: string, over: { desc?: string; author?: string } = {}) =>
+    picker(id, FOOT, over.author ?? "bot1", over.desc ?? BODY);
+  const find = (service: { findOwnedPairing: Function }, key = OWNER) =>
+    service.findOwnedPairing("guild1", {
+      roleId: "role1",
+      ownerKey: key,
+      channelId: "picker",
+    });
+
+  it("finds the one bot-authored picker that shows the role and has no mapping", async () => {
+    const { service, messageFetch } = build();
+    messageFetch.mockResolvedValue(
+      new Map([
+        ["a", plain("a", { desc: "React with 🎮 to get the <@&role2> role!" })],
+        ["b", plain("b", { author: "someone-else" })],
+        ["orphan1", plain("orphan1")],
+      ]),
+    );
+    expect(await find(service)).toBe("orphan1");
+    expect(Model.countDocuments).toHaveBeenCalledWith({
+      guildId: "guild1",
+      messageId: "orphan1",
+      isArchived: false,
+    });
+  });
+
+  it("ignores a candidate that a mapping already uses", async () => {
+    const { service, messageFetch } = build();
+    messageFetch.mockResolvedValue(new Map([["orphan1", plain("orphan1")]]));
+    Model.countDocuments.mockResolvedValue(1);
+    expect(await find(service)).toBeNull();
+  });
+
+  it("ignores a picker older than the snapshot", async () => {
+    const { service, messageFetch } = build();
+    // An ObjectId from 2038: every message is older than the step.
+    messageFetch.mockResolvedValue(new Map([["1000", plain("1000")]]));
+    expect(await find(service, "7fffffff0000000000000000:op-1")).toBeNull();
+  });
+
+  it("refuses when two pickers match, instead of guessing", async () => {
+    const { service, messageFetch } = build();
+    messageFetch.mockResolvedValue(
+      new Map([
+        ["p1", plain("p1")],
+        ["p2", plain("p2")],
+      ]),
+    );
+    await expect(find(service)).rejects.toThrow(/More than one/);
+  });
+
+  it("keeps reading to the end of the history before it decides", async () => {
+    const { service, messageFetch } = build();
+    // A match on the first page and a second on the next: both are seen.
+    messageFetch
+      .mockResolvedValueOnce(
+        new Map([
+          ...Array.from({ length: 99 }, (_, i) => {
+            const id = String(900 - i);
+            return [id, plain(id, { desc: "other" })] as const;
+          }),
+          ["801", plain("801")] as const,
+        ]),
+      )
+      .mockResolvedValueOnce(new Map([["700", plain("700")]]));
+    await expect(find(service)).rejects.toThrow(/More than one/);
+    expect(messageFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("a retry completes the unmarked picker instead of posting a second one", async () => {
+    const { service, messageFetch, pickerChannel } = build();
+    messageFetch.mockResolvedValue(new Map([["orphan1", plain("orphan1")]]));
+    const bind = spyBind(service).mockResolvedValue({
+      success: true,
+      message: "ok",
+      roleId: "role1",
+      messageId: "orphan1",
+    });
+    await service.registerGatedPairing("guild1", input({ retry: true }));
+    expect(bind).toHaveBeenCalledWith(
+      "guild1",
+      "role1",
+      "🎮",
+      expect.objectContaining({ messageId: "orphan1" }),
+    );
+    expect(pickerChannel.send).not.toHaveBeenCalled();
+  });
+
+  it("a rollback deletes an unmapped, unmarked picker that shows the role, and nothing else", async () => {
+    const { service, messageFetch } = build();
+    const un = (id: string) => ({
+      roleId: "role1",
+      messageId: id,
+      channelId: "picker",
+      ownerKey: OWNER,
+    });
+    const mine = plain("orphan1");
+    messageFetch.mockResolvedValue(mine);
+    await service.unregisterGatedPairing("guild1", un("orphan1"));
+    expect(mine.delete).toHaveBeenCalledTimes(1);
+    const otherRole = plain("orphan2", {
+      desc: "React with 🎮 to get the <@&role2> role!",
+    });
+    messageFetch.mockResolvedValue(otherRole);
+    await service.unregisterGatedPairing("guild1", un("orphan2"));
+    expect(otherRole.delete).not.toHaveBeenCalled();
+    const notBot = plain("orphan3", { author: "someone-else" });
+    messageFetch.mockResolvedValue(notBot);
+    await service.unregisterGatedPairing("guild1", un("orphan3"));
+    expect(notBot.delete).not.toHaveBeenCalled();
+  });
+
+  it("still finds a picker posted with the old footer marker (before #1513)", async () => {
+    const { service, messageFetch } = build();
+    messageFetch.mockResolvedValue(
+      new Map([["old1", picker("old1", `Remove your reaction${MARK}`)]]),
+    );
+    expect(await find(service)).toBe("old1");
+  });
 });
