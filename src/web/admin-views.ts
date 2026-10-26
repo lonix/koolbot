@@ -6345,8 +6345,18 @@ export interface ModerationProps extends CommonProps {
   dependencyState?: ReadonlyMap<string, boolean>;
   /** The stored config could not be read; the card renders a notice. */
   settingsUnavailable?: boolean;
+  /** The open-case or decision form the last save refused (#1523). */
+  refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
 }
+
+/** Form id of the Open case form of one log row (#1523). */
+export const moderationCaseOpenForm = (entryId: string): string =>
+  `moderation-case-open-${entryId}`;
+
+/** Form id of the decision form of one case (#1523). */
+export const moderationCaseDecideForm = (caseId: string): string =>
+  `moderation-case-decide-${caseId}`;
 
 /** Display words for log actions; shared with Discord (`utils/moderation-labels.ts`). */
 export const MODERATION_ACTION_LABELS: Record<string, string> = ACTION_WORDS;
@@ -6402,13 +6412,23 @@ function renderRowCaseCell(row: ModerationRow, props: ModerationProps): string {
   if (row.action !== "kick" && row.action !== "ban") {
     return '<span class="muted">—</span>';
   }
-  return `<details class="helper edit-details"><summary>Open case</summary>
+  const f = formView(props.refusedForm, moderationCaseOpenForm(row.entryId));
+  // The log is paged and filtered by the query string; a refused save has no
+  // query, so the form hands its page's query back to draw the same rows.
+  const query = buildModerationQueryString(
+    props.filters,
+    Math.min(
+      Math.max(1, props.page),
+      Math.max(1, Math.ceil(props.total / props.pageSize)),
+    ),
+  );
+  return `<details class="helper edit-details"${f.open()}><summary>Open case</summary>
     <form method="POST" action="/admin/moderation/cases/open" class="stack">
       <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
-      <input type="hidden" name="entry_id" value="${escapeHtml(row.entryId)}">
-      <label>Review in (days)<input type="number" name="review_in_days" min="1" max="3650" value="${props.defaultReviewDays ?? 90}"></label>
+      <input type="hidden" name="entry_id" value="${escapeHtml(row.entryId)}">${query ? `\n      <input type="hidden" name="view_query" value="${escapeHtml(query)}">` : ""}
+      <label>Review in (days)<input type="number" name="review_in_days" min="1" max="3650" value="${escapeHtml(f.value("review_in_days", String(props.defaultReviewDays ?? 90)))}"${f.attrs("review_in_days", "")}></label>${f.error("review_in_days")}
       <p class="muted">Clear the days for a case with no review date.</p>
-      <label>Note<input type="text" name="note" maxlength="500"></label>
+      <label>Note<input type="text" name="note" maxlength="500" value="${escapeHtml(f.value("note"))}"${f.attrs("note")}></label>${f.error("note")}
       <button type="submit" class="btn btn-primary btn-sm">Open case</button>
     </form>
   </details>`;
@@ -6449,10 +6469,11 @@ function renderCaseEvents(c: CaseView): string {
 function renderCaseActions(c: CaseView, props: ModerationProps): string {
   const base = `/admin/moderation/cases/${encodeURIComponent(c.id)}`;
   const days = props.defaultReviewDays ?? 90;
+  const f = formView(props.refusedForm, moderationCaseDecideForm(c.id));
   return `<form method="POST" action="${base}/uphold" class="stack">
       <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
-      <label>Next review in (days)<input type="number" name="next_review_in_days" min="1" max="3650" value="${days}"></label>
-      <label>Note<input type="text" name="note" maxlength="500"></label>
+      <label>Next review in (days)<input type="number" name="next_review_in_days" min="1" max="3650" value="${escapeHtml(f.value("next_review_in_days", String(days)))}"${f.attrs("next_review_in_days")}></label>${f.error("next_review_in_days")}
+      <label>Note<input type="text" name="note" maxlength="500" value="${escapeHtml(f.value("note"))}"${f.attrs("note")}></label>${f.error("note")}
       <div class="inline-form">
         <button type="submit" class="btn btn-sm">${DECISION_LABELS.uphold}</button>
         <button type="submit" class="btn btn-sm" formaction="${base}/extend">${DECISION_LABELS.extend}</button>

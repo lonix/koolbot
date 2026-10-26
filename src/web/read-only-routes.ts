@@ -3059,141 +3059,157 @@ export function createReadOnlyRouter(
   );
 
   // ---------- Moderation log (#728) ----------
+  const renderModeration = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const config = ConfigService.getInstance();
+    const moderationService = ModerationService.getInstance(client);
+
+    const pageSize = 50;
+    // A refused Open case form is a POST with no query string; it hands back
+    // the page's own query (`view_query`) so the same log rows are drawn and
+    // the refused row is on the page (#1523).
+    const query: Record<string, unknown> = refusedForm
+      ? Object.fromEntries(
+          new URLSearchParams(
+            typeof req.body?.view_query === "string"
+              ? req.body.view_query.slice(0, 200)
+              : "",
+          ),
+        )
+      : req.query;
+    const pageRaw = Number.parseInt(String(query.page ?? "1"), 10);
+    const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+
+    const actionRaw = String(query.action ?? "").trim();
+    const actionFilter = (MODERATION_ACTIONS as readonly string[]).includes(
+      actionRaw,
+    )
+      ? (actionRaw as ModerationAction)
+      : undefined;
+    const userFilter = String(query.user ?? "").trim() || undefined;
+
+    // moderation.enabled is the master gate: when off, the page renders the
+    // disabled banner and an empty table without querying the log, matching
+    // the "inert until opted in" contract in defaultConfig.
+    const [enabled, moderationSettings] = await Promise.all([
+      config.getBoolean("moderation.enabled", false),
+      // Editable moderation settings card (#977). Loaded whether or not the
+      // feature is on, so it can be switched on from this card as well.
+      loadFeatureSettings(client, common.guildId, MODERATION_SETTING_KEYS),
+    ]);
+    const [total, docs] = enabled
+      ? await Promise.all([
+          moderationService
+            .countRecent(common.guildId, {
+              action: actionFilter,
+              userId: userFilter,
+            })
+            .catch(() => 0),
+          moderationService
+            .getRecent(common.guildId, {
+              action: actionFilter,
+              userId: userFilter,
+              limit: pageSize,
+              skip: (page - 1) * pageSize,
+            })
+            .catch(() => []),
+        ])
+      : [0, []];
+
+    // Raid alerts and the moderation log channels only; the other log channels
+    // are covered where they are configured.
+    const permissionNotice = await loadPermissionNotice({
+      client,
+      guildId: common.guildId,
+      enabled,
+      filter: inFeatures(
+        "raid-alerts",
+        "log-moderation",
+        "log-moderation-review",
+      ),
+    });
+
+    const caseData = await loadModerationCaseData({
+      caseService: ModerationCaseService.getInstance(client),
+      moderationService,
+      guildId: common.guildId,
+      enabled,
+      entryIds: docs.map((d) => d._id as mongoose.Types.ObjectId),
+    });
+    const { casesEnabled, queue, queueCases, casesByEntry } = caseData;
+
+    // Resolve user + moderator labels to display names (batched, cache
+    // first; see `resolveMemberLabels`). Ids that stay unresolved fall back
+    // to the raw snowflake at render time.
+    const idsOnPage = logRowUserIds(docs, common.guildId);
+    for (const c of queueCases) {
+      idsOnPage.add(c.userId);
+      idsOnPage.add(c.openedByUserId);
+      if (c.originModeratorId) idsOnPage.add(c.originModeratorId);
+      // The review job records itself as "system", which is not a
+      // snowflake and would invalidate the whole batched member fetch.
+      for (const e of c.events) {
+        if (e.byUserId !== SYSTEM_ACTOR) idsOnPage.add(e.byUserId);
+      }
+    }
+    const labels = await resolveMemberLabels(
+      client,
+      common.guildId,
+      idsOnPage,
+      new Map([[common.guildId, "Server (anti-raid)"]]),
+    );
+
+    const labelOf = (id: string | null): string =>
+      id ? (labels.get(id) ?? id) : "Unknown";
+    const rows: ModerationRow[] = toModerationRows(docs, casesByEntry, labels);
+
+    // The user filter dropdown is seeded from the target users on this page.
+    const userOptions = Array.from(new Set(docs.map((d) => d.userId)))
+      .sort()
+      .map((id) => ({ id, label: labels.get(id) ?? id }));
+
+    return renderModerationPage({
+      refusedForm,
+      ...common,
+      enabled,
+      permissionNotice,
+      actionOptions: MODERATION_ACTIONS,
+      userOptions,
+      filters: {
+        action: actionFilter ?? "",
+        userId: userFilter ?? "",
+      },
+      rows,
+      total,
+      page,
+      pageSize,
+      casesEnabled,
+      defaultReviewDays: caseData.defaultReviewDays,
+      caseGroups: queue
+        ? buildCaseGroups(
+            queue,
+            caseData.originEntries,
+            caseData.queueHistory,
+            labelOf,
+          )
+        : null,
+      settingRows: moderationSettings.settingRows,
+      pickers: moderationSettings.pickers,
+      dependencyState: moderationSettings.dependencyState,
+      settingsUnavailable: moderationSettings.unavailable,
+      flash: readFlash(req),
+    });
+  };
+  registerFormPage("/admin/moderation", (req, refused) =>
+    renderModeration(req as AuthenticatedRequest, refused),
+  );
   router.get(
     "/moderation",
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
-      const config = ConfigService.getInstance();
-      const moderationService = ModerationService.getInstance(client);
-
-      const pageSize = 50;
-      const pageRaw = Number.parseInt(String(req.query.page ?? "1"), 10);
-      const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
-
-      const actionRaw = String(req.query.action ?? "").trim();
-      const actionFilter = (MODERATION_ACTIONS as readonly string[]).includes(
-        actionRaw,
-      )
-        ? (actionRaw as ModerationAction)
-        : undefined;
-      const userFilter = String(req.query.user ?? "").trim() || undefined;
-
-      // moderation.enabled is the master gate: when off, the page renders the
-      // disabled banner and an empty table without querying the log, matching
-      // the "inert until opted in" contract in defaultConfig.
-      const [enabled, moderationSettings] = await Promise.all([
-        config.getBoolean("moderation.enabled", false),
-        // Editable moderation settings card (#977). Loaded whether or not the
-        // feature is on, so it can be switched on from this card as well.
-        loadFeatureSettings(client, common.guildId, MODERATION_SETTING_KEYS),
-      ]);
-      const [total, docs] = enabled
-        ? await Promise.all([
-            moderationService
-              .countRecent(common.guildId, {
-                action: actionFilter,
-                userId: userFilter,
-              })
-              .catch(() => 0),
-            moderationService
-              .getRecent(common.guildId, {
-                action: actionFilter,
-                userId: userFilter,
-                limit: pageSize,
-                skip: (page - 1) * pageSize,
-              })
-              .catch(() => []),
-          ])
-        : [0, []];
-
-      // Raid alerts and the moderation log channels only; the other log channels
-      // are covered where they are configured.
-      const permissionNotice = await loadPermissionNotice({
-        client,
-        guildId: common.guildId,
-        enabled,
-        filter: inFeatures(
-          "raid-alerts",
-          "log-moderation",
-          "log-moderation-review",
-        ),
-      });
-
-      const caseData = await loadModerationCaseData({
-        caseService: ModerationCaseService.getInstance(client),
-        moderationService,
-        guildId: common.guildId,
-        enabled,
-        entryIds: docs.map((d) => d._id as mongoose.Types.ObjectId),
-      });
-      const { casesEnabled, queue, queueCases, casesByEntry } = caseData;
-
-      // Resolve user + moderator labels to display names (batched, cache
-      // first; see `resolveMemberLabels`). Ids that stay unresolved fall back
-      // to the raw snowflake at render time.
-      const idsOnPage = logRowUserIds(docs, common.guildId);
-      for (const c of queueCases) {
-        idsOnPage.add(c.userId);
-        idsOnPage.add(c.openedByUserId);
-        if (c.originModeratorId) idsOnPage.add(c.originModeratorId);
-        // The review job records itself as "system", which is not a
-        // snowflake and would invalidate the whole batched member fetch.
-        for (const e of c.events) {
-          if (e.byUserId !== SYSTEM_ACTOR) idsOnPage.add(e.byUserId);
-        }
-      }
-      const labels = await resolveMemberLabels(
-        client,
-        common.guildId,
-        idsOnPage,
-        new Map([[common.guildId, "Server (anti-raid)"]]),
-      );
-
-      const labelOf = (id: string | null): string =>
-        id ? (labels.get(id) ?? id) : "Unknown";
-      const rows: ModerationRow[] = toModerationRows(
-        docs,
-        casesByEntry,
-        labels,
-      );
-
-      // The user filter dropdown is seeded from the target users on this page.
-      const userOptions = Array.from(new Set(docs.map((d) => d.userId)))
-        .sort()
-        .map((id) => ({ id, label: labels.get(id) ?? id }));
-
-      res.type("text/html").send(
-        renderModerationPage({
-          ...common,
-          enabled,
-          permissionNotice,
-          actionOptions: MODERATION_ACTIONS,
-          userOptions,
-          filters: {
-            action: actionFilter ?? "",
-            userId: userFilter ?? "",
-          },
-          rows,
-          total,
-          page,
-          pageSize,
-          casesEnabled,
-          defaultReviewDays: caseData.defaultReviewDays,
-          caseGroups: queue
-            ? buildCaseGroups(
-                queue,
-                caseData.originEntries,
-                caseData.queueHistory,
-                labelOf,
-              )
-            : null,
-          settingRows: moderationSettings.settingRows,
-          pickers: moderationSettings.pickers,
-          dependencyState: moderationSettings.dependencyState,
-          settingsUnavailable: moderationSettings.unavailable,
-          flash: readFlash(req),
-        }),
-      );
+      res.type("text/html").send(await renderModeration(req, null));
     }),
   );
 

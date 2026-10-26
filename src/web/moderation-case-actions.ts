@@ -85,6 +85,43 @@ export function parseReviewDate(
   return { ok: true, date: null };
 }
 
+/**
+ * Check the note and review-date fields of the open-case and decision forms
+ * and say which field is wrong (#1523). `prefix` is `review` (open a case) or
+ * `next_review` (a decision). `reason` is the same refusal as one sentence,
+ * the note first, which is what a flash and the audit row carry. A date given
+ * as `<prefix>_at` has no control on the page, so its refusal is keyed
+ * `<prefix>_at` and only ever reaches the flash.
+ */
+export function checkCaseFields(
+  get: (name: string) => string,
+  prefix: "review" | "next_review",
+): {
+  review: ReviewDate;
+  errors: Record<string, string>;
+  reason: string | null;
+} {
+  const note = get("note");
+  const review = parseReviewDate(get, prefix);
+  const errors: Record<string, string> = {};
+  const lengthError = firstLengthError([
+    { label: "Note", value: note, max: TEXT_LIMITS.caseNote },
+  ]);
+  if (lengthError) errors.note = `At most ${TEXT_LIMITS.caseNote} characters.`;
+  if (!review.ok) {
+    errors[
+      get(`${prefix}_in_days`) || !get(`${prefix}_at`)
+        ? `${prefix}_in_days`
+        : `${prefix}_at`
+    ] = review.reason;
+  }
+  return {
+    review,
+    errors,
+    reason: lengthError ?? (review.ok ? null : review.reason),
+  };
+}
+
 export interface CaseFlash {
   type: "ok" | "err";
   text: string;
@@ -131,7 +168,7 @@ export async function decideCase(args: {
   const { client, session, caseId, decision, get, audit } = args;
   const cases = ModerationCaseService.getInstance(client);
   const note = get("note");
-  const review = parseReviewDate(get, "next_review");
+  const { review, reason: fieldReason } = checkCaseFields(get, "next_review");
   const action = `moderation.case.${decision}`;
 
   // A refusal is audited like any other failed attempt: who tried which
@@ -159,11 +196,8 @@ export async function decideCase(args: {
   if (!enabled) {
     return refuse("Moderation cases are turned off.");
   }
-  const lengthError = firstLengthError([
-    { label: "Note", value: note, max: TEXT_LIMITS.caseNote },
-  ]);
-  if (lengthError || !review.ok) {
-    return refuse(lengthError ?? (review.ok ? "" : review.reason));
+  if (fieldReason !== null || !review.ok) {
+    return refuse(fieldReason ?? "");
   }
 
   try {
