@@ -906,12 +906,16 @@ describe("the values a refused Channel manager form echoes (#1523)", () => {
 
   it("keeps a hostile field name out of a refused page", async () => {
     await mount();
-    const res = await harness.post("/channels/create", {
-      type: "text",
-      name: "x".repeat(101),
-      __proto__: "polluted",
-      constructor: "c",
-    } as Record<string, string>);
+    // fromEntries makes `__proto__` an own property, not a prototype assignment.
+    const res = await harness.post(
+      "/channels/create",
+      Object.fromEntries([
+        ["type", "text"],
+        ["name", "x".repeat(101)],
+        ["__proto__", "polluted"],
+        ["constructor", "c"],
+      ]) as Record<string, string>,
+    );
     expect(res.status).toBe(422);
     expect(await res.text()).not.toContain("polluted");
   });
