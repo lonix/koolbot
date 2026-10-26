@@ -176,24 +176,46 @@ export type MockButtonInteraction = ButtonInteraction & {
   reply: jest.Mock;
   update: jest.Mock;
   followUp: jest.Mock;
+  deferUpdate: jest.Mock;
+  deferReply: jest.Mock;
+  editReply: jest.Mock;
 };
 
+/**
+ * Like discord.js, acknowledging flips the state `safeReply` and
+ * `replyWithError` read to choose between reply, editReply and followUp:
+ * `reply` and `update` set `replied`; `deferReply` and `deferUpdate` set
+ * `deferred`. (#1510: without this a handler's failure reply always looked
+ * like a fresh `reply` in tests, whatever the handler had acknowledged.)
+ */
 export function createMockButtonInteraction(
   customId: string,
   overrides: Record<string, unknown> = {},
 ): MockButtonInteraction {
-  return {
+  const interaction: Record<string, unknown> = {
     customId,
     guildId: "guild-1",
     user: { id: "user-1", username: "alice" },
     client: createMockClient(),
     replied: false,
     deferred: false,
-    reply: jest.fn(async () => undefined),
-    update: jest.fn(async () => undefined),
+    reply: jest.fn(async () => {
+      interaction.replied = true;
+    }),
+    update: jest.fn(async () => {
+      interaction.replied = true;
+    }),
+    deferUpdate: jest.fn(async () => {
+      interaction.deferred = true;
+    }),
+    deferReply: jest.fn(async () => {
+      interaction.deferred = true;
+    }),
+    editReply: jest.fn(async () => undefined),
     followUp: jest.fn(async () => undefined),
     ...overrides,
-  } as unknown as MockButtonInteraction;
+  };
+  return interaction as unknown as MockButtonInteraction;
 }
 
 /**

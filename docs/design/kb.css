@@ -588,6 +588,7 @@ fieldset[data-groups-section] { border: 0; margin: 0; padding: 0; min-width: 0; 
 .kb-access__can li.is-not .kb-icon { color: var(--muted); }
 .kb-access__roles { display: flex; flex-direction: column; gap: var(--space-1); padding-top: var(--space-3); border-top: 1px solid var(--border); margin-top: auto; }
 .kb-access__card .kb-picker__trigger { width: 100%; }
+.kb-access__card .kb-picker { min-width: 0; }
 
 /* ---------- Steps (wizard progress) ---------- */
 .kb-steps-bar { display: flex; list-style: none; margin: 0; padding: 0; gap: var(--space-2); counter-reset: step; flex-wrap: wrap; }

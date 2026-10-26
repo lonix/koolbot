@@ -233,6 +233,18 @@ describe("GET /adopt/history/:id/restore", () => {
     expect(html).toContain('name="deleteCreatedRoles"');
     expect(html).not.toMatch(/name="deleteCreatedRoles"[^>]*checked/);
     expect(mockStartRollback).not.toHaveBeenCalled();
+    // The dialog upgrade (#1536) reads only a page that says so.
+    expect(res.headers.get("x-kb-confirm-page")).toBe("snapshot-restore");
+    expect(html).toContain("data-confirm-form");
+  });
+
+  it("does not offer the dialog for a snapshot that cannot be restored", async () => {
+    mockDetail.mockResolvedValue({ ...summary(), status: "rolled_back" });
+    await mount();
+    const res = await harness.get(`/adopt/history/${SNAP}/restore`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-kb-confirm-page")).toBeNull();
+    expect(await res.text()).toContain("can't be restored");
   });
 
   it("redirects with a notice for an unknown snapshot", async () => {

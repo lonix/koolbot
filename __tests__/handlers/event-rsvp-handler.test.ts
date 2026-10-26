@@ -7,7 +7,11 @@
 
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { MessageFlags } from "discord.js";
-import { createMockButtonInteraction } from "../test-utils.js";
+import {
+  createMockButtonInteraction,
+  errorEmbedPayload,
+  unexpectedErrorPayload,
+} from "../test-utils.js";
 
 const mockSetRsvp = jest.fn<() => Promise<unknown>>();
 const mockBuildAnnouncementPayload = jest.fn(() => ({ content: "refreshed" }));
@@ -75,8 +79,9 @@ describe("event RSVP button handler", () => {
     const it_ = createMockButtonInteraction("vc_control_rename");
     await handleEventRsvpButton(it_);
     expect(it_.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("Invalid RSVP button"),
+      errorEmbedPayload({
+        title: "This RSVP button is out of date",
+        description: expect.stringContaining("Interested"),
       }),
     );
     expect(mockSetRsvp).not.toHaveBeenCalled();
@@ -86,9 +91,7 @@ describe("event RSVP button handler", () => {
     const it_ = createMockButtonInteraction("event_rsvp_event-1_perhaps");
     await handleEventRsvpButton(it_);
     expect(it_.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("Unknown RSVP option"),
-      }),
+      errorEmbedPayload({ title: "This RSVP button is out of date" }),
     );
     expect(mockSetRsvp).not.toHaveBeenCalled();
   });
@@ -139,10 +142,13 @@ describe("event RSVP button handler", () => {
     expect(it_.update).not.toHaveBeenCalled();
     expect(it_.reply).not.toHaveBeenCalled();
     expect(it_.followUp).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("no longer accepting RSVPs"),
-        flags: MessageFlags.Ephemeral,
+      errorEmbedPayload({
+        title: "This event is no longer taking RSVPs here",
+        description: expect.stringContaining("Events list"),
       }),
+    );
+    expect(it_.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({ flags: MessageFlags.Ephemeral }),
     );
   });
 
@@ -153,12 +159,26 @@ describe("event RSVP button handler", () => {
     expect(it_.editReply).not.toHaveBeenCalled();
     expect(it_.update).not.toHaveBeenCalled();
     expect(it_.reply).not.toHaveBeenCalled();
+    expect(it_.followUp).toHaveBeenCalledWith(unexpectedErrorPayload());
     expect(it_.followUp).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringContaining("error recording your RSVP"),
-        flags: MessageFlags.Ephemeral,
-      }),
+      expect.objectContaining({ flags: MessageFlags.Ephemeral }),
     );
+  });
+
+  it("says the RSVP was recorded, with no retry advice, when the refresh fails", async () => {
+    mockSetRsvp.mockResolvedValue({ _id: "event-1" });
+    const it_ = rsvpClick("event_rsvp_event-1_going");
+    it_.editReply.mockRejectedValue(new Error("10062 Unknown interaction"));
+    await handleEventRsvpButton(it_);
+    expect(mockSetRsvp).toHaveBeenCalledTimes(1);
+    // The failed edit is the announcement's own refresh; the error is a
+    // separate follow-up and never a second edit.
+    expect(it_.editReply).toHaveBeenCalledTimes(1);
+    const sent = it_.followUp.mock.calls[0][0] as {
+      embeds: { data: { title: string; description: string } }[];
+    };
+    expect(sent.embeds[0].data.title).toBe("Your RSVP was recorded");
+    expect(sent.embeds[0].data.description).not.toMatch(/try again/i);
   });
 
   it("does not write the RSVP when the defer itself fails", async () => {

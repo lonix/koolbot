@@ -1171,6 +1171,36 @@ describe("GET /channels/:id/delete", () => {
     expect(mockDelete).not.toHaveBeenCalled();
   });
 
+  it("says what the page is: the confirmation, or its refusal (the dialog upgrade, #1536)", async () => {
+    const header = async (path: string): Promise<string | null> => {
+      const res = await harness.get(path);
+      await res.text();
+      return res.headers.get("x-kb-confirm-page");
+    };
+    await mount();
+    expect(await header(`/channels/${TEXT2}/delete`)).toBe("channel-delete");
+    protection = new Map([[TEXT2, ["the tickets.category_id setting"]]]);
+    expect(await header(`/channels/${TEXT2}/delete`)).toBe(
+      "channel-delete-refused",
+    );
+    protection = new Map();
+    expect(await header(`/channels/199999999999999999/delete`)).toBe(
+      "channel-delete-refused",
+    );
+    expect(await header(`/channels/${STAGE}/delete`)).toBe(
+      "channel-delete-refused",
+    );
+    canManage = false;
+    expect(await header(`/channels/${TEXT2}/delete`)).toBe(
+      "channel-delete-refused",
+    );
+    canManage = true;
+    protectionFails = true;
+    expect(await header(`/channels/${TEXT2}/delete`)).toBe(
+      "channel-delete-refused",
+    );
+  });
+
   it("shows the refusal, with no delete form, for a managed channel", async () => {
     protection = new Map([[TEXT2, ["the tickets.category_id setting"]]]);
     await mount();
