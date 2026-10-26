@@ -922,6 +922,20 @@ describe("an unmapped picker without a marker is inert (#1513)", () => {
     expect(mine.delete).toHaveBeenCalledTimes(1);
   });
 
+  it("a failed attempt that stays up deletes the picker it just posted, so only a real crash leaves an orphan", async () => {
+    const { service, send } = build();
+    const sent = (await send()) as {
+      react: jest.Mock;
+      delete: jest.Mock;
+    };
+    sent.react.mockRejectedValueOnce(new Error("Missing Permissions"));
+    const failed = await service.bindReactionRole("guild1", "role1", "🎮", {
+      adoptionOpKey: OWNER,
+    });
+    expect(failed.success).toBe(false);
+    expect(sent.delete).toHaveBeenCalledTimes(1);
+  });
+
   it("a picker posted with the old footer marker (before #1513) is still found and completed", async () => {
     const { service, messageFetch } = build();
     messageFetch.mockResolvedValue(
