@@ -188,7 +188,10 @@ const flashOf = async (
       html,
     );
   return {
-    path: /<form method="POST" action="([^"]+)"[^>]*data-event-form/.exec(html)?.[1] ?? "",
+    path:
+      /<form method="POST" action="([^"]+)"[^>]*data-event-form/.exec(
+        html,
+      )?.[1] ?? "",
     type: callout ? "err" : "",
     msg: callout?.[1] ?? null,
     invalid: [],
