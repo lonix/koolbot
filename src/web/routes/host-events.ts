@@ -35,6 +35,7 @@ import { Client } from "discord.js";
 import logger from "../../utils/logger.js";
 import {
   EventService,
+  formatEventWhen,
   isRecurring,
   recurrenceLabel,
 } from "../../services/event-service.js";
@@ -1679,14 +1680,11 @@ function registerEditRoutes(router: Router, client: Client): void {
       return;
     }
     const csrfToken = getCsrfToken(req);
+    // Edit event stays in the event's own zone throughout (#1538): the date,
+    // time and timezone fields edit that zone, and the read-only start fact
+    // beside them is shown in it too. The panel's start is the member's.
     const zone = zoneOf(event);
     void (async (): Promise<void> => {
-      // The date, time and timezone fields stay in the event's own zone, the
-      // one this form edits; the read-only start fact is the member's (#1538).
-      const memberZone = await readMemberZone(
-        session.discordUserId,
-        session.guildId,
-      );
       if (!(await service().editsAllowed())) {
         hostPanelRedirect(res, eventId, {
           type: "err",
@@ -1701,7 +1699,9 @@ function registerEditRoutes(router: Router, client: Client): void {
       const permissionNotice = await hostPermissionNotice(
         client,
         event.guildId,
-        toPanelEvent(client, event, memberZone),
+        // The panel event's start line is not shown here, so the event's own
+        // zone does.
+        toPanelEvent(client, event, zone),
         event,
         (e) =>
           hostEditPermissionFeatures(
@@ -1731,7 +1731,7 @@ function registerEditRoutes(router: Router, client: Client): void {
                 timezone: zone,
                 date: formatInTimeZone(event.startTime, zone, "yyyy-MM-dd"),
                 time: formatInTimeZone(event.startTime, zone, "HH:mm"),
-                when: formatDateTimeInZone(event.startTime, memberZone),
+                when: formatEventWhen(event),
                 version: eventEditVersion(event, mode.mode),
                 mode: mode.mode,
                 startLocked,

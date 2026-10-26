@@ -242,7 +242,7 @@ describe("host panel times (#1538)", () => {
     expect(r.text).not.toContain("America/New_York");
   });
 
-  it("shows the read-only start on Edit event in the member's zone", async () => {
+  it("keeps the read-only start on Edit event in the event's own zone, beside the fields that edit it", async () => {
     // Started already, so Edit event shows the start as a fact, not as fields.
     events[EVENT_ID] = makeEvent({
       state: "active",
@@ -253,8 +253,8 @@ describe("host panel times (#1538)", () => {
     const r = await call(`${PANEL}/edit`);
     expect(r.status).toBe(200);
     expect(r.text).toContain("Started");
-    expect(r.text).toContain("2020-01-02 08:00 (Pacific/Auckland)");
-    expect(r.text).not.toContain("America/New_York");
+    expect(r.text).toContain("2020-01-01 14:00 (America/New_York)");
+    expect(r.text).not.toContain("Pacific/Auckland");
   });
 });
 
