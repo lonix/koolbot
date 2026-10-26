@@ -1367,15 +1367,13 @@ describe("/me/voice (#656)", () => {
       },
     });
     const doc = new JSDOM(out.body).window.document;
-    const form = doc.querySelector<HTMLFormElement>(
-      'form[action="/me/voice/preset/delete"]',
-    )!;
+    const form = doc.querySelector('form[action="/me/voice/preset/delete"]')!;
     expect(form.getAttribute("data-confirm")).toBe(
       "Delete the preset 'Chill <b>'?",
     );
     expect(form.hasAttribute("data-confirm-list")).toBe(false);
     const btn = form.querySelector("button")!;
-    expect(btn.className).toBe("kb-btn kb-btn--danger");
+    expect(btn.getAttribute("class")).toBe("kb-btn kb-btn--danger");
     expect(btn.getAttribute("aria-label")).toBe("Delete Chill <b>");
     // Set as default is not destructive: no dialog.
     expect(
@@ -1975,8 +1973,8 @@ describe("/me/birthday clear (#1033)", () => {
     });
     expect(out.statusCode).toBe(200);
     const doc = new JSDOM(out.html).window.document;
-    const b = doc.querySelector<HTMLButtonElement>('button[name="clear"]')!;
-    expect(b.className).toBe("kb-btn kb-btn--danger");
+    const b = doc.querySelector('button[name="clear"]')!;
+    expect(b.getAttribute("class")).toBe("kb-btn kb-btn--danger");
     expect(b.getAttribute("style")).toBeNull();
     expect(b.getAttribute("data-confirm")).toBe("Remove your birthday?");
     const items = JSON.parse(b.getAttribute("data-confirm-list")!) as string[];
@@ -1986,7 +1984,7 @@ describe("/me/birthday clear (#1033)", () => {
   it("GET leaves the cooldown line out when the cooldown is 0 (#1521)", async () => {
     const out = await dispatch({ body: {}, get: { cooldownSeconds: 0 } });
     const doc = new JSDOM(out.html).window.document;
-    const b = doc.querySelector<HTMLButtonElement>('button[name="clear"]')!;
+    const b = doc.querySelector('button[name="clear"]')!;
     const items = JSON.parse(b.getAttribute("data-confirm-list")!) as string[];
     expect(items).toHaveLength(4);
   });

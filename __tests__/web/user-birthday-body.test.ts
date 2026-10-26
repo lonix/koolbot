@@ -54,19 +54,19 @@ describe("renderUserBirthdayBody day dropdown (#704)", () => {
 describe("renderUserBirthdayBody remove button (#1521)", () => {
   const stored = { month: 4, day: 12, year: null };
 
-  function removeButton(html: string): HTMLButtonElement {
+  function removeButton(html: string) {
     const doc = new JSDOM(html).window.document;
-    return doc.querySelector<HTMLButtonElement>('button[name="clear"]')!;
+    return doc.querySelector('button[name="clear"]')!;
   }
 
   it("is a danger button without an inline style", () => {
     const b = removeButton(
       renderUserBirthdayBody({ csrfToken: "tok", selected: stored }),
     );
-    expect(b.className).toBe("kb-btn kb-btn--danger");
+    expect(b.getAttribute("class")).toBe("kb-btn kb-btn--danger");
     expect(b.getAttribute("style")).toBeNull();
-    expect(b.value).toBe("1");
-    expect(b.type).toBe("submit");
+    expect(b.getAttribute("value")).toBe("1");
+    expect(b.getAttribute("type")).toBe("submit");
   });
 
   it("asks first, with the consequences in the member's terms", () => {
