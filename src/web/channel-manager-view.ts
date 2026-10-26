@@ -90,8 +90,14 @@ function parentSelect(
         `<option value="${escapeHtml(n.category.id)}"${n.category.id === picked ? " selected" : ""}>${escapeHtml(channelText({ name: n.category.name, type: ChannelType.GuildCategory }))}</option>`,
     )
     .join("");
+  // A refused category that is gone stays selected, or the retry would quietly
+  // create or move the channel out of any category.
+  const missing =
+    picked !== null && !tree.categories.some((n) => n.category.id === picked)
+      ? `<option value="${escapeHtml(picked)}" selected>Category ${escapeHtml(picked)} (not found)</option>`
+      : "";
   return `<label>${escapeHtml(label)}
-    <select name="parent"${disabled ? " disabled" : ""}${f.attrs("parent")}><option value=""${picked === null ? " selected" : ""}>(no category)</option>${options}</select>
+    <select name="parent"${disabled ? " disabled" : ""}${f.attrs("parent")}><option value=""${picked === null ? " selected" : ""}>(no category)</option>${missing}${options}</select>
   </label>${f.error("parent")}`;
 }
 

@@ -917,6 +917,40 @@ describe("the values a refused Channel manager form echoes (#1523)", () => {
   });
 });
 
+describe("a refused category that is gone (#1523)", () => {
+  it("stays selected on the create form, so a retry cannot create an uncategorised channel", async () => {
+    await mount();
+    const r = await refusal(
+      await harness.post("/channels/create", {
+        type: "text",
+        name: "x",
+        parent: "199999999999999999",
+      }),
+    );
+    expect(r.html).toContain(
+      '<option value="199999999999999999" selected>Category 199999999999999999 (not found)</option>',
+    );
+    expect(r.html).not.toContain('<option value="" selected>');
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("stays selected on the edit form, so a retry cannot move the channel out of its category", async () => {
+    await mount();
+    const r = await refusal(
+      await harness.post(`/channels/${TEXT}/edit`, {
+        orig_name: "general",
+        orig_parent: CAT,
+        name: "general",
+        parent: "199999999999999999",
+      }),
+    );
+    expect(r.html).toContain(
+      '<option value="199999999999999999" selected>Category 199999999999999999 (not found)</option>',
+    );
+    expect(mockEdit).not.toHaveBeenCalled();
+  });
+});
+
 describe("a refused channel edit (#1523)", () => {
   it("reopens that channel's Edit form, marks the fields and keeps what was typed and the baselines", async () => {
     await mount();
