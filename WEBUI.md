@@ -3979,7 +3979,7 @@ refusal the same way. A few details differ from a plain form:
 - **Channel manager** marks every refused field of one save together (name, topic, user limit, bitrate, category). The
   edit form's hidden baselines come back as they were posted, so a change made elsewhere in the meantime is still caught
   as a conflict.
-- **Events** marks the refused one of the title, description, date, time, duration and repeat fields (the validator names one at a time). A refused Groups section is still
+- **Events** marks the refused one of the title, description, date, time, duration and repeat fields (one at a time). A refused Groups section is still
   a flash, and its rows come back from the browser's draft as before; the refused page carries an error notice at the top for that.
 
 A refusal that is not about one field stays a flash on the page: Discord unreachable, a stale token or a conflict, a
