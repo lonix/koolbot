@@ -19,6 +19,7 @@ import { sanitizeForLog } from "./utils/log-sanitize.js";
 import { getSharedRest } from "./utils/discord-rest.js";
 import { markMongoDisconnectIntentional } from "./utils/mongo.js";
 import { safeReply } from "./utils/safe-reply.js";
+import { replyWithUnexpectedError } from "./utils/error-reply.js";
 import { runWithTimeout } from "./utils/run-with-timeout.js";
 import { ConfigService } from "./services/config-service.js";
 import { startComponentAudit } from "./utils/component-audit.js";
@@ -730,10 +731,7 @@ async function initializeServices(): Promise<void> {
     await discordLogger.initialize();
 
     // Log database connection status
-    await discordLogger.logDatabaseStatus(
-      true,
-      "Successfully connected to MongoDB database",
-    );
+    await discordLogger.logDatabaseStatus(true);
 
     // Try to register commands, but don't fail if Discord API is unavailable
     try {
@@ -942,7 +940,7 @@ async function initializeServices(): Promise<void> {
     if (discordLogger) {
       await discordLogger.logError(
         error instanceof Error ? error : new Error(String(error)),
-        "Service Initialization",
+        "service initialisation",
       );
     }
 
@@ -1146,10 +1144,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     );
   } catch (error) {
     logger.error(`Error executing command ${interaction.commandName}:`, error);
-    await safeReply(interaction, {
-      content: "There was an error while executing this command!",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithUnexpectedError(interaction);
   }
 });
 

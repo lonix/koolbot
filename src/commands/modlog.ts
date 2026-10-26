@@ -11,7 +11,10 @@ import { actionLabel, formatCaseLine } from "../utils/moderation-format.js";
 import type { Types } from "mongoose";
 import logger from "../utils/logger.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
-import { safeReply } from "../utils/safe-reply.js";
+import {
+  replyWithError,
+  replyWithUnexpectedError,
+} from "../utils/error-reply.js";
 import {
   clampToLimit,
   truncateText,
@@ -51,9 +54,9 @@ export async function execute(
 ): Promise<void> {
   try {
     if (!interaction.guildId) {
-      await interaction.reply({
-        content: "This command can only be used in a server.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Can't use this here",
+        next: "Run this command in a server.",
       });
       return;
     }
@@ -72,8 +75,9 @@ export async function execute(
     // stale command registration must not keep serving history after the
     // feature is turned off.
     if (!(await moderationService.isEnabled())) {
-      await interaction.editReply({
-        content: "The moderation log is currently disabled.",
+      await replyWithError(interaction, {
+        title: "The moderation log is off",
+        next: "Ask an admin to turn it on in the Web UI, then try again.",
       });
       return;
     }
@@ -148,9 +152,6 @@ export async function execute(
     await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error in modlog command:", error);
-    await safeReply(interaction, {
-      content: "There was an error fetching the moderation history.",
-      flags: MessageFlags.Ephemeral,
-    });
+    await replyWithUnexpectedError(interaction);
   }
 }

@@ -17,6 +17,8 @@ import {
   createRawMember,
   type MockChatInputInteraction,
   type MockCommandOptions,
+  errorEmbedPayload,
+  unexpectedErrorPayload,
 } from "../test-utils.js";
 
 const mockAddQuote = jest.fn<() => Promise<unknown>>();
@@ -260,8 +262,12 @@ describe("/quote add", () => {
     mockAddQuote.mockRejectedValue(new UserFacingError("quote too long"));
     const it_ = interaction(options);
     await expect(execute(it_)).resolves.toBeUndefined();
-    const reply = it_.reply.mock.calls[0][0] as { content: string };
-    expect(reply.content).toContain("quote too long");
+    expect(it_.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't complete that",
+        description: "quote too long",
+      }),
+    );
   });
 
   // #1153: Mongoose / driver messages reveal schema and query details.
@@ -271,12 +277,36 @@ describe("/quote add", () => {
     mockAddQuote.mockRejectedValue(new Error(detail));
     const it_ = interaction(options);
     await expect(execute(it_)).resolves.toBeUndefined();
-    const reply = it_.reply.mock.calls[0][0] as { content: string };
-    expect(reply.content).toContain("There was an error");
-    expect(reply.content).not.toContain("ObjectId");
+    expect(it_.editReply).toHaveBeenCalledWith(unexpectedErrorPayload());
+    expect(JSON.stringify(it_.editReply.mock.calls)).not.toContain("ObjectId");
     expect(mockLoggerError).toHaveBeenCalledWith(
       "Error executing quote command:",
       expect.objectContaining({ message: detail }),
+    );
+  });
+});
+
+describe("/quote add after the quote was saved", () => {
+  // addQuote() inserts a new row on every call, so once it has succeeded no
+  // reply may tell the member to try again.
+  it("says the quote was saved, with no retry advice, when posting throws", async () => {
+    mockPostQuote.mockRejectedValue(new Error("Missing Access"));
+    const it_ = interaction({
+      subcommand: "add",
+      strings: { text: "Hello" },
+      users: { author: { id: "author-1" } },
+    });
+    await expect(execute(it_)).resolves.toBeUndefined();
+    expect(mockAddQuote).toHaveBeenCalledTimes(1);
+    expect(it_.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Your quote was saved",
+        description: expect.stringContaining("before doing this again"),
+      }),
+    );
+    expect(JSON.stringify(it_.editReply.mock.calls)).not.toMatch(/Try again/i);
+    expect(JSON.stringify(it_.editReply.mock.calls)).not.toContain(
+      "Missing Access",
     );
   });
 });
@@ -290,8 +320,12 @@ describe("/quote edit", () => {
   it("requires at least one field to change", async () => {
     const it_ = interaction({ subcommand: "edit", strings: { id: "quote-1" } });
     await execute(it_);
-    const reply = it_.reply.mock.calls[0][0] as { content: string };
-    expect(reply.content).toContain("at least one field");
+    expect(it_.reply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Nothing to update",
+        description: expect.stringContaining("new text or a new author"),
+      }),
+    );
     expect(mockGetQuoteById).not.toHaveBeenCalled();
     // Cheap synchronous guard: answers directly, never defers.
     expect(it_.deferReply).not.toHaveBeenCalled();
@@ -335,8 +369,12 @@ describe("/quote edit", () => {
       flags: MessageFlags.Ephemeral,
     });
     expect(it_.reply).not.toHaveBeenCalled();
-    const reply = it_.editReply.mock.calls[0][0] as { content: string };
-    expect(reply.content).toContain("Quote not found");
+    expect(it_.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't find that quote",
+        description: expect.stringContaining("quote ID"),
+      }),
+    );
     expect(mockEditQuote).not.toHaveBeenCalled();
   });
 
@@ -350,8 +388,12 @@ describe("/quote edit", () => {
     const it_ = interaction(base);
     await execute(it_);
     expect(it_.reply).not.toHaveBeenCalled();
-    const reply = it_.editReply.mock.calls[0][0] as { content: string };
-    expect(reply.content).toContain("only edit quotes that you added");
+    expect(it_.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't edit that quote",
+        description: expect.stringContaining("only edit quotes that you added"),
+      }),
+    );
     expect(mockEditQuote).not.toHaveBeenCalled();
   });
 
@@ -394,9 +436,11 @@ describe("/quote edit", () => {
     await execute(it_);
     expect(mockEditQuote).not.toHaveBeenCalled();
     expect(it_.reply).not.toHaveBeenCalled();
-    const reply = it_.editReply.mock.calls[0][0] as { content: string };
-    expect(reply.content).toContain(
-      "couldn't find or update the quote message",
+    expect(it_.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't update the quote message",
+        description: expect.stringContaining("Ask an admin"),
+      }),
     );
   });
 
@@ -436,8 +480,12 @@ describe("/quote admin subcommands", () => {
         { member: createRawMember(false) },
       );
       await execute(it_);
-      const reply = it_.reply.mock.calls[0][0] as { content: string };
-      expect(reply.content).toContain("requires the Administrator permission");
+      expect(it_.reply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "Administrators only",
+          description: expect.stringContaining("Administrator permission"),
+        }),
+      );
       expect(it_.deferReply).not.toHaveBeenCalled();
     },
   );
@@ -486,10 +534,16 @@ describe("/quote admin subcommands", () => {
       { member: createRawMember(true), deferred: true },
     );
     await expect(execute(it_)).resolves.toBeUndefined();
-    const edit = it_.editReply.mock.calls[0][0] as { content: string };
-    expect(edit.content).toContain("Failed to rebuild the quote channel");
+    expect(it_.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't rebuild the quote channel",
+        description: expect.stringContaining("tell an admin"),
+      }),
+    );
     // #1153: the raw Discord error text stays in the log.
-    expect(edit.content).not.toContain("Missing Access");
+    expect(JSON.stringify(it_.editReply.mock.calls)).not.toContain(
+      "Missing Access",
+    );
     expect(mockLoggerError).toHaveBeenCalledWith(
       expect.stringContaining("Missing Access"),
     );
@@ -528,8 +582,12 @@ describe("/quote import", () => {
       { member: createRawMember(true) },
     );
     await execute(it_);
-    const reply = it_.reply.mock.calls[0][0] as { content: string };
-    expect(reply.content).toContain("too large");
+    expect(it_.reply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "That backup file is too large",
+        description: expect.stringContaining("5 MB"),
+      }),
+    );
     expect(it_.deferReply).not.toHaveBeenCalled();
     expect(mockImportQuotes).not.toHaveBeenCalled();
   });
@@ -541,8 +599,12 @@ describe("/quote import", () => {
     const it_ = importInteraction({ deferred: true });
     await execute(it_);
     expect(mockImportQuotes).not.toHaveBeenCalled();
-    const edit = it_.editReply.mock.calls[0][0] as { content: string };
-    expect(edit.content).toContain("Could not read the backup file");
+    expect(it_.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't read the backup file",
+        description: expect.stringContaining("/quote export"),
+      }),
+    );
     fetchMock.mockRestore();
   });
 

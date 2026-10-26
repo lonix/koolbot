@@ -7,6 +7,10 @@
  * 2. Times in Discord text go through `discordTimestamp()` (or `setTimestamp()`),
  *    never `toLocaleString()` and friends, which print one fixed timezone and
  *    format for every reader.
+ * 3. A failed slash command answers through `replyWithError` /
+ *    `replyWithUnexpectedError` (`utils/error-reply.ts`, #1509): an ephemeral
+ *    embed-danger embed that says what to do next. A reply `content` literal in
+ *    `src/commands/` that starts with `❌` or says "There was an error" fails.
  *
  * Plain string scan over the TypeScript sources (comments stripped); the Web UI
  * (`src/web/`) is HTML and out of scope. A file may only be listed in
@@ -392,6 +396,147 @@ describe("discord time guard", () => {
       }
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * Every string a reply text expression can produce: string and template
+ * literals, `+` concatenation, conditionals (both branches) and same-file
+ * constants. Calls and property reads are dynamic and yield nothing; the
+ * literals that feed them are checked where they are written.
+ */
+function replyTexts(
+  sf: ts.SourceFile,
+  expr: ts.Expression,
+  seen: string[] = [],
+): string[] {
+  if (ts.isParenthesizedExpression(expr) || ts.isAsExpression(expr)) {
+    return replyTexts(sf, expr.expression, seen);
+  }
+  if (ts.isStringLiteralLike(expr)) return [expr.text];
+  if (ts.isTemplateExpression(expr)) {
+    return [
+      expr.head.text +
+        expr.templateSpans.map((span) => "${}" + span.literal.text).join(""),
+    ];
+  }
+  if (
+    ts.isBinaryExpression(expr) &&
+    expr.operatorToken.kind === ts.SyntaxKind.PlusToken
+  ) {
+    // A dynamic side (a call, a property read) contributes no text.
+    const left = replyTexts(sf, expr.left, seen);
+    const right = replyTexts(sf, expr.right, seen);
+    return (left.length ? left : [""]).flatMap((l) =>
+      (right.length ? right : [""]).map((r) => l + r),
+    );
+  }
+  if (ts.isConditionalExpression(expr)) {
+    return [
+      ...replyTexts(sf, expr.whenTrue, seen),
+      ...replyTexts(sf, expr.whenFalse, seen),
+    ];
+  }
+  if (ts.isIdentifier(expr) && !seen.includes(expr.text)) {
+    return bindingsOf(sf, expr.text).flatMap((b) =>
+      replyTexts(sf, b, [...seen, expr.text]),
+    );
+  }
+  return [];
+}
+
+const REPLY_METHODS = new Set(["reply", "editReply", "followUp", "send"]);
+const CROSS_MARK = /^\s*❌/;
+const GENERIC_FAILURE = /There was an error/i;
+
+/** The reply texts of a source: `content: x`, and `reply(x)` / `editReply(x)` with a bare string. */
+function replyTextExpressions(
+  sf: ts.SourceFile,
+): { line: number; expr: ts.Expression }[] {
+  const out: { line: number; expr: ts.Expression }[] = [];
+  const at = (n: ts.Node): number =>
+    sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
+  const visit = (n: ts.Node): void => {
+    if (
+      ts.isPropertyAssignment(n) &&
+      ts.isIdentifier(n.name) &&
+      n.name.text === "content"
+    ) {
+      out.push({ line: at(n), expr: n.initializer });
+    }
+    if (
+      ts.isCallExpression(n) &&
+      ts.isPropertyAccessExpression(n.expression) &&
+      REPLY_METHODS.has(n.expression.name.text) &&
+      n.arguments[0]
+    ) {
+      out.push({ line: at(n), expr: n.arguments[0] });
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+function errorReplyProblems(source: string, file = "commands/x.ts"): string[] {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  return replyTextExpressions(sf).flatMap(({ line, expr }) => {
+    const problems: string[] = [];
+    for (const text of replyTexts(sf, expr)) {
+      if (CROSS_MARK.test(text)) {
+        problems.push(
+          `${line}: reply text starts with "❌"; use replyWithError (utils/error-reply.ts)`,
+        );
+      }
+      if (GENERIC_FAILURE.test(text)) {
+        problems.push(
+          `${line}: reply text says "There was an error"; use replyWithUnexpectedError (utils/error-reply.ts)`,
+        );
+      }
+    }
+    return [...new Set(problems)];
+  });
+}
+
+describe("discord error reply guard (#1509)", () => {
+  it("has no ❌ or generic-error reply text in src/commands", () => {
+    const commands = path.join(SRC, "commands");
+    const hits = walk(commands).flatMap((file) =>
+      errorReplyProblems(fs.readFileSync(file, "utf8"), rel(file, SRC)).map(
+        (p) => `${rel(file, SRC)}:${p}`,
+      ),
+    );
+    expect(hits).toEqual([]);
+  });
+
+  it("catches the failure texts it is meant to catch (self-test)", () => {
+    for (const bad of [
+      'await interaction.reply({ content: "❌ Quote not found." });',
+      "await interaction.editReply({ content: `❌ Failed: ${why}` });",
+      'await interaction.editReply("❌ Tell me what you want to play.");',
+      'await safeReply(interaction, { content: "There was an error while executing this command!" });',
+      'await interaction.reply({ content: "there was an error posting your LFG." });',
+      'const m = "❌ nope";\nawait interaction.reply({ content: m });',
+      'await interaction.reply({ content: ok ? "Done" : "❌ nope" });',
+      'await interaction.reply({ content: "❌ " + reason });',
+      'await interaction.followUp("There was an error recording the warning.");',
+    ]) {
+      expect(errorReplyProblems(bad)).not.toEqual([]);
+    }
+  });
+
+  it("leaves the texts it must not touch alone (self-test)", () => {
+    for (const fine of [
+      'await replyWithError(interaction, { title: "Couldn\'t post your LFG", next: "Try again." });',
+      "await replyWithUnexpectedError(interaction);",
+      'await interaction.editReply({ content: "✅ Quote updated successfully!" });',
+      "await interaction.reply({ content: `Posted for ${game}` });",
+      "// await interaction.reply({ content: '❌ old' });",
+      'logger.error("There was an error while executing this command!");',
+      "await interaction.editReply({ content: result.message });",
+    ]) {
+      expect(errorReplyProblems(fine)).toEqual([]);
     }
   });
 });
