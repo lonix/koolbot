@@ -67,7 +67,16 @@ export type CreateEventResult =
       impromptu: boolean;
       started: boolean;
     }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      /**
+       * The refusal by form field, when it is about fields of the form (#1523):
+       * the page marks them. Absent for what is not (the Groups section, the
+       * per-host cap, an unreadable setting), which stays a flash.
+       */
+      fields?: Record<string, string>;
+    };
 
 function field(body: Record<string, unknown>, name: string): string {
   const raw = body[name];
@@ -223,11 +232,9 @@ async function createEventUnlocked(
   const recurrence = recurrenceRaw as EventRecurrence;
   const impromptu = when === "now";
   if (impromptu && recurrence !== "none") {
-    return {
-      ok: false,
-      error:
-        'An event that starts now cannot repeat. Choose "Pick date & time" for a repeating event.',
-    };
+    const error =
+      'An event that starts now cannot repeat. Choose "Pick date & time" for a repeating event.';
+    return { ok: false, error, fields: { recurrence: error } };
   }
 
   // The date and time fields are read only for "Pick date & time". The other
@@ -247,7 +254,15 @@ async function createEventUnlocked(
     },
     { requireFuture: true, ...(startOverride ? { startOverride } : {}) },
   );
-  if (!parsed.ok) return { ok: false, error: parsed.error };
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      error: parsed.error,
+      ...(parsed.fields && Object.keys(parsed.fields).length > 0
+        ? { fields: parsed.fields }
+        : {}),
+    };
+  }
   const { title, description, startTime, timezone, durationMinutes } =
     parsed.value;
   const config = ConfigService.getInstance();

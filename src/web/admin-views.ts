@@ -2664,8 +2664,13 @@ export interface EventsProps extends CommonProps {
   groupPresetsNotice?: string | null;
   /** The host's last group setup, to prefill the form (#1406); absent = defaults. */
   groupRemembered?: { prefill: GroupFormPrefill; resetHref: string } | null;
+  /** The Schedule form, when the last save was refused (#1523). */
+  refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
 }
+
+/** Form id of the Schedule a new event form on the Events page (#1523). */
+export const EVENT_CREATE_FORM = "event-create";
 
 export function renderFlash(flash?: FlashMessage | null, id = ""): string {
   if (!flash) return "";
@@ -3545,6 +3550,7 @@ export function renderEventsPage(props: EventsProps): string {
     props.groupLimits?.maxCount ?? 15,
   );
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+  const create = formView(props.refusedForm, EVENT_CREATE_FORM);
 
   const renderEventRow = (e: EventRow, cols: EventCols): string => {
     const finished = e.state === "cancelled" || e.state === "ended";
@@ -3680,7 +3686,15 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
   const body = `
 <h1>Events</h1>
 <p class="subtitle">Schedule events that spin up a temporary voice channel shortly before they start, are announced with a Discord event link members can mark Interested on, remind attendees, and clean themselves up afterward.</p>
-${renderPageFlash(props.flash)}
+${renderPageFlash(
+  props.flash ??
+    // A refused form also says so at the top. That notice is what makes the
+    // Groups section put back the rows the admin had filled in: its draft is
+    // restored whenever the page comes back with an error notice (#1523).
+    (props.refusedForm
+      ? { type: "err", text: "Not saved. Check the fields marked below." }
+      : null),
+)}
 ${renderFeatureDisabledNotice({
   enabled: props.enabled,
   label: "Events",
@@ -3701,37 +3715,44 @@ ${permissionNote}
   <form method="POST" action="/admin/events/create" class="stack" data-event-form>
     ${csrfInput}
     <label>Title
-      <input type="text" name="title" required maxlength="100" placeholder="Game Night">
-    </label>
+      <input type="text" name="title" required maxlength="100" placeholder="Game Night"${create.valueAttr("title")}${create.attrs("title")}>
+    </label>${create.error("title")}
     <label>Description
-      <textarea name="description" rows="3" maxlength="1000" placeholder="What's happening?"></textarea>
-    </label>
+      <textarea name="description" rows="3" maxlength="1000" placeholder="What's happening?"${create.attrs("description")}>${create.textareaContent("description")}</textarea>
+    </label>${create.error("description")}
     <label>When
-      <select name="when" data-when>
-        ${EVENT_WHEN_CHOICES.map((w) => `<option value="${w}"${w === "pick" ? " selected" : ""}>${EVENT_WHEN_LABELS[w]}</option>`).join("")}
+      <select name="when" data-when${create.attrs("when")}>
+        ${EVENT_WHEN_CHOICES.map((w) => `<option value="${w}"${w === create.selected("when", "pick") ? " selected" : ""}>${EVENT_WHEN_LABELS[w]}</option>`).join("")}
       </select>
     </label>
     <label data-when-pick>Date
-      <input type="date" name="date" pattern="\\d{4}-\\d{2}-\\d{2}" placeholder="YYYY-MM-DD">
-    </label>
+      <input type="date" name="date" pattern="\\d{4}-\\d{2}-\\d{2}" placeholder="YYYY-MM-DD"${create.valueAttr("date")}${create.attrs("date")}>
+    </label>${create.error("date")}
     <label data-when-pick>Time
-      <input type="time" name="time" pattern="\\d{2}:\\d{2}" placeholder="HH:MM">
-    </label>
+      <input type="time" name="time" pattern="\\d{2}:\\d{2}" placeholder="HH:MM"${create.valueAttr("time")}${create.attrs("time")}>
+    </label>${create.error("time")}
     <label>Duration (minutes, optional)
-      <input type="number" name="duration" min="1" max="1440" placeholder="120">
-    </label>
+      <input type="number" name="duration" min="1" max="1440" placeholder="120"${create.valueAttr("duration")}${create.attrs("duration")}>
+    </label>${create.error("duration")}
     <div>
       <label for="admin-event-timezone">Timezone (optional)</label>
-      ${renderTimezoneSelect("timezone", "", { id: "admin-event-timezone", defaultZone: props.timezone, blank: true })}
+      ${renderTimezoneSelect("timezone", create.value("timezone"), { id: "admin-event-timezone", defaultZone: props.timezone, blank: true })}
     </div>
     <label>Repeat
-      <select name="recurrence">
-        <option value="none" selected>Does not repeat</option>
-        <option value="weekly">Weekly</option>
-        <option value="biweekly">Every 2 weeks</option>
-        <option value="monthly">Monthly</option>
+      <select name="recurrence"${create.attrs("recurrence")}>
+        ${[
+          ["none", "Does not repeat"],
+          ["weekly", "Weekly"],
+          ["biweekly", "Every 2 weeks"],
+          ["monthly", "Monthly"],
+        ]
+          .map(
+            ([value, label]) =>
+              `<option value="${value}"${value === create.selected("recurrence", "none") ? " selected" : ""}>${label}</option>`,
+          )
+          .join("\n        ")}
       </select>
-    </label>
+    </label>${create.error("recurrence")}
     ${renderGroupsSection(groupLimits, props.groupPresets, props.groupPresetsNotice ?? null, undefined, props.groupRemembered ?? null, permissionInline)}
     <button type="submit" class="btn btn-primary">Schedule event</button>
   </form>

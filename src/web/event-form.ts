@@ -38,7 +38,17 @@ export type EventFormResult =
         durationMinutes: number;
       };
     }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      /**
+       * The same refusal by form field (`title`, `description`, `date`, `time`,
+       * `duration`), worded to read under the field, for a page that marks it
+       * (#1523). Empty when it is about no one field (the timezone). All
+       * missing fields are named here; `error` is the first, as before.
+       */
+      fields?: Record<string, string>;
+    };
 
 /**
  * Validate the core fields. `requireFuture` is true for a new event and for an
@@ -67,20 +77,36 @@ export async function validateEventForm(
     timezone: tzInput,
   } = fields;
   if (opts.startOverride ? !title : !title || !date || !time) {
+    const fields: Record<string, string> = {};
+    if (!title) fields.title = "Enter a title.";
+    if (!opts.startOverride && !date) fields.date = "Pick a date.";
+    if (!opts.startOverride && !time) {
+      fields.time = "Enter a time, for example 19:30.";
+    }
     return {
       ok: false,
       error: opts.startOverride
         ? "A title is required."
         : "Title, date and time are all required.",
+      fields,
     };
   }
   const lengthError = firstLengthError([
     { label: "Title", value: title, max: EVENT_TITLE_MAX },
     { label: "Description", value: description, max: EVENT_DESCRIPTION_MAX },
   ]);
-  if (lengthError) return { ok: false, error: lengthError };
+  if (lengthError) {
+    const fields: Record<string, string> = {};
+    if (title.length > EVENT_TITLE_MAX) {
+      fields.title = `At most ${EVENT_TITLE_MAX} characters.`;
+    }
+    if (description.length > EVENT_DESCRIPTION_MAX) {
+      fields.description = `At most ${EVENT_DESCRIPTION_MAX} characters.`;
+    }
+    return { ok: false, error: lengthError, fields };
+  }
   if (tzInput && !isValidTimezone(tzInput)) {
-    return { ok: false, error: `Invalid timezone: ${tzInput}` };
+    return { ok: false, error: `Invalid timezone: ${tzInput}`, fields: {} };
   }
 
   const config = ConfigService.getInstance();
@@ -90,13 +116,24 @@ export async function validateEventForm(
   const startTime =
     opts.startOverride ?? parseEventDateTime(date, time, timezone);
   if (!startTime) {
+    // The date alone parses (at noon) or it does not: say which of the two.
+    const dateOk = parseEventDateTime(date, "12:00", timezone) !== null;
     return {
       ok: false,
       error: "Invalid date/time. Use YYYY-MM-DD and 24-hour HH:MM.",
+      fields: dateOk
+        ? { time: "Use 24-hour time, for example 19:30." }
+        : { date: "Use a date like 2026-05-01." },
     };
   }
   if (opts.requireFuture && startTime.getTime() <= Date.now()) {
-    return { ok: false, error: "The event start time must be in the future." };
+    return {
+      ok: false,
+      error: "The event start time must be in the future.",
+      fields: opts.startOverride
+        ? {}
+        : { date: "The start time must be in the future." },
+    };
   }
 
   let durationMinutes =
@@ -112,6 +149,9 @@ export async function validateEventForm(
       return {
         ok: false,
         error: `Duration must be between ${EVENT_DURATION_MIN} and ${EVENT_DURATION_MAX} minutes.`,
+        fields: {
+          duration: `Use ${EVENT_DURATION_MIN} to ${EVENT_DURATION_MAX} minutes.`,
+        },
       };
     }
     durationMinutes = parsed;

@@ -1510,180 +1510,188 @@ export function createReadOnlyRouter(
   );
 
   // ---------- Events ----------
+  const renderEvents = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const service = EventService.getInstance(client);
+    const config = ConfigService.getInstance();
+    const [
+      enabled,
+      categoryId,
+      announcementChannelId,
+      tz,
+      events,
+      eventSettings,
+      groupDefaultCount,
+      groupMaxCount,
+    ] = await Promise.all([
+      config.getBoolean("events.enabled", false),
+      config.getString("events.category_id", ""),
+      config.getString("events.announcement_channel_id", ""),
+      config.getString("events.timezone", ""),
+      service.listEvents(common.guildId),
+      // Editable `events.*` settings card (#975).
+      loadFeatureSettings(client, common.guildId, EVENTS_SETTING_KEYS),
+      config.getNumber("events.groups.default_count", 2),
+      config.getNumber("events.groups.max_count", 15),
+    ]);
+
+    // "Expected to show up": who marked Interested on the native event, read
+    // live from Discord for the next few upcoming events. Nothing is stored.
+    const expectedById = new Map<string, EventExpected>();
+    const upcoming = events
+      .filter((e) => e.state === "scheduled" || e.state === "active")
+      .slice(0, MAX_EVENTS_PER_VIEW);
+    await Promise.all(
+      upcoming.map(async (e) => {
+        if (!e.nativeEventId) {
+          expectedById.set(String(e._id), {
+            kind: "none",
+            message: e.nativeDetached
+              ? "Deleted from Discord's Events list."
+              : "Not on Discord's Events list yet.",
+          });
+          return;
+        }
+        expectedById.set(
+          String(e._id),
+          await loadInterested(client, e.guildId, e.nativeEventId),
+        );
+      }),
+    );
+    const permissionNotice = await loadPermissionNotice({
+      client,
+      guildId: common.guildId,
+      enabled,
+      filter: inAreas("Events"),
+    });
+
+    // The event's channel by name and type, from the guild cache: no Discord
+    // call. Gone (or not cached) is null, which the row shows as unavailable.
+    const guildChannels = client.guilds.cache.get(common.guildId)?.channels
+      .cache;
+    const channelLabelOf = (
+      id: string | null | undefined,
+    ): { channelName?: string | null; channelType?: ChannelType | null } => {
+      if (!id) return {};
+      const ch = guildChannels?.get(id);
+      return ch
+        ? { channelName: ch.name, channelType: ch.type }
+        : { channelName: null, channelType: null };
+    };
+
+    const rows = events.map((e) => {
+      const counts = countRsvps(e.rsvps);
+      const finished = e.state === "ended" || e.state === "cancelled";
+      return {
+        id: String(e._id),
+        title: e.title,
+        when: formatEventWhen(e),
+        state: e.state,
+        // Legacy RSVPs (events made before native-only events) stay
+        // visible until the event is over.
+        legacyRsvps:
+          !finished && e.rsvps.length > 0
+            ? { going: counts.going, maybe: counts.maybe, cant: counts.cant }
+            : null,
+        expected: expectedById.get(String(e._id)) ?? null,
+        channelId: e.channelId,
+        ...channelLabelOf(e.channelId),
+        recurrence: isRecurring(e) ? recurrenceLabel(e.recurrence) : null,
+        occurrence: isRecurring(e) ? e.occurrenceIndex + 1 : null,
+        awaitingSuccessor:
+          isRecurring(e) &&
+          (e.state === "ended" || e.state === "cancelled") &&
+          !e.nextSpawned &&
+          !e.seriesCancelled,
+        groupCount: e.groupsEnabled ? (e.groups?.length ?? 0) : undefined,
+        hasGroupChannels:
+          e.groupsEnabled === true &&
+          (e.groups ?? []).some((g) => !!g.channelId),
+        nativeAdopted: e.nativeAdopted === true,
+        cover: e.nativeAdopted
+          ? ({ kind: "adopted" } as const)
+          : coverIneligibleReason(e)
+            ? e.nativeDetached &&
+              e.recurrence === "none" &&
+              (e.state === "scheduled" || e.state === "active")
+              ? ({ kind: "detached" } as const)
+              : null
+            : ({
+                kind: "editable",
+                hasCover: !!e.coverHash,
+                series: isRecurring(e),
+              } as const),
+      };
+    });
+
+    // The picker's presets: enabled built-ins plus enabled library presets
+    // (#1200). Never throws; an unreadable library fails closed and says so.
+    // The viewing admin's own personal presets are included (#1216).
+    const presetCatalog = await loadPresetCatalog(common.guildId, {
+      ownerId: req.webSession?.discordUserId,
+    });
+
+    // The admin's last group setup (#1406), unless they asked for the defaults.
+    // A failed read is "no prefill" and never blocks the form.
+    const offeredPresets = enabledPresets(presetCatalog);
+    const prefill =
+      req.query.defaults === "1"
+        ? null
+        : await loadGroupPrefill(
+            common.guildId,
+            req.webSession?.discordUserId,
+            {
+              maxCount: resolveGroupCountLimits(
+                groupDefaultCount,
+                groupMaxCount,
+              ).maxCount,
+              presets: offeredPresets,
+            },
+          );
+
+    return renderEventsPage({
+      refusedForm,
+      ...common,
+      enabled,
+      categoryConfigured: categoryId.length > 0,
+      announcementConfigured: announcementChannelId.length > 0,
+      permissionNotice,
+      // Resolve to a usable zone (falls back to server tz on an invalid
+      // value) so the UI shows exactly what event parsing will use.
+      timezone: resolveTimezone(tz),
+      rows,
+      settingRows: eventSettings.settingRows,
+      settingsPickers: eventSettings.pickers,
+      dependencyState: eventSettings.dependencyState,
+      settingsUnavailable: eventSettings.unavailable,
+      groupLimits: {
+        defaultCount: groupDefaultCount,
+        maxCount: groupMaxCount,
+      },
+      groupPresets: offeredPresets,
+      groupPresetsNotice: catalogNotice(
+        presetCatalog.state,
+        presetCatalog.personalUnreadable,
+      ),
+      groupRemembered: prefill
+        ? {
+            prefill,
+            resetHref: "/admin/events?defaults=1#schedule-event",
+          }
+        : null,
+      flash: readFlash(req),
+    });
+  };
+  registerFormPage("/admin/events", (req, refused) =>
+    renderEvents(req as AuthenticatedRequest, refused),
+  );
   router.get(
     "/events",
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
-      const service = EventService.getInstance(client);
-      const config = ConfigService.getInstance();
-      const [
-        enabled,
-        categoryId,
-        announcementChannelId,
-        tz,
-        events,
-        eventSettings,
-        groupDefaultCount,
-        groupMaxCount,
-      ] = await Promise.all([
-        config.getBoolean("events.enabled", false),
-        config.getString("events.category_id", ""),
-        config.getString("events.announcement_channel_id", ""),
-        config.getString("events.timezone", ""),
-        service.listEvents(common.guildId),
-        // Editable `events.*` settings card (#975).
-        loadFeatureSettings(client, common.guildId, EVENTS_SETTING_KEYS),
-        config.getNumber("events.groups.default_count", 2),
-        config.getNumber("events.groups.max_count", 15),
-      ]);
-
-      // "Expected to show up": who marked Interested on the native event, read
-      // live from Discord for the next few upcoming events. Nothing is stored.
-      const expectedById = new Map<string, EventExpected>();
-      const upcoming = events
-        .filter((e) => e.state === "scheduled" || e.state === "active")
-        .slice(0, MAX_EVENTS_PER_VIEW);
-      await Promise.all(
-        upcoming.map(async (e) => {
-          if (!e.nativeEventId) {
-            expectedById.set(String(e._id), {
-              kind: "none",
-              message: e.nativeDetached
-                ? "Deleted from Discord's Events list."
-                : "Not on Discord's Events list yet.",
-            });
-            return;
-          }
-          expectedById.set(
-            String(e._id),
-            await loadInterested(client, e.guildId, e.nativeEventId),
-          );
-        }),
-      );
-      const permissionNotice = await loadPermissionNotice({
-        client,
-        guildId: common.guildId,
-        enabled,
-        filter: inAreas("Events"),
-      });
-
-      // The event's channel by name and type, from the guild cache: no Discord
-      // call. Gone (or not cached) is null, which the row shows as unavailable.
-      const guildChannels = client.guilds.cache.get(common.guildId)?.channels
-        .cache;
-      const channelLabelOf = (
-        id: string | null | undefined,
-      ): { channelName?: string | null; channelType?: ChannelType | null } => {
-        if (!id) return {};
-        const ch = guildChannels?.get(id);
-        return ch
-          ? { channelName: ch.name, channelType: ch.type }
-          : { channelName: null, channelType: null };
-      };
-
-      const rows = events.map((e) => {
-        const counts = countRsvps(e.rsvps);
-        const finished = e.state === "ended" || e.state === "cancelled";
-        return {
-          id: String(e._id),
-          title: e.title,
-          when: formatEventWhen(e),
-          state: e.state,
-          // Legacy RSVPs (events made before native-only events) stay
-          // visible until the event is over.
-          legacyRsvps:
-            !finished && e.rsvps.length > 0
-              ? { going: counts.going, maybe: counts.maybe, cant: counts.cant }
-              : null,
-          expected: expectedById.get(String(e._id)) ?? null,
-          channelId: e.channelId,
-          ...channelLabelOf(e.channelId),
-          recurrence: isRecurring(e) ? recurrenceLabel(e.recurrence) : null,
-          occurrence: isRecurring(e) ? e.occurrenceIndex + 1 : null,
-          awaitingSuccessor:
-            isRecurring(e) &&
-            (e.state === "ended" || e.state === "cancelled") &&
-            !e.nextSpawned &&
-            !e.seriesCancelled,
-          groupCount: e.groupsEnabled ? (e.groups?.length ?? 0) : undefined,
-          hasGroupChannels:
-            e.groupsEnabled === true &&
-            (e.groups ?? []).some((g) => !!g.channelId),
-          nativeAdopted: e.nativeAdopted === true,
-          cover: e.nativeAdopted
-            ? ({ kind: "adopted" } as const)
-            : coverIneligibleReason(e)
-              ? e.nativeDetached &&
-                e.recurrence === "none" &&
-                (e.state === "scheduled" || e.state === "active")
-                ? ({ kind: "detached" } as const)
-                : null
-              : ({
-                  kind: "editable",
-                  hasCover: !!e.coverHash,
-                  series: isRecurring(e),
-                } as const),
-        };
-      });
-
-      // The picker's presets: enabled built-ins plus enabled library presets
-      // (#1200). Never throws; an unreadable library fails closed and says so.
-      // The viewing admin's own personal presets are included (#1216).
-      const presetCatalog = await loadPresetCatalog(common.guildId, {
-        ownerId: req.webSession?.discordUserId,
-      });
-
-      // The admin's last group setup (#1406), unless they asked for the defaults.
-      // A failed read is "no prefill" and never blocks the form.
-      const offeredPresets = enabledPresets(presetCatalog);
-      const prefill =
-        req.query.defaults === "1"
-          ? null
-          : await loadGroupPrefill(
-              common.guildId,
-              req.webSession?.discordUserId,
-              {
-                maxCount: resolveGroupCountLimits(
-                  groupDefaultCount,
-                  groupMaxCount,
-                ).maxCount,
-                presets: offeredPresets,
-              },
-            );
-
-      res.type("text/html").send(
-        renderEventsPage({
-          ...common,
-          enabled,
-          categoryConfigured: categoryId.length > 0,
-          announcementConfigured: announcementChannelId.length > 0,
-          permissionNotice,
-          // Resolve to a usable zone (falls back to server tz on an invalid
-          // value) so the UI shows exactly what event parsing will use.
-          timezone: resolveTimezone(tz),
-          rows,
-          settingRows: eventSettings.settingRows,
-          settingsPickers: eventSettings.pickers,
-          dependencyState: eventSettings.dependencyState,
-          settingsUnavailable: eventSettings.unavailable,
-          groupLimits: {
-            defaultCount: groupDefaultCount,
-            maxCount: groupMaxCount,
-          },
-          groupPresets: offeredPresets,
-          groupPresetsNotice: catalogNotice(
-            presetCatalog.state,
-            presetCatalog.personalUnreadable,
-          ),
-          groupRemembered: prefill
-            ? {
-                prefill,
-                resetHref: "/admin/events?defaults=1#schedule-event",
-              }
-            : null,
-          flash: readFlash(req),
-        }),
-      );
+      res.type("text/html").send(await renderEvents(req, null));
     }),
   );
 

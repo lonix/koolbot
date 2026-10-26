@@ -31,7 +31,29 @@ import {
   requireSessionContext,
   asyncHandler,
   respondSectionFlash,
+  refuseForm,
 } from "./helpers.js";
+import { EVENT_CREATE_FORM } from "../../admin-views.js";
+
+/** What the Schedule form posted, as a refused form shows it: text as typed (#1523). */
+export function eventFormValues(body: unknown): Record<string, string> {
+  const source = (body ?? {}) as Record<string, unknown>;
+  const values: Record<string, string> = {};
+  for (const name of [
+    "title",
+    "description",
+    "when",
+    "date",
+    "time",
+    "duration",
+    "timezone",
+    "recurrence",
+  ]) {
+    values[name] =
+      typeof source[name] === "string" ? (source[name] as string) : "";
+  }
+  return values;
+}
 
 export function createEventsRouter(client: Client): Router {
   const router = Router();
@@ -51,6 +73,28 @@ export function createEventsRouter(client: Client): Router {
         via: "admin",
       });
       if (!result.ok) {
+        // A refusal about the form's own fields comes back as the page with
+        // each field marked and what was typed. The Groups section, the
+        // per-host cap and an unreadable setting are not about one field: they
+        // stay the flash (and the Groups rows come back from the draft the
+        // form's script keeps for exactly that).
+        if (
+          result.fields &&
+          (await refuseForm(req, res, {
+            page: "/admin/events",
+            formId: EVENT_CREATE_FORM,
+            errors: result.fields,
+            values: eventFormValues(req.body),
+            // Without the page the refusal keeps its original sentence.
+            fallback: () =>
+              flashRedirect(res, "/admin/events", {
+                type: "err",
+                text: result.error,
+              }),
+          }))
+        ) {
+          return;
+        }
         flashRedirect(res, "/admin/events", {
           type: "err",
           text: result.error,

@@ -82,6 +82,8 @@ jest.unstable_mockModule("../../src/services/event-service.js", () => ({
 const { createEventsRouter } =
   await import("../../src/web/routes/write/events.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
+const { registerFormPage } = await import("../../src/web/form-pages.js");
+const { renderEventsPage } = await import("../../src/web/admin-views.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
 
 const client = { user: { id: "bot" } } as unknown as Client;
@@ -100,6 +102,10 @@ let harness: AdminHarness;
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  // No page to draw a refusal on, unless a test registers one: the flash.
+  registerFormPage("/admin/events", async () => {
+    throw new Error("page unavailable");
+  });
   mockConfigGetString.mockResolvedValue("UTC");
   mockConfigGetNumber.mockResolvedValue(120);
   mockCreateEvent.mockResolvedValue({ _id: "event-1" });
@@ -205,6 +211,159 @@ describe("POST /events/create — validation", () => {
       expect(mockCreateEvent).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("a refused Schedule form (#1523)", () => {
+  // The read router registers the page's renderer in the app; here the real
+  // view stands in.
+  beforeEach(() => {
+    registerFormPage("/admin/events", async (_req, refused) =>
+      renderEventsPage({
+        guildId: "guild-1",
+        csrfToken: "csrf",
+        remainingMs: 1000,
+        navFeatureStatus: {},
+        enabled: true,
+        categoryConfigured: true,
+        announcementConfigured: true,
+        timezone: "UTC",
+        rows: [],
+        settingRows: [],
+        refusedForm: refused,
+      }),
+    );
+  });
+
+  const refusal = async (
+    body: Record<string, string>,
+  ): Promise<{
+    html: string;
+    invalid: string[];
+    lines: Record<string, string>;
+  }> => {
+    const res = await harness.post("/events/create", body);
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    const invalid = [...html.matchAll(/<[^>]*aria-invalid="true"[^>]*>/g)].map(
+      (m) => /id="([^"]+)"/.exec(m[0])?.[1] ?? "",
+    );
+    const lines: Record<string, string> = {};
+    for (const m of html.matchAll(
+      /<p class="kb-field__error" id="([^"]+)">([^<]*)<\/p>/g,
+    )) {
+      lines[m[1]] = m[2].replaceAll("&#39;", "'").replaceAll("&quot;", '"');
+    }
+    return { html, invalid, lines };
+  };
+
+  it("marks every missing field at once, in page order, and keeps the description", async () => {
+    const r = await refusal({ description: "  keep <me>\n", duration: "90" });
+    expect(r.invalid).toEqual([
+      "event-create-title",
+      "event-create-date",
+      "event-create-time",
+    ]);
+    expect(r.lines).toEqual({
+      "event-create-title-error": "Enter a title.",
+      "event-create-date-error": "Pick a date.",
+      "event-create-time-error": "Enter a time, for example 19:30.",
+    });
+    // Raw echo, escaped; the textarea keeps its text.
+    expect(r.html).toContain("  keep &lt;me&gt;");
+    expect(r.html).toContain('value="90"');
+    expect(mockCreateEvent).not.toHaveBeenCalled();
+  });
+
+  it("says at the top that the form was not saved, so the Groups draft is put back", async () => {
+    const r = await refusal({});
+    expect(r.html).toMatch(
+      /<div class="notice err" role="alert" tabindex="-1" data-flash>Not saved\. Check the fields marked below\.<\/div>/,
+    );
+  });
+
+  it.each([
+    ["title", { title: "x".repeat(101) }, "At most 100 characters."],
+    [
+      "description",
+      { description: "y".repeat(1001) },
+      "At most 1000 characters.",
+    ],
+    ["duration", { duration: "1441" }, "Use 1 to 1440 minutes."],
+    ["duration", { duration: "abc" }, "Use 1 to 1440 minutes."],
+    [
+      "date",
+      { date: "2000-01-01", time: "18:00" },
+      "The start time must be in the future.",
+    ],
+    [
+      "date",
+      { date: "next tuesday", time: "18:00" },
+      "Use a date like 2026-05-01.",
+    ],
+    [
+      "time",
+      { date: "2999-01-01", time: "half seven" },
+      "Use 24-hour time, for example 19:30.",
+    ],
+  ])(
+    "marks the %s field and keeps the typed values",
+    async (field, body, message) => {
+      const r = await refusal({
+        title: "Raid",
+        date: "2999-01-01",
+        time: "18:00",
+        ...body,
+      });
+      expect(r.invalid).toEqual([`event-create-${field}`]);
+      expect(r.lines[`event-create-${field}-error`]).toBe(message);
+      for (const [name, value] of Object.entries({
+        title: "Raid",
+        date: "2999-01-01",
+        time: "18:00",
+        ...body,
+      })) {
+        if (name === "description") continue;
+        expect(r.html).toContain(`name="${name}"`);
+        expect(r.html).toContain(`value="${value}"`);
+      }
+    },
+  );
+
+  it("marks the Repeat choice when an event that starts now is set to repeat", async () => {
+    const r = await refusal({
+      title: "Now",
+      when: "now",
+      recurrence: "weekly",
+    });
+    expect(r.invalid).toEqual(["event-create-recurrence"]);
+    expect(r.html).toContain('<option value="now" selected>');
+    expect(r.html).toContain('<option value="weekly" selected>');
+  });
+
+  it("keeps a refused Groups section a flash, not a field error", async () => {
+    const { date, time } = futureDateTime();
+    const res = await harness.post("/events/create", {
+      title: "Raid",
+      date,
+      time,
+      groups_enabled: "1",
+    });
+    expect(res.status).toBe(303);
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toMatch(
+      /^Groups: /,
+    );
+  });
+
+  it("keeps an invalid timezone, which only a hand-made post can send, a flash", async () => {
+    const { date, time } = futureDateTime();
+    const res = await harness.post("/events/create", {
+      title: "Raid",
+      date,
+      time,
+      timezone: "Mars/Olympus_Mons",
+    });
+    expect(res.status).toBe(303);
+  });
 });
 
 describe("POST /events/create — When (#1305)", () => {
