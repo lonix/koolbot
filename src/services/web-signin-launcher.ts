@@ -7,6 +7,7 @@ import {
 import logger from "../utils/logger.js";
 import { describeDiscordError } from "../utils/log-sanitize.js";
 import { safeReply } from "../utils/safe-reply.js";
+import { replyWithError, UNEXPECTED_ERROR } from "../utils/error-reply.js";
 import {
   clearMemberCooldown,
   cooldownRemaining,
@@ -107,7 +108,10 @@ export async function runWebSignin(
   const rejection = (await guard?.()) ?? null;
   if (rejection) {
     logger.info(`/${commandName} rejected for user=${userId}: not permitted`);
-    await interaction.editReply({ content: rejection });
+    await replyWithError(interaction, {
+      title: "You can't use this command",
+      next: rejection,
+    });
     return;
   }
 
@@ -115,9 +119,9 @@ export async function runWebSignin(
     logger.info(
       `/${commandName} rejected for user=${userId}: WebUI disabled (WEBUI_ENABLED!=true)`,
     );
-    await interaction.editReply({
-      content:
-        "The web UI is disabled. Ask an operator to set `WEBUI_ENABLED=true` and restart the bot.",
+    await replyWithError(interaction, {
+      title: "The Web UI is off",
+      next: "Ask an operator to set `WEBUI_ENABLED=true` and restart the bot.",
     });
     return;
   }
@@ -127,8 +131,14 @@ export async function runWebSignin(
     logger.warn(
       `/${commandName} rejected for user=${userId}: invalid WebUI config: ${configErrors.join("; ")}`,
     );
-    await interaction.editReply({
-      content: `❌ Web UI is enabled but its configuration is invalid: ${configErrors.join("; ")}`,
+    // The detail stays in the log above. Only `/config` (admin-only, behind
+    // the guard) may show it; `/me` is open to every member.
+    await replyWithError(interaction, {
+      title: "The Web UI isn't set up correctly",
+      next:
+        role === "admin"
+          ? `Its configuration is invalid: ${configErrors.join("; ")}`
+          : "Ask an admin to check the Web UI settings.",
     });
     return;
   }
@@ -137,8 +147,9 @@ export async function runWebSignin(
     logger.info(
       `/${commandName} rejected for user=${userId}: not invoked in a guild`,
     );
-    await interaction.editReply({
-      content: "This command must be run inside a guild.",
+    await replyWithError(interaction, {
+      title: "Can't use this here",
+      next: "Run this command in a server.",
     });
     return;
   }
@@ -148,8 +159,9 @@ export async function runWebSignin(
     logger.info(
       `/${commandName} rejected for user=${userId}: guild is not the configured GUILD_ID`,
     );
-    await interaction.editReply({
-      content: "The web UI is only available in this bot's own server.",
+    await replyWithError(interaction, {
+      title: "Can't use this here",
+      next: "The Web UI is only available in this bot's own server.",
     });
     return;
   }
@@ -165,8 +177,9 @@ export async function runWebSignin(
   const wait = cooldownRemaining(cooldownScope, userId, cooldownSeconds);
   if (wait > 0) {
     logger.info(`/${commandName} rejected for user=${userId}: cooldown`);
-    await interaction.editReply({
-      content: `You just asked for a sign-in link. Please wait ${waitText(wait)}, or use the link I already sent you.`,
+    await replyWithError(interaction, {
+      title: "You just asked for a sign-in link",
+      next: `Please wait ${waitText(wait)}, or use the link I already sent you.`,
     });
     return;
   }
@@ -226,8 +239,9 @@ export async function runWebSignin(
     logger.error(
       `Error issuing web sign-in link for user=${userId}: ${describeDiscordError(error)}`,
     );
-    await safeReply(interaction, {
-      content: "An error occurred while issuing your sign-in link.",
+    await replyWithError(interaction, {
+      title: "Couldn't issue your sign-in link",
+      next: UNEXPECTED_ERROR.next,
     });
   }
 }
