@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 import type { Client } from "discord.js";
+import fs from "node:fs";
+import path from "node:path";
 
 const mockRegisterReloadCallback = jest.fn();
 const mockGetBoolean = jest.fn();
@@ -527,6 +529,53 @@ describe("DiscordLogger (#844)", () => {
       expect(uncached.fields?.find((f) => f.name === "Server")?.value).toBe(
         "`guild-1`",
       );
+    });
+  });
+
+  // The copy rules only hold in production if the callers pass copy that
+  // follows them: the title takes its text from the caller's context label.
+  describe("production call shapes (#1516)", () => {
+    const SRC = path.resolve(
+      path.dirname(new URL(import.meta.url).pathname),
+      "../../src",
+    );
+    const read = (f: string): string =>
+      fs.readFileSync(path.join(SRC, f), "utf8");
+    const CALLERS = [
+      "index.ts",
+      "services/voice-channel-truncation.ts",
+      "services/message-activity-cleanup.ts",
+    ];
+
+    /** The string literal passed as the context (2nd argument) of logError. */
+    function errorContexts(source: string): string[] {
+      return [
+        ...source.matchAll(
+          /\.logError\(\s*[^,]+(?:\([^)]*\))?[^,]*,\s*"([^"]+)"/g,
+        ),
+      ].map((m) => m[1]);
+    }
+
+    it("finds every logError caller's context label", () => {
+      const all = CALLERS.flatMap((f) => errorContexts(read(f)));
+      expect(all).toHaveLength(3);
+    });
+
+    it("passes context labels in lower case, so the title reads as a sentence", async () => {
+      for (const f of CALLERS) {
+        for (const label of errorContexts(read(f))) {
+          expect(label).toBe(label.toLowerCase());
+          expect(label).not.toMatch(/ization/);
+        }
+      }
+      const real = CALLERS.flatMap((f) => errorContexts(read(f)));
+      expect(real).toContain("voice channel clean-up");
+    });
+
+    it("posts the database success without a redundant description", () => {
+      const call = /logDatabaseStatus\(\s*true\s*([,)])/.exec(read("index.ts"));
+      expect(call).not.toBeNull();
+      expect(call?.[1]).toBe(")");
     });
   });
 });

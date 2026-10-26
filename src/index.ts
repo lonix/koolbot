@@ -730,10 +730,7 @@ async function initializeServices(): Promise<void> {
     await discordLogger.initialize();
 
     // Log database connection status
-    await discordLogger.logDatabaseStatus(
-      true,
-      "Successfully connected to MongoDB database",
-    );
+    await discordLogger.logDatabaseStatus(true);
 
     // Try to register commands, but don't fail if Discord API is unavailable
     try {
@@ -942,7 +939,7 @@ async function initializeServices(): Promise<void> {
     if (discordLogger) {
       await discordLogger.logError(
         error instanceof Error ? error : new Error(String(error)),
-        "Service Initialization",
+        "service initialisation",
       );
     }
 
