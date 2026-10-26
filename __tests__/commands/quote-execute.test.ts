@@ -327,13 +327,49 @@ describe("/quote edit", () => {
       }),
     );
     expect(mockGetQuoteById).not.toHaveBeenCalled();
+    // Cheap synchronous guard: answers directly, never defers.
+    expect(it_.deferReply).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges before it reads the quote (#842)", async () => {
+    mockGetQuoteById.mockResolvedValue(null);
+    const it_ = interaction(base);
+    await execute(it_);
+    // Compare call order after execute(): an expect inside a mock
+    // implementation would be swallowed by the command's try/catch.
+    expect(it_.deferReply).toHaveBeenCalledTimes(1);
+    expect(mockGetQuoteById).toHaveBeenCalledTimes(1);
+    expect(it_.deferReply.mock.invocationCallOrder[0]).toBeLessThan(
+      mockGetQuoteById.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("finishes a successful edit with editReply", async () => {
+    mockGetQuoteById.mockResolvedValue({
+      content: "Hello",
+      authorId: "author-1",
+      addedById: "user-1",
+      messageId: "message-1",
+    });
+    const it_ = interaction(base);
+    await execute(it_);
+    expect(it_.deferReply).toHaveBeenCalledWith({
+      flags: MessageFlags.Ephemeral,
+    });
+    expect(it_.reply).not.toHaveBeenCalled();
+    const reply = it_.editReply.mock.calls[0][0] as { content: string };
+    expect(reply.content).toContain("Quote updated successfully");
   });
 
   it("reports a quote id that does not exist", async () => {
     mockGetQuoteById.mockResolvedValue(null);
     const it_ = interaction(base);
     await execute(it_);
-    expect(it_.reply).toHaveBeenCalledWith(
+    expect(it_.deferReply).toHaveBeenCalledWith({
+      flags: MessageFlags.Ephemeral,
+    });
+    expect(it_.reply).not.toHaveBeenCalled();
+    expect(it_.editReply).toHaveBeenCalledWith(
       errorEmbedPayload({
         title: "Couldn't find that quote",
         description: expect.stringContaining("quote ID"),
@@ -351,7 +387,8 @@ describe("/quote edit", () => {
     });
     const it_ = interaction(base);
     await execute(it_);
-    expect(it_.reply).toHaveBeenCalledWith(
+    expect(it_.reply).not.toHaveBeenCalled();
+    expect(it_.editReply).toHaveBeenCalledWith(
       errorEmbedPayload({
         title: "Couldn't edit that quote",
         description: expect.stringContaining("only edit quotes that you added"),
@@ -391,9 +428,15 @@ describe("/quote edit", () => {
     });
     mockUpdateQuoteMessage.mockRejectedValue(new Error("Unknown Message"));
     const it_ = interaction(base);
+    // discord.js flags the interaction as deferred; `safeReply` picks
+    // `editReply` from that state.
+    it_.deferReply.mockImplementation(async () => {
+      (it_ as { deferred: boolean }).deferred = true;
+    });
     await execute(it_);
     expect(mockEditQuote).not.toHaveBeenCalled();
-    expect(it_.reply).toHaveBeenCalledWith(
+    expect(it_.reply).not.toHaveBeenCalled();
+    expect(it_.editReply).toHaveBeenCalledWith(
       errorEmbedPayload({
         title: "Couldn't update the quote message",
         description: expect.stringContaining("Ask an admin"),
