@@ -21,6 +21,7 @@ import {
   requireSessionContext,
   asyncHandler,
   refuseForm,
+  rowIsGone,
 } from "./helpers.js";
 import { addFieldError, type FormErrors } from "../../form-errors.js";
 import { birthdayEditForm } from "../../admin-views.js";
@@ -52,8 +53,26 @@ export function createBirthdaysRouter(client: Client): Router {
       const errors: FormErrors = {};
       if (month === null) addFieldError(errors, "month", "Choose a month.");
       if (day === null) addFieldError(errors, "day", "Choose a day.");
-      // A refusal is drawn in the member's own row; a row removed in another
-      // tab has none, and `refuseForm` then answers with the flash instead.
+      // A refusal is drawn in the member's own row. A member whose birthday was
+      // removed in another tab has none: say so, as the save itself would.
+      if (
+        Object.keys(errors).length > 0 &&
+        (await rowIsGone(
+          async () =>
+            (
+              await BirthdayService.getInstance(client).listBirthdays(
+                session.guildId,
+              )
+            ).some((e) => e.userId === userId),
+          "Birthday",
+        ))
+      ) {
+        flashRedirect(res, BIRTHDAYS_PAGE, {
+          type: "err",
+          text: `No birthday is stored for ${userId}.`,
+        });
+        return;
+      }
       if (
         await refuseForm(req, res, {
           page: BIRTHDAYS_PAGE,

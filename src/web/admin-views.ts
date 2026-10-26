@@ -1974,11 +1974,12 @@ export function renderPermissionsPage(props: PermissionsProps): string {
       const cells = [...props.roleIds, ...usedGroupRefs]
         .map(
           (rid) =>
-            // Each cell's whole content was "✓" or "—" (#855): the glyph stays
-            // for sighted users (aria-hidden) and hidden text says what it means.
+            // A state never rests on colour or a glyph alone (#855, #1545): an
+            // allowed cell has the check icon and the word, a disallowed one a
+            // quiet dash with hidden text.
             `<td>${
               allowed.has(rid)
-                ? '<span class="tag tag-on"><span aria-hidden="true">✓</span><span class="visually-hidden">Allowed</span></span>'
+                ? `<span class="kb-perm kb-perm--has">${icon("check")}Allowed</span>`
                 : '<span class="muted" aria-hidden="true">—</span><span class="visually-hidden">Not allowed</span>'
             }</td>`,
         )
@@ -3221,6 +3222,9 @@ export function renderGroupsSection(
   // A missing bot permission next to the field it breaks (#1478), already
   // rendered by `splitEventFormNotice`; absent or "" leaves the markup as it was.
   permissionInline: Partial<EventFormInline> = {},
+  // True inside a panel whose head already says "Groups" (the member form, #1507): the legend
+  // stays for assistive tech but is not drawn a second time.
+  hideLegend = false,
 ): string {
   const inline = (html: string | undefined): string =>
     html ? `\n      ${html}` : "";
@@ -3260,7 +3264,7 @@ export function renderGroupsSection(
     )
     .join("");
   return `<fieldset data-groups-section>
-      <legend>Groups</legend>${rememberedNote ? `\n      ${rememberedNote}` : ""}
+      <legend${hideLegend ? ' class="kb-visually-hidden"' : ""}>Groups</legend>${rememberedNote ? `\n      ${rememberedNote}` : ""}
       <div class="kb-groupopt">
         <label class="kb-switch"><input type="checkbox" role="switch" name="${GROUP_FORM_FIELDS.enabled}" value="1"${prefill ? " checked" : ""} aria-describedby="groups-enabled-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Split into groups (teams, squads, rooms…)</label>
         <p class="kb-help" id="groups-enabled-help">Each group gets its own voice channel next to the event's channel, made at the channel creation time and removed when the event is over. Leave it off for a plain event.</p>
@@ -4112,8 +4116,20 @@ export interface ReactionRolesProps extends CommonProps {
   settingsUnavailable?: boolean;
   /** Text-channel options backing the `reactionroles.message_channel_id` picker. */
   textChannels?: ChannelOption[];
+  /** The create, bind or group form the server just refused, to draw again with its values and messages (#1520). */
+  refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
 }
+
+/** Form ids of the Reaction roles page, shared with the write routes (#1520). */
+export const REACTION_ROLE_CREATE_FORM = "reaction-role-create";
+export const REACTION_ROLE_BIND_FORM = "reaction-role-bind";
+export const REACTION_ROLE_GROUP_CREATE_FORM = "reaction-role-group-create";
+export const REACTION_ROLE_GROUP_GENERATE_FORM = "reaction-role-group-generate";
+
+/** The row-keyed field names of a group form's option rows (`roleName-0`, `emoji-0`, ...). */
+export const groupRoleNameField = (i: number): string => `roleName-${i}`;
+export const groupEmojiField = (i: number): string => `emoji-${i}`;
 
 function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
   const escapedName = escapeHtml(rr.roleName);
@@ -4183,23 +4199,48 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
 function groupOptionRows(
   formLabel: string,
   placeholders: (i: number) => [string, string],
+  f: FormView,
 ): string {
   const row = (i: number): string => {
     const [role, emoji] = placeholders(i);
+    const nameField = groupRoleNameField(i);
+    const emojiField = groupEmojiField(i);
     return `<div class="inline-form">
-      <input type="text" name="roleName" maxlength="100" aria-label="${escapeHtml(`${formLabel}: option ${i + 1} role name`)}" placeholder="${escapeHtml(role)}">
-      <input type="text" name="emoji" maxlength="100" aria-label="${escapeHtml(`${formLabel}: option ${i + 1} emoji`)}" placeholder="${escapeHtml(emoji)}">
-    </div>`;
+      <input type="text" name="roleName" maxlength="100" aria-label="${escapeHtml(`${formLabel}: option ${i + 1} role name`)}" placeholder="${escapeHtml(role)}"${f.valueAttr(nameField)}${f.attrs(nameField)}>
+      <input type="text" name="emoji" maxlength="100" aria-label="${escapeHtml(`${formLabel}: option ${i + 1} emoji`)}" placeholder="${escapeHtml(emoji)}"${f.valueAttr(emojiField)}${f.attrs(emojiField)}>
+    </div>${f.error(nameField)}${f.error(emojiField)}`;
   };
   const visible = 6;
   const rows = (from: number, to: number): string =>
     Array.from({ length: to - from }, (_unused, i) => row(from + i)).join("");
+  // The folded rows open when a refused form typed into one, or the typed text
+  // and its message would be out of sight.
+  const foldedUsed = Array.from(
+    { length: MAX_GROUP_ENTRIES - visible },
+    (_unused, i) => visible + i,
+  ).some(
+    (i) =>
+      f.value(groupRoleNameField(i)) !== "" ||
+      f.value(groupEmojiField(i)) !== "" ||
+      f.error(groupRoleNameField(i)) !== "" ||
+      f.error(groupEmojiField(i)) !== "",
+  );
   return `${rows(0, visible)}
-    <details><summary>More options (up to ${MAX_GROUP_ENTRIES})</summary>${rows(visible, MAX_GROUP_ENTRIES)}</details>`;
+    <details${foldedUsed ? " open" : ""}><summary>More options (up to ${MAX_GROUP_ENTRIES})</summary>${rows(visible, MAX_GROUP_ENTRIES)}</details>`;
 }
 
 export function renderReactionRolesPage(props: ReactionRolesProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+  const create = formView(props.refusedForm, REACTION_ROLE_CREATE_FORM);
+  const bind = formView(props.refusedForm, REACTION_ROLE_BIND_FORM);
+  const groupCreate = formView(
+    props.refusedForm,
+    REACTION_ROLE_GROUP_CREATE_FORM,
+  );
+  const groupGenerate = formView(
+    props.refusedForm,
+    REACTION_ROLE_GROUP_GENERATE_FORM,
+  );
   const activeRows = props.active
     .map((rr) => reactionRoleRow(rr, csrfInput))
     .join("");
@@ -4249,18 +4290,18 @@ ${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPicker
   <form method="POST" action="/admin/reaction-roles/create" class="stack">
     ${csrfInput}
     <label>Role name
-      <input type="text" name="name" required maxlength="100" placeholder="Gamer">
-    </label>
+      <input type="text" name="name" required maxlength="100" placeholder="Gamer"${create.valueAttr("name")}${create.attrs("name")}>
+    </label>${create.error("name")}
     <label>Emoji (Unicode or <code>&lt;:name:id&gt;</code>)
-      <input type="text" name="emoji" required maxlength="100" placeholder="🎮">
-    </label>
-    <label class="inline"><input type="checkbox" name="createChannel" value="1" checked> Create a private category + channel for this role</label>
+      <input type="text" name="emoji" required maxlength="100" placeholder="🎮"${create.valueAttr("emoji")}${create.attrs("emoji")}>
+    </label>${create.error("emoji")}
+    <label class="inline"><input type="checkbox" name="createChannel" value="1"${create.checked("createChannel", true) ? " checked" : ""}> Create a private category + channel for this role</label>
     <label>Assignment mode
-      <select name="mode">
-        <option value="toggle" selected>Toggle — react to add, unreact to remove (default)</option>
-        <option value="sticky">Sticky — react to add; removing the reaction keeps the role</option>
+      <select name="mode"${create.attrs("mode")}>
+        <option value="toggle"${create.selected("mode", "toggle") !== "sticky" ? " selected" : ""}>Toggle — react to add, unreact to remove (default)</option>
+        <option value="sticky"${create.selected("mode", "toggle") === "sticky" ? " selected" : ""}>Sticky — react to add; removing the reaction keeps the role</option>
       </select>
-    </label>
+    </label>${create.error("mode")}
     <p class="muted">For one-of-set (pick exactly one) behaviour, use <strong>Create a role group</strong> below — a single message can't enforce "unique" against itself.</p>
     <button type="submit" class="btn btn-primary">Create reaction role</button>
   </form>
@@ -4271,14 +4312,14 @@ ${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPicker
   <form method="POST" action="/admin/reaction-roles/bind" class="stack">
     ${csrfInput}
     <label>Role ID
-      <input type="text" name="roleId" required maxlength="30" placeholder="123456789012345678">
-    </label>
+      <input type="text" name="roleId" required maxlength="30" placeholder="123456789012345678"${bind.valueAttr("roleId")}${bind.attrs("roleId")}>
+    </label>${bind.error("roleId")}
     <label>Emoji (Unicode or <code>&lt;:name:id&gt;</code>)
-      <input type="text" name="emoji" required maxlength="100" placeholder="🎨">
-    </label>
+      <input type="text" name="emoji" required maxlength="100" placeholder="🎨"${bind.valueAttr("emoji")}${bind.attrs("emoji")}>
+    </label>${bind.error("emoji")}
     <label>Message ID <span class="muted">(optional — add to an existing picker message)</span>
-      <input type="text" name="messageId" maxlength="30" placeholder="(new message)">
-    </label>
+      <input type="text" name="messageId" maxlength="30" placeholder="(new message)"${bind.valueAttr("messageId")}${bind.attrs("messageId")}>
+    </label>${bind.error("messageId")}
     <button type="submit" class="btn btn-primary">Bind existing role</button>
   </form>
 </div>
@@ -4288,16 +4329,16 @@ ${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPicker
   <form method="POST" action="/admin/reaction-roles/group/create" class="stack">
     ${csrfInput}
     <label>Group name
-      <input type="text" name="groupName" required maxlength="100" placeholder="Colour">
-    </label>
+      <input type="text" name="groupName" required maxlength="100" placeholder="Colour"${groupCreate.valueAttr("groupName")}${groupCreate.attrs("groupName")}>
+    </label>${groupCreate.error("groupName")}
     <label>Group mode
-      <select name="mode">
-        <option value="unique" selected>Unique — pick exactly one (reacting swaps your choice)</option>
-        <option value="sticky">Sticky — add-only, reactions never revoke</option>
-        <option value="toggle">Toggle — independent add/remove per option</option>
+      <select name="mode"${groupCreate.attrs("mode")}>
+        <option value="unique"${groupCreate.selected("mode", "unique") === "unique" ? " selected" : ""}>Unique — pick exactly one (reacting swaps your choice)</option>
+        <option value="sticky"${groupCreate.selected("mode", "unique") === "sticky" ? " selected" : ""}>Sticky — add-only, reactions never revoke</option>
+        <option value="toggle"${groupCreate.selected("mode", "unique") === "toggle" ? " selected" : ""}>Toggle — independent add/remove per option</option>
       </select>
-    </label>
-    ${groupOptionRows("Role group", (i) => [`Role name${i < 2 ? " (required)" : ""}`, `Emoji${i < 2 ? " (required)" : ""}`])}
+    </label>${groupCreate.error("mode")}
+    ${groupOptionRows("Role group", (i) => [`Role name${i < 2 ? " (required)" : ""}`, `Emoji${i < 2 ? " (required)" : ""}`], groupCreate)}
     <button type="submit" class="btn btn-primary">Create role group</button>
   </form>
 </div>
@@ -4307,23 +4348,23 @@ ${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPicker
   <form method="POST" action="/admin/reaction-roles/group/generate" class="stack">
     ${csrfInput}
     <label>Source
-      <select name="preset">
-        ${reactionRoleGroupPresets.map((p) => `<option value="${escapeHtml(p.key)}">${escapeHtml(p.name)} preset — ${escapeHtml(p.description)} (${p.entries.length} roles)</option>`).join("")}
-        <option value="custom">Custom group (fill in below)</option>
+      <select name="preset"${groupGenerate.attrs("preset")}>
+        ${reactionRoleGroupPresets.map((p) => `<option value="${escapeHtml(p.key)}"${groupGenerate.selected("preset") === p.key ? " selected" : ""}>${escapeHtml(p.name)} preset — ${escapeHtml(p.description)} (${p.entries.length} roles)</option>`).join("")}
+        <option value="custom"${groupGenerate.selected("preset") === "custom" ? " selected" : ""}>Custom group (fill in below)</option>
       </select>
-    </label>
+    </label>${groupGenerate.error("preset")}
     <label>Custom group name <span class="muted">(custom only)</span>
-      <input type="text" name="groupName" maxlength="100" placeholder="Platform">
-    </label>
+      <input type="text" name="groupName" maxlength="100" placeholder="Platform"${groupGenerate.valueAttr("groupName")}${groupGenerate.attrs("groupName")}>
+    </label>${groupGenerate.error("groupName")}
     <label>Group mode <span class="muted">(blank = preset default; unique for custom)</span>
-      <select name="mode">
-        <option value="">Default</option>
-        <option value="unique">Unique — pick exactly one</option>
-        <option value="sticky">Sticky — add-only</option>
-        <option value="toggle">Toggle — independent add/remove</option>
+      <select name="mode"${groupGenerate.attrs("mode")}>
+        <option value=""${groupGenerate.refused && groupGenerate.selected("mode") === "" ? " selected" : ""}>Default</option>
+        <option value="unique"${groupGenerate.selected("mode") === "unique" ? " selected" : ""}>Unique — pick exactly one</option>
+        <option value="sticky"${groupGenerate.selected("mode") === "sticky" ? " selected" : ""}>Sticky — add-only</option>
+        <option value="toggle"${groupGenerate.selected("mode") === "toggle" ? " selected" : ""}>Toggle — independent add/remove</option>
       </select>
-    </label>
-    ${groupOptionRows("Custom role group", (i) => [`Custom role name${i < 1 ? " (custom only)" : ""}`, "Emoji"])}
+    </label>${groupGenerate.error("mode")}
+    ${groupOptionRows("Custom role group", (i) => [`Custom role name${i < 1 ? " (custom only)" : ""}`, "Emoji"], groupGenerate)}
     <button type="submit" class="btn btn-primary">Generate roles</button>
   </form>
 </div>
@@ -4402,8 +4443,14 @@ export interface NoticesProps extends CommonProps {
   settingsUnavailable?: boolean;
   groups: Array<{ category: string; rows: NoticeRow[] }>;
   categoryOptions: NoticeCategoryOption[];
+  /** The create or edit form the server just refused, to draw again with its values and messages (#1520). */
+  refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
 }
+
+/** Form ids of the Notices page, shared with the write routes (#1520). */
+export const NOTICE_CREATE_FORM = "notice-create";
+export const noticeEditForm = (id: string): string => `notice-edit-${id}`;
 
 function noticeCategoryOptionsHtml(
   options: NoticeCategoryOption[],
@@ -4419,33 +4466,35 @@ function noticeCategoryOptionsHtml(
 
 export function renderNoticesPage(props: NoticesProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+  const create = formView(props.refusedForm, NOTICE_CREATE_FORM);
   const groupSections =
     props.groups.length === 0
       ? `<div class="empty">No notices stored.</div>`
       : props.groups
           .map((g) => {
             const rows = g.rows
-              .map(
-                (n) => `<tr>
+              .map((n) => {
+                const f = formView(props.refusedForm, noticeEditForm(n.id));
+                return `<tr>
 <td><form method="POST" action="/admin/notices/${escapeHtml(n.id)}/order" class="inline-order">${csrfInput}<input type="number" name="order" aria-label="Display order for ${escapeHtml(n.title)}" value="${n.order}" min="-1000" max="10000" required><button type="submit" class="btn" aria-label="Save display order for ${escapeHtml(n.title)}">Save</button></form></td>
 <td>${escapeHtml(n.title)}<div class="muted mono">id: ${escapeHtml(n.id)}</div></td>
 <td class="muted">${escapeHtml(n.preview)}</td>
 <td class="mono muted">${escapeHtml(n.messageId)}</td>
 <td class="muted">${escapeHtml(n.updatedAt)}</td>
 <td class="actions">
-  <details class="helper edit-details"><summary>Edit</summary>
+  <details class="helper edit-details"${f.open()}><summary>Edit</summary>
     <form method="POST" action="/admin/notices/${escapeHtml(n.id)}/update" class="stack">${csrfInput}
-      <label>Title<input type="text" name="title" maxlength="256" value="${escapeHtml(n.title)}" required></label>
-      <label>Content<textarea name="content" rows="6" maxlength="4000" required>${escapeHtml(n.content)}</textarea></label>
-      <label>Category<select name="category">${noticeCategoryOptionsHtml(props.categoryOptions, n.category)}</select></label>
-      <label>Order<input type="number" name="order" min="-1000" max="10000" value="${n.order}" required></label>
+      <label>Title<input type="text" name="title" maxlength="256" value="${escapeHtml(f.value("title", n.title))}" required${f.attrs("title")}></label>${f.error("title")}
+      <label>Content<textarea name="content" rows="6" maxlength="4000" required${f.attrs("content")}>${f.textareaContent("content", n.content)}</textarea></label>${f.error("content")}
+      <label>Category<select name="category"${f.attrs("category")}>${noticeCategoryOptionsHtml(props.categoryOptions, f.selected("category", n.category))}</select></label>${f.error("category")}
+      <label>Order<input type="number" name="order" min="-1000" max="10000" value="${escapeHtml(f.value("order", String(n.order)))}" required${f.attrs("order")}></label>${f.error("order")}
       <button type="submit" class="btn btn-primary">Save changes</button>
     </form>
   </details>
   <form method="POST" action="/admin/notices/${escapeHtml(n.id)}/delete" data-confirm="Delete notice '${escapeHtml(n.title)}'?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
 </td>
-</tr>`,
-              )
+</tr>`;
+              })
               .join("");
             return `<div class="card">
   <h2>${escapeHtml(g.category)} <span class="muted">(${g.rows.length})</span></h2>
@@ -4481,10 +4530,10 @@ ${renderStatusLine({
   <h2>Create a notice</h2>
   <form method="POST" action="/admin/notices/create" class="stack">
     ${csrfInput}
-    <label>Title<input type="text" name="title" maxlength="256" required></label>
-    <label>Content<textarea name="content" rows="5" maxlength="4000" required></textarea></label>
-    <label>Category<select name="category" required>${noticeCategoryOptionsHtml(props.categoryOptions)}</select></label>
-    <label>Order (lower posts first)<input type="number" name="order" min="-1000" max="10000" value="0" required></label>
+    <label>Title<input type="text" name="title" maxlength="256" required${create.valueAttr("title")}${create.attrs("title")}></label>${create.error("title")}
+    <label>Content<textarea name="content" rows="5" maxlength="4000" required${create.attrs("content")}>${create.refused ? create.textareaContent("content") : ""}</textarea></label>${create.error("content")}
+    <label>Category<select name="category" required${create.attrs("category")}>${noticeCategoryOptionsHtml(props.categoryOptions, create.selected("category") || undefined)}</select></label>${create.error("category")}
+    <label>Order (lower posts first)<input type="number" name="order" min="-1000" max="10000" value="${escapeHtml(create.value("order", "0"))}" required${create.attrs("order")}></label>${create.error("order")}
     <button type="submit" class="btn btn-primary">Create notice</button>
   </form>
 </div>
@@ -4591,8 +4640,13 @@ export interface QuotesProps extends CommonProps {
   page: number;
   pageSize: number;
   search: string;
+  /** The edit form the server just refused, to draw again with its values and messages (#1520). */
+  refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
 }
+
+/** Form id of one quote's edit form on the Quotes page, shared with the write route (#1520). */
+export const quoteEditForm = (id: string): string => `quote-edit-${id}`;
 
 function quotesQueryString(search: string, page: number): string {
   const parts: string[] = [];
@@ -4610,6 +4664,7 @@ export function renderQuotesPage(props: QuotesProps): string {
     .map((q) => {
       const preview =
         q.content.length > 160 ? `${q.content.slice(0, 160)}…` : q.content;
+      const f = formView(props.refusedForm, quoteEditForm(q.id));
       return `<tr>
 <td>${escapeHtml(preview)}<div class="muted mono">id: ${escapeHtml(q.id)}</div></td>
 <td title="${escapeHtml(q.authorId)}">${escapeHtml(q.authorLabel)}</td>
@@ -4618,10 +4673,10 @@ export function renderQuotesPage(props: QuotesProps): string {
 <td>👍 ${q.likes} · 👎 ${q.dislikes}</td>
 <td class="mono muted">${escapeHtml(q.messageId)}</td>
 <td class="actions">
-  <details class="helper edit-details"><summary>Edit</summary>
-    <form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/edit" class="stack">${csrfInput}
-      <label>Quote<textarea name="content" rows="4" maxlength="${props.maxLength}" required>${escapeHtml(q.content)}</textarea></label>
-      <label>Author (Discord user ID)<input type="text" name="author_id" inputmode="numeric" pattern="\\d{17,20}" value="${escapeHtml(q.authorId)}" required></label>
+  <details class="helper edit-details"${f.open()}><summary>Edit</summary>
+    <form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/edit${escapeHtml(quotesQueryString(props.search, page))}" class="stack">${csrfInput}
+      <label>Quote<textarea name="content" rows="4" maxlength="${props.maxLength}" required${f.attrs("content")}>${f.textareaContent("content", q.content)}</textarea></label>${f.error("content")}
+      <label>Author (Discord user ID)<input type="text" name="author_id" inputmode="numeric" pattern="\\d{17,20}" value="${escapeHtml(f.value("author_id", q.authorId))}" required${f.attrs("author_id")}></label>${f.error("author_id")}
       <button type="submit" class="btn btn-primary">Save changes</button>
     </form>
   </details>
@@ -5165,7 +5220,20 @@ export interface StringArrayEditorOptions {
    * defaults are in use, alongside a "seed defaults" button.
    */
   defaultsNotice?: string;
+  /** The add, edit or import form the server just refused, to draw again with its values and messages (#1520). */
+  refusedForm?: RefusedForm | null;
 }
+
+/**
+ * Form ids of the string-array editor, which only the Presence page uses
+ * today. Shared with the write routes (#1520).
+ */
+export const botStatusAddForm = (pool: string): string =>
+  `bot-status-add-${pool}`;
+export const botStatusImportForm = (pool: string): string =>
+  `bot-status-import-${pool}`;
+export const botStatusEditForm = (id: string): string =>
+  `bot-status-edit-${id}`;
 
 export function renderStringArrayEditor(
   opts: StringArrayEditorOptions,
@@ -5174,26 +5242,32 @@ export function renderStringArrayEditor(
   const poolPath = `${opts.basePath}/pool/${encodeURIComponent(opts.collectionId)}`;
   const entryPath = (id: string): string =>
     `${opts.basePath}/entry/${encodeURIComponent(id)}`;
+  const add = formView(opts.refusedForm, botStatusAddForm(opts.collectionId));
+  const imp = formView(
+    opts.refusedForm,
+    botStatusImportForm(opts.collectionId),
+  );
 
   const rows =
     opts.items.length === 0
       ? `<tr><td colspan="3"><span class="muted">No entries stored.</span></td></tr>`
       : opts.items
-          .map(
-            (item) => `<tr>
+          .map((item) => {
+            const f = formView(opts.refusedForm, botStatusEditForm(item.id));
+            return `<tr>
 <td><form method="POST" action="${entryPath(item.id)}/order" class="inline-order">${csrfInput}<input type="number" name="order" aria-label="Display order for ${escapeHtml(item.text)}" value="${item.order}" min="-1000" max="10000" required><button type="submit" class="btn" aria-label="Save display order for ${escapeHtml(item.text)}">Save</button></form></td>
 <td>
-  <details class="helper edit-details"><summary>${escapeHtml(item.text)}</summary>
+  <details class="helper edit-details"${f.open()}><summary>${escapeHtml(item.text)}</summary>
     <form method="POST" action="${entryPath(item.id)}/update" class="stack">${csrfInput}
-      <label>Text<input type="text" name="text" maxlength="${opts.maxLength}" value="${escapeHtml(item.text)}" required></label>
+      <label>Text<input type="text" name="text" maxlength="${opts.maxLength}" value="${escapeHtml(f.value("text", item.text))}" required${f.attrs("text")}></label>${f.error("text")}
       <button type="submit" class="btn btn-primary">Save changes</button>
     </form>
   </details>
   <div class="muted mono">id: ${escapeHtml(item.id)}</div>
 </td>
 <td class="actions"><form method="POST" action="${entryPath(item.id)}/delete" data-confirm="Delete this entry?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form></td>
-</tr>`,
-          )
+</tr>`;
+          })
           .join("");
 
   const defaultsBanner = opts.defaultsNotice
@@ -5213,19 +5287,19 @@ export function renderStringArrayEditor(
   <table><thead><tr><th scope="col">Order</th><th scope="col">Text</th><th scope="col">Actions</th></tr></thead><tbody>${rows}</tbody></table>
   <form method="POST" action="${poolPath}/add" class="stack">
     ${csrfInput}
-    <label>Add entry<input type="text" name="text" maxlength="${opts.maxLength}" required></label>
+    <label>Add entry<input type="text" name="text" maxlength="${opts.maxLength}" required${add.valueAttr("text")}${add.attrs("text")}></label>${add.error("text")}
     ${hint}
-    <label>Order<input type="number" name="order" min="-1000" max="10000" value="0" required></label>
+    <label>Order<input type="number" name="order" min="-1000" max="10000" value="${escapeHtml(add.value("order", "0"))}" required${add.attrs("order")}></label>${add.error("order")}
     <button type="submit" class="btn btn-primary">Add</button>
   </form>
-  <details class="helper">
+  <details class="helper"${imp.open()}>
     <summary>Import / export</summary>
     <form method="POST" action="${poolPath}/import" class="stack">
       ${csrfInput}
       <p class="muted">Paste one entry per line, or a JSON array of strings. Exporting: the textarea below shows the current effective list — copy it to back up.</p>
-      <label>Entries<textarea name="items" rows="8">${escapeHtml(opts.exportText)}</textarea></label>
-      <label class="inline-form"><input type="radio" name="mode" value="replace" checked> Replace pool</label>
-      <label class="inline-form"><input type="radio" name="mode" value="append"> Append to pool</label>
+      <label>Entries<textarea name="items" rows="8"${imp.attrs("items")}>${imp.textareaContent("items", opts.exportText)}</textarea></label>${imp.error("items")}
+      <label class="inline-form"><input type="radio" name="mode" value="replace"${imp.selected("mode", "replace") !== "append" ? " checked" : ""}> Replace pool</label>
+      <label class="inline-form"><input type="radio" name="mode" value="append"${imp.selected("mode", "replace") === "append" ? " checked" : ""}> Append to pool</label>
       <button type="submit" class="btn btn-primary">Import</button>
     </form>
   </details>
@@ -5247,6 +5321,8 @@ export interface BotStatusPoolView {
 export interface BotStatusProps extends CommonProps {
   maxLength: number;
   pools: BotStatusPoolView[];
+  /** The add, edit or import form the server just refused, to draw again with its values and messages (#1520). */
+  refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
 }
 
@@ -5268,6 +5344,7 @@ export function renderBotStatusPage(props: BotStatusProps): string {
         defaultsNotice: p.usingDefaults
           ? "This pool has no stored entries — the bot is using its built-in defaults. Add, import, or seed below to customise."
           : undefined,
+        refusedForm: props.refusedForm,
       }),
     )
     .join("");
@@ -6952,14 +7029,27 @@ function errorRateTag(rate: number): string {
   return `<span class="tag tag-on">0%</span>`;
 }
 
+/** The time-window choice as a labelled `kb-tabs` strip; the current one has `aria-current` (#1545). */
+function renderWindowTabs(
+  path: string,
+  windows: readonly number[],
+  current: number,
+): string {
+  const links = windows
+    .map(
+      (w) =>
+        `<a href="${path}?window=${w}"${w === current ? ' aria-current="true"' : ""}>${w} days</a>`,
+    )
+    .join("");
+  return `<nav class="kb-tabs" aria-label="Time window">${links}</nav>`;
+}
+
 export function renderCommandMetricsPage(props: CommandMetricsProps): string {
-  const windowToggle = [7, 30]
-    .map((w) => {
-      const active = w === props.windowDays;
-      const cls = active ? "btn btn-sm btn-primary" : "btn btn-sm";
-      return `<a class="${cls}" href="/admin/metrics?window=${w}">${w}d</a>`;
-    })
-    .join(" ");
+  const windowToggle = renderWindowTabs(
+    "/admin/metrics",
+    [7, 30],
+    props.windowDays,
+  );
 
   const usageRowsHtml =
     props.rows.length === 0
@@ -7022,21 +7112,23 @@ export function renderCommandMetricsPage(props: CommandMetricsProps): string {
     (max, d) => Math.max(max, d.usageCount),
     0,
   );
+  const peakIndex =
+    maxDaily > 0
+      ? props.dailyTotals.findIndex((d) => d.usageCount === maxDaily)
+      : -1;
   const trendHtml =
     props.dailyTotals.length === 0
       ? `<div class="empty">No data yet.</div>`
-      : props.dailyTotals
-          .map((d) => {
+      : `<div class="kb-bars">${props.dailyTotals
+          .map((d, i) => {
             const pct = maxDaily > 0 ? (d.usageCount / maxDaily) * 100 : 0;
-            return `<div class="field-row" style="align-items:center;gap:.75rem">
-<span class="muted mono" style="min-width:6rem">${escapeHtml(d.date)}</span>
-<span style="flex:1;background:var(--heat-empty);border-radius:4px;overflow:hidden">
-  <span style="display:block;height:1rem;width:${pct.toFixed(1)}%;background:var(--embed-brand)"></span>
-</span>
-<span class="mono" style="min-width:3rem;text-align:right">${d.usageCount}</span>
-</div>`;
+            return `<div class="kb-bars__row${i === peakIndex ? " is-peak" : ""}"><span title="${escapeHtml(d.date)}">${escapeHtml(d.date.slice(5))}</span><span class="kb-bars__track"><span class="kb-bars__fill" style="width:${pct.toFixed(1)}%"></span></span><span class="kb-bars__val">${d.usageCount}</span></div>`;
           })
-          .join("");
+          .join("")}</div>${
+          peakIndex >= 0
+            ? `<p class="muted">Busiest day: ${escapeHtml(props.dailyTotals[peakIndex].date)}, ${countOf(maxDaily, "invocation")}.</p>`
+            : ""
+        }`;
 
   const body = `
 <h1>Command metrics</h1>
@@ -7060,7 +7152,7 @@ ${props.enabled ? "" : `<p class="muted">Enable <code>monitoring.metrics_persist
 
 <div class="card">
   <h2>Commands by usage</h2>
-  <p class="inline-form"><span class="muted">Window</span> ${windowToggle}</p>
+  ${windowToggle}
   ${usageRowsHtml}
 </div>
 
@@ -7124,13 +7216,11 @@ function heatMinutes(minutes: number): string {
 
 export function renderAnalyticsPage(props: AnalyticsProps): string {
   const { heatmap } = props;
-  const windowToggle = [7, 30, 90]
-    .map((w) => {
-      const active = w === props.windowDays;
-      const cls = active ? "btn btn-sm btn-primary" : "btn btn-sm";
-      return `<a class="${cls}" href="/admin/analytics?window=${w}">${w}d</a>`;
-    })
-    .join(" ");
+  const windowToggle = renderWindowTabs(
+    "/admin/analytics",
+    [7, 30, 90],
+    props.windowDays,
+  );
 
   const disabledNotice = props.enabled
     ? ""
@@ -7215,8 +7305,8 @@ export function renderAnalyticsPage(props: AnalyticsProps): string {
 ${disabledNotice}
 <div class="card">
   <h2>Overview</h2>
+  ${windowToggle}
   <dl class="kv">
-    <dt>Window</dt><dd>${props.windowDays} days &nbsp; ${windowToggle}</dd>
     <dt>Timezone</dt><dd class="mono">${escapeHtml(heatmap.timeZone)}</dd>
     <dt>Total voice time</dt><dd>${escapeHtml(heatMinutes(heatmap.totalMinutes))}</dd>
     ${peakLine}

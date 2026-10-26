@@ -19,7 +19,10 @@ import { getErrorMessage } from "../utils/error-guards.js";
 import { formatDuration } from "../utils/time.js";
 import logger from "../utils/logger.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
-import { safeReply } from "../utils/safe-reply.js";
+import {
+  replyWithError,
+  replyWithUnexpectedError,
+} from "../utils/error-reply.js";
 
 const MS_PER_MINUTE = 60 * 1000;
 
@@ -69,9 +72,9 @@ export async function execute(
 
   try {
     if (!interaction.guildId) {
-      await interaction.reply({
-        content: "This command can only be used in a server.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Can't use this here",
+        next: "Run this command in a server.",
       });
       return;
     }
@@ -81,17 +84,17 @@ export async function execute(
     const reason = interaction.options.getString("reason", true).trim();
 
     if (targetUser.bot) {
-      await interaction.reply({
-        content: "You can't time out a bot.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Couldn't time out that member",
+        next: "You can't time out a bot. Pick a member, then try again.",
       });
       return;
     }
 
     if (targetUser.id === interaction.user.id) {
-      await interaction.reply({
-        content: "You can't time out yourself.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Couldn't time out that member",
+        next: "You can't time out yourself. Pick someone else, then try again.",
       });
       return;
     }
@@ -100,9 +103,9 @@ export async function execute(
     // "" — an invalid embed field value. Refusing here, before the timeout,
     // keeps the failure in front of the action rather than after it.
     if (!reason) {
-      await interaction.reply({
-        content: "Please give a reason for the timeout.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Couldn't time out that member",
+        next: "Give a reason for the timeout, then try again.",
       });
       return;
     }
@@ -119,16 +122,18 @@ export async function execute(
     // operator who toggles the feature off expects the bot to stop acting
     // immediately. Refuse rather than act without a record.
     if (!(await moderationService.isEnabled())) {
-      await interaction.editReply({
-        content: "The moderation log is currently disabled.",
+      await replyWithError(interaction, {
+        title: "The moderation log is off",
+        next: "Ask an admin to turn it on in the Web UI, then try again.",
       });
       return;
     }
 
     const guild = interaction.guild;
     if (!guild) {
-      await interaction.editReply({
-        content: "I couldn't read this server's details. Please try again.",
+      await replyWithError(interaction, {
+        title: "Couldn't read this server",
+        next: "Try again in a minute.",
       });
       return;
     }
@@ -139,8 +144,9 @@ export async function execute(
     // member" is never shown for what was really a transient error.
     const targetMember = await fetchMemberOrNull(guild, targetUser.id);
     if (!targetMember) {
-      await interaction.editReply({
-        content: `**${escapeDisplayText(targetUser.tag)}** isn't a member of this server.`,
+      await replyWithError(interaction, {
+        title: "Couldn't time out that member",
+        next: `**${escapeDisplayText(targetUser.tag)}** isn't a member of this server. Pick someone who is, then try again.`,
       });
       return;
     }
@@ -153,7 +159,10 @@ export async function execute(
       capability: "moderatable",
     });
     if (refusal) {
-      await interaction.editReply({ content: refusal });
+      await replyWithError(interaction, {
+        title: "Couldn't time out that member",
+        next: refusal,
+      });
       return;
     }
 
@@ -164,7 +173,10 @@ export async function execute(
       formatAuditReason(interaction.user.tag, reason),
     );
     if (typeof applied === "string") {
-      await interaction.editReply({ content: applied });
+      await replyWithError(interaction, {
+        title: "Discord rejected the timeout",
+        next: applied,
+      });
       return;
     }
 
@@ -216,12 +228,14 @@ export async function execute(
     await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error in timeout command:", error);
-    await safeReply(interaction, {
-      content: timedOut
-        ? "The member was timed out, but I couldn't record it or show the confirmation. Don't run this again — check /modlog."
-        : "There was an error timing the member out.",
-      flags: MessageFlags.Ephemeral,
-    });
+    if (timedOut) {
+      await replyWithError(interaction, {
+        title: "The member was timed out",
+        next: "I couldn't record it or show the confirmation. Don't run this again — check `/modlog`.",
+      });
+    } else {
+      await replyWithUnexpectedError(interaction);
+    }
   }
 }
 

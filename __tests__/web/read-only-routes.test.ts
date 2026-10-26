@@ -982,6 +982,18 @@ describe("refused-form pages (#1517)", () => {
     expect(getFormPage("/admin/polls")).toBeInstanceOf(Function);
   });
 
+  it("registers a renderer for the Reaction roles, Notices, Quotes and Presence pages (#1520)", () => {
+    createReadOnlyRouter({} as never, (_req, _res, next) => next());
+    for (const path of [
+      "/admin/reaction-roles",
+      "/admin/notices",
+      "/admin/quotes",
+      "/admin/bot-status",
+    ]) {
+      expect(getFormPage(path)).toBeInstanceOf(Function);
+    }
+  });
+
   it("registers one for each page whose forms answer a refusal with 422 (#1523)", () => {
     createReadOnlyRouter({} as never, (_req, _res, next) => next());
     for (const path of [

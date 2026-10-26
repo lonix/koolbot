@@ -1,5 +1,6 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { data, execute } from "../../src/commands/ping.js";
+import { unexpectedErrorPayload } from "../test-utils.js";
 import {
   MessageFlags,
   type ChatInputCommandInteraction,
@@ -136,10 +137,12 @@ describe("Ping Command", () => {
 
       await execute(mockInteraction as ChatInputCommandInteraction);
 
-      expect(mockInteraction.followUp).toHaveBeenCalledWith({
-        content: "There was an error while executing this command!",
-        flags: MessageFlags.Ephemeral,
-      });
+      expect(mockInteraction.followUp).toHaveBeenCalledWith(
+        expect.objectContaining({ flags: MessageFlags.Ephemeral }),
+      );
+      expect(mockInteraction.followUp).toHaveBeenCalledWith(
+        unexpectedErrorPayload(),
+      );
       expect(mockInteraction.reply).toHaveBeenCalledTimes(1);
     });
 
@@ -151,10 +154,12 @@ describe("Ping Command", () => {
       await execute(mockInteraction as ChatInputCommandInteraction);
 
       expect(mockInteraction.reply).toHaveBeenCalledTimes(2);
-      expect(mockInteraction.reply).toHaveBeenLastCalledWith({
-        content: "There was an error while executing this command!",
-        flags: MessageFlags.Ephemeral,
-      });
+      expect(mockInteraction.reply).toHaveBeenLastCalledWith(
+        expect.objectContaining({ flags: MessageFlags.Ephemeral }),
+      );
+      expect(mockInteraction.reply).toHaveBeenLastCalledWith(
+        unexpectedErrorPayload(),
+      );
       expect(mockInteraction.followUp).not.toHaveBeenCalled();
     });
   });

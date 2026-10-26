@@ -46,6 +46,13 @@ export async function handleEventRsvpButton(
   }
 
   try {
+    // Acknowledge before the write: Discord invalidates an interaction left
+    // unacknowledged for three seconds (`10062 Unknown interaction`, #842),
+    // and the write is a Mongo round trip. Everything after this edits the
+    // announcement with `editReply` and answers the member with an ephemeral
+    // `followUp`, as the LFG buttons do (#1534).
+    await interaction.deferUpdate();
+
     const service = EventService.getInstance(interaction.client);
     const event = await service.setRsvp(
       eventId,
@@ -54,7 +61,7 @@ export async function handleEventRsvpButton(
       interaction.message.id,
     );
     if (!event) {
-      await interaction.reply({
+      await interaction.followUp({
         content:
           "❌ This event is no longer accepting RSVPs here. Press Interested on the event in Discord's Events list instead.",
         flags: MessageFlags.Ephemeral,
@@ -63,7 +70,7 @@ export async function handleEventRsvpButton(
     }
 
     // Refresh the announcement message in place with the new live counts.
-    await interaction.update(service.buildLegacyRsvpPayload(event));
+    await interaction.editReply(service.buildLegacyRsvpPayload(event));
     await interaction.followUp({
       content: `Your RSVP: **${RSVP_LABELS[status]}**`,
       flags: MessageFlags.Ephemeral,

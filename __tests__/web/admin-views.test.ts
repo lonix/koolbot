@@ -1418,9 +1418,10 @@ describe("renderPermissionsPage", () => {
     expect(html).toContain('<th scope="row" class="mono">/dbtrunk</th>');
     expect(html).not.toContain('<td class="mono">/dbtrunk</td>');
     // A cell is never just a glyph: hidden text says what it means.
-    expect(html).toContain(
-      '<span aria-hidden="true">✓</span><span class="visually-hidden">Allowed</span>',
+    expect(html).toMatch(
+      /<span class="kb-perm kb-perm--has"><svg class="kb-icon"[^>]*aria-hidden="true"[^>]*>.*?<\/svg>Allowed<\/span>/,
     );
+    expect(html).not.toContain('<span aria-hidden="true">✓</span>');
     expect(html).toContain(
       '<span class="muted" aria-hidden="true">—</span><span class="visually-hidden">Not allowed</span>',
     );
@@ -5407,6 +5408,70 @@ describe("Command Audit and Metrics settings cards (#978)", () => {
       dailyTotals: [],
       ...extra,
     });
+
+  describe("window tabs and daily trend (#1545)", () => {
+    it("Command metrics marks the current window with aria-current, in words, without a primary fill", () => {
+      const html = renderMetrics({ windowDays: 30 });
+      expect(html).toContain('<nav class="kb-tabs" aria-label="Time window">');
+      expect(html).toContain(
+        '<a href="/admin/metrics?window=30" aria-current="true">30 days</a>',
+      );
+      expect(html).toContain('<a href="/admin/metrics?window=7">7 days</a>');
+      expect(html).not.toContain("90 days</a>");
+      expect(html).not.toMatch(/btn btn-sm/);
+    });
+
+    it("Voice analytics offers 7, 30 and 90 days and marks the current one", () => {
+      const html = renderAnalyticsPage({
+        ...COMMON,
+        enabled: true,
+        windowDays: 90,
+        heatmap: {
+          matrix: Array.from({ length: 7 }, () => Array(24).fill(0)),
+          byHour: Array(24).fill(0),
+          byDay: Array(7).fill(0),
+          totalMinutes: 0,
+          peak: null,
+          timeZone: "UTC",
+        },
+      });
+      expect(html).toContain('aria-label="Time window"');
+      expect(html).toContain(
+        '<a href="/admin/analytics?window=90" aria-current="true">90 days</a>',
+      );
+      expect(html).toContain('<a href="/admin/analytics?window=7">7 days</a>');
+      expect(html).toContain(
+        '<a href="/admin/analytics?window=30">30 days</a>',
+      );
+      expect(html).not.toMatch(/btn btn-sm/);
+    });
+
+    it("the daily trend is a kb-bars list that names the busiest day and uses no inline colour", () => {
+      const html = renderMetrics({
+        dailyTotals: [
+          { date: "2026-01-08", usageCount: 5, errorCount: 0 },
+          { date: "2026-01-09", usageCount: 20, errorCount: 1 },
+          { date: "2026-01-10", usageCount: 10, errorCount: 0 },
+        ],
+      });
+      expect(html).toContain('<div class="kb-bars">');
+      expect(html).toContain(
+        '<div class="kb-bars__row is-peak"><span title="2026-01-09">01-09</span>',
+      );
+      expect(html).toContain('<span class="kb-bars__val">20</span>');
+      expect(html).toContain("Busiest day: 2026-01-09, 20 invocations.");
+      expect(html).not.toContain('embed-brand)"');
+      expect(html).not.toContain("background:var(--embed-brand)");
+    });
+
+    it("the daily trend names no peak when every day is zero", () => {
+      const html = renderMetrics({
+        dailyTotals: [{ date: "2026-01-09", usageCount: 0, errorCount: 0 }],
+      });
+      expect(html).not.toContain("is-peak");
+      expect(html).not.toContain("Busiest day");
+    });
+  });
 
   it.each([
     ["Command Audit", renderAudit, AUDIT_KEYS, "/admin/audit/commands"],

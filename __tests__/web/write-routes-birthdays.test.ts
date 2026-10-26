@@ -26,6 +26,7 @@ const mockRecordAudit = jest.fn(async () => undefined);
 const mockEditBirthday = jest.fn<() => Promise<unknown>>();
 const mockPurgeForUser = jest.fn<() => Promise<Record<string, unknown>>>();
 const mockRunNow = jest.fn<() => Promise<unknown>>();
+const mockListBirthdays = jest.fn<() => Promise<Array<{ userId: string }>>>();
 
 jest.unstable_mockModule("../../src/web/audit.js", () => ({
   recordAudit: mockRecordAudit,
@@ -46,6 +47,7 @@ jest.unstable_mockModule("../../src/services/birthday-service.js", () => ({
       editBirthday: mockEditBirthday,
       purgeForUser: mockPurgeForUser,
       runNow: mockRunNow,
+      listBirthdays: mockListBirthdays,
     }),
   },
 }));
@@ -78,6 +80,7 @@ beforeEach(async () => {
   registerFormPage("/admin/birthdays", async () => {
     throw new Error("page unavailable");
   });
+  mockListBirthdays.mockResolvedValue([{ userId: MEMBER }]);
   mockEditBirthday.mockResolvedValue({
     before: { month: 6, day: 15, year: 1990 },
     after: { month: 6, day: 16, year: 1990 },
@@ -217,8 +220,28 @@ describe("POST /birthdays/:userId/edit", () => {
       expect(html).toContain(`birthday-edit-${MEMBER}-day-error`);
     });
 
-    it("answers with the flash when the member's row is no longer on the page", async () => {
+    it("says no birthday is stored when it was removed before the refusal", async () => {
+      mockListBirthdays.mockResolvedValue([]);
+      const res = await edit({ month: "", day: "20" });
+      expect(res.status).toBe(303);
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
+        `No birthday is stored for ${MEMBER}.`,
+      );
+      expect(mockEditBirthday).not.toHaveBeenCalled();
+    });
+
+    it("still answers the refusal when the lookup fails", async () => {
+      mockListBirthdays.mockRejectedValue(new Error("db down"));
+      const res = await edit({ month: "", day: "20" });
+      expect(res.status).toBe(422);
+    });
+
+    it("answers with the flash when the member's row is not on the page that comes back", async () => {
       const other = "222222222222222222";
+      mockListBirthdays.mockResolvedValue([
+        { userId: MEMBER },
+        { userId: other },
+      ]);
       const res = await edit({ month: "", day: "20" }, other);
       expect(res.status).toBe(303);
       expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
