@@ -3691,7 +3691,7 @@ ${renderPageFlash(
     // A refused form also says so at the top. That notice is what makes the
     // Groups section put back the rows the admin had filled in: its draft is
     // restored whenever the page comes back with an error notice (#1523).
-    (props.refusedForm
+    (create.refused
       ? { type: "err", text: "Not saved. Check the fields marked below." }
       : null),
 )}
