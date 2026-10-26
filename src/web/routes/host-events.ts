@@ -1493,6 +1493,7 @@ function toPanelEvent(client: Client, event: IEvent): HostPanelEvent {
     title: event.title,
     description: event.description ?? "",
     state: event.state,
+    running: isEventRunning(event, new Date()),
     when: formatEventWhen(event),
     durationMinutes: event.durationMinutes,
     recurrence: isRecurring(event) ? recurrenceLabel(event.recurrence) : null,

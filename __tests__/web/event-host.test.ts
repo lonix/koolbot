@@ -349,9 +349,9 @@ describe("renderHostPanelBody", () => {
         ],
       },
     });
-    expect(html).toContain('<span class="mono">2/2</span>');
-    expect(html).toContain('<span class="mono">5</span>');
-    expect(html).toContain('<span class="muted">n/a</span>');
+    expect(html).toContain('<span class="kb-mono">2/2</span>');
+    expect(html).toContain('<span class="kb-mono">5</span>');
+    expect(html).toContain('<span class="kb-muted">n/a</span>');
   });
 
   it("escapes every rendered value", () => {
@@ -402,7 +402,9 @@ describe("renderHostPanelBody", () => {
   });
 
   it("still says Not created yet when there is no channel", () => {
-    expect(renderHostPanelBody({ event: base })).toContain("Not created yet");
+    expect(renderHostPanelBody({ event: base })).toContain(
+      "Main channel not created yet",
+    );
   });
 
   it("escapes the main channel's name", () => {

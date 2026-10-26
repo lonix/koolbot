@@ -259,6 +259,17 @@ afterEach(() => {
 });
 
 describe("Your events (#1319)", () => {
+  it("says each event's state with the words the host panel shares (#1518)", async () => {
+    const r = await call("/me/events");
+    for (const word of ["Live", "Planned", "Ended"]) {
+      expect(r.text).toMatch(
+        new RegExp(
+          `<span class="kb-badge kb-badge--(on|off|info)">${word}</span>`,
+        ),
+      );
+    }
+  });
+
   it("lists the host's live, upcoming and past events and nobody else's", async () => {
     const r = await call("/me/events");
     expect(r.status).toBe(200);

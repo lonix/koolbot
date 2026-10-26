@@ -2208,7 +2208,7 @@ Members cannot opt out. Nothing is a command: the host only ticks the box.
   restore whose answer was lost is never recorded as done.
 - **Who cannot be tagged:** the server owner and anyone whose highest role is at or above the
   bot's role (Discord does not let a bot rename them). They are listed under **Clan tags**
-  in the Groups card of the host panel, with the reason, and are not retried more than every
+  under **Clan tags** in **Group details** of the host panel, with the reason, and are not retried more than every
   ten minutes. Without the **Manage Nicknames** permission nothing is applied and the card
   says so; it applies the tags within a minute of the permission being given. One person
   can carry one event's tag at a time: someone still wearing another event's tag is listed
@@ -2271,7 +2271,7 @@ scan makes the record and the server agree: a group whose channel was deleted is
 again while the event is open, and channels recorded for a finished or cancelled event are
 removed. Every pass collects what it could not do (a full category, a rate limit, a missing
 permission) instead of stopping: the bot logs a standing problem once, and the last result is
-shown as a warning in the Groups section of the host panel. Without **Manage Channels** the group channels are skipped and
+shown as a warning at the top of the host panel. Without **Manage Channels** the group channels are skipped and
 the event runs with its main channel only; without **Manage Roles** or **Move Members** the
 channels are created without the host's extra access. A create Discord refuses (a full
 category, say) or rate limits is not repeated for a few minutes, so it cannot fire every scan.
@@ -2293,7 +2293,7 @@ recorded channels cannot be read, or when the bot lacks Manage Channels in the c
 also compares the order in the bot's own cache every minute (no Discord call) and starts a pass
 when a group channel has been moved out of place, so a channel someone drags away is put back
 within a minute or two; that also means a deliberate manual move of a group channel is undone.
-A rate limit, a refusal or a timeout is shown in the Groups section of the host panel and the
+A rate limit, a refusal or a timeout is shown as a warning at the top of the host panel and the
 write is tried again later (after the wait Discord gave, at least a minute; five minutes after a
 refusal; ten after a timeout or any answer that was lost, since the outcome is then unknown), always after reading again first. If
 a write went through but Discord still reports another order, the bot waits five minutes before it
@@ -2323,12 +2323,17 @@ anything that cannot be read counts as "not the host". An event adopted from an
 existing Discord event records the adopting admin as its creator but is not listed
 under Events you host, and the panel never changes the Discord event itself.
 
-The page shows a summary (state, start, duration, repeat, main voice channel) and the
-event's groups. Scheduled and active events also show the team board and its toolbar (#1424, below), **End the event**, and two
+The page opens with its header (#1518): the state as a badge after the title (**Live**, **Planned**, **Ended** or **Cancelled**, the same words as
+**Your events**), then the event's name, its description when it has one, and its start, duration, repeat and main voice channel as a line of
+facts. Problems come next, as warning notices above everything else: what the bot lacks (the permission notice below), the group channels the last
+pass could not set up, and the clan tags it could not apply. A page with nothing wrong shows none. Scheduled and active events then show the
+team board and its toolbar (#1424, below), a folded **Group details** section (who may join each group, whether its channel exists, when channels are
+created, the Captains lobby and the clan tags status), **End the event**, and two
 folded sections at the bottom of the page (#1319, #1424): **Event settings** and **Change the groups**. Each summary states the current
 values (the channel lead time, whether leaders and clan tags are on, and the number and names of the groups), and both open by themselves
 after a settings save, so the result is in view (a board action such as an assignment does not open them). The page is part of the Hosting
-section: its breadcrumb returns to **Your events**. Ended and cancelled events show the read-only summary only. Each action a host takes is
+section: its breadcrumb returns to **Your events**. Ended and cancelled events show the header, the problems and **Group details** only.
+Each action a host takes is
 recorded in the audit log with the event id. The Web UI must be on and the member must be able to get a sign-in link (`/me`) to reach the page.
 
 **The team board and toolbar** (#1424) replace the cards **Assign people**, **Move people**, **Leaders** and **Team names and tags** of the
@@ -2488,7 +2493,7 @@ event is scheduled or active.
 - **Audit:** each press is one audit entry with counts (moved, skipped by reason,
   not confirmed), no names. Move one person also records the person's id.
 
-**Leaders** (#1195) is a section of the host panel, and a column of the Groups card, only while
+**Leaders** (#1195) is a section of the host panel, and a column of the table in **Group details**, only while
 the event has groups and **Group leaders** was ticked on the schedule form. With it off
 nothing about leaders shows, and setting a leader, renaming the label and pulling leaders
 refuse. (Leaders can be switched on or off at any time in **Live settings** below. A repeating
@@ -2871,7 +2876,7 @@ from the host and the current leaders.
 - **Nothing to configure, nothing visible in the group list.** The lobby is stored as a hidden group
   of kind `leads` in the event's groups (so the channel pass, the cleanup and the repeating series
   keep working unchanged), and the switch is read from the presence of that group: there is no
-  separate stored flag and no setting. The group is not listed in the Groups card of the host
+  separate stored flag and no setting. The group is not listed in **Group details** of the host
   panel (one line under it says whether the lobby is on and whether its channel exists), has no name or
   size field in Live settings, no remove tick box, no kind choice, and does not count as the group
   an event keeps. It is named after what leaders are called ("Leader lobby", "Captain lobby"), and
@@ -3039,7 +3044,7 @@ see but not join. It is made with the other group channels (#1190) and removed w
   permissions, which the @everyone deny overrides; a deny the category already has (View
   for @everyone, or any deny on that role) is never lifted, and View is not added while
   @everyone's View is denied. While the admin groups cannot be read nothing is stripped
-  or granted on a guess, the channel is not marked verified, the Groups section says so, and
+  or granted on a guess, the channel is not marked verified, the warning at the top of the host panel says so, and
   the next pass after a few minutes does it.
 - **Leaders** here are the event's current leaders (a team group's leader who is also
   a member of it, only while the event's leaders switch is on), read from the event as it
@@ -3053,7 +3058,7 @@ see but not join. It is made with the other group channels (#1190) and removed w
   for one event are merged into one when several changes arrive together), and a channel
   that was deleted and made again meanwhile is handled from the new record. Nothing is
   written when the event or the channel cannot be read, or when the bot lacks **Manage
-  Roles** on the channel: the Groups section of the host panel says why.
+  Roles** on the channel: the warning at the top of the host panel says why.
 - **A leader who loses access is moved out** (after the overwrites, never inside the
   channel lock): if they are connected to the leaders-only channel they go to the channel
   of the team group they are in, or to the main channel if they have none or it has no
@@ -3097,7 +3102,7 @@ see but not join. It is made with the other group channels (#1190) and removed w
   role with access. This holds the same way when the channel is created, in a pass and in the
   scan's check. While the category cannot be
   read grants no View, enforces nothing and leaves the channel
-  unverified with a note in the Groups section). Each scan also reads the admin groups'
+  unverified with a warning at the top of the host panel). Each scan also reads the admin groups'
   roles again, so a role that became or stopped being an admin group's role gets its allow
   or loses it without anyone touching the event. A pass that fails marks the channel
   unverified, so one more check runs after the wait and clears what was reported. Someone who
@@ -3108,7 +3113,7 @@ see but not join. It is made with the other group channels (#1190) and removed w
   (as for every group channel) and **Manage Roles** plus the permissions it grants (View
   Channel, Connect, Speak and Move Members) in the events category. If any is missing, or
   Discord refuses the overwrites anyway, the channel is created **without** the
-  restriction, so anyone who can see it can join, and the Groups section of the host
+  restriction, so anyone who can see it can join, and the warning at the top of the host
   panel says so, naming what is missing, until a later pass has restricted it. Later
   changes need **Manage Roles** on the channel. While `events.enabled` is off a pass only
   takes access away, never gives it.
@@ -3122,11 +3127,15 @@ see but not join. It is made with the other group channels (#1190) and removed w
   the box to leave people in open and leaders-only channels; Pull leaders only aims at it
   by default; Move one person accepts only the host or a leader for it.
 
-**End the event** (#1193) ends a running event now. It is the **End the event** section of
-the host panel (shown for every open event; the form only for an `active` one, a scheduled
+**End the event** (#1193) ends a running event now. It is the **End the event** panel of
+the host panel (shown for every open event; the button only for an `active` one, a scheduled
 event says it can be ended once it has started) and an **End now** control on every
-`active` row of the Events table (admin only). Both are one small form with a required tick
-box, "I want to end this event now", that the server checks again: a post without it changes
+`active` row of the Events table (admin only). On the host panel (#1518), **End event now** asks in the
+confirmation dialog, which lists what ending does (the reminders stop, people in group channels are moved back to the main channel, the group
+channels are removed and leaders cleared, the main channel is removed after the grace period, the Discord event is closed or, for an adopted one,
+left as it is, and that it cannot be undone). Without scripts there is no dialog: the form shows the same list and a required tick box, "I want to
+end this event now". The **End now** control of the Events table is still one small form with a required tick
+box. In both the server checks the confirmation again: a post without it changes
 nothing, so the confirmation holds without scripts. An event with group channels needs no extra choice: a host end
 always moves everyone in a group channel back to the main channel first (there is no option to skip it). A
 group channel that still holds someone afterwards (for example when the bot may not move members) is left

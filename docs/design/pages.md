@@ -179,8 +179,19 @@ The host panel for a live event, as an event host who is neither admin nor moder
 - At the bottom, folded: *Event settings* (Group leaders and Clan tags, children nested) and *Change the groups* (add, remove, preset, switch off).
   Each summary states the current values.
 
-**As built (#1319, #1424).** The panel is in the Hosting section (`active` is `/me/events`, breadcrumb *Your events*). The body is the Summary and
-Groups cards, then the board (`src/web/host-board-view.ts`), then *End the event*, then the two folds.
+**As built (#1319, #1424, #1518).** The panel is in the Hosting section (`active` is `/me/events`, breadcrumb *Your events*). The body is the header,
+the problems, the board (`src/web/host-board-view.ts`), the folded *Group details*, *End the event*, then the two folds.
+
+- *Header*: the `h1` is *Host panel* with the state as a `kb-badge` after it (*Live*, *Planned*, *Ended*, *Cancelled*: `eventStateWord`, shared with
+  *Your events*); `kb-pagehead__sub` is the event's title, a second one carries the description; `kb-pagehead__meta` has one icon span each for the
+  start, duration, repeat, main channel and an adopted event's note.
+- *Problems*: the permission notice, the group-channel warnings and the clan tag warnings are warn Callouts directly under the header, before the board.
+- *Group details*: a closed `kb-disclosure` under the board with who may join each group, whether its channel exists, when channels are made, the
+  Captains lobby line and the clan tags status. It keeps the table's every column. An ended or cancelled event has no board, so it shows this fold
+  under its read-only Callout.
+- *End the event*: a `kb-panel--danger` with one line and a `kb-btn--danger` *End event now* that opens the Dialog (`data-confirm="End this event
+  now?"`, the list is `endEventItems`). Without script a `noscript` block shows the same list and a required tick box; the server's `confirm=1`
+  check stays. An event that has not started gets a plain panel with one sentence.
 
 - *Toolbar* (`kb-toolbar`, `role=group` with a label): the lock state as a `kb-badge` with *Lock groups* / *Unlock groups*, a separator, *Randomise…* and
   *Move people…*, then *Send to teams* at the end. *Randomise…* and *Move people…* are `details.kb-toolbar__action` (a disclosure, so they work
@@ -196,7 +207,6 @@ Groups cards, then the board (`src/web/host-board-view.ts`), then *End the event
 - *Folds* at the bottom, as `kb-disclosure`: *Event settings* (lead time, *Group leaders* and *Clan tags* with their children, the leader label and what
   leaders changed) and *Change the groups* (names and sizes, preset, add, remove, switch off). Their summaries state the current values (for example
   *Channels 20 min before the start · Captains on · Clan tags on* and *2 groups: Reds, Blues*). They open only after a settings save.
-- Not built here: the Summary, Groups and *End the event* parts are still the cards of #1189, and the edit page is #1298's.
 
 ## Moderator
 

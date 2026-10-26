@@ -497,11 +497,31 @@ describe("host panel page", () => {
 
   it("shows only the sections that apply to a plain event", async () => {
     const r = await call(url(PANEL));
-    expect(r.text).toContain("This event has no groups.");
     expect(r.text).toContain('id="host-end"');
     expect(r.text).not.toContain('id="host-board"');
     // Switching groups on is still offered, from the second fold.
     expect(r.text).toContain('id="host-groupchanges"');
+  });
+
+  it("says the state in words, the same ones as Your events (#1518)", async () => {
+    const cases: Array<[Partial<FakeEvent>, string]> = [
+      [{ state: "scheduled" }, "Planned"],
+      // Active, but its start is still ahead: not running yet.
+      [{ state: "active" }, "Planned"],
+      [{ state: "active", startTime: new Date(Date.now() - 600_000) }, "Live"],
+      [{ state: "ended" }, "Ended"],
+      [{ state: "cancelled" }, "Cancelled"],
+    ];
+    for (const [over, word] of cases) {
+      events[EVENT_ID] = makeEvent(over);
+      const r = await call(url(PANEL));
+      expect(r.text).toMatch(
+        new RegExp(
+          `<h1 class="kb-pagehead__title">Host panel <span class="kb-badge kb-badge--(on|off|info)">${word}</span></h1>`,
+        ),
+      );
+      expect(r.text).not.toContain('class="tag ');
+    }
   });
 
   it("is a read-only summary for ended and cancelled events", async () => {
@@ -509,7 +529,9 @@ describe("host panel page", () => {
       events[EVENT_ID] = makeEvent({ state });
       const r = await call(url(PANEL));
       expect(r.status).toBe(200);
-      expect(r.text).toContain("read-only summary");
+      expect(r.text).toContain(
+        `This event is ${state}, so this page is a read-only summary`,
+      );
       expect(r.text).not.toContain('id="host-end"');
     }
   });

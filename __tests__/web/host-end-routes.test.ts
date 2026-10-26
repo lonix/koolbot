@@ -426,13 +426,37 @@ describe("the end section", () => {
 
   it("says the Discord event is closed, or for an adopted event that it is left as it is", async () => {
     const own = await call(PANEL);
-    expect(own.text).toContain("the Discord event is closed");
+    expect(own.text).toContain("The Discord event is closed.");
     events[EVENT_ID] = makeEvent({ nativeAdopted: true });
     const adopted = await call(PANEL);
     expect(adopted.text).toContain(
-      "KoolBot stops tracking the Discord event; the Discord event is left as it is",
+      "KoolBot stops tracking the Discord event; the Discord event is left as it is.",
     );
-    expect(adopted.text).not.toContain("the Discord event is closed");
+    expect(adopted.text).not.toContain("The Discord event is closed.");
+  });
+
+  it("asks in the shared dialog: the title is the question and the list holds every consequence (#1518)", async () => {
+    const r = await call(PANEL);
+    const form = (r.text.match(/<form[\s\S]*?<\/form>/g) ?? []).find((f) =>
+      f.includes(`action="${PANEL}/end"`),
+    ) as string;
+    expect(form).toContain('data-confirm="End this event now?"');
+    const raw = form.match(/data-confirm-list="([^"]*)"/)?.[1] as string;
+    const items = JSON.parse(
+      raw
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&amp;/g, "&"),
+    ) as string[];
+    expect(items).toContain(
+      "Everyone in a group channel is moved back to the main channel first.",
+    );
+    expect(items.at(-1)).toBe("This cannot be undone.");
+    // The submit button supplies the confirmation the dialog collected.
+    expect(form).toContain(
+      '<button type="submit" class="kb-btn kb-btn--danger" name="confirm" value="1">End event now</button>',
+    );
+    expect(r.text).toContain("kb-panel kb-panel--danger");
   });
 
   it("does not mention a pull-back for an event without group channels", async () => {
