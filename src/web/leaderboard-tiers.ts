@@ -97,66 +97,117 @@ export function serializeTiers(tiers: readonly LeaderboardTier[]): string {
 export type TierRowsResult =
   { ok: true; tiers: LeaderboardTier[] } | { ok: false; error: string };
 
+/** One refused field of the tier editor (#1523). */
+export interface TierRowError {
+  /** Position of the row in the submitted `topN[]` / `roleId[]` arrays. */
+  index: number;
+  field: "topN" | "roleId";
+  /** What to change, worded for the line under the field. */
+  message: string;
+  /** The same refusal as one sentence naming the row, for a flash. */
+  flat: string;
+}
+
 /**
- * Validate the editor's submitted rows (parallel `topN[]` / `roleId[]`
- * arrays). A row with both halves blank is an empty slot and is dropped; a
- * half-filled row is an error rather than being silently discarded. Checks
- * the shape only — whether each role exists and sits below the bot's role is
- * a guild lookup the route does afterwards.
+ * Check the editor's submitted rows (parallel `topN[]` / `roleId[]` arrays)
+ * and say which field of which row is wrong. A row with both halves blank is
+ * an empty slot and is dropped; a half-filled row is an error rather than
+ * being silently discarded. Checks the shape only: whether each role exists
+ * and sits below the bot's role is a guild lookup the route does afterwards.
+ * `tiers` is only meaningful when `errors` is empty.
  */
-export function validateTierRows(
+export function checkTierRows(
   topNs: readonly string[],
   roleIds: readonly string[],
-): TierRowsResult {
+): { tiers: LeaderboardTier[]; errors: TierRowError[] } {
   const tiers: LeaderboardTier[] = [];
+  const errors: TierRowError[] = [];
   const seenTopN = new Set<number>();
   const seenRole = new Set<string>();
+  const filled: number[] = [];
   const count = Math.max(topNs.length, roleIds.length);
   for (let i = 0; i < count; i++) {
     const topNRaw = (topNs[i] ?? "").trim();
     const roleId = (roleIds[i] ?? "").trim();
     if (!topNRaw && !roleId) continue;
+    filled.push(i);
     const row = `Row ${i + 1}`;
-    if (!topNRaw) return { ok: false, error: `${row}: enter a Top N.` };
-    if (!roleId) return { ok: false, error: `${row}: pick a role.` };
-    if (!/^\d+$/.test(topNRaw)) {
-      return {
-        ok: false,
-        error: `${row}: Top N must be a whole number greater than 0.`,
-      };
-    }
+    const fail = (
+      field: TierRowError["field"],
+      message: string,
+      flat: string,
+    ): void => {
+      errors.push({ index: i, field, message, flat });
+    };
+    const before = errors.length;
     const topN = Number(topNRaw);
-    if (topN < 1 || topN > MAX_TIER_TOP_N) {
-      return {
-        ok: false,
-        error: `${row}: Top N must be between 1 and ${MAX_TIER_TOP_N}.`,
-      };
+    if (!topNRaw) {
+      fail("topN", "Enter a Top N.", `${row}: enter a Top N.`);
+    } else if (!/^\d+$/.test(topNRaw)) {
+      fail(
+        "topN",
+        "Use a whole number greater than 0.",
+        `${row}: Top N must be a whole number greater than 0.`,
+      );
+    } else if (topN < 1 || topN > MAX_TIER_TOP_N) {
+      fail(
+        "topN",
+        `Use 1 to ${MAX_TIER_TOP_N}.`,
+        `${row}: Top N must be between 1 and ${MAX_TIER_TOP_N}.`,
+      );
+    } else if (seenTopN.has(topN)) {
+      fail(
+        "topN",
+        "Another tier has this Top N. Each Top N must be unique.",
+        `Top ${topN} is used by more than one tier. Each Top N must be unique.`,
+      );
     }
-    if (!ROLE_ID_RE.test(roleId)) {
-      return { ok: false, error: `${row}: that is not a valid role.` };
+    if (!roleId) {
+      fail("roleId", "Pick a role.", `${row}: pick a role.`);
+    } else if (!ROLE_ID_RE.test(roleId)) {
+      fail(
+        "roleId",
+        "Pick a role from the list.",
+        `${row}: that is not a valid role.`,
+      );
+    } else if (seenRole.has(roleId)) {
+      // The service tracks holders per role, so two tiers sharing a role would
+      // grant and revoke it against each other on every run.
+      fail(
+        "roleId",
+        "Another tier uses this role. Each tier needs its own role.",
+        `${row}: that role is already used by another tier. Each tier needs its own role.`,
+      );
     }
-    if (seenTopN.has(topN)) {
-      return {
-        ok: false,
-        error: `Top ${topN} is used by more than one tier. Each Top N must be unique.`,
-      };
+    if (errors.length === before) {
+      seenTopN.add(topN);
+      seenRole.add(roleId);
+      tiers.push({ topN, roleId });
     }
-    // The service tracks holders per role, so two tiers sharing a role would
-    // grant and revoke it against each other on every run.
-    if (seenRole.has(roleId)) {
-      return {
-        ok: false,
-        error: `${row}: that role is already used by another tier. Each tier needs its own role.`,
-      };
-    }
-    seenTopN.add(topN);
-    seenRole.add(roleId);
-    tiers.push({ topN, roleId });
   }
-  if (tiers.length > MAX_TIERS) {
-    return { ok: false, error: `At most ${MAX_TIERS} tiers are supported.` };
+  if (errors.length === 0 && tiers.length > MAX_TIERS) {
+    errors.push({
+      index: filled[MAX_TIERS],
+      field: "topN",
+      message: `At most ${MAX_TIERS} tiers are supported. Clear this row.`,
+      flat: `At most ${MAX_TIERS} tiers are supported.`,
+    });
   }
-  return { ok: true, tiers: tiers.sort((a, b) => a.topN - b.topN) };
+  return { tiers: tiers.sort((a, b) => a.topN - b.topN), errors };
+}
+
+/**
+ * {@link checkTierRows} as one result: the first refusal as a sentence, or
+ * the valid tiers ascending by `topN`.
+ */
+export function validateTierRows(
+  topNs: readonly string[],
+  roleIds: readonly string[],
+): TierRowsResult {
+  const { tiers, errors } = checkTierRows(topNs, roleIds);
+  return errors.length > 0
+    ? { ok: false, error: errors[0].flat }
+    : { ok: true, tiers };
 }
 
 /** The parts of a Discord role the assignability check reads. */

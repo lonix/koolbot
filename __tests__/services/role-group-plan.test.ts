@@ -9,6 +9,7 @@ import {
   PERMISSION_PRESETS,
   roleLockReason,
   validateGroupInput,
+  checkGroupInput,
   type GroupSpec,
 } from "../../src/services/role-group-plan.js";
 import type { ScannedState } from "../../src/services/server-adoption-planner.js";
@@ -308,5 +309,29 @@ describe("buildDesiredState", () => {
     );
     expect(issues).toEqual([]);
     expect(desired.roles).toEqual([]);
+  });
+});
+
+describe("checkGroupInput (#1523)", () => {
+  it.each([
+    [{ name: " " }, "name"],
+    [{ name: "x".repeat(101) }, "name"],
+    [{ name: "vip" }, "name"],
+    [{ name: "a", capabilities: ["owner"] }, "capability"],
+    [{ name: "a", capabilities: ["bot", "staff"] }, "capability"],
+    [{ name: "a", gateOnly: true, capabilities: ["staff"] }, "capability"],
+    [{ name: "a", colour: 0x1000000 }, "colour"],
+    // Not about a control the form has: only a crafted request gets here.
+    [{ name: "a", permissions: "abc" }, null],
+    [{ name: "a", rank: -1 }, null],
+  ])("names the field of %j", (input, field) => {
+    expect(checkGroupInput(input, [{ name: "VIP" }])?.field).toBe(field);
+  });
+
+  it("says the same thing as validateGroupInput", () => {
+    expect(checkGroupInput({ name: "vip" }, [{ name: "VIP" }])?.message).toBe(
+      validateGroupInput({ name: "vip" }, [{ name: "VIP" }]),
+    );
+    expect(checkGroupInput({ name: "VIP" }, [])).toBeNull();
   });
 });

@@ -40,6 +40,7 @@ import {
   catalogNotice,
   enabledPresets,
   loadPresetCatalog,
+  PRESET_FORM_FIELDS,
 } from "../services/event-group-preset-service.js";
 import { resolveGroupCountLimits } from "../services/event-groups.js";
 import { loadGroupPrefill } from "../services/event-last-setup-service.js";
@@ -201,6 +202,7 @@ import {
   type TicketRow,
   renderQuotesPage,
   renderBirthdaysPage,
+  birthdayEditForm,
   renderReactionRolesPage,
   renderSettingsPage,
   renderVoiceChannelsPage,
@@ -977,6 +979,50 @@ export function readFlash(req: Pick<Request, "query">): FlashMessage | null {
 const INVALID_KEYS_MAX = 25;
 const CONFIG_KEY_RE = /^[a-z0-9_]+(\.[a-z0-9_]+)*$/i;
 
+/**
+ * The page of the Birthdays list to draw (#1523). A refused edit is a POST with
+ * no `?page=`, so the page that holds the refused member is drawn instead of
+ * page 1, where that row may not be.
+ */
+export function birthdaysPageFor(
+  entries: ReadonlyArray<{ userId: string }>,
+  refusedForm: RefusedForm | null,
+  requestedPage: number,
+  pageSize: number,
+): number {
+  const at = refusedForm
+    ? entries.findIndex(
+        (e) => birthdayEditForm(e.userId) === refusedForm.formId,
+      )
+    : -1;
+  return at >= 0 ? Math.floor(at / pageSize) + 1 : requestedPage;
+}
+
+/**
+ * The query (`page`, `action`, `user`) the Moderation log is drawn with. A
+ * refused Open case form is a POST with no query string; it hands back the
+ * page's own query as the hidden `view_query` field, so the same log rows are
+ * drawn and the refused row is on the page (#1523). Only those keys are read,
+ * and only from the first 200 characters.
+ */
+export function moderationLogQuery(
+  refusedForm: RefusedForm | null,
+  body: unknown,
+  query: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!refusedForm) return query;
+  const raw = (body as { view_query?: unknown } | undefined)?.view_query;
+  const params = new globalThis.URLSearchParams(
+    typeof raw === "string" ? raw.slice(0, 200) : "",
+  );
+  return Object.fromEntries(
+    ["page", "action", "user"].flatMap((key) => {
+      const value = params.get(key);
+      return value === null ? [] : [[key, value]];
+    }),
+  );
+}
+
 export function readInvalidKeys(req: Pick<Request, "query">): string[] {
   const raw = req.query.invalid;
   if (typeof raw !== "string" || raw === "") return [];
@@ -1508,180 +1554,188 @@ export function createReadOnlyRouter(
   );
 
   // ---------- Events ----------
+  const renderEvents = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const service = EventService.getInstance(client);
+    const config = ConfigService.getInstance();
+    const [
+      enabled,
+      categoryId,
+      announcementChannelId,
+      tz,
+      events,
+      eventSettings,
+      groupDefaultCount,
+      groupMaxCount,
+    ] = await Promise.all([
+      config.getBoolean("events.enabled", false),
+      config.getString("events.category_id", ""),
+      config.getString("events.announcement_channel_id", ""),
+      config.getString("events.timezone", ""),
+      service.listEvents(common.guildId),
+      // Editable `events.*` settings card (#975).
+      loadFeatureSettings(client, common.guildId, EVENTS_SETTING_KEYS),
+      config.getNumber("events.groups.default_count", 2),
+      config.getNumber("events.groups.max_count", 15),
+    ]);
+
+    // "Expected to show up": who marked Interested on the native event, read
+    // live from Discord for the next few upcoming events. Nothing is stored.
+    const expectedById = new Map<string, EventExpected>();
+    const upcoming = events
+      .filter((e) => e.state === "scheduled" || e.state === "active")
+      .slice(0, MAX_EVENTS_PER_VIEW);
+    await Promise.all(
+      upcoming.map(async (e) => {
+        if (!e.nativeEventId) {
+          expectedById.set(String(e._id), {
+            kind: "none",
+            message: e.nativeDetached
+              ? "Deleted from Discord's Events list."
+              : "Not on Discord's Events list yet.",
+          });
+          return;
+        }
+        expectedById.set(
+          String(e._id),
+          await loadInterested(client, e.guildId, e.nativeEventId),
+        );
+      }),
+    );
+    const permissionNotice = await loadPermissionNotice({
+      client,
+      guildId: common.guildId,
+      enabled,
+      filter: inAreas("Events"),
+    });
+
+    // The event's channel by name and type, from the guild cache: no Discord
+    // call. Gone (or not cached) is null, which the row shows as unavailable.
+    const guildChannels = client.guilds.cache.get(common.guildId)?.channels
+      .cache;
+    const channelLabelOf = (
+      id: string | null | undefined,
+    ): { channelName?: string | null; channelType?: ChannelType | null } => {
+      if (!id) return {};
+      const ch = guildChannels?.get(id);
+      return ch
+        ? { channelName: ch.name, channelType: ch.type }
+        : { channelName: null, channelType: null };
+    };
+
+    const rows = events.map((e) => {
+      const counts = countRsvps(e.rsvps);
+      const finished = e.state === "ended" || e.state === "cancelled";
+      return {
+        id: String(e._id),
+        title: e.title,
+        when: formatEventWhen(e),
+        state: e.state,
+        // Legacy RSVPs (events made before native-only events) stay
+        // visible until the event is over.
+        legacyRsvps:
+          !finished && e.rsvps.length > 0
+            ? { going: counts.going, maybe: counts.maybe, cant: counts.cant }
+            : null,
+        expected: expectedById.get(String(e._id)) ?? null,
+        channelId: e.channelId,
+        ...channelLabelOf(e.channelId),
+        recurrence: isRecurring(e) ? recurrenceLabel(e.recurrence) : null,
+        occurrence: isRecurring(e) ? e.occurrenceIndex + 1 : null,
+        awaitingSuccessor:
+          isRecurring(e) &&
+          (e.state === "ended" || e.state === "cancelled") &&
+          !e.nextSpawned &&
+          !e.seriesCancelled,
+        groupCount: e.groupsEnabled ? (e.groups?.length ?? 0) : undefined,
+        hasGroupChannels:
+          e.groupsEnabled === true &&
+          (e.groups ?? []).some((g) => !!g.channelId),
+        nativeAdopted: e.nativeAdopted === true,
+        cover: e.nativeAdopted
+          ? ({ kind: "adopted" } as const)
+          : coverIneligibleReason(e)
+            ? e.nativeDetached &&
+              e.recurrence === "none" &&
+              (e.state === "scheduled" || e.state === "active")
+              ? ({ kind: "detached" } as const)
+              : null
+            : ({
+                kind: "editable",
+                hasCover: !!e.coverHash,
+                series: isRecurring(e),
+              } as const),
+      };
+    });
+
+    // The picker's presets: enabled built-ins plus enabled library presets
+    // (#1200). Never throws; an unreadable library fails closed and says so.
+    // The viewing admin's own personal presets are included (#1216).
+    const presetCatalog = await loadPresetCatalog(common.guildId, {
+      ownerId: req.webSession?.discordUserId,
+    });
+
+    // The admin's last group setup (#1406), unless they asked for the defaults.
+    // A failed read is "no prefill" and never blocks the form.
+    const offeredPresets = enabledPresets(presetCatalog);
+    const prefill =
+      req.query.defaults === "1"
+        ? null
+        : await loadGroupPrefill(
+            common.guildId,
+            req.webSession?.discordUserId,
+            {
+              maxCount: resolveGroupCountLimits(
+                groupDefaultCount,
+                groupMaxCount,
+              ).maxCount,
+              presets: offeredPresets,
+            },
+          );
+
+    return renderEventsPage({
+      refusedForm,
+      ...common,
+      enabled,
+      categoryConfigured: categoryId.length > 0,
+      announcementConfigured: announcementChannelId.length > 0,
+      permissionNotice,
+      // Resolve to a usable zone (falls back to server tz on an invalid
+      // value) so the UI shows exactly what event parsing will use.
+      timezone: resolveTimezone(tz),
+      rows,
+      settingRows: eventSettings.settingRows,
+      settingsPickers: eventSettings.pickers,
+      dependencyState: eventSettings.dependencyState,
+      settingsUnavailable: eventSettings.unavailable,
+      groupLimits: {
+        defaultCount: groupDefaultCount,
+        maxCount: groupMaxCount,
+      },
+      groupPresets: offeredPresets,
+      groupPresetsNotice: catalogNotice(
+        presetCatalog.state,
+        presetCatalog.personalUnreadable,
+      ),
+      groupRemembered: prefill
+        ? {
+            prefill,
+            resetHref: "/admin/events?defaults=1#schedule-event",
+          }
+        : null,
+      flash: readFlash(req),
+    });
+  };
+  registerFormPage("/admin/events", (req, refused) =>
+    renderEvents(req as AuthenticatedRequest, refused),
+  );
   router.get(
     "/events",
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
-      const service = EventService.getInstance(client);
-      const config = ConfigService.getInstance();
-      const [
-        enabled,
-        categoryId,
-        announcementChannelId,
-        tz,
-        events,
-        eventSettings,
-        groupDefaultCount,
-        groupMaxCount,
-      ] = await Promise.all([
-        config.getBoolean("events.enabled", false),
-        config.getString("events.category_id", ""),
-        config.getString("events.announcement_channel_id", ""),
-        config.getString("events.timezone", ""),
-        service.listEvents(common.guildId),
-        // Editable `events.*` settings card (#975).
-        loadFeatureSettings(client, common.guildId, EVENTS_SETTING_KEYS),
-        config.getNumber("events.groups.default_count", 2),
-        config.getNumber("events.groups.max_count", 15),
-      ]);
-
-      // "Expected to show up": who marked Interested on the native event, read
-      // live from Discord for the next few upcoming events. Nothing is stored.
-      const expectedById = new Map<string, EventExpected>();
-      const upcoming = events
-        .filter((e) => e.state === "scheduled" || e.state === "active")
-        .slice(0, MAX_EVENTS_PER_VIEW);
-      await Promise.all(
-        upcoming.map(async (e) => {
-          if (!e.nativeEventId) {
-            expectedById.set(String(e._id), {
-              kind: "none",
-              message: e.nativeDetached
-                ? "Deleted from Discord's Events list."
-                : "Not on Discord's Events list yet.",
-            });
-            return;
-          }
-          expectedById.set(
-            String(e._id),
-            await loadInterested(client, e.guildId, e.nativeEventId),
-          );
-        }),
-      );
-      const permissionNotice = await loadPermissionNotice({
-        client,
-        guildId: common.guildId,
-        enabled,
-        filter: inAreas("Events"),
-      });
-
-      // The event's channel by name and type, from the guild cache: no Discord
-      // call. Gone (or not cached) is null, which the row shows as unavailable.
-      const guildChannels = client.guilds.cache.get(common.guildId)?.channels
-        .cache;
-      const channelLabelOf = (
-        id: string | null | undefined,
-      ): { channelName?: string | null; channelType?: ChannelType | null } => {
-        if (!id) return {};
-        const ch = guildChannels?.get(id);
-        return ch
-          ? { channelName: ch.name, channelType: ch.type }
-          : { channelName: null, channelType: null };
-      };
-
-      const rows = events.map((e) => {
-        const counts = countRsvps(e.rsvps);
-        const finished = e.state === "ended" || e.state === "cancelled";
-        return {
-          id: String(e._id),
-          title: e.title,
-          when: formatEventWhen(e),
-          state: e.state,
-          // Legacy RSVPs (events made before native-only events) stay
-          // visible until the event is over.
-          legacyRsvps:
-            !finished && e.rsvps.length > 0
-              ? { going: counts.going, maybe: counts.maybe, cant: counts.cant }
-              : null,
-          expected: expectedById.get(String(e._id)) ?? null,
-          channelId: e.channelId,
-          ...channelLabelOf(e.channelId),
-          recurrence: isRecurring(e) ? recurrenceLabel(e.recurrence) : null,
-          occurrence: isRecurring(e) ? e.occurrenceIndex + 1 : null,
-          awaitingSuccessor:
-            isRecurring(e) &&
-            (e.state === "ended" || e.state === "cancelled") &&
-            !e.nextSpawned &&
-            !e.seriesCancelled,
-          groupCount: e.groupsEnabled ? (e.groups?.length ?? 0) : undefined,
-          hasGroupChannels:
-            e.groupsEnabled === true &&
-            (e.groups ?? []).some((g) => !!g.channelId),
-          nativeAdopted: e.nativeAdopted === true,
-          cover: e.nativeAdopted
-            ? ({ kind: "adopted" } as const)
-            : coverIneligibleReason(e)
-              ? e.nativeDetached &&
-                e.recurrence === "none" &&
-                (e.state === "scheduled" || e.state === "active")
-                ? ({ kind: "detached" } as const)
-                : null
-              : ({
-                  kind: "editable",
-                  hasCover: !!e.coverHash,
-                  series: isRecurring(e),
-                } as const),
-        };
-      });
-
-      // The picker's presets: enabled built-ins plus enabled library presets
-      // (#1200). Never throws; an unreadable library fails closed and says so.
-      // The viewing admin's own personal presets are included (#1216).
-      const presetCatalog = await loadPresetCatalog(common.guildId, {
-        ownerId: req.webSession?.discordUserId,
-      });
-
-      // The admin's last group setup (#1406), unless they asked for the defaults.
-      // A failed read is "no prefill" and never blocks the form.
-      const offeredPresets = enabledPresets(presetCatalog);
-      const prefill =
-        req.query.defaults === "1"
-          ? null
-          : await loadGroupPrefill(
-              common.guildId,
-              req.webSession?.discordUserId,
-              {
-                maxCount: resolveGroupCountLimits(
-                  groupDefaultCount,
-                  groupMaxCount,
-                ).maxCount,
-                presets: offeredPresets,
-              },
-            );
-
-      res.type("text/html").send(
-        renderEventsPage({
-          ...common,
-          enabled,
-          categoryConfigured: categoryId.length > 0,
-          announcementConfigured: announcementChannelId.length > 0,
-          permissionNotice,
-          // Resolve to a usable zone (falls back to server tz on an invalid
-          // value) so the UI shows exactly what event parsing will use.
-          timezone: resolveTimezone(tz),
-          rows,
-          settingRows: eventSettings.settingRows,
-          settingsPickers: eventSettings.pickers,
-          dependencyState: eventSettings.dependencyState,
-          settingsUnavailable: eventSettings.unavailable,
-          groupLimits: {
-            defaultCount: groupDefaultCount,
-            maxCount: groupMaxCount,
-          },
-          groupPresets: offeredPresets,
-          groupPresetsNotice: catalogNotice(
-            presetCatalog.state,
-            presetCatalog.personalUnreadable,
-          ),
-          groupRemembered: prefill
-            ? {
-                prefill,
-                resetHref: "/admin/events?defaults=1#schedule-event",
-              }
-            : null,
-          flash: readFlash(req),
-        }),
-      );
+      res.type("text/html").send(await renderEvents(req, null));
     }),
   );
 
@@ -1698,22 +1752,36 @@ export function createReadOnlyRouter(
   );
 
   // Group preset library (#1200): the admin page for the server-wide presets.
+  // One renderer for the GET and for a refused editor (#1523). A refused save
+  // is a POST with no query string: the preset being edited comes from the
+  // form's own `preset_id`, and the editor holds what was typed.
+  const renderEventPresets = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const data = await loadEventPresetsPage(
+      client,
+      common.guildId,
+      refusedForm
+        ? { edit: refusedForm.values[PRESET_FORM_FIELDS.id] ?? "" }
+        : (req.query as Record<string, unknown>),
+    );
+    return renderEventPresetsPage({
+      ...common,
+      ...data,
+      ...(refusedForm ? { values: refusedForm.values } : {}),
+      refusedForm,
+      flash: readFlash(req),
+    });
+  };
+  registerFormPage("/admin/events/presets", (req, refused) =>
+    renderEventPresets(req as AuthenticatedRequest, refused),
+  );
   router.get(
     "/events/presets",
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
-      const data = await loadEventPresetsPage(
-        client,
-        common.guildId,
-        req.query as Record<string, unknown>,
-      );
-      res.type("text/html").send(
-        renderEventPresetsPage({
-          ...common,
-          ...data,
-          flash: readFlash(req),
-        }),
-      );
+      res.type("text/html").send(await renderEventPresets(req, null));
     }),
   );
 
@@ -2149,145 +2217,157 @@ export function createReadOnlyRouter(
   );
 
   // ---------- Birthdays (#986) ----------
+  const renderBirthdays = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const session = req.webSession;
+    if (!session) throw new Error("requireSession middleware must run first");
+    const config = ConfigService.getInstance();
+    const pageSize = 25;
+    const pageRaw = Number.parseInt(String(req.query.page ?? "1"), 10);
+    const requestedPage = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+
+    const [
+      enabled,
+      channelId,
+      roleId,
+      cron,
+      template,
+      mention,
+      birthdaySettings,
+      entries,
+    ] = await Promise.all([
+      config.getBoolean("birthdays.enabled", false),
+      config.getString("birthdays.channel_id", ""),
+      config.getString("birthdays.role_id", ""),
+      config.getString("birthdays.cron", "0 * * * *"),
+      config.getString("birthdays.message", "🎂 Happy birthday, {user}! 🎉"),
+      config.getBoolean("birthdays.mention", true),
+      loadFeatureSettings(client, common.guildId, BIRTHDAYS_SETTING_KEYS),
+      BirthdayService.getInstance(client)
+        .listBirthdays(common.guildId)
+        .catch((err: unknown) => {
+          logger.error("birthdays page: list read failed", err);
+          return null;
+        }),
+    ]);
+
+    const total = entries?.length ?? 0;
+    const lastPage = Math.max(1, Math.ceil(total / pageSize));
+    // A refused edit is drawn on the page that holds its row: the POST has
+    // no `?page=`, so the row would otherwise be missing from page 1 (#1523).
+    const page = Math.min(
+      birthdaysPageFor(entries ?? [], refusedForm, requestedPage, pageSize),
+      lastPage,
+    );
+    const pageEntries = (entries ?? []).slice(
+      (page - 1) * pageSize,
+      page * pageSize,
+    );
+
+    const channelNames = new Map<string, string>();
+    const channelTypes = new Map<string, ChannelType>();
+    for (const c of birthdaySettings.pickers.textChannels ?? []) {
+      channelNames.set(c.id, c.name);
+      channelTypes.set(c.id, c.type);
+    }
+    const roleNames = new Map<string, string>();
+    for (const r of birthdaySettings.pickers.roles ?? []) {
+      roleNames.set(r.id, r.name);
+    }
+
+    // Names rather than raw snowflakes, plus the signed-in admin for the
+    // preview: one batched member fetch, best-effort — a miss falls back
+    // to the ID.
+    const viewerId = session.discordUserId;
+    const ids = [
+      ...new Set([...pageEntries.map((e) => e.userId), viewerId]),
+    ].filter((id) => /^\d{17,20}$/.test(id));
+    const userLabels = new Map<string, string>();
+    if (ids.length > 0) {
+      try {
+        const guild = await client.guilds.fetch(common.guildId);
+        const members = await guild.members.fetch({ user: ids });
+        for (const [id, member] of members) {
+          userLabels.set(id, member.displayName ?? member.user.username);
+        }
+      } catch (err) {
+        logger.debug("birthdays page member-label fetch failed", err);
+      }
+    }
+
+    const rows: BirthdayRow[] = pageEntries.map((e) => ({
+      userId: e.userId,
+      userLabel: userLabels.get(e.userId) ?? e.userId,
+      month: e.month,
+      day: e.day,
+      hasYear: e.hasYear,
+      nextDate: e.nextDate,
+      daysUntil: e.daysUntil,
+      roleGranted: e.roleGranted,
+      lastAnnouncedYear: e.lastAnnouncedYear,
+    }));
+
+    const viewerName = userLabels.get(viewerId) ?? "Member";
+    const previewArgs = { userId: viewerId, displayName: viewerName };
+
+    const permissionNotice = await loadPermissionNotice({
+      client,
+      guildId: common.guildId,
+      enabled,
+      filter: inAreas("Birthdays"),
+    });
+
+    return renderBirthdaysPage({
+      refusedForm,
+      ...common,
+      enabled,
+      permissionNotice,
+      channel: channelId
+        ? {
+            name: channelNames.get(channelId) ?? channelId,
+            id: channelId,
+            type: channelTypes.get(channelId) ?? null,
+          }
+        : null,
+      role: roleId
+        ? { name: roleNames.get(roleId) ?? roleId, id: roleId }
+        : null,
+      cron,
+      settingRows: birthdaySettings.settingRows,
+      settingsPickers: birthdaySettings.pickers,
+      dependencyState: birthdaySettings.dependencyState,
+      settingsUnavailable: birthdaySettings.unavailable,
+      preview: {
+        mentionUserId: viewerId,
+        mentionLabel: viewerName,
+        mention,
+        withAge: renderBirthdayMessage(template, {
+          ...previewArgs,
+          age: BIRTHDAY_PREVIEW_AGE,
+        }),
+        withoutAge: template.includes("{age}")
+          ? renderBirthdayMessage(template, { ...previewArgs, age: null })
+          : null,
+        sampleAge: BIRTHDAY_PREVIEW_AGE,
+      },
+      rows,
+      listUnavailable: entries === null,
+      total,
+      page,
+      pageSize,
+      flash: readFlash(req),
+    });
+  };
+  registerFormPage("/admin/birthdays", (req, refused) =>
+    renderBirthdays(req as AuthenticatedRequest, refused),
+  );
   router.get(
     "/birthdays",
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
-      const session = req.webSession;
-      if (!session) throw new Error("requireSession middleware must run first");
-      const config = ConfigService.getInstance();
-      const pageSize = 25;
-      const pageRaw = Number.parseInt(String(req.query.page ?? "1"), 10);
-      const requestedPage =
-        Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
-
-      const [
-        enabled,
-        channelId,
-        roleId,
-        cron,
-        template,
-        mention,
-        birthdaySettings,
-        entries,
-      ] = await Promise.all([
-        config.getBoolean("birthdays.enabled", false),
-        config.getString("birthdays.channel_id", ""),
-        config.getString("birthdays.role_id", ""),
-        config.getString("birthdays.cron", "0 * * * *"),
-        config.getString("birthdays.message", "🎂 Happy birthday, {user}! 🎉"),
-        config.getBoolean("birthdays.mention", true),
-        loadFeatureSettings(client, common.guildId, BIRTHDAYS_SETTING_KEYS),
-        BirthdayService.getInstance(client)
-          .listBirthdays(common.guildId)
-          .catch((err: unknown) => {
-            logger.error("birthdays page: list read failed", err);
-            return null;
-          }),
-      ]);
-
-      const total = entries?.length ?? 0;
-      const lastPage = Math.max(1, Math.ceil(total / pageSize));
-      const page = Math.min(requestedPage, lastPage);
-      const pageEntries = (entries ?? []).slice(
-        (page - 1) * pageSize,
-        page * pageSize,
-      );
-
-      const channelNames = new Map<string, string>();
-      const channelTypes = new Map<string, ChannelType>();
-      for (const c of birthdaySettings.pickers.textChannels ?? []) {
-        channelNames.set(c.id, c.name);
-        channelTypes.set(c.id, c.type);
-      }
-      const roleNames = new Map<string, string>();
-      for (const r of birthdaySettings.pickers.roles ?? []) {
-        roleNames.set(r.id, r.name);
-      }
-
-      // Names rather than raw snowflakes, plus the signed-in admin for the
-      // preview: one batched member fetch, best-effort — a miss falls back
-      // to the ID.
-      const viewerId = session.discordUserId;
-      const ids = [
-        ...new Set([...pageEntries.map((e) => e.userId), viewerId]),
-      ].filter((id) => /^\d{17,20}$/.test(id));
-      const userLabels = new Map<string, string>();
-      if (ids.length > 0) {
-        try {
-          const guild = await client.guilds.fetch(common.guildId);
-          const members = await guild.members.fetch({ user: ids });
-          for (const [id, member] of members) {
-            userLabels.set(id, member.displayName ?? member.user.username);
-          }
-        } catch (err) {
-          logger.debug("birthdays page member-label fetch failed", err);
-        }
-      }
-
-      const rows: BirthdayRow[] = pageEntries.map((e) => ({
-        userId: e.userId,
-        userLabel: userLabels.get(e.userId) ?? e.userId,
-        month: e.month,
-        day: e.day,
-        hasYear: e.hasYear,
-        nextDate: e.nextDate,
-        daysUntil: e.daysUntil,
-        roleGranted: e.roleGranted,
-        lastAnnouncedYear: e.lastAnnouncedYear,
-      }));
-
-      const viewerName = userLabels.get(viewerId) ?? "Member";
-      const previewArgs = { userId: viewerId, displayName: viewerName };
-
-      const permissionNotice = await loadPermissionNotice({
-        client,
-        guildId: common.guildId,
-        enabled,
-        filter: inAreas("Birthdays"),
-      });
-
-      res.type("text/html").send(
-        renderBirthdaysPage({
-          ...common,
-          enabled,
-          permissionNotice,
-          channel: channelId
-            ? {
-                name: channelNames.get(channelId) ?? channelId,
-                id: channelId,
-                type: channelTypes.get(channelId) ?? null,
-              }
-            : null,
-          role: roleId
-            ? { name: roleNames.get(roleId) ?? roleId, id: roleId }
-            : null,
-          cron,
-          settingRows: birthdaySettings.settingRows,
-          settingsPickers: birthdaySettings.pickers,
-          dependencyState: birthdaySettings.dependencyState,
-          settingsUnavailable: birthdaySettings.unavailable,
-          preview: {
-            mentionUserId: viewerId,
-            mentionLabel: viewerName,
-            mention,
-            withAge: renderBirthdayMessage(template, {
-              ...previewArgs,
-              age: BIRTHDAY_PREVIEW_AGE,
-            }),
-            withoutAge: template.includes("{age}")
-              ? renderBirthdayMessage(template, { ...previewArgs, age: null })
-              : null,
-            sampleAge: BIRTHDAY_PREVIEW_AGE,
-          },
-          rows,
-          listUnavailable: entries === null,
-          total,
-          page,
-          pageSize,
-          flash: readFlash(req),
-        }),
-      );
+      res.type("text/html").send(await renderBirthdays(req, null));
     }),
   );
 
@@ -2674,106 +2754,122 @@ export function createReadOnlyRouter(
   );
 
   // ---------- Leaderboard Roles (#985) ----------
+  const renderLeaderboardRoles = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const config = ConfigService.getInstance();
+
+    // One strict config snapshot backs both the settings card and the tier
+    // editor, so a failed read shows the "can't be loaded" notice for both
+    // rather than an empty editor (getString would turn the failure into
+    // "no tiers").
+    const stored = await config.getAll().catch((err: unknown) => {
+      logger.warn("leaderboard roles: config snapshot read failed", err);
+      return null;
+    });
+    const [enabled, voiceTrackingEnabled, period, cron, tiersRaw, settings] =
+      await Promise.all([
+        config.getBoolean("leaderboard_roles.enabled", false),
+        config.getBoolean("voicetracking.enabled", false),
+        config.getString("leaderboard_roles.period", "alltime"),
+        config.getString("leaderboard_roles.update_cron", "0 0 * * 1"),
+        stored === null
+          ? ""
+          : (storedTiersFromSnapshot(stored) ??
+            config.getString(TIERS_KEY, "")),
+        // Loaded whether or not the feature is on, so it can be switched
+        // on from this card as well.
+        loadFeatureSettings(
+          client,
+          common.guildId,
+          LEADERBOARD_ROLES_SETTING_KEYS,
+          stored,
+        ),
+      ]);
+    const parsed = parseTierConfig(tiersRaw);
+    const state = await loadLeaderboardRoleState(
+      client,
+      common.guildId,
+      parsed.tiers,
+    );
+
+    const permissionNotice = await loadPermissionNotice({
+      client,
+      guildId: common.guildId,
+      enabled,
+      filter: inAreas("Leaderboard roles"),
+    });
+
+    return renderLeaderboardRolesPage({
+      refusedForm,
+      ...common,
+      enabled,
+      permissionNotice,
+      voiceTrackingEnabled,
+      period,
+      cron,
+      tiers: state.tiers,
+      ignoredEntries: parsed.ignored,
+      roles: state.roles,
+      settingRows: settings.settingRows,
+      pickers: settings.pickers,
+      dependencyState: settings.dependencyState,
+      settingsUnavailable: settings.unavailable,
+      flash: readFlash(req),
+    });
+  };
+  registerFormPage("/admin/leaderboard-roles", (req, refused) =>
+    renderLeaderboardRoles(req as AuthenticatedRequest, refused),
+  );
   router.get(
     "/leaderboard-roles",
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
-      const config = ConfigService.getInstance();
-
-      // One strict config snapshot backs both the settings card and the tier
-      // editor, so a failed read shows the "can't be loaded" notice for both
-      // rather than an empty editor (getString would turn the failure into
-      // "no tiers").
-      const stored = await config.getAll().catch((err: unknown) => {
-        logger.warn("leaderboard roles: config snapshot read failed", err);
-        return null;
-      });
-      const [enabled, voiceTrackingEnabled, period, cron, tiersRaw, settings] =
-        await Promise.all([
-          config.getBoolean("leaderboard_roles.enabled", false),
-          config.getBoolean("voicetracking.enabled", false),
-          config.getString("leaderboard_roles.period", "alltime"),
-          config.getString("leaderboard_roles.update_cron", "0 0 * * 1"),
-          stored === null
-            ? ""
-            : (storedTiersFromSnapshot(stored) ??
-              config.getString(TIERS_KEY, "")),
-          // Loaded whether or not the feature is on, so it can be switched
-          // on from this card as well.
-          loadFeatureSettings(
-            client,
-            common.guildId,
-            LEADERBOARD_ROLES_SETTING_KEYS,
-            stored,
-          ),
-        ]);
-      const parsed = parseTierConfig(tiersRaw);
-      const state = await loadLeaderboardRoleState(
-        client,
-        common.guildId,
-        parsed.tiers,
-      );
-
-      const permissionNotice = await loadPermissionNotice({
-        client,
-        guildId: common.guildId,
-        enabled,
-        filter: inAreas("Leaderboard roles"),
-      });
-
-      res.type("text/html").send(
-        renderLeaderboardRolesPage({
-          ...common,
-          enabled,
-          permissionNotice,
-          voiceTrackingEnabled,
-          period,
-          cron,
-          tiers: state.tiers,
-          ignoredEntries: parsed.ignored,
-          roles: state.roles,
-          settingRows: settings.settingRows,
-          pickers: settings.pickers,
-          dependencyState: settings.dependencyState,
-          settingsUnavailable: settings.unavailable,
-          flash: readFlash(req),
-        }),
-      );
+      res.type("text/html").send(await renderLeaderboardRoles(req, null));
     }),
   );
 
   // ---------- Role Groups (#1020) ----------
+  const renderRoleGroups = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const session = req.webSession;
+    if (!session) throw new Error("requireSession middleware must run first");
+    const jobParam = req.query.job;
+    const data = await loadRoleGroupsPage(
+      client,
+      common.guildId,
+      session.discordUserId,
+    );
+    // Role groups have no switch: they are in use once the server has one.
+    const permissionNotice = await loadPermissionNotice({
+      client,
+      guildId: common.guildId,
+      enabled: data.groups.length > 0,
+      filter: (f) => f.area === "Role groups" || f.id === "log-role-groups",
+    });
+    return renderRoleGroupsPage({
+      refusedForm,
+      ...common,
+      ...data,
+      permissionNotice,
+      jobId:
+        typeof jobParam === "string" && /^[0-9a-f-]{36}$/i.test(jobParam)
+          ? jobParam
+          : null,
+      flash: readFlash(req),
+    });
+  };
+  registerFormPage("/admin/role-groups", (req, refused) =>
+    renderRoleGroups(req as AuthenticatedRequest, refused),
+  );
   router.get(
     "/role-groups",
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
-      const session = req.webSession;
-      if (!session) throw new Error("requireSession middleware must run first");
-      const jobParam = req.query.job;
-      const data = await loadRoleGroupsPage(
-        client,
-        common.guildId,
-        session.discordUserId,
-      );
-      // Role groups have no switch: they are in use once the server has one.
-      const permissionNotice = await loadPermissionNotice({
-        client,
-        guildId: common.guildId,
-        enabled: data.groups.length > 0,
-        filter: (f) => f.area === "Role groups" || f.id === "log-role-groups",
-      });
-      res.type("text/html").send(
-        renderRoleGroupsPage({
-          ...common,
-          ...data,
-          permissionNotice,
-          jobId:
-            typeof jobParam === "string" && /^[0-9a-f-]{36}$/i.test(jobParam)
-              ? jobParam
-              : null,
-          flash: readFlash(req),
-        }),
-      );
+      res.type("text/html").send(await renderRoleGroups(req, null));
     }),
   );
 
@@ -3070,141 +3166,146 @@ export function createReadOnlyRouter(
   );
 
   // ---------- Moderation log (#728) ----------
+  const renderModeration = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const config = ConfigService.getInstance();
+    const moderationService = ModerationService.getInstance(client);
+
+    const pageSize = 50;
+    const query = moderationLogQuery(refusedForm, req.body, req.query);
+    const pageRaw = Number.parseInt(String(query.page ?? "1"), 10);
+    const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+
+    const actionRaw = String(query.action ?? "").trim();
+    const actionFilter = (MODERATION_ACTIONS as readonly string[]).includes(
+      actionRaw,
+    )
+      ? (actionRaw as ModerationAction)
+      : undefined;
+    const userFilter = String(query.user ?? "").trim() || undefined;
+
+    // moderation.enabled is the master gate: when off, the page renders the
+    // disabled banner and an empty table without querying the log, matching
+    // the "inert until opted in" contract in defaultConfig.
+    const [enabled, moderationSettings] = await Promise.all([
+      config.getBoolean("moderation.enabled", false),
+      // Editable moderation settings card (#977). Loaded whether or not the
+      // feature is on, so it can be switched on from this card as well.
+      loadFeatureSettings(client, common.guildId, MODERATION_SETTING_KEYS),
+    ]);
+    const [total, docs] = enabled
+      ? await Promise.all([
+          moderationService
+            .countRecent(common.guildId, {
+              action: actionFilter,
+              userId: userFilter,
+            })
+            .catch(() => 0),
+          moderationService
+            .getRecent(common.guildId, {
+              action: actionFilter,
+              userId: userFilter,
+              limit: pageSize,
+              skip: (page - 1) * pageSize,
+            })
+            .catch(() => []),
+        ])
+      : [0, []];
+
+    // Raid alerts and the moderation log channels only; the other log channels
+    // are covered where they are configured.
+    const permissionNotice = await loadPermissionNotice({
+      client,
+      guildId: common.guildId,
+      enabled,
+      filter: inFeatures(
+        "raid-alerts",
+        "log-moderation",
+        "log-moderation-review",
+      ),
+    });
+
+    const caseData = await loadModerationCaseData({
+      caseService: ModerationCaseService.getInstance(client),
+      moderationService,
+      guildId: common.guildId,
+      enabled,
+      entryIds: docs.map((d) => d._id as mongoose.Types.ObjectId),
+    });
+    const { casesEnabled, queue, queueCases, casesByEntry } = caseData;
+
+    // Resolve user + moderator labels to display names (batched, cache
+    // first; see `resolveMemberLabels`). Ids that stay unresolved fall back
+    // to the raw snowflake at render time.
+    const idsOnPage = logRowUserIds(docs, common.guildId);
+    for (const c of queueCases) {
+      idsOnPage.add(c.userId);
+      idsOnPage.add(c.openedByUserId);
+      if (c.originModeratorId) idsOnPage.add(c.originModeratorId);
+      // The review job records itself as "system", which is not a
+      // snowflake and would invalidate the whole batched member fetch.
+      for (const e of c.events) {
+        if (e.byUserId !== SYSTEM_ACTOR) idsOnPage.add(e.byUserId);
+      }
+    }
+    const labels = await resolveMemberLabels(
+      client,
+      common.guildId,
+      idsOnPage,
+      new Map([[common.guildId, "Server (anti-raid)"]]),
+    );
+
+    const labelOf = (id: string | null): string =>
+      id ? (labels.get(id) ?? id) : "Unknown";
+    const rows: ModerationRow[] = toModerationRows(docs, casesByEntry, labels);
+
+    // The user filter dropdown is seeded from the target users on this page.
+    const userOptions = Array.from(new Set(docs.map((d) => d.userId)))
+      .sort()
+      .map((id) => ({ id, label: labels.get(id) ?? id }));
+
+    return renderModerationPage({
+      refusedForm,
+      ...common,
+      enabled,
+      permissionNotice,
+      actionOptions: MODERATION_ACTIONS,
+      userOptions,
+      filters: {
+        action: actionFilter ?? "",
+        userId: userFilter ?? "",
+      },
+      rows,
+      total,
+      page,
+      pageSize,
+      casesEnabled,
+      defaultReviewDays: caseData.defaultReviewDays,
+      caseGroups: queue
+        ? buildCaseGroups(
+            queue,
+            caseData.originEntries,
+            caseData.queueHistory,
+            labelOf,
+          )
+        : null,
+      settingRows: moderationSettings.settingRows,
+      pickers: moderationSettings.pickers,
+      dependencyState: moderationSettings.dependencyState,
+      settingsUnavailable: moderationSettings.unavailable,
+      flash: readFlash(req),
+    });
+  };
+  registerFormPage("/admin/moderation", (req, refused) =>
+    renderModeration(req as AuthenticatedRequest, refused),
+  );
   router.get(
     "/moderation",
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
-      const config = ConfigService.getInstance();
-      const moderationService = ModerationService.getInstance(client);
-
-      const pageSize = 50;
-      const pageRaw = Number.parseInt(String(req.query.page ?? "1"), 10);
-      const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
-
-      const actionRaw = String(req.query.action ?? "").trim();
-      const actionFilter = (MODERATION_ACTIONS as readonly string[]).includes(
-        actionRaw,
-      )
-        ? (actionRaw as ModerationAction)
-        : undefined;
-      const userFilter = String(req.query.user ?? "").trim() || undefined;
-
-      // moderation.enabled is the master gate: when off, the page renders the
-      // disabled banner and an empty table without querying the log, matching
-      // the "inert until opted in" contract in defaultConfig.
-      const [enabled, moderationSettings] = await Promise.all([
-        config.getBoolean("moderation.enabled", false),
-        // Editable moderation settings card (#977). Loaded whether or not the
-        // feature is on, so it can be switched on from this card as well.
-        loadFeatureSettings(client, common.guildId, MODERATION_SETTING_KEYS),
-      ]);
-      const [total, docs] = enabled
-        ? await Promise.all([
-            moderationService
-              .countRecent(common.guildId, {
-                action: actionFilter,
-                userId: userFilter,
-              })
-              .catch(() => 0),
-            moderationService
-              .getRecent(common.guildId, {
-                action: actionFilter,
-                userId: userFilter,
-                limit: pageSize,
-                skip: (page - 1) * pageSize,
-              })
-              .catch(() => []),
-          ])
-        : [0, []];
-
-      // Raid alerts and the moderation log channels only; the other log channels
-      // are covered where they are configured.
-      const permissionNotice = await loadPermissionNotice({
-        client,
-        guildId: common.guildId,
-        enabled,
-        filter: inFeatures(
-          "raid-alerts",
-          "log-moderation",
-          "log-moderation-review",
-        ),
-      });
-
-      const caseData = await loadModerationCaseData({
-        caseService: ModerationCaseService.getInstance(client),
-        moderationService,
-        guildId: common.guildId,
-        enabled,
-        entryIds: docs.map((d) => d._id as mongoose.Types.ObjectId),
-      });
-      const { casesEnabled, queue, queueCases, casesByEntry } = caseData;
-
-      // Resolve user + moderator labels to display names (batched, cache
-      // first; see `resolveMemberLabels`). Ids that stay unresolved fall back
-      // to the raw snowflake at render time.
-      const idsOnPage = logRowUserIds(docs, common.guildId);
-      for (const c of queueCases) {
-        idsOnPage.add(c.userId);
-        idsOnPage.add(c.openedByUserId);
-        if (c.originModeratorId) idsOnPage.add(c.originModeratorId);
-        // The review job records itself as "system", which is not a
-        // snowflake and would invalidate the whole batched member fetch.
-        for (const e of c.events) {
-          if (e.byUserId !== SYSTEM_ACTOR) idsOnPage.add(e.byUserId);
-        }
-      }
-      const labels = await resolveMemberLabels(
-        client,
-        common.guildId,
-        idsOnPage,
-        new Map([[common.guildId, "Server (anti-raid)"]]),
-      );
-
-      const labelOf = (id: string | null): string =>
-        id ? (labels.get(id) ?? id) : "Unknown";
-      const rows: ModerationRow[] = toModerationRows(
-        docs,
-        casesByEntry,
-        labels,
-      );
-
-      // The user filter dropdown is seeded from the target users on this page.
-      const userOptions = Array.from(new Set(docs.map((d) => d.userId)))
-        .sort()
-        .map((id) => ({ id, label: labels.get(id) ?? id }));
-
-      res.type("text/html").send(
-        renderModerationPage({
-          ...common,
-          enabled,
-          permissionNotice,
-          actionOptions: MODERATION_ACTIONS,
-          userOptions,
-          filters: {
-            action: actionFilter ?? "",
-            userId: userFilter ?? "",
-          },
-          rows,
-          total,
-          page,
-          pageSize,
-          casesEnabled,
-          defaultReviewDays: caseData.defaultReviewDays,
-          caseGroups: queue
-            ? buildCaseGroups(
-                queue,
-                caseData.originEntries,
-                caseData.queueHistory,
-                labelOf,
-              )
-            : null,
-          settingRows: moderationSettings.settingRows,
-          pickers: moderationSettings.pickers,
-          dependencyState: moderationSettings.dependencyState,
-          settingsUnavailable: moderationSettings.unavailable,
-          flash: readFlash(req),
-        }),
-      );
+      res.type("text/html").send(await renderModeration(req, null));
     }),
   );
 

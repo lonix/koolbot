@@ -92,6 +92,9 @@ jest.unstable_mockModule(
 const { createRoleGroupsRouter, permissionsFromNames } =
   await import("../../src/web/routes/write/role-groups.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
+const { registerFormPage } = await import("../../src/web/form-pages.js");
+const { renderRoleGroupsPage } =
+  await import("../../src/web/role-groups-views.js");
 const { signRoleDeleteReview } = await import("../../src/web/review-token.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
 
@@ -105,6 +108,7 @@ function makeClient(opts: { fetchFails?: boolean } = {}): Client {
       { id: "rBoost", name: "Server Booster", managed: true, position: 4 },
     ],
     ["rTop", { id: "rTop", name: "Above", managed: false, position: 10 }],
+    ["rUsed", { id: "rUsed", name: "Used", managed: false, position: 2 }],
     [
       "guild-1",
       { id: "guild-1", name: "@everyone", managed: false, position: 0 },
@@ -149,6 +153,10 @@ const group = (over = {}) => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // No page to draw a refusal on, unless a test registers one: the flash.
+  registerFormPage("/admin/role-groups", async () => {
+    throw new Error("page unavailable");
+  });
   mockRevalidator.mockReturnValue(async () => []);
   svc.create.mockResolvedValue({ ok: true, group: group() });
   svc.update.mockResolvedValue({ ok: true, group: group() });
@@ -300,6 +308,258 @@ describe("POST /role-groups/create", () => {
     );
     expect(res.status).toBe(403);
     expect(svc.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("a refused Role groups form (#1523)", () => {
+  // The read router registers the page's renderer in the app; here the real
+  // view stands in with one stored group (g1) and two roles to pick from.
+  beforeEach(() => {
+    registerFormPage("/admin/role-groups", async (_req, refused) =>
+      renderRoleGroupsPage({
+        csrfToken: "csrf",
+        remainingMs: 1000,
+        groups: [
+          {
+            ...group(),
+            rank: 1,
+            permissions: "0",
+            colour: null,
+            hoist: false,
+            unlinked: false,
+            lostRoleId: null,
+            recreateRequestedAt: null,
+            syncPolicy: null,
+            driftSignature: null,
+            createdAt: new Date(),
+            roleName: "Helpers",
+            roleMissing: false,
+            memberCount: 3,
+            roleLock: null,
+            drift: [],
+          } as never,
+        ],
+        roleOptions: [
+          {
+            id: "rOk",
+            name: "Helpers",
+            memberCount: 3,
+            lock: null,
+            taken: false,
+          },
+          {
+            id: "rTop",
+            name: "Above",
+            memberCount: 1,
+            lock: "hierarchy",
+            taken: false,
+          },
+          {
+            id: "rUsed",
+            name: "Used",
+            memberCount: 1,
+            lock: null,
+            taken: true,
+          },
+        ],
+        plan: null,
+        extraErrors: [],
+        botScanUnavailable: false,
+        botsMissing: 0,
+        adminReport: null,
+        adminGroupLacksAdministrator: false,
+        membersUnavailable: false,
+        roleNames: {},
+        globalPolicy: "flag",
+        refusedForm: refused,
+      }),
+    );
+  });
+
+  const lines = (html: string): Record<string, string> =>
+    Object.fromEntries(
+      [
+        ...html.matchAll(
+          /<p class="kb-field__error" id="([^"]+)">([^<]*)<\/p>/g,
+        ),
+      ].map((m) => [m[1], m[2].replaceAll("&#39;", "'")]),
+    );
+
+  it("marks a bad colour on the Add form and keeps the typed name, role, capabilities and permissions", async () => {
+    await mount();
+    const res = await harness.post("/role-groups/create", {
+      roleId: "rOk",
+      name: "  Helpers  ",
+      colour: " red",
+      capability: ["staff"],
+      editPermissions: "1",
+      perm: ["ManageMessages"],
+    });
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    expect(lines(html)).toEqual({
+      "role-group-create-colour-error": "Colour must look like #RRGGBB.",
+    });
+    expect(html).toContain(
+      'name="colour" placeholder="#RRGGBB (optional)" maxlength="7" value=" red" id="role-group-create-colour" aria-invalid="true"',
+    );
+    expect(html).toContain('name="name" maxlength="100"');
+    expect(html).toContain('value="  Helpers  "');
+    expect(html).toContain('<option value="rOk" selected>');
+    expect(html).toMatch(/name="capability" value="staff" checked/);
+    expect(html).toMatch(/name="perm" value="ManageMessages" checked/);
+    expect(html).toMatch(/name="editPermissions" value="1" checked/);
+    expect(svc.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["name", "A group needs a name."],
+    [
+      "capability",
+      "The bot capability can't be combined with other capabilities.",
+    ],
+    ["roleId", "That role already backs another group."],
+  ])("marks the %s field the service refuses", async (field, error) => {
+    svc.create.mockResolvedValue({ ok: false, error, field });
+    await mount();
+    const res = await harness.post("/role-groups/create", { name: "x" });
+    expect(res.status).toBe(422);
+    expect(lines(await res.text())).toEqual({
+      [`role-group-create-${field}-error`]: error,
+    });
+    expect(mockRecordAudit).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ result: "failure", errorMessage: error }),
+    );
+  });
+
+  it("refuses @everyone as a backing role on the role field", async () => {
+    await mount();
+    const res = await harness.post("/role-groups/create", {
+      roleId: "guild-1",
+    });
+    // The stand-in page has no such role to keep, but the error line is there.
+    expect(res.status).toBe(422);
+    expect(lines(await res.text())).toEqual({
+      "role-group-create-roleId-error": "@everyone can't be a group.",
+    });
+  });
+
+  it.each([
+    [
+      "rTop",
+      "That role is at or above the bot's own role, so it can't be linked.",
+    ],
+  ])(
+    "keeps the refused backing role (%s) selectable, so a retry is refused again and never creates a role-less group",
+    async (roleId, message) => {
+      await mount();
+      const first = await harness.post("/role-groups/create", { roleId });
+      expect(first.status).toBe(422);
+      const html = await first.text();
+      const option = new RegExp(`<option value="${roleId}"([^>]*)>`).exec(html);
+      expect(option?.[1]).toContain("selected");
+      expect(option?.[1]).not.toContain("disabled");
+      expect(lines(html)["role-group-create-roleId-error"]).toBe(message);
+      // The browser posts the selected, enabled option again.
+      const retry = await harness.post("/role-groups/create", { roleId });
+      expect(retry.status).toBe(422);
+      expect(lines(await retry.text())["role-group-create-roleId-error"]).toBe(
+        message,
+      );
+      expect(svc.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a refused role that the service says is taken selectable too", async () => {
+    svc.create.mockResolvedValue({
+      ok: false,
+      error: "That role already backs another group.",
+      field: "roleId",
+    });
+    await mount();
+    const res = await harness.post("/role-groups/create", { roleId: "rUsed" });
+    expect(res.status).toBe(422);
+    const option = /<option value="rUsed"([^>]*)>/.exec(await res.text());
+    expect(option?.[1]).toContain("selected");
+    expect(option?.[1]).not.toContain("disabled");
+  });
+
+  it("keeps a refusal that is not about a field a page flash", async () => {
+    svc.create.mockResolvedValue({
+      ok: false,
+      error: "At most 50 groups are supported.",
+    });
+    await mount();
+    const res = await harness.post("/role-groups/create", { name: "x" });
+    expect(res.status).toBe(303);
+    expect(flashOf(res).msg).toBe("At most 50 groups are supported.");
+  });
+
+  it("keeps an unreadable Discord role a page flash", async () => {
+    await mount(makeClient({ fetchFails: true }));
+    const res = await harness.post("/role-groups/create", { roleId: "rOk" });
+    expect(res.status).toBe(303);
+    expect(flashOf(res).msg).toContain("couldn't be read from Discord");
+  });
+
+  it("reopens the group's Edit form with the colour marked and the typed values kept", async () => {
+    await mount();
+    const res = await harness.post("/role-groups/g1/edit", {
+      name: " Mod2 ",
+      colour: "#12",
+      capability: ["admin"],
+      syncPolicy: "enforce",
+    });
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    expect(html).toContain("<details open><summary>Edit</summary>");
+    expect(lines(html)).toEqual({
+      "role-group-edit-g1-colour-error": "Colour must look like #RRGGBB.",
+    });
+    expect(html).toContain('value=" Mod2 "');
+    expect(html).toMatch(/name="capability" value="admin" checked/);
+    expect(html).toContain('<option value="enforce" selected>');
+    expect(svc.update).not.toHaveBeenCalled();
+  });
+
+  it("marks the name the service refuses on the Edit form", async () => {
+    svc.update.mockResolvedValue({
+      ok: false,
+      error: "That name is already in use.",
+      field: "name",
+    });
+    await mount();
+    const res = await harness.post("/role-groups/g1/edit", { name: "Taken" });
+    expect(res.status).toBe(422);
+    expect(lines(await res.text())).toEqual({
+      "role-group-edit-g1-name-error": "That name is already in use.",
+    });
+  });
+
+  it("says the group is gone when it was deleted before the refusal", async () => {
+    svc.get.mockResolvedValue(null);
+    await mount();
+    const res = await harness.post("/role-groups/gone/edit", {
+      name: "x",
+      colour: "red",
+    });
+    expect(res.status).toBe(303);
+    expect(flashOf(res).msg).toBe("That group no longer exists.");
+  });
+
+  it("falls back to the flash for a group the page no longer shows", async () => {
+    svc.update.mockResolvedValue({
+      ok: false,
+      error: "That name is already in use.",
+      field: "name",
+    });
+    await mount();
+    const res = await harness.post("/role-groups/other/edit", {
+      name: "Taken",
+    });
+    expect(res.status).toBe(303);
+    expect(flashOf(res).msg).toBe("Not saved. That name is already in use.");
   });
 });
 

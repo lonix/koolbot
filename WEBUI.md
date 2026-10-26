@@ -3980,6 +3980,28 @@ Discord (such as a role the bot cannot manage), a row that was deleted in
 another tab, or a page that cannot be drawn again. Routes use `refuseForm` and
 pages use `formView` (`src/web/form-errors.ts`).
 
+The forms on Birthdays (Edit), Leaderboard roles (Tiers), Moderation (Open case and the case decision), Role groups (Add
+group and Edit), Group presets (the editor), Channel manager (Create and Edit) and Events (Schedule a new event) answer a
+refusal the same way. A few details differ from a plain form:
+
+- **Leaderboard roles** draws the Tiers rows from what was submitted, so a row that was added and never saved keeps its
+  values. Each row's Top N and role have their own error line, and a role the server refuses (above the bot's role,
+  managed, powerful permissions, or backing a role group) is marked on its row.
+- **Moderation** and **Birthdays** are paged. Birthdays draws the page that holds the refused member. The Moderation log's
+  _Open case_ form carries the log's query (page and filters) in a hidden `view_query` field, only when the log is not on
+  its first unfiltered page, so the refused row is on the page that comes back.
+- **Group presets** marks the preset name and description, the group wording and lead time, and each group row's own
+  name, size, tag and marker. What is about no one field (for example "add at least one group") sits above the rows.
+- **Channel manager** marks every refused field of one save together (name, topic, user limit, bitrate, category). The
+  edit form's hidden baselines come back as they were posted, so a change made elsewhere in the meantime is still caught
+  as a conflict.
+- **Events** marks the refused one of the title, description, date, time, duration and repeat fields (one at a time). A refused Groups section is still
+  a flash, and its rows come back from the browser's draft as before; the refused page carries an error notice at the top for that.
+
+A refusal that is not about one field stays a flash on the page: Discord unreachable, a stale token or a conflict, a
+missing bot permission, the per-host event limit, a group or channel that no longer exists, or a failed read. A refused
+form whose row is gone from the page (deleted in another tab, or on another page of a list) answers the same way.
+
 **Outcomes are announced.** The inline flash the AJAX Settings save inserts is
 a live region: `role="alert"` for a failure, `role="status"` for success and
 warnings, so CSRF failure, rate-limit and network-error results are all read

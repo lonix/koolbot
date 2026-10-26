@@ -1,5 +1,6 @@
 import type { Client } from "discord.js";
 import { scriptTag } from "./html.js";
+import { formView, type RefusedForm } from "./form-errors.js";
 import {
   escapeHtml,
   renderAdminPage,
@@ -29,6 +30,7 @@ import {
   parseLibraryPresetId,
   PRESET_DESCRIPTION_MAX,
   PRESET_FORM_FIELDS,
+  PRESET_GROUPS_FIELD,
   presetToFormValues,
   PRESET_LOBBY_FIELDS,
   type CatalogReadState,
@@ -50,6 +52,7 @@ import {
   GROUP_SIZE_MAX,
   GROUP_SIZE_MIN,
   GROUP_TAG_MAX,
+  groupRowField,
   resolveGroupCountLimits,
 } from "../services/event-groups.js";
 
@@ -84,7 +87,12 @@ export interface EventPresetsPageProps {
   prefillNote: string | null;
   /** The hosts' personal presets for the publish card (#1216); null = unreadable. */
   hostPresets?: HostPresetsView | null;
+  /** The editor, when the last save was refused (#1523); `values` then holds what was typed. */
+  refusedForm?: RefusedForm | null;
 }
+
+/** Form id of the preset editor (add or edit: there is one editor on the page) (#1523). */
+export const EVENT_PRESET_FORM = "event-preset";
 
 /** The hosts' personal presets, with a name to show for each owner. */
 export interface HostPresetsView {
@@ -351,6 +359,8 @@ export interface PresetEditorFormProps {
   cancelHref: string;
   /** Wording of the submit button when adding. */
   addLabel?: string;
+  /** The editor, when the last save was refused (#1523); `values` then holds what was typed. */
+  refusedForm?: RefusedForm | null;
 }
 
 /**
@@ -361,6 +371,7 @@ export interface PresetEditorFormProps {
 export function renderPresetEditorForm(props: PresetEditorFormProps): string {
   const { csrfInput } = props;
   const v = props.values;
+  const f = formView(props.refusedForm, EVENT_PRESET_FORM);
   // Rows to render: the prefilled groups, else the configured default count.
   const prefilled: Array<Record<string, string>> = [];
   // Every stored row is shown, even beyond the cap: the validator refuses an
@@ -377,8 +388,32 @@ export function renderPresetEditorForm(props: PresetEditorFormProps): string {
     });
   }
   const rowCount = Math.max(prefilled.length, props.defaultCount);
+  const groupsError = f.error(PRESET_GROUPS_FIELD) !== "";
+  const rowColumns = ["marker", "name", "size", "tag", "kind"] as const;
   const rows = Array.from({ length: rowCount }, (_, i) =>
-    renderGroupRow(String(i), String(i + 1), prefilled[i]),
+    renderGroupRow(
+      String(i),
+      String(i + 1),
+      prefilled[i],
+      f.refused
+        ? {
+            attrs: {
+              ...Object.fromEntries(
+                rowColumns.map((c) => [c, f.attrs(groupRowField(i, c))]),
+              ),
+              // A refusal about no one field ("add at least one group") has no
+              // control of its own: the first row's name is the one it points
+              // at, so focus and the screen reader land on something real.
+              ...(i === 0 && groupsError && !f.error(groupRowField(0, "name"))
+                ? {
+                    name: `${f.attrs(groupRowField(0, "name"))} aria-invalid="true" aria-describedby="${EVENT_PRESET_FORM}-${PRESET_GROUPS_FIELD}-error"`,
+                  }
+                : {}),
+            },
+            extra: rowColumns.map((c) => f.error(groupRowField(i, c))).join(""),
+          }
+        : undefined,
+    ),
   ).join("\n      ");
 
   // The Captains lobby is a channel and counts toward the limit (the validator
@@ -405,25 +440,25 @@ export function renderPresetEditorForm(props: PresetEditorFormProps): string {
     ${csrfInput}
     ${props.editing ? `<input type="hidden" name="${PRESET_FORM_FIELDS.id}" value="${escapeHtml(props.editing.id)}">` : ""}
     <label>Preset name (up to ${GROUP_NAME_MAX} characters, unique ignoring case)
-      <input type="text" name="${PRESET_FORM_FIELDS.name}" required maxlength="${GROUP_NAME_MAX}" value="${escapeHtml(v[PRESET_FORM_FIELDS.name] ?? "")}" placeholder="Clan match">
-    </label>
+      <input type="text" name="${PRESET_FORM_FIELDS.name}" required maxlength="${GROUP_NAME_MAX}" value="${escapeHtml(v[PRESET_FORM_FIELDS.name] ?? "")}" placeholder="Clan match"${f.attrs(PRESET_FORM_FIELDS.name)}>
+    </label>${f.error(PRESET_FORM_FIELDS.name)}
     <label>Description (optional)
-      <input type="text" name="${PRESET_FORM_FIELDS.description}" maxlength="${PRESET_DESCRIPTION_MAX}" value="${escapeHtml(v[PRESET_FORM_FIELDS.description] ?? "")}">
-    </label>
+      <input type="text" name="${PRESET_FORM_FIELDS.description}" maxlength="${PRESET_DESCRIPTION_MAX}" value="${escapeHtml(v[PRESET_FORM_FIELDS.description] ?? "")}"${f.attrs(PRESET_FORM_FIELDS.description)}>
+    </label>${f.error(PRESET_FORM_FIELDS.description)}
     <label>What a group is called (e.g. Team, Squad, Room, Party)
-      <input type="text" name="${GROUP_FORM_FIELDS.label}" maxlength="${GROUP_LABEL_MAX}" value="${escapeHtml(v[GROUP_FORM_FIELDS.label] ?? "")}" placeholder="${DEFAULT_GROUP_LABEL}">
-    </label>
+      <input type="text" name="${GROUP_FORM_FIELDS.label}" maxlength="${GROUP_LABEL_MAX}" value="${escapeHtml(v[GROUP_FORM_FIELDS.label] ?? "")}" placeholder="${DEFAULT_GROUP_LABEL}"${f.attrs(GROUP_FORM_FIELDS.label)}>
+    </label>${f.error(GROUP_FORM_FIELDS.label)}
     <label>What a leader is called (e.g. Leader, Captain)
-      <input type="text" name="${GROUP_FORM_FIELDS.leaderLabel}" maxlength="${GROUP_LABEL_MAX}" value="${escapeHtml(v[GROUP_FORM_FIELDS.leaderLabel] ?? "")}" placeholder="${DEFAULT_LEADER_LABEL}">
-    </label>
+      <input type="text" name="${GROUP_FORM_FIELDS.leaderLabel}" maxlength="${GROUP_LABEL_MAX}" value="${escapeHtml(v[GROUP_FORM_FIELDS.leaderLabel] ?? "")}" placeholder="${DEFAULT_LEADER_LABEL}"${f.attrs(GROUP_FORM_FIELDS.leaderLabel)}>
+    </label>${f.error(GROUP_FORM_FIELDS.leaderLabel)}
     <label>Create channels this many minutes before the start (empty = server default)
-      <input type="number" name="${GROUP_FORM_FIELDS.leadMinutes}" min="${CHANNEL_LEAD_MIN}" max="${CHANNEL_LEAD_MAX}" value="${escapeHtml(v[GROUP_FORM_FIELDS.leadMinutes] ?? "")}" placeholder="Server default">
-    </label>
+      <input type="number" name="${GROUP_FORM_FIELDS.leadMinutes}" min="${CHANNEL_LEAD_MIN}" max="${CHANNEL_LEAD_MAX}" value="${escapeHtml(v[GROUP_FORM_FIELDS.leadMinutes] ?? "")}" placeholder="Server default"${f.attrs(GROUP_FORM_FIELDS.leadMinutes)}>
+    </label>${f.error(GROUP_FORM_FIELDS.leadMinutes)}
     <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.tags}" value="1"${v[GROUP_FORM_FIELDS.tags] ? " checked" : ""}> Clan tags on nicknames: pre-tick this on the event form when the preset is chosen (the host can still change it for each event)</label>
     <p class="muted">Only teams that have a tag get one on their members' nicknames, while the event runs.</p>
     <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captainsLobby}" value="1"${lobbyOn ? " checked" : ""}> Captains lobby: a separate voice channel that only the host and the current leaders can join. Choosing this preset on the event form ticks Captains lobby there. It only takes effect on an event while group leaders is ticked (a preset has no leaders setting of its own); the host can still untick it for each event.</label>
     ${lobbyFields}
-    ${renderGroupBuilder(props.maxCount)}
+    ${renderGroupBuilder(props.maxCount)}${f.error(PRESET_GROUPS_FIELD)}
     ${GROUP_ROWS_HEAD}
     <div data-group-rows data-max="${props.maxCount}" class="stack">
       ${rows}
@@ -498,6 +533,14 @@ function renderHostPresetsCard(
 }
 
 export function renderEventPresetsPage(props: EventPresetsPageProps): string {
+  // A refused edit of a preset that is gone has no editor to draw it in: the
+  // page would show an Add form without the preset's id, and saving that would
+  // create a new preset. Leave the refusal out, so `refuseForm` answers with
+  // its flash back to the editor, which says the preset no longer exists.
+  const refusedForm =
+    props.refusedForm?.values[PRESET_FORM_FIELDS.id] && !props.editing
+      ? null
+      : props.refusedForm;
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const notice = catalogNotice(props.state);
 
@@ -521,6 +564,7 @@ export function renderEventPresetsPage(props: EventPresetsPageProps): string {
     maxCount: props.maxCount,
     defaultCount: props.defaultCount,
     cancelHref: "/admin/events/presets",
+    refusedForm,
   });
   const heading = props.editing
     ? `Edit "${escapeHtml(props.editing.label)}"`

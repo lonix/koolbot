@@ -113,4 +113,25 @@ describe("refuseForm", () => {
     expect(status).not.toHaveBeenCalled();
     expect(redirect).toHaveBeenCalledTimes(1);
   });
+
+  it("hands the refusal to the route's own fallback instead of the flash redirect", async () => {
+    // A form whose retry needs more than the page's path (an editor reached
+    // through `?edit=`) keeps its own way back.
+    const { res, status, redirect } = fakeRes();
+    const fallback = jest.fn();
+    const answered = await refuseForm(req, res, {
+      page: "/admin/unregistered",
+      formId: "demo",
+      errors: { a: "First.", b: "Second." },
+      values: {},
+      fallback,
+    });
+    expect(answered).toBe(true);
+    expect(fallback).toHaveBeenCalledWith({
+      type: "err",
+      text: "Not saved. First.",
+    });
+    expect(status).not.toHaveBeenCalled();
+    expect(redirect).not.toHaveBeenCalled();
+  });
 });

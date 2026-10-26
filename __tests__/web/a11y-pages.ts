@@ -654,6 +654,49 @@ const MANAGER_CHANNELS: ManagedChannelView[] = [
   },
 ];
 
+/** The Role groups page the refused-form fixtures start from (#1523). */
+const ROLE_GROUPS_REFUSED_BASE = {
+  ...COMMON,
+  groups: [
+    {
+      id: "g1",
+      name: "Mods",
+      roleId: "r1",
+      rank: 2,
+      permissions: "0",
+      capabilities: ["staff"],
+      colour: null,
+      hoist: false,
+      createdByKoolbot: false,
+      gateOnly: false,
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+      roleName: "Moderator",
+      unlinked: false,
+      lostRoleId: null,
+      recreateRequestedAt: null,
+      syncPolicy: null,
+      driftSignature: null,
+      roleMissing: false,
+      memberCount: 3,
+      roleLock: null,
+      drift: [],
+    },
+  ],
+  roleOptions: [
+    { id: "r1", name: "Moderator", memberCount: 3, lock: null, taken: true },
+    { id: "r3", name: "Helpers", memberCount: 5, lock: null, taken: false },
+  ],
+  plan: null,
+  extraErrors: [],
+  botScanUnavailable: false,
+  botsMissing: 0,
+  adminReport: { humans: [], bots: [] },
+  adminGroupLacksAdministrator: false,
+  membersUnavailable: false,
+  roleNames: {},
+  globalPolicy: "flag",
+} as const;
+
 function channelManagerPages(): A11yPage[] {
   const base = {
     ...COMMON,
@@ -709,6 +752,46 @@ function channelManagerPages(): A11yPage[] {
         },
         confirmToken: "token",
         botCanManage: true,
+      }),
+    },
+    {
+      name: "Channel manager (create form refused)",
+      html: renderChannelManagerPage({
+        ...base,
+        refusedForm: {
+          formId: "channel-create",
+          errors: {
+            name: "The name is 101 characters; Discord allows at most 100.",
+            userLimit: "The user limit can be at most 99 (0 means no limit).",
+          },
+          values: {
+            type: "voice",
+            name: "x".repeat(101),
+            userLimit: "100",
+            bitrate: "64",
+            parent: "100000000000000001",
+          },
+        },
+      }),
+    },
+    {
+      name: "Channel manager (edit form refused)",
+      html: renderChannelManagerPage({
+        ...base,
+        refusedForm: {
+          formId: `channel-edit-${general.id}`,
+          errors: {
+            topic: "The topic is 1030 characters; Discord allows at most 1024.",
+          },
+          values: {
+            orig_name: general.name,
+            orig_topic: general.topic ?? "",
+            orig_parent: general.parentId ?? "",
+            name: general.name,
+            topic: "t".repeat(1030),
+            parent: general.parentId ?? "",
+          },
+        },
       }),
     },
   ];
@@ -2983,6 +3066,277 @@ export function adminPages(): A11yPage[] {
             answers: "only one",
             tags: "",
             multiSelect: "",
+          },
+        },
+      }),
+    },
+    {
+      name: "Events (schedule form refused)",
+      html: renderEventsPage({
+        ...COMMON,
+        enabled: true,
+        categoryConfigured: true,
+        announcementConfigured: true,
+        timezone: "Europe/Stockholm",
+        settingRows: [],
+        rows: [],
+        refusedForm: {
+          formId: "event-create",
+          errors: {
+            title: "Enter a title.",
+            date: "The start time must be in the future.",
+            duration: "Use 1 to 1440 minutes.",
+          },
+          values: {
+            title: "",
+            description: "Bring <snacks>",
+            when: "pick",
+            date: "2000-01-01",
+            time: "18:00",
+            duration: "5000",
+            timezone: "",
+            recurrence: "weekly",
+          },
+        },
+      }),
+    },
+    {
+      name: "Group presets (editor refused)",
+      html: renderEventPresetsPage({
+        ...COMMON,
+        entries: EVENT_GROUP_PRESETS.map((p) => ({
+          ...p,
+          source: "builtin" as const,
+          enabled: true,
+        })),
+        state: "ok",
+        maxCount: 15,
+        defaultCount: 2,
+        editing: { id: "lib:0123456789abcdef01234567", label: "Clan match" },
+        prefillNote: null,
+        values: {
+          preset_id: "lib:0123456789abcdef01234567",
+          preset_name: "",
+          groups_label: "Squad",
+          groups_lead_minutes: "9999",
+          group_0_name: "Assault",
+          group_0_kind: "team",
+          group_0_size: "500",
+          group_1_name: "Command",
+          group_1_kind: "team",
+        },
+        refusedForm: {
+          formId: "event-preset",
+          errors: {
+            preset_name: "A name is required.",
+            groups_lead_minutes:
+              "Channel creation time must be a whole number of minutes from 0 to 1440, or empty to use the server default.",
+            group_0_size: "A whole number from 1 to 99, or empty for no limit.",
+          },
+          values: {},
+        },
+      }),
+    },
+    {
+      name: "Birthdays (edit refused)",
+      html: renderBirthdaysPage({
+        ...COMMON,
+        enabled: true,
+        channel: { name: "general", id: "c1", type: ChannelType.GuildText },
+        role: null,
+        cron: "0 * * * *",
+        settingRows: [],
+        preview: {
+          mentionUserId: "999999999999999999",
+          mentionLabel: "Admin",
+          mention: true,
+          withAge: "Happy birthday",
+          withoutAge: null,
+          sampleAge: 30,
+        },
+        rows: [
+          {
+            userId: "111111111111111111",
+            userLabel: "Alice",
+            month: 9,
+            day: 25,
+            hasYear: true,
+            nextDate: "2026-09-25",
+            daysUntil: 1,
+            roleGranted: false,
+            lastAnnouncedYear: 2025,
+          },
+        ],
+        total: 1,
+        page: 1,
+        pageSize: 25,
+        refusedForm: {
+          formId: "birthday-edit-111111111111111111",
+          errors: { month: "Choose a month." },
+          values: { month: "", day: "20", clear_year: "1" },
+        },
+      }),
+    },
+    {
+      name: "Leaderboard roles (tiers refused)",
+      html: renderLeaderboardRolesPage({
+        ...COMMON,
+        enabled: true,
+        voiceTrackingEnabled: true,
+        period: "week",
+        cron: "0 0 * * 1",
+        tiers: [
+          {
+            topN: 1,
+            roleId: "r1",
+            roleName: "Admin",
+            assignable: true,
+            holders: [],
+            lastUpdated: null,
+          },
+        ],
+        ignoredEntries: [],
+        roles: ROLES,
+        settingRows: [],
+        refusedForm: {
+          formId: "leaderboard-tiers",
+          errors: {
+            "topN-1": "Another tier has this Top N. Each Top N must be unique.",
+            "roleId-2": "Pick a role.",
+          },
+          values: {
+            rows: "3",
+            "topN-0": "1",
+            "roleId-0": "r1",
+            "topN-1": "1",
+            "roleId-1": "r2",
+            "topN-2": "5",
+            "roleId-2": "",
+          },
+        },
+      }),
+    },
+    {
+      name: "Moderation (open case refused)",
+      html: renderModerationPage({
+        ...COMMON,
+        enabled: true,
+        actionOptions: ["warn", "kick", "ban"],
+        userOptions: [],
+        settingRows: [],
+        casesEnabled: true,
+        defaultReviewDays: 90,
+        caseGroups: null,
+        filters: { action: "", userId: "" },
+        rows: [
+          {
+            entryId: "a".repeat(24),
+            caseNumber: null,
+            caseStatus: null,
+            createdAt: "2026-01-09 12:00",
+            userId: "u1",
+            userLabel: "alice",
+            moderatorId: "u2",
+            moderatorLabel: "bob",
+            action: "kick",
+            reason: "spam",
+            source: "command",
+          },
+        ],
+        total: 1,
+        page: 1,
+        pageSize: 50,
+        refusedForm: {
+          formId: `moderation-case-open-${"a".repeat(24)}`,
+          errors: {
+            review_in_days:
+              "Review days must be a whole number from 1 to 3650.",
+          },
+          values: { review_in_days: "0", note: "Repeat offender" },
+        },
+      }),
+    },
+    {
+      name: "Moderation (case decision refused)",
+      html: renderModerationPage({
+        ...COMMON,
+        enabled: true,
+        actionOptions: ["warn", "kick", "ban"],
+        userOptions: [],
+        settingRows: [],
+        casesEnabled: true,
+        defaultReviewDays: 90,
+        caseGroups: {
+          overdue: [
+            {
+              id: "case1",
+              caseNumber: 1,
+              userId: "u3",
+              userLabel: "carol",
+              action: "ban",
+              status: "under_review",
+              reviewAt: "2026-01-02T00:00:00.000Z",
+              openedAt: "2025-10-02T00:00:00.000Z",
+              openedByLabel: "bob",
+              originModeratorLabel: "bob",
+              reason: "spam",
+              events: [],
+              history: [],
+              live: true,
+            },
+          ],
+          dueSoon: [],
+          scheduled: [],
+          indefinite: [],
+          recentlyResolved: [],
+        },
+        filters: { action: "", userId: "" },
+        rows: [],
+        total: 0,
+        page: 1,
+        pageSize: 50,
+        refusedForm: {
+          formId: "moderation-case-decide-case1",
+          // Days the browser accepts: a control its own checks call invalid
+          // cannot be submitted, which the confirm dialog test needs.
+          errors: { note: "At most 500 characters." },
+          values: { next_review_in_days: "90", note: "A very long note" },
+        },
+      }),
+    },
+    {
+      name: "Role groups (create form refused)",
+      html: renderRoleGroupsPage({
+        ...ROLE_GROUPS_REFUSED_BASE,
+        refusedForm: {
+          formId: "role-group-create",
+          errors: {
+            colour: "Colour must look like #RRGGBB.",
+            capability:
+              "The bot capability can't be combined with other capabilities.",
+          },
+          values: {
+            roleId: "",
+            name: "Helpers",
+            colour: "red",
+            "capability-bot": "1",
+            "capability-staff": "1",
+          },
+        },
+      }),
+    },
+    {
+      name: "Role groups (edit refused)",
+      html: renderRoleGroupsPage({
+        ...ROLE_GROUPS_REFUSED_BASE,
+        refusedForm: {
+          formId: "role-group-edit-g1",
+          errors: { name: 'A group called "Mods" already exists.' },
+          values: {
+            name: "Mods",
+            colour: "",
+            syncPolicy: "enforce",
+            "capability-staff": "1",
           },
         },
       }),
