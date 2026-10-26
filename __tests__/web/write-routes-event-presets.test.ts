@@ -487,11 +487,14 @@ describe("the Captains lobby tick (#1263)", () => {
   });
 });
 
+let presetGone = false;
+
 describe("a refused preset editor (#1523)", () => {
   // The read router registers the page's renderer in the app; here the real
   // view stands in. The editor is drawn from what was typed, and for an edit
   // the stored preset is only named in the heading.
   beforeEach(() => {
+    presetGone = false;
     registerFormPage("/admin/events/presets", async (_req, refused) =>
       renderEventPresetsPage({
         csrfToken: "csrf",
@@ -500,9 +503,10 @@ describe("a refused preset editor (#1523)", () => {
         state: "ok",
         maxCount: 4,
         defaultCount: 2,
-        editing: refused.values.preset_id
-          ? { id: refused.values.preset_id, label: "Stored name" }
-          : null,
+        editing:
+          refused.values.preset_id && !presetGone
+            ? { id: refused.values.preset_id, label: "Stored name" }
+            : null,
         values: refused.values,
         prefillNote: null,
         refusedForm: refused,
@@ -591,6 +595,31 @@ describe("a refused preset editor (#1523)", () => {
     const html = await res.text();
     expect(html).toContain(`name="preset_id" value="lib:${OID}"`);
     expect(html).toMatch(/<h2>Edit .{1,6}Stored name.{1,6}<\/h2>/);
+  });
+
+  it("does not draw an Add form for an edit whose preset is gone: the flash goes back to the editor", async () => {
+    // Saving that form would create a new preset instead of retrying the edit.
+    presetGone = true;
+    const res = await harness.post("/events/presets/save", {
+      ...goodBody,
+      preset_id: `lib:${OID}`,
+      preset_name: "",
+    });
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toContain(
+      `?edit=${encodeURIComponent(`lib:${OID}`)}&flash=err`,
+    );
+  });
+
+  it("points a refusal about no one field at the first group's name", async () => {
+    const res = await harness.post("/events/presets/save", {
+      preset_name: "Clan match",
+    });
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    expect(html).toMatch(
+      /name="group_0_name"[^>]* id="event-preset-group_0_name" aria-invalid="true" aria-describedby="event-preset-groups-error"/,
+    );
   });
 
   it("marks the name when it is taken, rather than redirecting", async () => {

@@ -109,7 +109,20 @@ export function createModerationRouter(client: Client): Router {
           (name) => getString(req, name),
           "next_review",
         );
-        if (checked.reason !== null) {
+        // "Decide later" needs a new review date, and an empty days box is a
+        // valid answer to the other decisions: the date check is this one's.
+        const errors: Record<string, string> = { ...checked.errors };
+        let reason = checked.reason;
+        if (
+          decision === "extend" &&
+          checked.review.ok &&
+          !checked.review.date
+        ) {
+          errors.next_review_in_days =
+            "Deciding later needs a new review date.";
+          reason ??= errors.next_review_in_days;
+        }
+        if (reason !== null) {
           // Cases switched off, or the switch unreadable, outrank a bad field:
           // `decideCase` words those and audits them.
           const on = await cases()
@@ -120,13 +133,13 @@ export function createModerationRouter(client: Client): Router {
               action: `moderation.case.${decision}`,
               targetId: caseId,
               result: "failure",
-              errorMessage: checked.reason,
+              errorMessage: reason,
             });
             if (
               await refuseForm(req, res, {
                 page: MODERATION_PAGE,
                 formId: moderationCaseDecideForm(caseId),
-                errors: checked.errors,
+                errors,
                 values: {
                   next_review_in_days: getRawString(req, "next_review_in_days"),
                   note: getRawString(req, "note"),

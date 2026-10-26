@@ -10,7 +10,10 @@
 import { Router } from "express";
 import { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
-import { BirthdayService } from "../../../services/birthday-service.js";
+import {
+  BirthdayService,
+  isValidMonthDay,
+} from "../../../services/birthday-service.js";
 import { recordAudit } from "../../audit.js";
 import {
   flashRedirect,
@@ -27,6 +30,21 @@ import { addFieldError, type FormErrors } from "../../form-errors.js";
 import { birthdayEditForm } from "../../admin-views.js";
 
 const BIRTHDAYS_PAGE = "/admin/birthdays";
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
 
 /** A Discord snowflake: 17–20 digits. */
 const SNOWFLAKE = /^\d{17,20}$/;
@@ -53,6 +71,15 @@ export function createBirthdaysRouter(client: Client): Router {
       const errors: FormErrors = {};
       if (month === null) addFieldError(errors, "month", "Choose a month.");
       if (day === null) addFieldError(errors, "day", "Choose a day.");
+      // The selects allow 31 April and 30 February (29 February is a real
+      // birth date): mark the day, so the choice and the box stay put.
+      if (month !== null && day !== null && !isValidMonthDay(month, day)) {
+        addFieldError(
+          errors,
+          "day",
+          `${MONTH_NAMES[month - 1]} has no day ${day}. Choose another day.`,
+        );
+      }
       // A refusal is drawn in the member's own row. A member whose birthday was
       // removed in another tab has none: say so, as the save itself would.
       if (

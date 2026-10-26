@@ -499,6 +499,36 @@ describe("a refused case form (#1523)", () => {
     },
   );
 
+  it("marks the days of Decide later when they are cleared, and keeps the note", async () => {
+    const res = await harness.post(`/moderation/cases/${CASE}/extend`, {
+      next_review_in_days: "",
+      note: "keep me",
+    });
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    expect(Object.keys(lines(html))).toEqual([
+      `moderation-case-decide-${CASE}-next_review_in_days-error`,
+    ]);
+    expect(html).toContain('value="keep me"');
+    expect(mockDecide).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      action: "moderation.case.extend",
+      result: "failure",
+      errorMessage: "Deciding later needs a new review date.",
+    });
+  });
+
+  it.each(["uphold", "permanent", "readmit"])(
+    "lets %s go ahead with the days cleared",
+    async (decision) => {
+      const res = await harness.post(`/moderation/cases/${CASE}/${decision}`, {
+        next_review_in_days: "",
+      });
+      expect(res.status).toBe(303);
+      expect(mockDecide).toHaveBeenCalled();
+    },
+  );
+
   it("lets a switched-off case lifecycle outrank a wrong field on a decision", async () => {
     mockIsEnabled.mockResolvedValue(false);
     const res = await harness.post(`/moderation/cases/${CASE}/uphold`, {

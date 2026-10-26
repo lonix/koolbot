@@ -23,7 +23,10 @@ import {
   planRoleGroups,
   planIsApplicable,
 } from "../../../services/role-group-adoption.js";
-import { ROLE_GROUP_SYNC_POLICIES } from "../../../models/role-group.js";
+import {
+  ROLE_GROUP_CAPABILITIES,
+  ROLE_GROUP_SYNC_POLICIES,
+} from "../../../models/role-group.js";
 import { ServerAdoptionService } from "../../../services/server-adoption-service.js";
 import {
   parseColour,
@@ -84,11 +87,16 @@ function groupFormValues(req: Parameters<typeof getString>[0]): FormValues {
     editPermissions: getCheckbox(req, "editPermissions") ? "1" : "",
     syncPolicy: getString(req, "syncPolicy"),
   };
-  for (const c of toArray(body["capability"])) {
-    values[roleGroupBoxKey("capability", c)] = "1";
+  // Only names the form offers become keys: never a name taken from the request.
+  for (const c of ROLE_GROUP_CAPABILITIES) {
+    if (toArray(body["capability"]).includes(c)) {
+      values[roleGroupBoxKey("capability", c)] = "1";
+    }
   }
-  for (const p of toArray(body["perm"])) {
-    values[roleGroupBoxKey("perm", p)] = "1";
+  for (const p of Object.keys(PermissionsBitField.Flags)) {
+    if (toArray(body["perm"]).includes(p)) {
+      values[roleGroupBoxKey("perm", p)] = "1";
+    }
   }
   return values;
 }

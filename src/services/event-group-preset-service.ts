@@ -422,11 +422,13 @@ export function validatePresetForm(
   if (carried) {
     // Last while it is validated, so "Group N" in an error is the number the
     // editor shows; it is moved back to its own place afterwards.
-    lobbyPosition = rows.length + 1;
+    // Beyond the highest submitted position: blank rows are dropped but keep
+    // their numbers, so `rows.length + 1` could be a visible row's number.
+    lobbyPosition = Math.max(...rows.map((r) => r.position)) + 1;
     rows = [
       ...rows,
       {
-        position: rows.length + 1,
+        position: lobbyPosition,
         name: carriedName,
         kind: "leads",
         size: str(PRESET_LOBBY_FIELDS.size).trim(),

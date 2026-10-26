@@ -119,17 +119,37 @@ const refuse = (text: string, extra: Partial<Outcome> = {}): Outcome => ({
   ...extra,
 });
 
+/** The fields the Channel manager forms post (and their `orig_*` baselines). */
+const POSTED_FIELDS = [
+  "type",
+  "name",
+  "topic",
+  "userLimit",
+  "bitrate",
+  "parent",
+  "orig_name",
+  "orig_topic",
+  "orig_userLimit",
+  "orig_bitrate",
+  "orig_bitrate_bps",
+  "orig_parent",
+] as const;
+
 /**
- * What the form posted, as a refused form shows it: every text field as typed,
- * including the `orig_*` baselines the edit form carries, so the lost-update
- * check still compares against what the admin was shown.
+ * What the form posted, as a refused form shows it: each known text field as
+ * typed, including the `orig_*` baselines the edit form carries, so the
+ * lost-update check still compares against what the admin was shown. Only the
+ * fixed names above are read and written, never a name taken from the request,
+ * so a hostile field name (`__proto__`, `constructor`) has no effect.
  */
-function postedValues(body: unknown): Record<string, string> {
+export function postedValues(body: unknown): Record<string, string> {
+  const source = (body ?? {}) as Record<string, unknown>;
   const values: Record<string, string> = {};
-  for (const [key, value] of Object.entries(
-    (body as Record<string, unknown> | undefined) ?? {},
-  )) {
-    if (key !== "_csrf" && typeof value === "string") values[key] = value;
+  for (const key of POSTED_FIELDS) {
+    const value = Object.prototype.hasOwnProperty.call(source, key)
+      ? source[key]
+      : undefined;
+    if (typeof value === "string") values[key] = value;
   }
   return values;
 }

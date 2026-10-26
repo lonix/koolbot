@@ -80,7 +80,7 @@ jest.unstable_mockModule("../../src/web/channel-manager-data.js", () => ({
 }));
 
 const { confirmationToken } = await import("../../src/web/channel-manager.js");
-const { createChannelManagerRouter } =
+const { createChannelManagerRouter, postedValues } =
   await import("../../src/web/routes/write/channel-manager.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
@@ -885,6 +885,35 @@ describe("POST /channels/:id/edit", () => {
     const r = await refusal(res);
     expect(r.invalid).toEqual([`channel-edit-${TEXT}-name`]);
     expect(mockEdit).not.toHaveBeenCalled();
+  });
+});
+
+describe("the values a refused Channel manager form echoes (#1523)", () => {
+  it("reads only the form's own fields, never a name taken from the request", () => {
+    const body = JSON.parse(
+      '{"name":"x","__proto__":"polluted","constructor":"c","toString":"t","evil":"e","topic":5}',
+    );
+    const values = postedValues(body);
+    expect(values).toEqual({ name: "x" });
+    expect(Object.getPrototypeOf(values)).toBe(Object.prototype);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.keys(values)).toEqual(["name"]);
+  });
+
+  it("is empty for no body", () => {
+    expect(postedValues(undefined)).toEqual({});
+  });
+
+  it("keeps a hostile field name out of a refused page", async () => {
+    await mount();
+    const res = await harness.post("/channels/create", {
+      type: "text",
+      name: "x".repeat(101),
+      __proto__: "polluted",
+      constructor: "c",
+    } as Record<string, string>);
+    expect(res.status).toBe(422);
+    expect(await res.text()).not.toContain("polluted");
   });
 });
 

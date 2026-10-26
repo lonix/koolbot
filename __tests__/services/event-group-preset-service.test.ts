@@ -303,6 +303,25 @@ describe("validatePresetForm", () => {
     expect(r.errors.length).toBe(4);
   });
 
+  it("keeps a visible row's errors on its field when a blank row comes first and a lobby is carried", () => {
+    // Blank rows are dropped but keep their numbers: the carried lobby must not
+    // take the number of the visible second row.
+    const r = svc.validatePresetForm(
+      {
+        preset_name: "Clan match",
+        group_1_name: "Assault",
+        group_1_size: "500",
+        groups_captains_lobby: "1",
+        lobby_name: "War room",
+        lobby_index: "1",
+      },
+      { maxCount: 15 },
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.fields).toEqual({ group_1_size: expect.any(String) });
+  });
+
   it("puts a refusal about no one field under `groups`", () => {
     const r = svc.validatePresetForm(
       { preset_name: "Clan match" },

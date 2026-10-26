@@ -41,7 +41,9 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
 }));
 
+const actualBirthday = await import("../../src/services/birthday-service.js");
 jest.unstable_mockModule("../../src/services/birthday-service.js", () => ({
+  isValidMonthDay: actualBirthday.isValidMonthDay,
   BirthdayService: {
     getInstance: (): unknown => ({
       editBirthday: mockEditBirthday,
@@ -213,6 +215,28 @@ describe("POST /birthdays/:userId/edit", () => {
       expect(mockEditBirthday).not.toHaveBeenCalled();
     });
 
+    it.each([
+      ["4", "31", "April has no day 31."],
+      ["2", "30", "February has no day 30."],
+    ])(
+      "marks the day of a date that is not on the calendar (%s/%s) and keeps the choices",
+      async (month, day, message) => {
+        const res = await edit({ month, day, clear_year: "1" });
+        expect(res.status).toBe(422);
+        const html = await res.text();
+        expect(html).toContain(message);
+        expect(html).toContain(`birthday-edit-${MEMBER}-day-error`);
+        expect(html).toMatch(/name="clear_year" value="1" checked/);
+        expect(mockEditBirthday).not.toHaveBeenCalled();
+      },
+    );
+
+    it("still accepts 29 February", async () => {
+      const res = await edit({ month: "2", day: "29" });
+      expect(res.status).toBe(303);
+      expect(mockEditBirthday).toHaveBeenCalled();
+    });
+
     it("marks both selects when neither is in range", async () => {
       const res = await edit({ month: "13", day: "0" });
       const html = await res.text();
@@ -325,10 +349,12 @@ describe("POST /birthdays/:userId/edit", () => {
 
   it("reports a service validation error", async () => {
     mockEditBirthday.mockRejectedValue(
-      new Error('"4/31" is not a valid month/day'),
+      new Error('"4/30" is not a valid month/day'),
     );
+    // The route marks an impossible date itself; a refusal that still comes
+    // from the service passes through as it did.
     const flash = parseFlashRedirect(
-      (await edit({ month: "4", day: "31" })).headers.get("location"),
+      (await edit({ month: "4", day: "30" })).headers.get("location"),
     );
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("not a valid month/day");

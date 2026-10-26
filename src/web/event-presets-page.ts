@@ -388,6 +388,7 @@ export function renderPresetEditorForm(props: PresetEditorFormProps): string {
     });
   }
   const rowCount = Math.max(prefilled.length, props.defaultCount);
+  const groupsError = f.error(PRESET_GROUPS_FIELD) !== "";
   const rowColumns = ["marker", "name", "size", "tag", "kind"] as const;
   const rows = Array.from({ length: rowCount }, (_, i) =>
     renderGroupRow(
@@ -396,9 +397,19 @@ export function renderPresetEditorForm(props: PresetEditorFormProps): string {
       prefilled[i],
       f.refused
         ? {
-            attrs: Object.fromEntries(
-              rowColumns.map((c) => [c, f.attrs(groupRowField(i, c))]),
-            ),
+            attrs: {
+              ...Object.fromEntries(
+                rowColumns.map((c) => [c, f.attrs(groupRowField(i, c))]),
+              ),
+              // A refusal about no one field ("add at least one group") has no
+              // control of its own: the first row's name is the one it points
+              // at, so focus and the screen reader land on something real.
+              ...(i === 0 && groupsError && !f.error(groupRowField(0, "name"))
+                ? {
+                    name: `${f.attrs(groupRowField(0, "name"))} aria-invalid="true" aria-describedby="${EVENT_PRESET_FORM}-${PRESET_GROUPS_FIELD}-error"`,
+                  }
+                : {}),
+            },
             extra: rowColumns.map((c) => f.error(groupRowField(i, c))).join(""),
           }
         : undefined,
@@ -522,6 +533,14 @@ function renderHostPresetsCard(
 }
 
 export function renderEventPresetsPage(props: EventPresetsPageProps): string {
+  // A refused edit of a preset that is gone has no editor to draw it in: the
+  // page would show an Add form without the preset's id, and saving that would
+  // create a new preset. Leave the refusal out, so `refuseForm` answers with
+  // its flash back to the editor, which says the preset no longer exists.
+  const refusedForm =
+    props.refusedForm?.values[PRESET_FORM_FIELDS.id] && !props.editing
+      ? null
+      : props.refusedForm;
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const notice = catalogNotice(props.state);
 
@@ -545,7 +564,7 @@ export function renderEventPresetsPage(props: EventPresetsPageProps): string {
     maxCount: props.maxCount,
     defaultCount: props.defaultCount,
     cancelHref: "/admin/events/presets",
-    refusedForm: props.refusedForm,
+    refusedForm,
   });
   const heading = props.editing
     ? `Edit "${escapeHtml(props.editing.label)}"`
