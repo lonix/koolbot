@@ -432,7 +432,7 @@ async function readPreferenceValues(
   await Promise.all([
     attempt("notifications", async () => {
       const { prefs, timezone } =
-        await UserNotificationPrefsService.getInstance().getPrefsWithTimezone(
+        await UserNotificationPrefsService.getInstance().getPrefsWithTimezoneStrict(
           userId,
           guildId,
         );
@@ -456,7 +456,7 @@ async function readPreferenceValues(
     flags.birthdayEnabled
       ? attempt("birthday", async () =>
           birthdayValue(
-            await BirthdayService.getInstance(client).getBirthday(
+            await BirthdayService.getInstance(client).getBirthdayStrict(
               userId,
               guildId,
             ),

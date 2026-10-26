@@ -318,7 +318,7 @@ describe("createUserRouter / index page", () => {
     const { UserNotificationPrefsService } =
       await import("../../src/services/user-notification-prefs-service.js");
     jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
-      getPrefsWithTimezone: async () => ({
+      getPrefsWithTimezoneStrict: async () => ({
         prefs: { achievements: true, digest: false, rewind: false },
         timezone: "Europe/Oslo",
       }),
@@ -342,7 +342,7 @@ describe("createUserRouter / index page", () => {
     const { UserNotificationPrefsService } =
       await import("../../src/services/user-notification-prefs-service.js");
     jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
-      getPrefsWithTimezone: async () => {
+      getPrefsWithTimezoneStrict: async () => {
         throw new Error("db down");
       },
     } as never);
@@ -353,6 +353,41 @@ describe("createUserRouter / index page", () => {
     // The unreadable values leave their lines out; other cards are unaffected.
     expect(html).not.toContain("Server default (");
     expect(html).not.toMatch(/ now<\/p>/);
+  });
+
+  it("omits the notifications, timezone and birthday values when their model queries fail (#1508)", async () => {
+    const { ConfigService } =
+      await import("../../src/services/config-service.js");
+    jest
+      .spyOn(ConfigService, "getInstance")
+      .mockReturnValue(meConfigStub({ "birthdays.enabled": true }) as never);
+    const { UserNotificationPrefs } =
+      await import("../../src/models/user-notification-prefs.js");
+    const { UserBirthday } = await import("../../src/models/user-birthday.js");
+    const prefsSpy = jest
+      .spyOn(UserNotificationPrefs, "findOne")
+      .mockRejectedValue(new Error("db down") as never);
+    const birthdaySpy = jest
+      .spyOn(UserBirthday, "findOne")
+      .mockRejectedValue(new Error("db down") as never);
+    const { UserNotificationPrefsService } =
+      await import("../../src/services/user-notification-prefs-service.js");
+    jest.spyOn(UserNotificationPrefsService, "getInstance").mockRestore();
+    const { BirthdayService } =
+      await import("../../src/services/birthday-service.js");
+    jest.spyOn(BirthdayService, "getInstance").mockRestore();
+
+    let html: string;
+    try {
+      html = await dispatchIndex("user");
+    } finally {
+      prefsSpy.mockRestore();
+      birthdaySpy.mockRestore();
+    }
+    expect(html).toContain("My preferences");
+    expect(html).not.toContain("None of");
+    expect(html).not.toContain("Server default (");
+    expect(html).not.toContain("Not set");
   });
 
   it("omits the poll-participation card when the member has never voted (#655)", async () => {
