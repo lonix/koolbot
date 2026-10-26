@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "@jest/globals";
 import { renderWizardConfirmPage } from "../../src/web/admin-views.js";
 import {
@@ -316,5 +317,18 @@ describe("renderWizardConfirmPage Apply button", () => {
         renderWizardConfirmPage({ ...base, pending: [["a.enabled", true]] }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("Picker inside an AccessCard (#1547)", () => {
+  const css = readFileSync(
+    new URL("../../docs/design/kb.css", import.meta.url),
+    "utf8",
+  );
+
+  it("may shrink below its 18rem minimum, so a 16rem card does not spill", () => {
+    expect(css).toMatch(/\.kb-access__card \.kb-picker \{ min-width: 0; \}/);
+    // Sizing elsewhere is unchanged.
+    expect(css).toMatch(/\n\.kb-picker \{[^}]*min-width: 18rem/);
   });
 });
