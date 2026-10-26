@@ -282,7 +282,21 @@ describe("POST /polls/schedules/create", () => {
 });
 
 describe("POST /polls/schedules/:id/{edit,delete,toggle,test}", () => {
+  it("falls back to the not-found flash when the refused row no longer exists", async () => {
+    mockGetSchedule.mockResolvedValue(null);
+    const res = await harness.post("/polls/schedules/gone/edit", {
+      ...SCHEDULE,
+      cron: "bad cron",
+    });
+    expect(res.status).toBe(303);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toBe("Schedule gone not found.");
+    expect(mockUpdateSchedule).not.toHaveBeenCalled();
+  });
+
   it("refuses a bad edit, reopens that row's form and keeps what was typed", async () => {
+    mockGetSchedule.mockResolvedValue({ guildId: "guild-1" });
     const res = await harness.post("/polls/schedules/sched-1/edit", {
       ...SCHEDULE,
       cron: "bad cron",
@@ -401,6 +415,15 @@ describe("POST /polls/schedules/:id/{edit,delete,toggle,test}", () => {
 });
 
 describe("POST /polls/items/create", () => {
+  it("keeps a refused cron exactly as typed", async () => {
+    const res = await harness.post("/polls/schedules/create", {
+      ...SCHEDULE,
+      cron: "  bad cron  ",
+    });
+    const r = await refusal(res);
+    expect(r.html).toContain('value="  bad cron  "');
+  });
+
   it("refuses a missing question, keeping the answers and tags", async () => {
     const res = await harness.post("/polls/items/create", {
       answers: "a, b",
@@ -488,7 +511,31 @@ describe("POST /polls/items/create", () => {
 });
 
 describe("POST /polls/items/:id/{edit,delete,toggle}", () => {
+  it("falls back to the not-found flash when the refused question no longer exists", async () => {
+    mockListPollItems.mockResolvedValue([]);
+    const res = await harness.post("/polls/items/gone/edit", {
+      question: "Q",
+      answers: "only-one",
+    });
+    expect(res.status).toBe(303);
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
+      "Question gone not found.",
+    );
+  });
+
+  it("keeps question text exactly as typed when refusing", async () => {
+    mockListPollItems.mockResolvedValue([{ _id: "item-1" }]);
+    const res = await harness.post("/polls/items/item-1/edit", {
+      question: "  Q?  ",
+      answers: " only-one ",
+    });
+    const r = await refusal(res);
+    expect(r.html).toContain('value="  Q?  "');
+    expect(r.html).toContain('value=" only-one "');
+  });
+
   it("applies the same answer validation on edit, in that row's open form", async () => {
+    mockListPollItems.mockResolvedValue([{ _id: "item-1" }]);
     const res = await harness.post("/polls/items/item-1/edit", {
       question: "Q",
       answers: "only-one",

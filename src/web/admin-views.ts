@@ -2868,7 +2868,7 @@ ${renderStatusLine({
     </label>${create.error("cron")}
     ${CRON_EXAMPLES_HTML}
     <label>Message
-      <textarea name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"${create.attrs("message")}>${escapeHtml(create.value("message"))}</textarea>
+      <textarea name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"${create.attrs("message")}>${create.textareaContent("message")}</textarea>
     </label>${create.error("message")}
     <label class="checkbox">
       <input type="checkbox" name="placeholders" value="1"${create.checked("placeholders") ? " checked" : ""}>
@@ -2881,7 +2881,7 @@ ${renderStatusLine({
         <input type="text" name="embedTitle" maxlength="256"${create.valueAttr("embedTitle")}${create.attrs("embedTitle")}>
       </label>${create.error("embedTitle")}
       <label>Description
-        <textarea name="embedDescription" rows="3" maxlength="4000"${create.attrs("embedDescription")}>${escapeHtml(create.value("embedDescription"))}</textarea>
+        <textarea name="embedDescription" rows="3" maxlength="4000"${create.attrs("embedDescription")}>${create.textareaContent("embedDescription")}</textarea>
       </label>${create.error("embedDescription")}
       <label>Colour (hex, e.g. <code>#5865F2</code>)
         <input type="text" name="embedColor" pattern="^#?[0-9A-Fa-f]{6}$" placeholder="#5865F2"${create.valueAttr("embedColor")}${create.attrs("embedColor")}>
@@ -2899,7 +2899,7 @@ ${renderStatusLine({
       <select name="channelId" required${once.attrs("channelId")}>${channelOptionsHtml(props.textChannels, once.selected("channelId") || undefined)}</select>
     </label>${once.error("channelId")}
     <label>Message
-      <textarea name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"${once.attrs("message")}>${escapeHtml(once.value("message"))}</textarea>
+      <textarea name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"${once.attrs("message")}>${once.textareaContent("message")}</textarea>
     </label>${once.error("message")}
     <label class="checkbox">
       <input type="checkbox" name="placeholders" value="1"${once.checked("placeholders") ? " checked" : ""}>
@@ -2912,7 +2912,7 @@ ${renderStatusLine({
         <input type="text" name="embedTitle" maxlength="256"${once.valueAttr("embedTitle")}${once.attrs("embedTitle")}>
       </label>${once.error("embedTitle")}
       <label>Description
-        <textarea name="embedDescription" rows="3" maxlength="4000"${once.attrs("embedDescription")}>${escapeHtml(once.value("embedDescription"))}</textarea>
+        <textarea name="embedDescription" rows="3" maxlength="4000"${once.attrs("embedDescription")}>${once.textareaContent("embedDescription")}</textarea>
       </label>${once.error("embedDescription")}
       <label>Colour (hex, e.g. <code>#5865F2</code>)
         <input type="text" name="embedColor" pattern="^#?[0-9A-Fa-f]{6}$" placeholder="#5865F2"${once.valueAttr("embedColor")}${once.attrs("embedColor")}>

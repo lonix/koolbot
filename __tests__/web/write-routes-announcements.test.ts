@@ -16,6 +16,7 @@ import {
   afterEach,
 } from "@jest/globals";
 import type { Client } from "discord.js";
+import { JSDOM } from "jsdom";
 import {
   startAdminHarness,
   stubRequireSession,
@@ -211,6 +212,26 @@ describe("POST /announcements/create", () => {
     expect(r.html).toContain('<option value="channel-3" selected>');
     expect(r.html).toMatch(/name="placeholders" value="1" checked/);
     expect(mockCreateAnnouncement).not.toHaveBeenCalled();
+  });
+
+  it("echoes the message and embed text exactly as typed, not trimmed", async () => {
+    const res = await harness.post("/announcements/create", {
+      channelId: "channel-9",
+      cron: "nope",
+      message: "\n  indented line\n\n",
+      embedDescription: "  spaced  ",
+    });
+    const r = await refusal(res);
+    // What the browser puts back in the boxes, after HTML parsing.
+    const doc = new JSDOM(r.html).window.document;
+    const box = (name: string): string =>
+      (
+        doc.querySelector(
+          `form[action$="/announcements/create"] [name=${name}]`,
+        ) as unknown as { value: string }
+      ).value;
+    expect(box("message")).toBe("\n  indented line\n\n");
+    expect(box("embedDescription")).toBe("  spaced  ");
   });
 
   it("marks every refused field at once, in page order", async () => {
@@ -417,6 +438,21 @@ describe("POST /announcements/post-once and /post-vc-stats", () => {
     expect(r.invalidIds).toEqual(["announcement-once-channelId"]);
     expect(r.html).toContain("hi &lt;there&gt;");
     expect(mockPostOnce).not.toHaveBeenCalled();
+  });
+
+  it("echoes the one-off message exactly as typed", async () => {
+    const res = await harness.post("/announcements/post-once", {
+      message: "  keep me  ",
+    });
+    const r = await refusal(res);
+    const doc = new JSDOM(r.html).window.document;
+    expect(
+      (
+        doc.querySelector(
+          'form[action$="/announcements/post-once"] [name=message]',
+        ) as unknown as { value: string }
+      ).value,
+    ).toBe("  keep me  ");
   });
 
   it("applies the same length caps as the scheduled create", async () => {

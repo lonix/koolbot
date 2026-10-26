@@ -60,6 +60,12 @@ export interface FormView {
   /** The typed text of a field when refused, otherwise `fallback`. Escape it yourself. */
   value(name: string, fallback?: string): string;
   /**
+   * The escaped content of a `<textarea>`. A refused form's text starts with a
+   * newline of its own, which the HTML parser drops, so a draft that begins
+   * with a blank line comes back as typed.
+   */
+  textareaContent(name: string, fallback?: string): string;
+  /**
    * ` value="..."` (escaped) for an input that is empty by default, or "" when
    * the refused form left it empty. For an input with a stored value, write
    * `value="${escapeHtml(view.value(name, stored))}"` instead.
@@ -95,6 +101,10 @@ export function formView(
     refused: state !== null,
     value: (name, fallback = "") =>
       state ? (state.values[name] ?? "") : fallback,
+    textareaContent: (name, fallback = ""): string =>
+      state
+        ? `\n${escapeHtml(state.values[name] ?? "")}`
+        : escapeHtml(fallback),
     valueAttr: (name): string => {
       const v = state ? (state.values[name] ?? "") : "";
       return v ? ` value="${escapeHtml(v)}"` : "";

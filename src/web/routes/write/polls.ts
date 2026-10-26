@@ -16,6 +16,7 @@ import { recordAudit } from "../../audit.js";
 import {
   flashRedirect,
   getString,
+  getRawString,
   getCheckbox,
   normalizeCron,
   validCron,
@@ -51,8 +52,7 @@ export function checkPollScheduleForm(req: Req): {
   pingRoleId: string;
 } {
   const channelId = getString(req, "channelId");
-  const typedCron = getString(req, "cron");
-  const cron = normalizeCron(typedCron);
+  const cron = normalizeCron(getString(req, "cron"));
   const durationRaw = getString(req, "durationHours");
   const pingRoleId = getString(req, "pingRoleId");
 
@@ -85,8 +85,8 @@ export function checkPollScheduleForm(req: Req): {
     errors,
     values: {
       channelId,
-      cron: typedCron,
-      durationHours: durationRaw,
+      cron: getRawString(req, "cron"),
+      durationHours: getRawString(req, "durationHours"),
       pingRoleId,
     },
     channelId,
@@ -149,9 +149,9 @@ export function checkPollItemForm(req: Req): {
   return {
     errors,
     values: {
-      question,
-      answers: answersStr,
-      tags: tagsStr,
+      question: getRawString(req, "question"),
+      answers: getRawString(req, "answers"),
+      tags: getRawString(req, "tags"),
       multiSelect: multiSelect ? "1" : "",
     },
     question,
@@ -233,6 +233,18 @@ export function createPollsRouter(client: Client): Router {
       const session = requireSessionContext(req);
       const id = String(req.params.id);
       const form = checkPollScheduleForm(req);
+      // A refused edit is drawn in the row's own form; a row deleted in another
+      // tab has none, so say so instead.
+      if (Object.keys(form.errors).length > 0) {
+        const current = await PollService.getInstance(client).getSchedule(id);
+        if (!current || current.guildId !== session.guildId) {
+          flashRedirect(res, PAGE, {
+            type: "err",
+            text: `Schedule ${id} not found.`,
+          });
+          return;
+        }
+      }
       if (
         await refuseForm(req, res, {
           page: PAGE,
@@ -499,6 +511,18 @@ export function createPollsRouter(client: Client): Router {
       const session = requireSessionContext(req);
       const id = String(req.params.id);
       const form = checkPollItemForm(req);
+      if (Object.keys(form.errors).length > 0) {
+        const items = await PollService.getInstance(client).listPollItems(
+          session.guildId,
+        );
+        if (!items.some((it) => String(it._id) === id)) {
+          flashRedirect(res, PAGE, {
+            type: "err",
+            text: `Question ${id} not found.`,
+          });
+          return;
+        }
+      }
       if (
         await refuseForm(req, res, {
           page: PAGE,

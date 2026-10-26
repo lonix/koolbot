@@ -34,6 +34,7 @@ describe("formView for a form that was not refused", () => {
       expect(v.open()).toBe("");
       expect(v.selected("channelId", "c1")).toBe("c1");
       expect(v.valueAttr("cron")).toBe("");
+      expect(v.textareaContent("message", "a<b")).toBe("a&lt;b");
     },
   );
 });
@@ -48,6 +49,11 @@ describe("formView for the refused form", () => {
     expect(v.selected("channelId", "c1")).toBe("c2");
     expect(v.checked("flag", false)).toBe(true);
     expect(v.checked("other", true)).toBe(false);
+  });
+
+  it("starts a refused textarea with a newline so a leading blank line survives parsing", () => {
+    expect(v.textareaContent("message", "ignored")).toBe("\nhello");
+    expect(v.textareaContent("missing")).toBe("\n");
   });
 
   it("writes a value attribute only for a non-empty typed value", () => {

@@ -16,6 +16,7 @@ import { recordAudit } from "../../audit.js";
 import {
   flashRedirect,
   getString,
+  getRawString,
   getCheckbox,
   normalizeCron,
   validCron,
@@ -51,8 +52,7 @@ export function checkAnnouncementForm(
   embedData: IScheduledAnnouncement["embedData"] | undefined;
 } {
   const channelId = getString(req, "channelId");
-  const typedCron = getString(req, "cron");
-  const cron = normalizeCron(typedCron);
+  const cron = normalizeCron(getString(req, "cron"));
   const message = getString(req, "message");
   const placeholders = getCheckbox(req, "placeholders");
   const embedTitle = getString(req, "embedTitle");
@@ -112,15 +112,18 @@ export function checkAnnouncementForm(
           color,
         }
       : undefined;
+  // Echoed exactly as typed (not trimmed), so a draft with indentation or blank
+  // lines comes back unchanged; the trimmed variables above are what is
+  // validated and saved.
   const values: FormValues = {
     channelId,
-    message,
+    message: getRawString(req, "message"),
     placeholders: placeholders ? "1" : "",
-    embedTitle,
-    embedDescription,
-    embedColor: embedColorHex,
+    embedTitle: getRawString(req, "embedTitle"),
+    embedDescription: getRawString(req, "embedDescription"),
+    embedColor: getRawString(req, "embedColor"),
   };
-  if (withCron) values.cron = typedCron;
+  if (withCron) values.cron = getRawString(req, "cron");
   return {
     errors,
     values,

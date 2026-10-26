@@ -33,6 +33,7 @@ import {
 import { signFlash, truncateFlash, wantsJson } from "../../http-flash.js";
 import type { FormErrors, FormValues } from "../../form-errors.js";
 import { getFormPage } from "../../form-pages.js";
+import { escapeHtml } from "../../html.js";
 import { loadReactionRoleMessageIds } from "../../reaction-role-messages.js";
 import { PROTECTED_KEYS } from "../../bootstrap-vars.js";
 import { pickCascadeMasterKey } from "../../cascade-master.js";
@@ -203,8 +204,16 @@ export async function refuseForm(
         errors: opts.errors,
         values: opts.values,
       });
-      res.status(422).type("text/html").send(html);
-      return true;
+      // The page must hold the refused form: its first error line carries the
+      // form id. A row deleted since the form was drawn has no form, and a 422
+      // with no message, no marked field and no values would explain nothing.
+      const first = Object.keys(opts.errors)[0];
+      const marker = `id="${escapeHtml(`${opts.formId}-${first}-error`)}"`;
+      if (html.includes(marker)) {
+        res.status(422).type("text/html").send(html);
+        return true;
+      }
+      logger.warn("Refused form is not on the rendered page; redirecting");
     } catch (err) {
       logger.warn("Could not render a refused form; redirecting", err);
     }
