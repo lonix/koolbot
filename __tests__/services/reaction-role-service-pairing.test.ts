@@ -844,11 +844,76 @@ describe("finding a picker that carries no marker (#1513)", () => {
       ]),
     );
     expect(await find(service)).toBe("orphan1");
+    // Archived mappings count too: archiving saves the mapping before the
+    // message is deleted, so a failed delete leaves a used picker behind.
     expect(Model.countDocuments).toHaveBeenCalledWith({
       guildId: "guild1",
       messageId: "orphan1",
-      isArchived: false,
     });
+  });
+
+  it("ignores a picker whose only mapping is archived (its delete failed)", async () => {
+    const { service, messageFetch } = build();
+    messageFetch.mockResolvedValue(
+      new Map([
+        ["stuck", plain("stuck")],
+        ["orphan1", plain("orphan1")],
+      ]),
+    );
+    Model.countDocuments.mockImplementation((async (q: {
+      messageId: string;
+      isArchived?: boolean;
+    }) =>
+      q.messageId === "stuck" && q.isArchived !== false ? 1 : 0) as never);
+    // No false ambiguity next to the genuine orphan.
+    expect(await find(service)).toBe("orphan1");
+  });
+
+  it("does not claim another step's legacy-marked picker, even with a matching description", async () => {
+    const { service, messageFetch, pickerChannel } = build();
+    const theirs = picker(
+      "theirs",
+      "KoolBot · Reaction roles · ref snap-2:op-1",
+      "bot1",
+      BODY,
+    );
+    messageFetch.mockResolvedValue(new Map([["theirs", theirs]]));
+    expect(await find(service)).toBeNull();
+    // A retry posts its own picker instead of completing the other step's.
+    const bind = spyBind(service).mockResolvedValue({
+      success: true,
+      message: "ok",
+      roleId: "role1",
+      messageId: "sent1",
+    });
+    await service.registerGatedPairing("guild1", input({ retry: true }));
+    expect(bind.mock.calls[0][3]).not.toHaveProperty("messageId");
+    expect(pickerChannel.send).not.toHaveBeenCalled(); // bind is stubbed
+    // And a rollback never deletes it.
+    messageFetch.mockResolvedValue(theirs);
+    await service.unregisterGatedPairing("guild1", {
+      roleId: "role1",
+      messageId: "theirs",
+      channelId: "picker",
+      ownerKey: OWNER,
+    });
+    expect(theirs.delete).not.toHaveBeenCalled();
+  });
+
+  it("a rollback keeps an unmarked picker an archived mapping still points at", async () => {
+    const { service, messageFetch } = build();
+    const stuck = plain("stuck");
+    messageFetch.mockResolvedValue(stuck);
+    Model.countDocuments.mockImplementation((async (q: {
+      isArchived?: boolean;
+    }) => (q.isArchived !== false ? 1 : 0)) as never);
+    await service.unregisterGatedPairing("guild1", {
+      roleId: "role1",
+      messageId: "stuck",
+      channelId: "picker",
+      ownerKey: OWNER,
+    });
+    expect(stuck.delete).not.toHaveBeenCalled();
   });
 
   it("ignores a candidate that a mapping already uses", async () => {

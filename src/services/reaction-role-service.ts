@@ -104,7 +104,18 @@ const stepBoundary = (ownerKey: string): number | null => {
   const created = /^([0-9a-f]{24}):/i.exec(ownerKey);
   return created ? parseInt(created[1].slice(0, 8), 16) * 1000 - 1000 : null;
 };
-/** Bot-authored, shows the role and is not older than the step. Unmapped is checked by the caller. */
+/** Any `· ref <key>` footer marker, whichever step it belongs to. */
+const hasAnyRefMarker = (message: PickerMessage): boolean =>
+  (message.embeds ?? []).some((e) =>
+    new RegExp(`${PICKER_REF_SEPARATOR}${PICKER_REF_PREFIX}\\S+$`).test(
+      e.footer?.text ?? "",
+    ),
+  );
+/**
+ * Bot-authored, shows the role and is not older than the step. A message that
+ * carries a marker belongs to the step in the marker (see `hasLegacyMarker`),
+ * never to this heuristic. Unmapped is checked by the caller.
+ */
 const looksLikeStepPicker = (
   message: PickerMessage,
   botId: string | undefined,
@@ -112,6 +123,7 @@ const looksLikeStepPicker = (
   roleId: string,
 ): boolean => {
   if (!botId || message.author?.id !== botId || !message.id) return false;
+  if (hasAnyRefMarker(message)) return false;
   const boundary = stepBoundary(ownerKey);
   if (boundary !== null && SnowflakeUtil.timestampFrom(message.id) < boundary) {
     return false;
@@ -2443,10 +2455,11 @@ export class ReactionRoleService {
     const settle = async (): Promise<Message | null> => {
       const unmapped: Message[] = [];
       for (const m of candidates.values()) {
+        // Archived mappings count: archiving saves the mapping before the
+        // message is deleted, so a failed delete leaves a used picker behind.
         const used = await ReactionRoleConfig.countDocuments({
           guildId: guild.id,
           messageId: m.id,
-          isArchived: false,
         });
         if (used === 0) unmapped.push(m);
       }
@@ -2614,15 +2627,25 @@ export class ReactionRoleService {
               }),
           `read orphan picker ${input.messageId}`,
         );
+        // Content alone is weaker proof than a marker: any mapping at all,
+        // archived included, means the picker is not an unsaved orphan.
+        const anyMapping =
+          orphan && !hasLegacyMarker(orphan, botId, input.ownerKey)
+            ? await ReactionRoleConfig.countDocuments({
+                guildId,
+                messageId: input.messageId,
+              })
+            : 0;
         if (
           orphan &&
           (hasLegacyMarker(orphan, botId, input.ownerKey) ||
-            looksLikeStepPicker(
-              orphan,
-              botId,
-              input.ownerKey,
-              this.normalizeRoleId(input.roleId),
-            ))
+            (anyMapping === 0 &&
+              looksLikeStepPicker(
+                orphan,
+                botId,
+                input.ownerKey,
+                this.normalizeRoleId(input.roleId),
+              )))
         ) {
           await this.deleteMessageUnderLock(orphan);
         }
