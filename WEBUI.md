@@ -1633,8 +1633,8 @@ flushes them in batches to MongoDB as daily `{command, date, guildId}`
 buckets, so the data survives restarts (unlike the live in-memory view) and
 is pruned automatically by a TTL index. The page shows commands by usage,
 an error spotlight (commands at or above a 10% error rate), the slowest
-commands by average response time, and a per-day usage trend. The 7d/30d
-toggle only selects the view window over already-persisted data; it is not a
+commands by average response time, and a per-day usage trend. The "7 days" / "30 days"
+window tabs (the current one carries `aria-current`) only select the view window over already-persisted data; it is not a
 config key. Persistence is governed by `monitoring.metrics_persistence.enabled`
 (default on), while `monitoring.metrics_retention_days` (default 30) controls
 how long buckets are kept before the TTL index prunes them; both are edited in
@@ -1918,8 +1918,8 @@ voice-activity heatmap (#675, Part B). It aggregates the already-stored
 `VoiceChannelTracking` sessions into a 24×7 (hour × weekday) grid of total
 voice minutes — a colour-intensity matrix where darker cells are busier — plus
 per-weekday and per-hour bar breakdowns and a "busiest slot" callout. Use it to
-pick high-reach times for digests, announcements, and polls. A 7d/30d/90d
-window toggle selects the trailing date range over already-persisted data (it
+pick high-reach times for digests, announcements, and polls. The "7 days" / "30 days" / "90 days"
+window tabs select the trailing date range over already-persisted data (it
 is not a config key); the default is 90 days so weekly patterns read clearly.
 Sessions are bucketed by their **start** hour/weekday in the **server**
 timezone and weighted by the whole session duration — no new data capture, no
