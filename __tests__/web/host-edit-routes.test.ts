@@ -421,16 +421,21 @@ describe("who may edit", () => {
   });
 });
 
-/** The markup without script bodies (the focus script names the attribute too). */
-/** The text of the error line with this id (its icon has no text). */
-const errorLine = (html: string, id: string): string | null => {
-  const m = new RegExp(
-    `<p class="kb-field__error" id="${id}-error"[^>]*>(.*?)</p>`,
-  ).exec(html);
-  return m ? m[1].replace(/<[^>]*>/g, "") : null;
+/** The page up to its first script (the focus script names the attribute too), by plain string search. */
+const noScripts = (html: string): string => {
+  const at = html.toLowerCase().indexOf("<script");
+  return at === -1 ? html : html.slice(0, at);
 };
-const noScripts = (html: string): string =>
-  html.replace(/<script[\s\S]*?<\/script>/g, "");
+/** The text of the error line with this id: what follows its icon, up to the closing tag. */
+const errorLine = (html: string, id: string): string | null => {
+  const open = html.indexOf(`<p class="kb-field__error" id="${id}-error"`);
+  if (open === -1) return null;
+  const start = html.indexOf(">", open) + 1;
+  const end = html.indexOf("</p>", start);
+  const inner = html.slice(start, end);
+  const icon = inner.lastIndexOf("</svg>");
+  return icon === -1 ? inner : inner.slice(icon + "</svg>".length);
+};
 
 describe("validation is the create form's", () => {
   // [name, posted override, message, id of the field it marks]

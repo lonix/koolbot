@@ -490,8 +490,10 @@ describe("POST /me/events/new: planned events", () => {
 });
 
 /** The markup without script bodies (the focus script names the attribute too). */
-const noScripts = (html: string): string =>
-  html.replace(/<script[\s\S]*?<\/script>/g, "");
+const noScripts = (html: string): string => {
+  const at = html.toLowerCase().indexOf("<script");
+  return at === -1 ? html : html.slice(0, at);
+};
 
 describe("POST /me/events/new: a refused form (#1531)", () => {
   /** The opening tag of the control with this id. */
