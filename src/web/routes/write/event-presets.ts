@@ -13,7 +13,9 @@ import { ConfigService } from "../../../services/config-service.js";
 import {
   createLibraryPreset,
   deleteLibraryPreset,
+  DUPLICATE_NAME,
   PRESET_FORM_FIELDS,
+  PRESET_LOBBY_FIELDS,
   setPresetEnabled,
   updateLibraryPreset,
   validatePresetForm,
@@ -22,7 +24,14 @@ import {
   publishPersonalPreset,
   unpublishPersonalPreset,
 } from "../../../services/event-personal-preset-service.js";
-import { resolveGroupCountLimits } from "../../../services/event-groups.js";
+import {
+  GROUP_FORM_FIELDS,
+  GROUP_FORM_MAX_ROWS,
+  groupRowField,
+  resolveGroupCountLimits,
+} from "../../../services/event-groups.js";
+import type { FormValues } from "../../form-errors.js";
+import { EVENT_PRESET_FORM } from "../../event-presets-page.js";
 import { recordAudit } from "../../audit.js";
 import {
   asyncHandler,
@@ -30,6 +39,7 @@ import {
   flashRedirectQuery,
   type Flash,
   getString,
+  refuseForm,
   requireSessionContext,
 } from "./helpers.js";
 
@@ -55,6 +65,42 @@ function backToEditor(
   );
 }
 
+/**
+ * What the preset editor submitted, as a refused editor shows it (#1523): every
+ * field exactly as typed, the ticks as "1" or "", and the group rows in the
+ * order of the form (they are contiguous, so the first missing one ends them).
+ */
+export function presetFormValues(body: unknown): FormValues {
+  const source = (body ?? {}) as Record<string, unknown>;
+  const str = (name: string): string =>
+    typeof source[name] === "string" ? (source[name] as string) : "";
+  const values: FormValues = {};
+  for (const name of [
+    PRESET_FORM_FIELDS.id,
+    PRESET_FORM_FIELDS.name,
+    PRESET_FORM_FIELDS.description,
+    GROUP_FORM_FIELDS.label,
+    GROUP_FORM_FIELDS.leaderLabel,
+    GROUP_FORM_FIELDS.leadMinutes,
+    ...Object.values(PRESET_LOBBY_FIELDS),
+  ]) {
+    values[name] = str(name);
+  }
+  for (const name of [
+    GROUP_FORM_FIELDS.tags,
+    GROUP_FORM_FIELDS.captainsLobby,
+  ]) {
+    values[name] = str(name).trim() ? "1" : "";
+  }
+  for (let i = 0; i < GROUP_FORM_MAX_ROWS; i++) {
+    if (typeof source[groupRowField(i, "name")] !== "string") break;
+    for (const field of ["name", "kind", "size", "tag", "marker"] as const) {
+      values[groupRowField(i, field)] = str(groupRowField(i, field));
+    }
+  }
+  return values;
+}
+
 export function createEventPresetsRouter(): Router {
   const router = Router();
 
@@ -71,6 +117,24 @@ export function createEventPresetsRouter(): Router {
       const { maxCount } = resolveGroupCountLimits(defaultCount, configuredMax);
       const checked = validatePresetForm(req.body, { maxCount });
       if (!checked.ok) {
+        // Each refused field is marked in the editor, which comes back holding
+        // what was typed. Only if no message could be tied to the page does the
+        // old redirect to the editor (with a flash) answer.
+        if (
+          await refuseForm(req, res, {
+            page: PAGE,
+            formId: EVENT_PRESET_FORM,
+            errors: checked.fields,
+            values: presetFormValues(req.body),
+            fallback: (flash) =>
+              backToEditor(res, id, {
+                ...flash,
+                text: `Preset not saved. ${checked.errors.join(" ")}`,
+              }),
+          })
+        ) {
+          return;
+        }
         backToEditor(res, id, {
           type: "err",
           text: `Preset not saved. ${checked.errors.join(" ")}`,
@@ -108,6 +172,21 @@ export function createEventPresetsRouter(): Router {
             ? `Saved preset "${data.name}". Events that already used it are unchanged.`
             : `Added preset "${data.name}". It is on, so hosts can pick it now.`,
         });
+      } else if (
+        result.error === DUPLICATE_NAME &&
+        (await refuseForm(req, res, {
+          page: PAGE,
+          formId: EVENT_PRESET_FORM,
+          errors: { [PRESET_FORM_FIELDS.name]: result.error },
+          values: presetFormValues(req.body),
+          fallback: (flash) =>
+            backToEditor(res, id, {
+              ...flash,
+              text: `Preset not saved. ${result.error}`,
+            }),
+        }))
+      ) {
+        return;
       } else {
         backToEditor(res, id, {
           type: "err",

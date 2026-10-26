@@ -192,6 +192,12 @@ export async function refuseForm(
     formId: string;
     errors: FormErrors;
     values: FormValues;
+    /**
+     * Where the refusal goes when the page cannot show the form, in place of the
+     * flash redirect to `page` (#1523). For a form whose retry needs more than
+     * the page's path: the Group presets editor goes back to `?edit=<id>`.
+     */
+    fallback?: (flash: Flash) => void;
   },
 ): Promise<boolean> {
   const messages = Object.values(opts.errors);
@@ -218,10 +224,9 @@ export async function refuseForm(
       logger.warn("Could not render a refused form; redirecting", err);
     }
   }
-  flashRedirect(res, opts.page, {
-    type: "err",
-    text: `Not saved. ${messages[0]}`,
-  });
+  const flash: Flash = { type: "err", text: `Not saved. ${messages[0]}` };
+  if (opts.fallback) opts.fallback(flash);
+  else flashRedirect(res, opts.page, flash);
   return true;
 }
 

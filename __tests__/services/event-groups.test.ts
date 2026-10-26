@@ -12,6 +12,7 @@ import {
   copyGroupSetup,
   effectiveChannelLeadMinutes,
   emptyGroupSetup,
+  groupErrorFields,
   hasCaptainsLobby,
   parseGroupForm,
   readSeriesGroupSetup,
@@ -963,5 +964,85 @@ describe("the series group setup (#1266)", () => {
         memberIds: [],
       },
     ]);
+  });
+});
+
+describe("groupErrorFields (#1523)", () => {
+  it("ties each message to its form field, worded to read under it", () => {
+    const { fields, rest } = groupErrorFields([
+      "Group 3 size: a whole number from 1 to 99, or empty for no limit.",
+      'Group 1 name: "Red" is already used by group 0; names must be unique.',
+      "Group label: at most 40 characters (got 60).",
+      "Leader label: control characters are not allowed.",
+      "Channel creation time must be a whole number of minutes from 0 to 1440, or empty to use the server default.",
+      "Group 2 marker: not an emoji.",
+      "Group 2 tag: too long.",
+      "Group 2 kind: must be team, open or leads.",
+    ]);
+    expect(fields).toEqual({
+      group_2_size: "A whole number from 1 to 99, or empty for no limit.",
+      group_0_name: '"Red" is already used by group 0; names must be unique.',
+      groups_label: "At most 40 characters (got 60).",
+      groups_leader_label: "Control characters are not allowed.",
+      groups_lead_minutes:
+        "Channel creation time must be a whole number of minutes from 0 to 1440, or empty to use the server default.",
+      group_1_marker: "Not an emoji.",
+      group_1_tag: "Too long.",
+      group_1_kind: "Must be team, open or leads.",
+    });
+    expect(rest).toEqual([]);
+  });
+
+  it("keeps the first message per field and leaves what is about no field in rest", () => {
+    const { fields, rest } = groupErrorFields([
+      "Group 1 name: first.",
+      "Group 1 name: second.",
+      "Add at least one group, or switch groups off. Give each group a name.",
+      "An event can have at most 3 groups (events.groups.max_count); this has 4.",
+    ]);
+    expect(fields).toEqual({ group_0_name: "First." });
+    expect(rest).toHaveLength(2);
+  });
+
+  it("sends a row the caller appended itself to rest", () => {
+    const { fields, rest } = groupErrorFields(
+      ["Group 4 name: bad.", "Group 2 name: bad too."],
+      new Set([4]),
+    );
+    expect(fields).toEqual({ group_1_name: "Bad too." });
+    expect(rest).toEqual(["Group 4 name: bad."]);
+  });
+
+  it("covers every message validateGroupSetup can raise for a row or a label", () => {
+    const result = validateGroupSetup(
+      {
+        enabled: true,
+        presetId: "",
+        groupLabel: "x".repeat(200),
+        leaderLabel: "",
+        channelLeadMinutes: "99999",
+        rows: [
+          {
+            position: 1,
+            name: "",
+            kind: "team",
+            size: "0",
+            tag: "",
+            marker: "",
+          },
+        ],
+      } as GroupSetupInput,
+      { maxCount: 5 },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const { fields, rest } = groupErrorFields(result.errors);
+    expect(Object.keys(fields).sort()).toEqual([
+      "group_0_name",
+      "group_0_size",
+      "groups_label",
+      "groups_lead_minutes",
+    ]);
+    expect(rest).toEqual([]);
   });
 });

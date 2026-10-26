@@ -16,6 +16,7 @@ import {
   GROUP_COUNT_HARD_MAX,
   GROUP_FORM_FIELDS,
   GROUP_NAME_MAX,
+  groupErrorFields,
   normalizeGroupText,
   parseGroupForm,
   validateGroupSetup,
@@ -339,7 +340,20 @@ export interface PresetData {
 }
 
 export type PresetValidation =
-  { ok: true; data: PresetData } | { ok: false; errors: string[] };
+  | { ok: true; data: PresetData }
+  | {
+      ok: false;
+      errors: string[];
+      /**
+       * The same refusals by form field (`preset_name`, `group_2_size`, ...),
+       * for a page that marks each field (#1523); `groups` holds what is about
+       * no one field. Every message is in `errors` as well.
+       */
+      fields: Record<string, string>;
+    };
+
+/** Key of the refusals in {@link PresetValidation} that are about no one field. */
+export const PRESET_GROUPS_FIELD = "groups";
 
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
@@ -403,9 +417,12 @@ export function validatePresetForm(
     carriedName !== "" &&
     rows.length > 0 &&
     !rows.some((r) => r.kind === "leads");
+  // The "Group N" a carried lobby row is validated as; it has no row on the page.
+  let lobbyPosition: number | null = null;
   if (carried) {
     // Last while it is validated, so "Group N" in an error is the number the
     // editor shows; it is moved back to its own place afterwards.
+    lobbyPosition = rows.length + 1;
     rows = [
       ...rows,
       {
@@ -438,7 +455,13 @@ export function validatePresetForm(
       ),
     );
   }
-  if (errors.length > 0 || !result.ok) return { ok: false, errors };
+  if (errors.length > 0 || !result.ok) {
+    return {
+      ok: false,
+      errors,
+      fields: presetErrorFields(errors, lobbyPosition),
+    };
+  }
   const setup = result.setup;
   if (carried) {
     const at = setup.groups.findIndex((g) => g.kind === "leads");
@@ -469,6 +492,43 @@ export function validatePresetForm(
       })),
     },
   };
+}
+
+/**
+ * {@link PresetValidation}'s refusals by form field (#1523): the preset's own
+ * name and description, then each group field through `groupErrorFields`.
+ * Whatever is about no one field is joined under {@link PRESET_GROUPS_FIELD}.
+ */
+function presetErrorFields(
+  errors: readonly string[],
+  lobbyPosition: number | null,
+): Record<string, string> {
+  const fields: Record<string, string> = {};
+  const lift = (text: string): string =>
+    `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+  const own: string[] = [];
+  for (const message of errors) {
+    const m = /^Preset (name|description): (.+)$/s.exec(message);
+    if (!m) {
+      own.push(message);
+      continue;
+    }
+    const key = PRESET_FORM_FIELDS[m[1] as "name" | "description"];
+    if (!Object.prototype.hasOwnProperty.call(fields, key)) {
+      fields[key] = lift(m[2]);
+    }
+  }
+  const grouped = groupErrorFields(
+    own,
+    lobbyPosition === null ? new Set() : new Set([lobbyPosition]),
+  );
+  for (const [key, text] of Object.entries(grouped.fields)) {
+    if (!Object.prototype.hasOwnProperty.call(fields, key)) fields[key] = text;
+  }
+  if (grouped.rest.length > 0) {
+    fields[PRESET_GROUPS_FIELD] = grouped.rest.join(" ");
+  }
+  return fields;
 }
 
 function getEventGroupPresetByLabel(

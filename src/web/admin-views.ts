@@ -3048,6 +3048,12 @@ export interface GroupRowOptions {
   requireName?: boolean;
   /** Markup inside the row, after the grid: hidden shown-value fields, a note. Built by the caller (escaped there). */
   extra?: string;
+  /**
+   * Extra attributes for a column's control, by column, for a refused field:
+   * ` id="..." aria-invalid="true" aria-describedby="..."` from `FormView.attrs`
+   * (#1523). Built by the caller (escaped there).
+   */
+  attrs?: Partial<Record<"marker" | "name" | "size" | "tag" | "kind", string>>;
 }
 
 /**
@@ -3087,15 +3093,15 @@ export function renderGroupRow(
   return `<div data-group-row role="group" aria-label="Group ${position}" class="kb-grouprows__item">
         <div class="kb-grouprow">
           <div data-marker-wrap class="kb-emoji-wrap">
-            <input type="text" data-marker-input class="kb-input kb-input--sm" name="${field("marker")}" aria-label="Group ${position} marker (optional, e.g. a coloured circle)" maxlength="${GROUP_MARKER_MAX_CHARS * 2}" value="${escapeHtml(group?.marker ?? "")}">
+            <input type="text" data-marker-input class="kb-input kb-input--sm" name="${field("marker")}" aria-label="Group ${position} marker (optional, e.g. a coloured circle)" maxlength="${GROUP_MARKER_MAX_CHARS * 2}" value="${escapeHtml(group?.marker ?? "")}"${options?.attrs?.marker ?? ""}>
             <button type="button" data-marker-btn class="kb-emoji-btn kb-emoji-btn--sm" aria-haspopup="true" aria-expanded="false" aria-label="Group ${position} marker: choose one" hidden>+</button>
           </div>
-          <input type="text" class="kb-input kb-input--sm" name="${field("name")}"${options?.requireName ? " required" : ""} aria-label="Group ${position} name" maxlength="${GROUP_NAME_MAX}" value="${escapeHtml(group?.name ?? "")}">
-          <input type="number" class="kb-input kb-input--sm" name="${field("size")}" aria-label="Group ${position} size (1 to ${GROUP_SIZE_MAX}, empty = no limit)" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" value="${escapeHtml(group?.size ?? "")}">
+          <input type="text" class="kb-input kb-input--sm" name="${field("name")}"${options?.requireName ? " required" : ""} aria-label="Group ${position} name" maxlength="${GROUP_NAME_MAX}" value="${escapeHtml(group?.name ?? "")}"${options?.attrs?.name ?? ""}>
+          <input type="number" class="kb-input kb-input--sm" name="${field("size")}" aria-label="Group ${position} size (1 to ${GROUP_SIZE_MAX}, empty = no limit)" min="${GROUP_SIZE_MIN}" max="${GROUP_SIZE_MAX}" value="${escapeHtml(group?.size ?? "")}"${options?.attrs?.size ?? ""}>
           ${
             options?.noTag
               ? `<input type="text" class="kb-input kb-input--sm" aria-label="Group ${position} tag (only a team carries a tag)" title="Only a team carries a tag" disabled>`
-              : `<input type="text" class="kb-input kb-input--sm" name="${field("tag")}" aria-label="Group ${position} tag (optional, up to ${GROUP_TAG_MAX} characters)" maxlength="${GROUP_TAG_MAX}" value="${escapeHtml(group?.tag ?? "")}">`
+              : `<input type="text" class="kb-input kb-input--sm" name="${field("tag")}" aria-label="Group ${position} tag (optional, up to ${GROUP_TAG_MAX} characters)" maxlength="${GROUP_TAG_MAX}" value="${escapeHtml(group?.tag ?? "")}"${options?.attrs?.tag ?? ""}>`
           }${
             options?.fixedKind
               ? ""
@@ -3108,7 +3114,7 @@ export function renderGroupRow(
             : `
         <div data-kind-panel class="kb-grouprows__more">
           <label class="kb-label">Group ${position} kind
-            <select class="kb-select kb-input--sm" name="${field("kind")}">${kinds}</select>
+            <select class="kb-select kb-input--sm" name="${field("kind")}"${options?.attrs?.kind ?? ""}>${kinds}</select>
           </label>
         </div>`
         }${options?.extra ?? ""}

@@ -280,6 +280,42 @@ describe("validatePresetForm", () => {
     ...over,
   });
 
+  it("names the field of every refusal (#1523)", () => {
+    const r = svc.validatePresetForm(
+      body({
+        preset_name: " ",
+        preset_description: "d".repeat(500),
+        group_0_size: "500",
+        groups_label: "x".repeat(200),
+      }),
+      { maxCount: 15 },
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(Object.keys(r.fields).sort()).toEqual([
+      "group_0_size",
+      "groups_label",
+      "preset_description",
+      "preset_name",
+    ]);
+    expect(r.fields.preset_name).toBe("A name is required.");
+    // Every message is still in `errors`, as before.
+    expect(r.errors.length).toBe(4);
+  });
+
+  it("puts a refusal about no one field under `groups`", () => {
+    const r = svc.validatePresetForm(
+      { preset_name: "Clan match" },
+      {
+        maxCount: 15,
+      },
+    );
+    expect(r).toMatchObject({
+      ok: false,
+      fields: { groups: "Add at least one group, each with a name." },
+    });
+  });
+
   it("accepts a preset and returns clean data", () => {
     const r = svc.validatePresetForm(
       body({ groups_label: " Squad ", groups_lead_minutes: "30" }),

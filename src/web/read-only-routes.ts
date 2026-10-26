@@ -40,6 +40,7 @@ import {
   catalogNotice,
   enabledPresets,
   loadPresetCatalog,
+  PRESET_FORM_FIELDS,
 } from "../services/event-group-preset-service.js";
 import { resolveGroupCountLimits } from "../services/event-groups.js";
 import { loadGroupPrefill } from "../services/event-last-setup-service.js";
@@ -1699,22 +1700,36 @@ export function createReadOnlyRouter(
   );
 
   // Group preset library (#1200): the admin page for the server-wide presets.
+  // One renderer for the GET and for a refused editor (#1523). A refused save
+  // is a POST with no query string: the preset being edited comes from the
+  // form's own `preset_id`, and the editor holds what was typed.
+  const renderEventPresets = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const data = await loadEventPresetsPage(
+      client,
+      common.guildId,
+      refusedForm
+        ? { edit: refusedForm.values[PRESET_FORM_FIELDS.id] ?? "" }
+        : (req.query as Record<string, unknown>),
+    );
+    return renderEventPresetsPage({
+      ...common,
+      ...data,
+      ...(refusedForm ? { values: refusedForm.values } : {}),
+      refusedForm,
+      flash: readFlash(req),
+    });
+  };
+  registerFormPage("/admin/events/presets", (req, refused) =>
+    renderEventPresets(req as AuthenticatedRequest, refused),
+  );
   router.get(
     "/events/presets",
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
-      const data = await loadEventPresetsPage(
-        client,
-        common.guildId,
-        req.query as Record<string, unknown>,
-      );
-      res.type("text/html").send(
-        renderEventPresetsPage({
-          ...common,
-          ...data,
-          flash: readFlash(req),
-        }),
-      );
+      res.type("text/html").send(await renderEventPresets(req, null));
     }),
   );
 
