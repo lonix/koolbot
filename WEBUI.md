@@ -1977,6 +1977,14 @@ same Groups block, without **Repeat** (a host's events do not repeat) and withou
 from the form), the scope is checked on every request, and the host reaches only events they created. Both forms use one create pipeline
 (`src/web/event-create.ts`), and every create is audited as `event.create` with `via` (`admin` or `host`) and `when`.
 
+**A refused form keeps what was typed** (#1531). When the server refuses **New event** or **Edit event**, the answer is the form itself
+(status 422, no redirect): the title, date, time, timezone, duration and Groups rows come back as posted, the field the refusal is about gets
+`aria-invalid="true"` and an error line linked by `aria-describedby` that says what to change, a short error callout sits at the top, and
+focus moves to the marked field. A Groups error shows above the Groups block. A refusal that is not about one field (the open-event limit,
+a Discord failure) shows its reason in the callout only. The edit form comes back with the version, mode and CSRF token it was posted with,
+so a stale form is still refused on the next save. Other refusals on the edit page (a conflict, an event that has started) still return to a
+fresh page with a message. The admin Events form is not changed yet.
+
 **Limit on open events** (#1408). `events.max_active_per_host` (Settings, Events) is the most events a host who is not an administrator may
 have open at once; `0`, the default, means no limit. Open means scheduled or running, the same events **Your events** lists under Live now
 and Upcoming; ended and cancelled events do not count, nor do events an admin adopted. A host at the limit who tries **New event** or

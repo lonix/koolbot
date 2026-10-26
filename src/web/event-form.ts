@@ -14,7 +14,8 @@ import {
 import { parseEventDateTime } from "../services/event-service.js";
 import { ConfigService } from "../services/config-service.js";
 import { isValidTimezone, resolveTimezone } from "../utils/timezone.js";
-import { firstLengthError, parseIntInRange } from "./routes/write/helpers.js";
+import { parseIntInRange } from "./routes/write/helpers.js";
+import type { EventFormField } from "./event-field-errors.js";
 
 /** The posted fields, already trimmed (as `getString` returns them). */
 export interface EventFormFields {
@@ -38,7 +39,25 @@ export type EventFormResult =
         durationMinutes: number;
       };
     }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      /** What to change, in the host's terms. */
+      error: string;
+      /** The field the refusal is about; absent when it is not about one. */
+      field?: EventFormField;
+    };
+
+const refuse = (
+  field: EventFormField,
+  error: string,
+): { ok: false; error: string; field: EventFormField } => ({
+  ok: false,
+  error,
+  field,
+});
+
+const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_SHAPE = /^\d{2}:\d{2}$/;
 
 /**
  * Validate the core fields. `requireFuture` is true for a new event and for an
@@ -66,21 +85,25 @@ export async function validateEventForm(
     duration,
     timezone: tzInput,
   } = fields;
-  if (opts.startOverride ? !title : !title || !date || !time) {
-    return {
-      ok: false,
-      error: opts.startOverride
-        ? "A title is required."
-        : "Title, date and time are all required.",
-    };
+  if (!title) return refuse("title", "Enter a title.");
+  if (!opts.startOverride) {
+    if (!date) return refuse("date", "Pick a date.");
+    if (!time) return refuse("time", "Enter a time, for example 19:30.");
   }
-  const lengthError = firstLengthError([
-    { label: "Title", value: title, max: EVENT_TITLE_MAX },
-    { label: "Description", value: description, max: EVENT_DESCRIPTION_MAX },
-  ]);
-  if (lengthError) return { ok: false, error: lengthError };
+  if (title.length > EVENT_TITLE_MAX) {
+    return refuse(
+      "title",
+      `Use at most ${EVENT_TITLE_MAX} characters for the title.`,
+    );
+  }
+  if (description.length > EVENT_DESCRIPTION_MAX) {
+    return refuse(
+      "description",
+      `Use at most ${EVENT_DESCRIPTION_MAX} characters for the description.`,
+    );
+  }
   if (tzInput && !isValidTimezone(tzInput)) {
-    return { ok: false, error: `Invalid timezone: ${tzInput}` };
+    return refuse("timezone", "Pick a timezone from the list.");
   }
 
   const config = ConfigService.getInstance();
@@ -90,13 +113,18 @@ export async function validateEventForm(
   const startTime =
     opts.startOverride ?? parseEventDateTime(date, time, timezone);
   if (!startTime) {
-    return {
-      ok: false,
-      error: "Invalid date/time. Use YYYY-MM-DD and 24-hour HH:MM.",
-    };
+    return !DATE_SHAPE.test(date)
+      ? refuse("date", "Use the date format YYYY-MM-DD.")
+      : !TIME_SHAPE.test(time)
+        ? refuse("time", "Use 24-hour time as HH:MM, for example 19:30.")
+        : refuse("date", "That date and time do not exist. Pick another.");
   }
   if (opts.requireFuture && startTime.getTime() <= Date.now()) {
-    return { ok: false, error: "The event start time must be in the future." };
+    // A start decided by the When choice has no date field to mark.
+    return refuse(
+      opts.startOverride ? "when" : "date",
+      "Pick a time in the future.",
+    );
   }
 
   let durationMinutes =
@@ -109,10 +137,12 @@ export async function validateEventForm(
       EVENT_DURATION_MAX,
     );
     if (parsed === null) {
-      return {
-        ok: false,
-        error: `Duration must be between ${EVENT_DURATION_MIN} and ${EVENT_DURATION_MAX} minutes.`,
-      };
+      return refuse(
+        "duration",
+        /^\d+$/.test(duration) && Number(duration) > EVENT_DURATION_MAX
+          ? `At most ${EVENT_DURATION_MAX} minutes.`
+          : `Enter a whole number of minutes, from ${EVENT_DURATION_MIN} to ${EVENT_DURATION_MAX}.`,
+      );
     }
     durationMinutes = parsed;
   }

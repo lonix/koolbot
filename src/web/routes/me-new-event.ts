@@ -20,16 +20,23 @@ import {
   enabledPresets,
   loadPresetCatalog,
 } from "../../services/event-group-preset-service.js";
-import { resolveGroupCountLimits } from "../../services/event-groups.js";
-import { loadGroupPrefill } from "../../services/event-last-setup-service.js";
+import {
+  parseGroupForm,
+  resolveGroupCountLimits,
+} from "../../services/event-groups.js";
+import {
+  loadGroupPrefill,
+  type GroupFormPrefill,
+} from "../../services/event-last-setup-service.js";
 import { parseEventWhen } from "../event-when.js";
+import type { EventFormRefusal } from "../event-field-errors.js";
 import { resolveTimezone } from "../../utils/timezone.js";
 import {
   createdFlash,
   createEventFromForm,
   redirectToHostPanel,
 } from "../event-create.js";
-import { renderNewEventBody } from "../event-new-view.js";
+import { renderNewEventBody, type NewEventValues } from "../event-new-view.js";
 import { inAreas, loadPermissionNotice } from "../permission-notice.js";
 import { boundAuditEntry, recordAudit, type AuditEntry } from "../audit.js";
 import { requireCsrf } from "../csrf.js";
@@ -37,7 +44,7 @@ import { getDisplayedRemainingMs } from "../admin-layout.js";
 import { readMeSurfaceFlags } from "../me-surfaces.js";
 import { renderUserPage } from "../user-layout.js";
 import { renderErrorPage } from "../views.js";
-import { readSignedFlash, signFlash, truncateFlash } from "../http-flash.js";
+import { readSignedFlash } from "../http-flash.js";
 import type { AuthenticatedRequest, WebSessionContext } from "../session.js";
 
 const PAGE = "/me/events/new";
@@ -52,17 +59,59 @@ function csrfOf(req: Request): string {
   return (req as Request & { csrfToken?: string }).csrfToken ?? "";
 }
 
-function redirectWith(
-  res: Response,
-  flash: { type: "ok" | "err"; text: string },
-): void {
-  const text = truncateFlash(flash.text);
-  const qs = new globalThis.URLSearchParams({
-    flash: flash.type,
-    msg: text,
-    sig: signFlash(flash.type, text),
-  }).toString();
-  res.redirect(303, `${PAGE}?${qs}`);
+/** A refused post: what to change, and what was posted, to put back in the form. */
+interface RefusedForm {
+  refusal: EventFormRefusal;
+  body: Record<string, unknown>;
+}
+
+function posted(body: Record<string, unknown>, name: string): string {
+  const raw = body[name];
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+/** The text fields as posted. The zone and duration fall back to the page's own when absent or unusable. */
+function valuesFromPost(
+  body: Record<string, unknown>,
+  timezone: string,
+  defaultDuration: number,
+): NewEventValues {
+  const minutes = Number(posted(body, "duration"));
+  return {
+    date: posted(body, "date"),
+    time: posted(body, "time"),
+    title: posted(body, "title"),
+    description: posted(body, "description"),
+    durationMinutes:
+      Number.isInteger(minutes) && minutes > 0 ? minutes : defaultDuration,
+    timezone: posted(body, "timezone") || timezone,
+  };
+}
+
+/** The group section as posted, in the shape the form prefills from; null when it was off. */
+function groupPrefillFromPost(
+  body: Record<string, unknown>,
+): GroupFormPrefill | null {
+  const input = parseGroupForm(body);
+  if (!input.enabled) return null;
+  return {
+    presetId: input.presetId === "custom" ? "" : input.presetId,
+    groupLabel: input.groupLabel,
+    leaderLabel: input.leaderLabel,
+    channelLeadMinutes: input.channelLeadMinutes,
+    rows: input.rows.map((r) => ({
+      name: r.name,
+      kind: r.kind,
+      size: r.size,
+      tag: r.tag,
+      marker: r.marker,
+    })),
+    captainsEnabled: input.captainsEnabled === true,
+    captainCustomisationEnabled: input.captainCustomisationEnabled === true,
+    captainsLobby: input.captainsLobby === true,
+    tagsEnabled: input.tagsEnabled === true,
+    tagsSuffix: input.tagsSuffix === true,
+  };
 }
 
 function notFound(res: Response): void {
@@ -95,60 +144,67 @@ export function createMeNewEventRouter(client: Client): Router {
       .catch(next);
   });
 
-  router.get("/", (req, res, next) => {
-    const session = (req as AuthenticatedRequest).webSession;
-    if (!session) {
-      res.status(500).type("text/plain").send("session missing");
-      return;
-    }
-    void (async (): Promise<void> => {
-      const config = ConfigService.getInstance();
-      const [
-        tz,
-        defaultDuration,
-        defaultCount,
-        configuredMax,
-        categoryId,
-        announcementChannelId,
-        flags,
-        catalog,
-      ] = await Promise.all([
-        config.getString("events.timezone", ""),
-        config.getNumber("events.default_duration_minutes", 120),
-        config.getNumber("events.groups.default_count", 2),
-        config.getNumber("events.groups.max_count", 15),
-        config.getString("events.category_id", ""),
-        config.getString("events.announcement_channel_id", ""),
-        readMeSurfaceFlags(),
-        // The host's own presets are offered too (#1216).
-        loadPresetCatalog(session.guildId, { ownerId: session.discordUserId }),
-      ]);
-      const limits = resolveGroupCountLimits(defaultCount, configuredMax);
-      const presets = enabledPresets(catalog);
-      const startNow = req.query.when === "now";
-      // The host's last setup (#1406), unless they asked for the defaults. A
-      // failed read is "no prefill" and never blocks the form.
-      const prefill =
-        req.query.defaults === "1"
-          ? null
-          : await loadGroupPrefill(session.guildId, session.discordUserId, {
-              maxCount: limits.maxCount,
-              presets,
-            });
-      const setupNotice = !categoryId
-        ? "No channel category is set, so event channels cannot be created yet."
-        : !announcementChannelId
-          ? "No announcement channel is set, so events will not be announced."
-          : null;
-      // Only the Events entries; the channel category and announcement channel
-      // being unset is the setup notice's to say (the check skips an unset one).
-      const permissionNotice = await loadPermissionNotice({
-        client,
-        guildId: session.guildId,
-        enabled: true,
-        filter: inAreas("Events"),
-      });
-      res.type("text/html").send(
+  // The form, for a fresh page (GET) and for a refused post (#1531), which is
+  // answered in the same response so what was typed is not lost.
+  async function sendForm(
+    req: Request,
+    res: Response,
+    session: WebSessionContext,
+    refused?: RefusedForm,
+  ): Promise<void> {
+    const config = ConfigService.getInstance();
+    const [
+      tz,
+      defaultDuration,
+      defaultCount,
+      configuredMax,
+      categoryId,
+      announcementChannelId,
+      flags,
+      catalog,
+    ] = await Promise.all([
+      config.getString("events.timezone", ""),
+      config.getNumber("events.default_duration_minutes", 120),
+      config.getNumber("events.groups.default_count", 2),
+      config.getNumber("events.groups.max_count", 15),
+      config.getString("events.category_id", ""),
+      config.getString("events.announcement_channel_id", ""),
+      readMeSurfaceFlags(),
+      // The host's own presets are offered too (#1216).
+      loadPresetCatalog(session.guildId, { ownerId: session.discordUserId }),
+    ]);
+    const limits = resolveGroupCountLimits(defaultCount, configuredMax);
+    const presets = enabledPresets(catalog);
+    const startNow = req.query.when === "now";
+    // The host's last setup (#1406), unless they asked for the defaults. A
+    // failed read is "no prefill" and never blocks the form.
+    // A refused form shows the rows as they were posted instead.
+    const remembered = refused
+      ? null
+      : req.query.defaults === "1"
+        ? null
+        : await loadGroupPrefill(session.guildId, session.discordUserId, {
+            maxCount: limits.maxCount,
+            presets,
+          });
+    const postedGroups = refused ? groupPrefillFromPost(refused.body) : null;
+    const setupNotice = !categoryId
+      ? "No channel category is set, so event channels cannot be created yet."
+      : !announcementChannelId
+        ? "No announcement channel is set, so events will not be announced."
+        : null;
+    // Only the Events entries; the channel category and announcement channel
+    // being unset is the setup notice's to say (the check skips an unset one).
+    const permissionNotice = await loadPermissionNotice({
+      client,
+      guildId: session.guildId,
+      enabled: true,
+      filter: inAreas("Events"),
+    });
+    res
+      .status(refused ? 422 : 200)
+      .type("text/html")
+      .send(
         renderUserPage({
           title: "New event",
           active: PAGE,
@@ -164,27 +220,48 @@ export function createMeNewEventRouter(client: Client): Router {
               catalog.state,
               catalog.personalUnreadable,
             ),
-            groupRemembered: prefill
-              ? {
-                  prefill,
-                  resetHref: `${PAGE}?${startNow ? "when=now&" : ""}defaults=1`,
-                }
-              : null,
+            groupRemembered: postedGroups
+              ? { prefill: postedGroups, resetHref: null }
+              : remembered
+                ? {
+                    prefill: remembered,
+                    resetHref: `${PAGE}?${startNow ? "when=now&" : ""}defaults=1`,
+                  }
+                : null,
             setupNotice,
             // `?when=now` is Start now on Your events; anything else is the default.
-            initialWhen:
-              req.query.when === "now" && parseEventWhen("now") === "now"
+            initialWhen: refused
+              ? (parseEventWhen(posted(refused.body, "when")) ?? "pick")
+              : req.query.when === "now" && parseEventWhen("now") === "now"
                 ? "now"
                 : "pick",
+            ...(refused
+              ? {
+                  refusal: refused.refusal,
+                  values: valuesFromPost(
+                    refused.body,
+                    resolveTimezone(tz),
+                    defaultDuration,
+                  ),
+                }
+              : {}),
           }),
           csrfToken: csrfOf(req),
           remainingMs: getDisplayedRemainingMs(session),
           isAdmin: session.role === "admin",
-          flash: readSignedFlash(req.query),
+          flash: refused ? null : readSignedFlash(req.query),
           ...flags,
         }),
       );
-    })().catch(next);
+  }
+
+  router.get("/", (req, res, next) => {
+    const session = (req as AuthenticatedRequest).webSession;
+    if (!session) {
+      res.status(500).type("text/plain").send("session missing");
+      return;
+    }
+    void sendForm(req, res, session).catch(next);
   });
 
   router.post("/", (req, res, next) => {
@@ -200,7 +277,18 @@ export function createMeNewEventRouter(client: Client): Router {
         audit: auditBounded,
       });
       if (!result.ok) {
-        redirectWith(res, { type: "err", text: result.error });
+        // Answered with the form itself, what was typed put back and the
+        // refused field marked (#1531), not a redirect to an empty one.
+        await sendForm(req, res, session, {
+          refusal: {
+            message: result.error,
+            ...(result.field ? { field: result.field } : {}),
+          },
+          body:
+            req.body && typeof req.body === "object"
+              ? (req.body as Record<string, unknown>)
+              : {},
+        });
         return;
       }
       // Every new event opens on its host panel: the one place a host runs it.

@@ -421,63 +421,104 @@ describe("who may edit", () => {
   });
 });
 
+/** The markup without script bodies (the focus script names the attribute too). */
+const noScripts = (html: string): string =>
+  html.replace(/<script[\s\S]*?<\/script>/g, "");
+
 describe("validation is the create form's", () => {
-  const cases: Array<[string, Json, string]> = [
-    [
-      "a missing title",
-      { title: "" },
-      "Title, date and time are all required.",
-    ],
-    ["a missing date", { date: "" }, "Title, date and time are all required."],
+  // [name, posted override, message, id of the field it marks]
+  const cases: Array<[string, Json, string, string]> = [
+    ["a missing title", { title: "" }, "Enter a title.", "edit-title"],
+    ["a missing date", { date: "" }, "Pick a date.", "edit-date"],
     [
       "a title over 100 characters",
       { title: "x".repeat(101) },
-      "Title must be 100 characters or fewer.",
+      "Use at most 100 characters for the title.",
+      "edit-title",
     ],
     [
       "a description over 1000 characters",
       { description: "x".repeat(1001) },
-      "Description must be 1000 characters or fewer.",
+      "Use at most 1000 characters for the description.",
+      "edit-description",
     ],
     [
       "an impossible date",
       { date: "2099-02-30" },
-      "Invalid date/time. Use YYYY-MM-DD and 24-hour HH:MM.",
+      "That date and time do not exist. Pick another.",
+      "edit-date",
     ],
     [
       "a start in the past",
       { date: "2000-01-01" },
-      "The event start time must be in the future.",
+      "Pick a time in the future.",
+      "edit-date",
     ],
     [
       "a duration of 0",
       { duration: "0" },
-      "Duration must be between 1 and 1440 minutes.",
+      "Enter a whole number of minutes, from 1 to 1440.",
+      "edit-duration",
     ],
     [
       "a duration over 1440",
       { duration: "1441" },
-      "Duration must be between 1 and 1440 minutes.",
+      "At most 1440 minutes.",
+      "edit-duration",
     ],
     [
       "an unknown timezone",
       { timezone: "Mars/Base" },
-      "Invalid timezone: Mars/Base",
+      "Pick a timezone from the list.",
+      "edit-timezone",
     ],
   ];
 
   it.each(cases)(
-    "refuses %s with the create form's message",
-    async (_n, body, msg) => {
+    "refuses %s with the create form's message, on the form itself, marking the field",
+    async (_n, body, msg, id) => {
       const r = await save(body);
-      expect(r.status).toBe(303);
-      expect(flashOf(r.location)).toEqual({ type: "err", msg });
-      expect(r.location).toContain(EDIT);
+      // Answered with the form (no redirect, no flash), not a reload of the stored event.
+      expect(r.status).toBe(422);
+      expect(r.location).toBeNull();
+      const field = new RegExp(
+        `<(?:input|select|textarea)[^>]*id="${id}"[^>]*>`,
+      ).exec(r.text);
+      expect(field?.[0]).toContain('aria-invalid="true"');
+      expect(field?.[0]).toContain(`aria-describedby="${id}-error"`);
+      expect(r.text).toContain(
+        `<p class="kb-field__error" id="${id}-error">${msg}</p>`,
+      );
+      expect(r.text).toContain("kb-callout--err");
+      // Exactly one field is marked.
+      expect(noScripts(r.text).match(/aria-invalid="true"/g)).toHaveLength(1);
       expect(row().title).toBe("Quiz night");
       expect(row().durationMinutes).toBe(90);
       expect(syncEvent).not.toHaveBeenCalled();
     },
   );
+
+  it("keeps what was typed and carries the version, mode and CSRF token as posted", async () => {
+    const form = await formState();
+    const r = await save(
+      {
+        title: "Quiz night, renamed",
+        description: "New <b>text</b>",
+        duration: "5000",
+      },
+      form,
+    );
+    expect(r.status).toBe(422);
+    expect(r.text).toContain('value="Quiz night, renamed"');
+    expect(r.text).toContain("New &lt;b&gt;text&lt;/b&gt;</textarea>");
+    expect(r.text).toContain('value="5000"');
+    expect(r.text).toContain(`name="version" value="${form.version}"`);
+    expect(r.text).toContain('name="mode" value="full"');
+    expect(r.text).toContain(`name="_csrf" value="${csrf()}"`);
+    // Focus goes to the marked field on load.
+    expect(r.text).toContain("aria-invalid");
+    expect(r.text).toContain("el.focus()");
+  });
 });
 
 describe("a moved start", () => {
@@ -1347,6 +1388,14 @@ describe("a recurring event", () => {
     );
     expect(failures).toHaveLength(3);
     expect(failures.every((a) => (a as Json).result === "failure")).toBe(true);
+  });
+
+  it("keeps the chosen scope when a field is refused (#1531)", async () => {
+    const r = await save({ duration: "5000", scope: "following" });
+    expect(r.status).toBe(422);
+    expect(r.text).toMatch(/name="scope" value="following" required checked/);
+    expect(r.text).not.toMatch(/name="scope" value="occurrence"[^>]*checked/);
+    expect(row().durationMinutes).toBe(90);
   });
 
   it("'This occurrence' saves the row, keeps the series' values for the next one and audits the scope", async () => {

@@ -3190,7 +3190,11 @@ export function renderGroupsSection(
   presetsHref = "/admin/events/presets",
   // The host's last setup (#1406), already validated against today's limits by
   // `loadGroupPrefill`; `resetHref` reloads the form with the normal defaults.
-  remembered: { prefill: GroupFormPrefill; resetHref: string } | null = null,
+  // A `resetHref` of null is a refused form's own rows: no "prefilled" note.
+  remembered: {
+    prefill: GroupFormPrefill;
+    resetHref: string | null;
+  } | null = null,
   // A missing bot permission next to the field it breaks (#1478), already
   // rendered by `splitEventFormNotice`; absent or "" leaves the markup as it was.
   permissionInline: Partial<EventFormInline> = {},
@@ -3215,7 +3219,7 @@ export function renderGroupsSection(
   const rows = Array.from({ length: rowCount }, (_, i) =>
     renderGroupRow(String(i), String(i + 1), prefill?.rows[i]),
   ).join("\n      ");
-  const rememberedNote = remembered
+  const rememberedNote = remembered?.resetHref
     ? `<p class="kb-help" data-prefilled>Prefilled from your last event. <a href="${escapeHtml(remembered.resetHref)}">Start from the defaults instead</a></p>`
     : "";
   // The quick builder's own fields belong to no form (`form="none"`): they

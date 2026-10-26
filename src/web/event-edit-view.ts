@@ -18,6 +18,12 @@ import {
   type PermissionNotice,
 } from "./permission-notice.js";
 import {
+  FOCUS_FIRST_INVALID_SCRIPT,
+  markField,
+  renderRefusalCallout,
+  type EventFormRefusal,
+} from "./event-field-errors.js";
+import {
   TIMEZONE_SELECT_SCRIPT,
   renderTimezoneSelect,
 } from "./setting-pickers.js";
@@ -58,6 +64,25 @@ export interface EventEditView {
    * "weekly").
    */
   series?: { cadence: string };
+}
+
+/**
+ * A refused save (#1531): what to change and in which field, and the fields as
+ * posted. The page is the form again, in the response to the post, so nothing
+ * typed is lost. Text fields a limited form never offered are not carried.
+ */
+export interface EventEditRefused {
+  refusal: EventFormRefusal;
+  values: {
+    title: string;
+    description: string;
+    duration: string;
+    date: string;
+    time: string;
+    timezone: string;
+    /** The scope chosen on a recurring event's form, if any. */
+    scope: string;
+  };
 }
 
 /**
@@ -122,13 +147,13 @@ function renderCoverPanel(
 }
 
 /** The scope question of a recurring event (#1298): no option is pre-chosen. */
-function renderScopeField(cadence: string): string {
+function renderScopeField(cadence: string, selected = ""): string {
   return `<div class="kb-fields">
         <div class="kb-field">
           <p class="kb-label" id="edit-scope-l">Apply this change to</p>
           <div class="kb-segmented" role="radiogroup" aria-labelledby="edit-scope-l" aria-describedby="edit-scope-h">
-            <label><input type="radio" name="scope" value="occurrence" required><span>This occurrence</span></label>
-            <label><input type="radio" name="scope" value="following" required><span>This and following</span></label>
+            <label><input type="radio" name="scope" value="occurrence" required${selected === "occurrence" ? " checked" : ""}><span>This occurrence</span></label>
+            <label><input type="radio" name="scope" value="following" required${selected === "following" ? " checked" : ""}><span>This and following</span></label>
           </div>
           <p class="kb-help" id="edit-scope-h">This event repeats ${escapeHtml(cadence)}. "This occurrence" leaves the next ones as they were. "This and following" also changes every later occurrence.</p>
         </div>
@@ -146,14 +171,24 @@ export function renderEventEditBody(opts: {
   permissionNotice?: PermissionNotice | null;
   /** The Bot permissions page is admin-only; a host gets a sentence instead of the link. */
   canLinkToPermissions?: boolean;
+  /** Set when the server refused the last save (#1531). */
+  refused?: EventEditRefused;
 }): string {
   const e = opts.event;
+  const refusal = opts.refused?.refusal ?? null;
+  const v = opts.refused?.values;
+  const mTitle = markField(refusal, "title", "edit-title");
+  const mDate = markField(refusal, "date", "edit-date");
+  const mTime = markField(refusal, "time", "edit-time");
+  const mZone = markField(refusal, "timezone", "edit-timezone");
+  const mDesc = markField(refusal, "description", "edit-description");
+  const mDuration = markField(refusal, "duration", "edit-duration");
   const panel = hostPanelPath(e.id);
   const full = e.mode === "full";
   const titleField = `<div class="kb-fields">
         <div class="kb-field">
           <label class="kb-label" for="edit-title">Title</label>
-          <input class="kb-input" id="edit-title" type="text" name="title" required maxlength="${EVENT_TITLE_MAX}" value="${escapeHtml(e.title)}">
+          <input class="kb-input" id="edit-title" type="text" name="title" required maxlength="${EVENT_TITLE_MAX}" value="${escapeHtml(v?.title ?? e.title)}"${mTitle.attrs}>${mTitle.after(10)}
         </div>
       </div>`;
   const scheduleFields =
@@ -164,24 +199,19 @@ export function renderEventEditBody(opts: {
         <dt>Starts</dt><dd class="kb-mono">${escapeHtml(e.when)}</dd>
       </dl>`
       : full
-        ? `<div class="kb-fields">
-        <div class="kb-field">
-          <label class="kb-label" for="edit-title">Title</label>
-          <input class="kb-input" id="edit-title" type="text" name="title" required maxlength="${EVENT_TITLE_MAX}" value="${escapeHtml(e.title)}">
-        </div>
-      </div>
+        ? `${titleField}
       <div class="kb-fields">
         <div class="kb-field">
           <label class="kb-label" for="edit-date">Date (YYYY-MM-DD)</label>
-          <input class="kb-input" id="edit-date" type="text" name="date" required pattern="\\d{4}-\\d{2}-\\d{2}" value="${escapeHtml(e.date)}">
+          <input class="kb-input" id="edit-date" type="text" name="date" required pattern="\\d{4}-\\d{2}-\\d{2}" value="${escapeHtml(v?.date ?? e.date)}"${mDate.attrs}>${mDate.after(10)}
         </div>
         <div class="kb-field">
           <label class="kb-label" for="edit-time">Time (24h HH:MM)</label>
-          <input class="kb-input" id="edit-time" type="text" name="time" required pattern="\\d{2}:\\d{2}" value="${escapeHtml(e.time)}">
+          <input class="kb-input" id="edit-time" type="text" name="time" required pattern="\\d{2}:\\d{2}" value="${escapeHtml(v?.time ?? e.time)}"${mTime.attrs}>${mTime.after(10)}
         </div>
         <div class="kb-field">
           <label class="kb-label" for="edit-timezone">Timezone</label>
-          ${renderTimezoneSelect("timezone", e.timezone, { id: "edit-timezone", defaultZone: e.timezone, firstLabel: "Current" })}
+          ${renderTimezoneSelect("timezone", v?.timezone || e.timezone, { id: "edit-timezone", defaultZone: e.timezone, firstLabel: "Current", ...(mZone.errorId ? { invalid: true, describedBy: mZone.errorId } : {}) })}${mZone.after(10)}
         </div>
       </div>`
         : `<p class="kb-help">This event has already started, so its title and start time are fixed. You can still change the description and the duration.</p>
@@ -205,7 +235,7 @@ export function renderEventEditBody(opts: {
     <p class="kb-pagehead__sub">${escapeHtml(e.title)}</p>
   </div>
 </header>
-${noticeBlock}<form method="POST" action="${escapeHtml(panel)}/edit" data-event-edit-form>
+${refusal ? `${renderRefusalCallout(refusal, "Your changes were not saved")}\n` : ""}${noticeBlock}<form method="POST" action="${escapeHtml(panel)}/edit" data-event-edit-form>
   <input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">
   <input type="hidden" name="version" value="${escapeHtml(e.version)}">
   <input type="hidden" name="mode" value="${full ? "full" : "limited"}">
@@ -213,18 +243,18 @@ ${noticeBlock}<form method="POST" action="${escapeHtml(panel)}/edit" data-event-
   <section class="kb-panel" aria-labelledby="edit-event-h">
     <header class="kb-panel__head"><h2 class="kb-panel__title" id="edit-event-h">Event details</h2></header>
     <div class="kb-panel__body kb-stack">
-      ${e.series ? renderScopeField(e.series.cadence) : ""}
+      ${e.series ? renderScopeField(e.series.cadence, v?.scope) : ""}
       ${scheduleFields}
       <div class="kb-fields">
         <div class="kb-field">
           <label class="kb-label" for="edit-description">Description</label>
-          <textarea class="kb-textarea" id="edit-description" name="description" rows="3" maxlength="${EVENT_DESCRIPTION_MAX}">${escapeHtml(e.description)}</textarea>
+          <textarea class="kb-textarea" id="edit-description" name="description" rows="3" maxlength="${EVENT_DESCRIPTION_MAX}"${mDesc.attrs}>${escapeHtml(v?.description ?? e.description)}</textarea>${mDesc.after(10)}
         </div>
       </div>
       <div class="kb-fields">
         <div class="kb-field">
           <label class="kb-label" for="edit-duration">Duration (minutes)</label>
-          <input class="kb-input" id="edit-duration" type="number" name="duration" required min="${EVENT_DURATION_MIN}" max="${EVENT_DURATION_MAX}" value="${escapeHtml(e.durationMinutes)}">
+          <input class="kb-input" id="edit-duration" type="number" name="duration" required min="${EVENT_DURATION_MIN}" max="${EVENT_DURATION_MAX}" value="${escapeHtml(v?.duration ?? e.durationMinutes)}"${mDuration.attrs}>${mDuration.after(10)}
         </div>
       </div>
       <div class="kb-row"><button type="submit" class="kb-btn kb-btn--primary">Save changes</button> <a class="kb-btn kb-btn--ghost" href="${escapeHtml(panel)}">Cancel</a></div>
@@ -232,5 +262,5 @@ ${noticeBlock}<form method="POST" action="${escapeHtml(panel)}/edit" data-event-
     ${foot}
   </section>
 </form>${full && !e.startLocked ? scriptTag(TIMEZONE_SELECT_SCRIPT) : ""}
-${opts.cover ? renderCoverPanel(e.id, opts.cover, opts.csrfToken, opts.adminEventsHref ?? null) : ""}`;
+${opts.cover ? renderCoverPanel(e.id, opts.cover, opts.csrfToken, opts.adminEventsHref ?? null) : ""}${refusal ? `\n${scriptTag(FOCUS_FIRST_INVALID_SCRIPT)}` : ""}`;
 }

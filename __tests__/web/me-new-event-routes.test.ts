@@ -443,24 +443,23 @@ describe("POST /me/events/new: planned events", () => {
 
   it("still refuses a start in the past for Pick date & time", async () => {
     const res = await harness.post("", { ...planned, date: "2020-01-01" });
-    const flash = parseFlashRedirect(res.headers.get("location"));
-    expect(flash.path).toBe("/me/events/new");
-    expect(flash.type).toBe("err");
-    expect(flash.msg).toContain("must be in the future");
+    expect(res.status).toBe(422);
+    expect(res.headers.get("location")).toBeNull();
+    expect(await res.text()).toContain("Pick a time in the future.");
     expect(mockCreateEvent).not.toHaveBeenCalled();
   });
 
   it("refuses Pick date & time without a date or time", async () => {
     const res = await harness.post("", { title: "No time" });
-    const flash = parseFlashRedirect(res.headers.get("location"));
-    expect(flash.type).toBe("err");
-    expect(flash.msg).toContain("Title, date and time are all required");
+    expect(res.status).toBe(422);
+    expect(await res.text()).toContain("Pick a date.");
     expect(mockCreateEvent).not.toHaveBeenCalled();
   });
 
   it("refuses an unknown When value", async () => {
     const res = await harness.post("", { ...planned, when: "tomorrow" });
-    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+    expect(res.status).toBe(422);
+    expect(await res.text()).toContain("Pick when the event starts.");
     expect(mockCreateEvent).not.toHaveBeenCalled();
   });
 
@@ -488,6 +487,98 @@ describe("POST /me/events/new: planned events", () => {
       expect(mockCreateImpromptu).not.toHaveBeenCalled();
     },
   );
+});
+
+/** The markup without script bodies (the focus script names the attribute too). */
+const noScripts = (html: string): string =>
+  html.replace(/<script[\s\S]*?<\/script>/g, "");
+
+describe("POST /me/events/new: a refused form (#1531)", () => {
+  /** The opening tag of the control with this id. */
+  const control = (html: string, id: string): string =>
+    new RegExp(`<(?:input|select|textarea)[^>]*id="${id}"[^>]*>`).exec(
+      html,
+    )?.[0] ?? "";
+
+  it("answers on the form itself, keeps what was typed and marks the start time", async () => {
+    const res = await harness.post("", {
+      ...planned,
+      title: "Game <night>",
+      description: "Bring snacks",
+      date: "2020-01-01",
+      time: "18:30",
+      duration: "180",
+    });
+    expect(res.status).toBe(422);
+    expect(res.headers.get("location")).toBeNull();
+    const html = await res.text();
+    expect(html).toContain('value="Game &lt;night&gt;"');
+    expect(html).toContain('value="2020-01-01"');
+    expect(html).toContain('value="18:30"');
+    expect(html).toContain("Bring snacks</textarea>");
+    expect(html).toMatch(/<option value="180" selected>/);
+    const date = control(html, "new-event-date");
+    expect(date).toContain('aria-invalid="true"');
+    expect(date).toContain('aria-describedby="new-event-date-error"');
+    expect(html).toContain(
+      '<p class="kb-field__error" id="new-event-date-error">Pick a time in the future.</p>',
+    );
+    expect(noScripts(html).match(/aria-invalid="true"/g)).toHaveLength(1);
+    expect(html).toContain("kb-callout--err");
+    expect(html).toContain(`name="_csrf" value="${TEST_CSRF_TOKEN}"`);
+    expect(html).toContain("el.focus()");
+    expect(mockCreateEvent).not.toHaveBeenCalled();
+  });
+
+  it("marks the duration and keeps a value that is not one of the presets", async () => {
+    const res = await harness.post("", { ...planned, duration: "5000" });
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    expect(control(html, "new-event-duration")).toContain(
+      'aria-invalid="true"',
+    );
+    expect(html).toMatch(/<option value="5000" selected>/);
+    expect(html).toContain("At most 1440 minutes.");
+  });
+
+  it("marks the title, and puts the posted When choice back", async () => {
+    const res = await harness.post("", { when: "now", title: "" });
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    expect(control(html, "new-event-title")).toContain('aria-invalid="true"');
+    expect(html).toMatch(/value="now" checked/);
+  });
+
+  it("shows a group error above the groups block, with the rows as posted", async () => {
+    const res = await harness.post("", {
+      ...planned,
+      groups_enabled: "1",
+      groups_preset: "",
+      groups_captains: "1",
+      group_0_name: "Red",
+      group_0_size: "abc",
+      group_1_name: "Blue",
+    });
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    expect(html).toContain('id="new-event-groups-error"');
+    expect(html).toContain("data-field-error-target");
+    expect(html.indexOf('id="new-event-groups-error"')).toBeLessThan(
+      html.indexOf("data-groups-section"),
+    );
+    expect(html).toContain('value="Red"');
+    expect(html).toContain('value="Blue"');
+    // The refused rows are not "prefilled from your last event".
+    expect(html).not.toContain("data-prefilled");
+    expect(mockCreateEvent).not.toHaveBeenCalled();
+  });
+
+  it("leaves a fresh form without any marks", async () => {
+    const html = await (await harness.get("")).text();
+    expect(html).not.toContain("aria-invalid");
+    expect(html).not.toContain("kb-field__error");
+    expect(html).not.toContain("kb-callout--err");
+  });
 });
 
 describe("POST /me/events/new: Now", () => {
@@ -540,17 +631,19 @@ describe("POST /me/events/new: Now", () => {
       new actualEvents.ImpromptuNotReadyError("No channel category is set."),
     );
     const res = await harness.post("", { title: "Right now", when: "now" });
-    const flash = parseFlashRedirect(res.headers.get("location"));
-    expect(flash.path).toBe("/me/events/new");
-    expect(flash.type).toBe("err");
-    expect(flash.msg).toContain("No channel category is set.");
+    // Not about one field: the form comes back with the reason in the callout.
+    expect(res.status).toBe(422);
+    const html = await res.text();
+    expect(html).toContain("No channel category is set.");
+    expect(noScripts(html)).not.toContain('aria-invalid="true"');
     const entry = mockRecordAudit.mock.calls[0][1] as { result: string };
     expect(entry.result).toBe("failure");
   });
 
   it("needs a title", async () => {
     const res = await harness.post("", { when: "now" });
-    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+    expect(res.status).toBe(422);
+    expect(await res.text()).toContain("Enter a title.");
     expect(mockCreateImpromptu).not.toHaveBeenCalled();
   });
 });

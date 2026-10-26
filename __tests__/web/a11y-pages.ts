@@ -5108,6 +5108,30 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      name: "/me new event (rejected start time)",
+      html: shell(
+        "New event",
+        "/me/events/new",
+        renderNewEventBody({
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Oslo",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 15 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+          refusal: { field: "date", message: "Pick a time in the future." },
+          values: {
+            date: "2020-01-01",
+            time: "18:30",
+            title: "Game night",
+            description: "Bring snacks",
+            durationMinutes: 90,
+            timezone: "Europe/Oslo",
+          },
+        }),
+      ),
+    },
+    {
       name: "/me edit event (not started)",
       html: shell(
         "Edit event: Quiz night",
@@ -5115,6 +5139,29 @@ export function userPages(): A11yPage[] {
         renderEventEditBody({
           event: editEventView({}),
           csrfToken: COMMON.csrfToken,
+        }),
+      ),
+    },
+    {
+      name: "/me edit event (rejected duration)",
+      html: shell(
+        "Edit event: Quiz night",
+        "/me/",
+        renderEventEditBody({
+          event: editEventView({}),
+          csrfToken: COMMON.csrfToken,
+          refused: {
+            refusal: { field: "duration", message: "At most 1440 minutes." },
+            values: {
+              title: "Quiz night",
+              description: "Bring a friend",
+              duration: "5000",
+              date: "2099-06-01",
+              time: "18:00",
+              timezone: "UTC",
+              scope: "",
+            },
+          },
         }),
       ),
     },
