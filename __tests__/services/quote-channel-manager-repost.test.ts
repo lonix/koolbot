@@ -110,7 +110,7 @@ describe("QuoteChannelManager.repostHeader", () => {
     expect(store.get("quotes.header_message_id")).toBe("new1");
     const payload = channel.send.mock.calls[0][0];
     expect(payload.allowedMentions).toEqual({ parse: [] });
-    expect(payload.embeds[0].toJSON().title).toContain("Quote Channel");
+    expect(payload.embeds[0].toJSON().title).toBe("📝 Quotes");
   });
 
   it("succeeds when the old header is already gone", async () => {

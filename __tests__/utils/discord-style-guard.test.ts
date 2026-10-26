@@ -14,6 +14,9 @@
  *    `src/index.ts` that starts with `❌` or `⚠️`, or says "There was an error"
  *    or "An error occurred while processing", fails.
  *
+ * 3. A command in backticks carries no option syntax (`/quote add`, not
+ *    `/quote text:"..." author:@user`): Discord shows the option hints itself.
+ *
  * Plain string scan over the TypeScript sources (comments stripped); the Web UI
  * (`src/web/`) is HTML and out of scope. A file may only be listed in
  * DATE_ALLOWED with a reason: use it for a log line or a template placeholder,
@@ -45,6 +48,18 @@ const DATE_ALLOWED: Record<string, string> = {
 const DATE_TEXT = /\.(toLocaleString|toLocaleDateString|toLocaleTimeString)\(/;
 /** Replaced by `discordTimestamp(date, "R")` in the slash commands. */
 const COMMAND_DATE_HELPERS = /\b(formatTimeAgo|formatDateTimeInZone)\(/;
+
+/**
+ * Files that still print option syntax in a command, each with the reason and
+ * the issue that removes the entry. Never add one to silence the guard.
+ */
+const OPTION_SYNTAX_ALLOWED: Record<string, string> = {
+  "commands/remind.ts":
+    "`/remind cancel id:…` until the ids issue (#1532) lands; remove this entry there",
+};
+
+/** `/name word:` (also after a subcommand) or `/name @user`, `<user>`, `[x]` inside backticks. */
+const OPTION_SYNTAX = /`\/[\w-]+(?: [\w-]+)*? (?:[\w-]+:|[@<[])/;
 
 function stripComments(source: string): string {
   return source
@@ -263,6 +278,22 @@ function dateProblems(files: string[], root: string): string[] {
   return hits;
 }
 
+function optionSyntaxProblems(files: string[], root: string): string[] {
+  const hits: string[] = [];
+  for (const file of files) {
+    const name = rel(file, root);
+    if (name in OPTION_SYNTAX_ALLOWED) continue;
+    stripComments(fs.readFileSync(file, "utf8"))
+      .split("\n")
+      .forEach((line, i) => {
+        if (OPTION_SYNTAX.test(line)) {
+          hits.push(`${name}:${i + 1}: ${line.trim()}`);
+        }
+      });
+  }
+  return hits;
+}
+
 describe("discord footer guard", () => {
   it("finds source files to scan", () => {
     expect(walk(SRC).length).toBeGreaterThan(50);
@@ -404,6 +435,51 @@ describe("discord time guard", () => {
       ]) {
         fs.writeFileSync(f, fine);
         expect(dateProblems([f], tmp)).toHaveLength(0);
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("discord command text guard (#1511)", () => {
+  it("prints no option syntax inside a command in backticks", () => {
+    expect(optionSyntaxProblems(walk(SRC), SRC)).toEqual([]);
+  });
+
+  it("every allow-list entry still needs its exemption and names an issue", () => {
+    for (const [name, reason] of Object.entries(OPTION_SYNTAX_ALLOWED)) {
+      expect(reason).toMatch(/#\d+/);
+      const source = stripComments(
+        fs.readFileSync(path.join(SRC, name), "utf8"),
+      );
+      expect(OPTION_SYNTAX.test(source)).toBe(true);
+    }
+  });
+
+  it("detects option syntax and leaves plain commands alone (self-test)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "discord-guard-"));
+    try {
+      const f = path.join(tmp, "x.ts");
+      for (const bad of [
+        "const a = 'Use `/quote text:\"x\" author:@user`';",
+        "const a = 'See `/aka @user`';",
+        "const a = `Cancel it with \\`/remind cancel id:${id}\\`.`;",
+        "const a = 'Run `/warn <user> <reason>`';",
+        "const a = 'Run `/modlog [page]`';",
+      ]) {
+        fs.writeFileSync(f, bad);
+        expect(optionSyntaxProblems([f], tmp)).toHaveLength(1);
+      }
+      for (const fine of [
+        "const a = 'Use `/quote add` to save one';",
+        "const a = 'Use `/help` to see every command';",
+        "const a = 'Open a ticket with `/ticket open`';",
+        "// see `/quote text: x`",
+        "const a = 'Name: `/quote` then more text: here';",
+      ]) {
+        fs.writeFileSync(f, fine);
+        expect(optionSyntaxProblems([f], tmp)).toHaveLength(0);
       }
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });

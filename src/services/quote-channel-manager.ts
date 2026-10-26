@@ -53,15 +53,17 @@ const VOTE_PERSIST_DEBOUNCE_MS = 2000;
 // Identifiers used to recognise an existing bot-authored header embed when the
 // stored message ID has been lost (e.g. after a reinstall wiped the config
 // row). Matching on these prevents the welcome post from being duplicated.
-const HEADER_TITLE = "📝 Welcome to the Quote Channel!";
+const HEADER_TITLE = "📝 Quotes";
+/** The header title from before #1511, still recognised so an already-posted header is found and rewritten once. */
+const LEGACY_HEADER_TITLE = "📝 Welcome to the Quote Channel!";
 /** Footer of every bot post in the quote channel, header and quotes alike, so it cannot identify the header. */
 const QUOTES_FOOTER = "KoolBot · Quotes";
 /** The header-only footer from before #1331, still recognised so an already-posted header is found after an upgrade. */
 const LEGACY_HEADER_FOOTER = "KoolBot Quote System";
 
 /**
- * True when an embed is the quote channel header: its unique title, or the
- * pre-#1331 header-only footer. The shared `KoolBot · Quotes` footer is on
+ * True when an embed is the quote channel header: its unique title (current
+ * or pre-#1511), or the pre-#1331 header-only footer. The shared `KoolBot · Quotes` footer is on
  * every quote post too, so it never counts, and a quote post is never taken
  * for the header.
  */
@@ -70,7 +72,9 @@ function isHeaderEmbed(embed: {
   footer?: { text?: string } | null;
 }): boolean {
   return (
-    embed.title === HEADER_TITLE || embed.footer?.text === LEGACY_HEADER_FOOTER
+    embed.title === HEADER_TITLE ||
+    embed.title === LEGACY_HEADER_TITLE ||
+    embed.footer?.text === LEGACY_HEADER_FOOTER
   );
 }
 
@@ -415,27 +419,26 @@ export class QuoteChannelManager {
   private buildHeaderEmbed(): EmbedBuilder {
     return new EmbedBuilder()
       .setColor(embedColor("lore"))
-      .setTitle("📝 Welcome to the Quote Channel!")
+      .setTitle(HEADER_TITLE)
       .setDescription(
-        "This channel is managed by KoolBot to showcase memorable quotes from server members.",
+        "Memorable quotes from this server. Add one with `/quote add`.",
       )
       .addFields(
         {
-          name: "📥 How to Add a Quote",
+          name: "Add a quote",
           value:
-            'Use the `/quote` command anywhere in the server to submit a quote.\nExample: `/quote text:"Great quote!" author:@Alice`',
+            "Run `/quote add` anywhere in the server and fill in the quote and who said it.",
           inline: false,
         },
         {
-          name: "👍 How to Vote",
-          value:
-            "React with 👍 or 👎 to show your appreciation (or not!) for quotes.",
+          name: "Vote",
+          value: "React with 👍 or 👎 on a quote to rate it.",
           inline: false,
         },
         {
-          name: "🔒 Channel Rules",
+          name: "Good to know",
           value:
-            "• Only bot messages are allowed here\n• All other messages will be automatically removed\n• Browse and enjoy past quotes by scrolling up!",
+            "- Only KoolBot posts here, so other messages are removed.\n- Scroll up to browse past quotes.",
           inline: false,
         },
       )

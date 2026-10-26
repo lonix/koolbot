@@ -9,6 +9,8 @@ import {
 import {
   NoticesChannelManager,
   getFeatureEnabledKeys,
+  BOT_INFO_TITLE,
+  LEGACY_BOT_INFO_TITLE,
 } from "../../src/services/notices-channel-manager.js";
 import {
   defaultConfig,
@@ -131,11 +133,29 @@ describe("NoticesChannelManager", () => {
       expect(keys).not.toContain("core.errors.enabled");
     });
 
-    it("includes the running version", async () => {
-      withEnabled([]);
+    it("keeps the version out of the description (it lives in the footer)", async () => {
+      withEnabled(["quotes.enabled"]);
       const content = await generate();
       expect(getBotVersion()).toMatch(/^\d+\.\d+\.\d+/);
-      expect(content).toContain(`KoolBot v${getBotVersion()}`);
+      expect(content).not.toContain(getBotVersion());
+    });
+
+    it("follows the message rules: dash list, no filler, closing line points at /help (#1511)", async () => {
+      withEnabled(["quotes.enabled", "voicechannels.enabled"]);
+      const content = await generate();
+      expect(content).toContain("- 🎤 Voice channels: ");
+      expect(content).toContain(
+        "- 📝 Quotes: Save memorable quotes with `/quote add`",
+      );
+      expect(content).not.toMatch(/Welcome|Getting Started|\*\*|•/);
+      expect(content.endsWith("Use `/help` to see every command.")).toBe(true);
+    });
+
+    it("says admins switch features on in the Web UI when nothing is listed (#1511)", async () => {
+      withEnabled([]);
+      const content = await generate();
+      expect(content).toContain("Admins switch features on in the Web UI.");
+      expect(content.endsWith("Use `/help` to see every command.")).toBe(true);
     });
 
     it("shows only the enabled features", async () => {
@@ -150,7 +170,7 @@ describe("NoticesChannelManager", () => {
     it("falls back to the placeholder when nothing is enabled", async () => {
       withEnabled([]);
       const content = await generate();
-      expect(content).toContain("More features can be enabled");
+      expect(content).toContain("Admins switch features on in the Web UI.");
     });
 
     it("keeps a newly added, unclassified feature out of the notice (#1131)", async () => {
@@ -177,9 +197,9 @@ describe("NoticesChannelManager", () => {
     it("hides a classified-but-unlisted feature even while it is enabled (#1131)", async () => {
       withEnabled(["messagetracking.enabled", "leaderboard_roles.enabled"]);
       const content = await generate();
-      expect(content).not.toContain("Message Tracking");
-      expect(content).not.toContain("Leaderboard Roles");
-      expect(content).toContain("More features can be enabled");
+      expect(content).not.toContain("Message tracking");
+      expect(content).not.toContain("Leaderboard roles");
+      expect(content).toContain("Admins switch features on in the Web UI.");
     });
 
     it("lists a listed feature only while its gate is enabled (#1131)", async () => {
@@ -193,7 +213,7 @@ describe("NoticesChannelManager", () => {
       withEnabled(getFeatureEnabledKeys());
       const content = await generate();
       for (const info of Object.values(BOT_FEATURES)) {
-        const line = `**${info.emoji} ${info.label}**`;
+        const line = `- ${info.emoji} ${info.label}: `;
         if (info.listed) expect(content).toContain(line);
         else expect(content).not.toContain(line);
       }
@@ -255,7 +275,7 @@ describe("NoticesChannelManager", () => {
       const manager = NoticesChannelManager.getInstance(mockClient) as any;
       withEnabled(manager, ["namehistory.enabled", "aka.enabled"]);
       const content: string = await manager.generateBotInfoContent();
-      expect(content.match(/Name History/g)).toHaveLength(1);
+      expect(content.match(/Name history/g)).toHaveLength(1);
       expect(content).not.toContain("Namehistory");
       expect(content).not.toContain("Aka");
       expect(content).not.toContain("✅");
@@ -558,9 +578,10 @@ describe("NoticesChannelManager", () => {
       };
       const notice: any = {
         _id: "notice1",
-        title: "KoolBot Features & Commands",
+        title: BOT_INFO_TITLE,
         category: "help",
         content: "stale",
+        botVersion: getBotVersion(),
         messageId: "old-msg",
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -592,6 +613,69 @@ describe("NoticesChannelManager", () => {
         deleteErrors,
       };
     };
+
+    it("renames a record with the old title instead of posting a second notice (#1511)", async () => {
+      const { manager, messages, notice, channel } = setup();
+      notice.title = LEGACY_BOT_INFO_TITLE;
+      // Same copy, same version: only the title differs.
+      notice.content = "fresh";
+      await manager.ensureBotInfoNotice();
+
+      expect(Notice.findOne).toHaveBeenCalledWith({
+        title: { $in: [BOT_INFO_TITLE, LEGACY_BOT_INFO_TITLE] },
+        category: "help",
+      });
+      expect(notice.title).toBe(BOT_INFO_TITLE);
+      expect(notice.save).toHaveBeenCalledTimes(1);
+      expect(channel.send).toHaveBeenCalledTimes(1);
+      const sent = (channel.send.mock.calls[0] as any)[0].embeds[0].toJSON();
+      expect(sent.title).toContain(BOT_INFO_TITLE);
+      // One message left: the old one was replaced.
+      expect([...messages]).toEqual(["new-msg-1"]);
+    });
+
+    it("keeps the old title when the re-post fails, so the next pass renames it (#1511)", async () => {
+      const { manager, notice, channel } = setup();
+      notice.title = LEGACY_BOT_INFO_TITLE;
+      channel.send.mockRejectedValueOnce(new Error("discord down") as never);
+      await manager.ensureBotInfoNotice();
+      expect(notice.title).toBe(LEGACY_BOT_INFO_TITLE);
+      expect(notice.save).not.toHaveBeenCalled();
+    });
+
+    it("re-posts when only the bot version changed and stores the new version (#1511)", async () => {
+      const { manager, notice, channel } = setup();
+      notice.content = "fresh";
+      notice.botVersion = "0.0.1";
+      await manager.ensureBotInfoNotice();
+
+      expect(channel.send).toHaveBeenCalledTimes(1);
+      expect(notice.botVersion).toBe(getBotVersion());
+      expect(notice.save).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves the post alone when copy, title and version are unchanged (#1511)", async () => {
+      const { manager, notice, channel } = setup();
+      notice.content = "fresh";
+      await manager.ensureBotInfoNotice();
+
+      expect(channel.send).not.toHaveBeenCalled();
+      expect(notice.save).not.toHaveBeenCalled();
+    });
+
+    it("puts the version in the footer of the features notice only (#1511)", async () => {
+      const { manager, channel, notice } = setup();
+      await manager.postNotice(notice);
+      const footer = (channel.send.mock.calls[0] as any)[0].embeds[0].toJSON()
+        .footer.text;
+      expect(footer).toBe(`KoolBot · Notices · Help · v${getBotVersion()}`);
+
+      channel.send.mockClear();
+      await manager.postNotice({ ...notice, title: "House rules" });
+      const other = (channel.send.mock.calls[0] as any)[0].embeds[0].toJSON()
+        .footer.text;
+      expect(other).toBe("KoolBot · Notices · Help");
+    });
 
     it("posts the new message before deleting the old one", async () => {
       const { manager, messages, events, notice } = setup();

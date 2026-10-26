@@ -39,7 +39,7 @@ jest.unstable_mockModule("../../src/services/quote-service.js", () => ({
   },
 }));
 
-const HEADER_TITLE = "📝 Welcome to the Quote Channel!";
+const HEADER_TITLE = "📝 Quotes";
 const HEADER_FOOTER = "KoolBot · Quotes";
 
 function headerMessage(id: string) {
