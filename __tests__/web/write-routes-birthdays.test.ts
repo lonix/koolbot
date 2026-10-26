@@ -53,6 +53,8 @@ jest.unstable_mockModule("../../src/services/birthday-service.js", () => ({
 const { createBirthdaysRouter } =
   await import("../../src/web/routes/write/birthdays.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
+const { registerFormPage } = await import("../../src/web/form-pages.js");
+const { renderBirthdaysPage } = await import("../../src/web/admin-views.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
 
 const client = { user: { id: "bot" } } as unknown as Client;
@@ -72,6 +74,10 @@ const CLEAN_PURGE = {
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  // No page to draw the refusal on, unless a test registers one: the flash.
+  registerFormPage("/admin/birthdays", async () => {
+    throw new Error("page unavailable");
+  });
   mockEditBirthday.mockResolvedValue({
     before: { month: 6, day: 15, year: 1990 },
     after: { month: 6, day: 16, year: 1990 },
@@ -128,18 +134,97 @@ describe("POST /birthdays/:userId/edit", () => {
     expect(mockEditBirthday).not.toHaveBeenCalled();
   });
 
-  it("requires a month and a day in range", async () => {
-    for (const body of [
-      { month: "", day: "16" },
-      { month: "13", day: "16" },
-      { month: "6", day: "0" },
-    ]) {
+  it("falls back to the flash when the page cannot be drawn", async () => {
+    for (const [body, msg] of [
+      [{ month: "", day: "16" }, "Not saved. Choose a month."],
+      [{ month: "13", day: "16" }, "Not saved. Choose a month."],
+      [{ month: "6", day: "0" }, "Not saved. Choose a day."],
+    ] as const) {
       const flash = parseFlashRedirect(
         (await edit(body)).headers.get("location"),
       );
-      expect(flash.msg).toBe("Choose a month and a day.");
+      expect(flash.msg).toBe(msg);
     }
     expect(mockEditBirthday).not.toHaveBeenCalled();
+  });
+
+  describe("a refused edit", () => {
+    // The read router registers the page's renderer in the app; here the real
+    // view stands in with one stored birthday (with a year) to edit.
+    const row = {
+      userId: MEMBER,
+      userLabel: "Alice",
+      month: 6,
+      day: 15,
+      hasYear: true,
+      nextDate: "2026-06-15",
+      daysUntil: 3,
+      roleGranted: false,
+      lastAnnouncedYear: null,
+    };
+    beforeEach(() => {
+      registerFormPage("/admin/birthdays", async (_req, refused) =>
+        renderBirthdaysPage({
+          guildId: "guild-1",
+          csrfToken: "csrf",
+          remainingMs: 1000,
+          navFeatureStatus: {},
+          enabled: true,
+          channel: null,
+          role: null,
+          cron: "0 * * * *",
+          settingRows: [],
+          preview: {
+            mentionUserId: MEMBER,
+            mentionLabel: "Alice",
+            mention: true,
+            withAge: "Happy birthday",
+            withoutAge: null,
+            sampleAge: 30,
+          },
+          rows: [row],
+          total: 1,
+          page: 1,
+          pageSize: 25,
+          refusedForm: refused,
+        }),
+      );
+    });
+
+    it("marks the month, reopens the row and keeps the typed day and year choice", async () => {
+      const res = await edit({ month: "", day: "20", clear_year: "1" });
+      expect(res.status).toBe(422);
+      const html = await res.text();
+      expect(html).toContain(
+        `<details class="helper edit-details" open><summary>Edit</summary>`,
+      );
+      expect(html).toContain(
+        `<select name="month" required id="birthday-edit-${MEMBER}-month" aria-invalid="true" aria-describedby="birthday-edit-${MEMBER}-month-error">`,
+      );
+      expect(html).toContain(
+        `<p class="kb-field__error" id="birthday-edit-${MEMBER}-month-error">Choose a month.</p>`,
+      );
+      expect(html).toContain('<option value="20" selected>20</option>');
+      expect(html).toMatch(/name="clear_year" value="1" checked/);
+      expect(html).not.toContain(`birthday-edit-${MEMBER}-day-error`);
+      expect(mockEditBirthday).not.toHaveBeenCalled();
+    });
+
+    it("marks both selects when neither is in range", async () => {
+      const res = await edit({ month: "13", day: "0" });
+      const html = await res.text();
+      expect(html).toContain(`birthday-edit-${MEMBER}-month-error`);
+      expect(html).toContain(`birthday-edit-${MEMBER}-day-error`);
+    });
+
+    it("answers with the flash when the member's row is no longer on the page", async () => {
+      const other = "222222222222222222";
+      const res = await edit({ month: "", day: "20" }, other);
+      expect(res.status).toBe(303);
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
+        "Not saved. Choose a month.",
+      );
+    });
   });
 
   it("refuses to create an entry the member never set", async () => {

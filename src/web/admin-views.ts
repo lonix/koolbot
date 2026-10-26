@@ -4773,8 +4773,14 @@ export interface BirthdaysProps extends CommonProps {
   total: number;
   page: number;
   pageSize: number;
+  /** The edit form the last save refused (#1523). */
+  refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
 }
+
+/** Form id of one member's Edit form on the Birthdays page (#1523). */
+export const birthdayEditForm = (userId: string): string =>
+  `birthday-edit-${userId}`;
 
 /**
  * A rendered birthday message as HTML: escaped, with the sample member's
@@ -4820,8 +4826,9 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
   const rowsHtml = props.rows
     .map((b) => {
       const id = escapeHtml(b.userId);
+      const f = formView(props.refusedForm, birthdayEditForm(b.userId));
       const clearYear = b.hasYear
-        ? `<label class="checkbox"><input type="checkbox" name="clear_year" value="1"> Remove the birth year (the post stops showing an age)</label>`
+        ? `<label class="checkbox"><input type="checkbox" name="clear_year" value="1"${f.checked("clear_year") ? " checked" : ""}> Remove the birth year (the post stops showing an age)</label>`
         : "";
       return `<tr>
 <td title="${id}">${escapeHtml(b.userLabel)}<div class="muted mono">${id}</div></td>
@@ -4831,10 +4838,10 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
 <td>${b.roleGranted ? '<span class="tag tag-on">granted</span>' : '<span class="muted">—</span>'}</td>
 <td class="muted">${b.lastAnnouncedYear ?? "—"}</td>
 <td class="actions">
-  <details class="helper edit-details"><summary>Edit</summary>
+  <details class="helper edit-details"${f.open()}><summary>Edit</summary>
     <form method="POST" action="/admin/birthdays/${id}/edit" class="stack">${csrfInput}
-      <label>Month<select name="month" required>${monthOptions(b.month)}</select></label>
-      <label>Day<select name="day" required>${dayOptions(b.day)}</select></label>
+      <label>Month<select name="month" required${f.attrs("month")}>${monthOptions(Number(f.selected("month", String(b.month))))}</select></label>${f.error("month")}
+      <label>Day<select name="day" required${f.attrs("day")}>${dayOptions(Number(f.selected("day", String(b.day))))}</select></label>${f.error("day")}
       ${clearYear}
       <button type="submit" class="btn btn-primary">Save changes</button>
     </form>

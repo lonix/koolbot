@@ -16,10 +16,14 @@ import {
   flashRedirect,
   getCheckbox,
   getString,
+  getRawString,
   parseIntInRange,
   requireSessionContext,
   asyncHandler,
+  refuseForm,
 } from "./helpers.js";
+import { addFieldError, type FormErrors } from "../../form-errors.js";
+import { birthdayEditForm } from "../../admin-views.js";
 
 const BIRTHDAYS_PAGE = "/admin/birthdays";
 
@@ -45,13 +49,26 @@ export function createBirthdaysRouter(client: Client): Router {
         });
         return;
       }
-      if (month === null || day === null) {
-        flashRedirect(res, BIRTHDAYS_PAGE, {
-          type: "err",
-          text: "Choose a month and a day.",
-        });
+      const errors: FormErrors = {};
+      if (month === null) addFieldError(errors, "month", "Choose a month.");
+      if (day === null) addFieldError(errors, "day", "Choose a day.");
+      // A refusal is drawn in the member's own row; a row removed in another
+      // tab has none, and `refuseForm` then answers with the flash instead.
+      if (
+        await refuseForm(req, res, {
+          page: BIRTHDAYS_PAGE,
+          formId: birthdayEditForm(userId),
+          errors,
+          values: {
+            month: getRawString(req, "month"),
+            day: getRawString(req, "day"),
+            clear_year: clearYear ? "1" : "",
+          },
+        })
+      ) {
         return;
       }
+      if (month === null || day === null) return;
 
       try {
         // A strict read: `getBirthday` turns a read error into "not set",
