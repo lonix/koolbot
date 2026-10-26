@@ -3924,13 +3924,18 @@ at the flash, which lists every reason. A page-level "something was invalid"
 banner on its own is not enough on a page with hundreds of fields.
 
 **A refused form comes back with what you typed.** When a create or edit form
-on a feature page is refused (Announcements and Polls so far), the server draws
-the page again with status 422 instead of redirecting: every field you typed is
-still filled in, each refused field has `aria-invalid="true"` and a
-`p.kb-field__error` line under it (linked by `aria-describedby`) that says what
-to change, and focus moves to the first refused field. Typed text never goes
-into a URL. A refused edit opens that row's _Edit_ disclosure. Routes use
-`refuseForm` and pages use `formView` (`src/web/form-errors.ts`).
+on a feature page is refused (Announcements, Polls, Reaction roles, Notices,
+Quotes and Presence so far), the server draws the page again with status 422
+instead of redirecting: every field you typed is still filled in, each refused
+field has `aria-invalid="true"` and a `p.kb-field__error` line under it (linked
+by `aria-describedby`) that says what to change, and focus moves to the first
+refused field. Typed text never goes into a URL. A refused edit opens that
+row's _Edit_ disclosure (on Presence, a refused import opens _Import / export_,
+and a role-group form opens _More options_ when a refused row sits in it). A
+refusal that is not about one field stays a page message: a failure from
+Discord (such as a role the bot cannot manage), a row that was deleted in
+another tab, or a page that cannot be drawn again. Routes use `refuseForm` and
+pages use `formView` (`src/web/form-errors.ts`).
 
 **Outcomes are announced.** The inline flash the AJAX Settings save inserts is
 a live region: `role="alert"` for a failure, `role="status"` for success and

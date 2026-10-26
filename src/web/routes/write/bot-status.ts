@@ -19,17 +19,42 @@ import {
   isBotStatusPool,
   validateStatusEntry,
   STATUS_POOL_DEFAULTS,
+  STATUS_TEXT_MAX,
   type BotStatusPool,
 } from "../../../content/statuses.js";
 import { recordAudit } from "../../audit.js";
 import {
   flashRedirect,
   getString,
+  getRawString,
   parseIntInRange,
   requireSessionContext,
   asyncHandler,
   parseStringListImport,
+  refuseForm,
 } from "./helpers.js";
+import { addFieldError, type FormErrors } from "../../form-errors.js";
+import {
+  botStatusAddForm,
+  botStatusEditForm,
+  botStatusImportForm,
+} from "../../admin-views.js";
+
+const PAGE = "/admin/bot-status";
+
+/**
+ * What to change in a status text that `validateStatusEntry` refused, or null
+ * when it is fine. `validateStatusEntry` stays the one place that decides.
+ */
+function statusTextProblem(pool: BotStatusPool, text: string): string | null {
+  if (!validateStatusEntry(pool, text)) return null;
+  const trimmed = text.trim();
+  if (!trimmed) return "Enter the status text.";
+  if (trimmed.length > STATUS_TEXT_MAX) {
+    return `At most ${STATUS_TEXT_MAX} characters.`;
+  }
+  return "This pool needs the {count} placeholder.";
+}
 
 export function createBotStatusRouter(client: Client): Router {
   const router = Router();
@@ -80,19 +105,32 @@ export function createBotStatusRouter(client: Client): Router {
       }
       const text = getString(req, "text");
       const orderRaw = getString(req, "order");
-      const invalid = validateStatusEntry(pool, text);
-      if (invalid) {
-        flashRedirect(res, "/admin/bot-status", { type: "err", text: invalid });
-        return;
-      }
+      const errors: FormErrors = {};
+      const problem = statusTextProblem(pool, text);
+      if (problem) addFieldError(errors, "text", problem);
       const order = parseIntInRange(orderRaw || "0", -1000, 10000);
       if (order === null) {
-        flashRedirect(res, "/admin/bot-status", {
-          type: "err",
-          text: "Order must be an integer between -1000 and 10000.",
-        });
+        addFieldError(
+          errors,
+          "order",
+          "Use a whole number from -1000 to 10000.",
+        );
+      }
+      if (
+        await refuseForm(req, res, {
+          page: PAGE,
+          formId: botStatusAddForm(pool),
+          errors,
+          values: {
+            text: getRawString(req, "text"),
+            order: getRawString(req, "order"),
+          },
+        })
+      ) {
         return;
       }
+      // Not reached with a bad order: it was refused above. Narrows the type.
+      if (order === null) return;
       try {
         const entry = await new BotStatusMessage({
           guildId: session.guildId,
@@ -138,9 +176,17 @@ export function createBotStatusRouter(client: Client): Router {
       const entry = await findOwnedEntry(res, session.guildId, id);
       if (!entry) return;
       const pool: BotStatusPool = entry.pool;
-      const invalid = validateStatusEntry(pool, text);
-      if (invalid) {
-        flashRedirect(res, "/admin/bot-status", { type: "err", text: invalid });
+      const errors: FormErrors = {};
+      const problem = statusTextProblem(pool, text);
+      if (problem) addFieldError(errors, "text", problem);
+      if (
+        await refuseForm(req, res, {
+          page: PAGE,
+          formId: botStatusEditForm(id),
+          errors,
+          values: { text: getRawString(req, "text") },
+        })
+      ) {
         return;
       }
       try {
@@ -277,23 +323,35 @@ export function createBotStatusRouter(client: Client): Router {
       }
       const mode = getString(req, "mode") === "append" ? "append" : "replace";
       const entries = parseStringListImport(getString(req, "items"));
+      const errors: FormErrors = {};
       if (entries.length === 0) {
-        flashRedirect(res, "/admin/bot-status", {
-          type: "err",
-          text: "Nothing to import — paste one entry per line or a JSON array.",
-        });
-        return;
+        addFieldError(
+          errors,
+          "items",
+          "Paste at least one entry: one per line, or a JSON array.",
+        );
       }
       // Validate every entry up front so the pool is never left half-written.
       for (let i = 0; i < entries.length; i++) {
-        const invalid = validateStatusEntry(pool, entries[i]);
-        if (invalid) {
-          flashRedirect(res, "/admin/bot-status", {
-            type: "err",
-            text: `Import rejected at entry ${i + 1} ("${entries[i].slice(0, 40)}"): ${invalid}`,
-          });
-          return;
+        const problem = statusTextProblem(pool, entries[i]);
+        if (problem) {
+          addFieldError(
+            errors,
+            "items",
+            `Entry ${i + 1} ("${entries[i].slice(0, 40)}"): ${problem}`,
+          );
+          break;
         }
+      }
+      if (
+        await refuseForm(req, res, {
+          page: PAGE,
+          formId: botStatusImportForm(pool),
+          errors,
+          values: { items: getRawString(req, "items"), mode },
+        })
+      ) {
+        return;
       }
       try {
         let baseOrder = 0;

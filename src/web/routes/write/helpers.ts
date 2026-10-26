@@ -226,6 +226,28 @@ export async function refuseForm(
 }
 
 /**
+ * Whether a refused edit's row is known to be gone (#1520). A write route asks
+ * this before it answers a refusal, so a row deleted in another tab gets the
+ * not-found flash instead of a 422 for a form that is no longer on the page.
+ *
+ * The lookup only decides between "not found" and the validation refusal, so a
+ * failed read counts as "not known to be gone": the refusal is still answered
+ * (and `refuseForm` falls back to a flash if the page cannot show the form)
+ * rather than the request failing with a generic server error.
+ */
+export async function rowIsGone(
+  exists: () => Promise<boolean>,
+  what: string,
+): Promise<boolean> {
+  try {
+    return !(await exists());
+  } catch (err) {
+    logger.warn(`${what} lookup before a refused edit failed`, err);
+    return false;
+  }
+}
+
+/**
  * Reply to a section-save with either an inline JSON flash (AJAX) or the
  * legacy 303 redirect (no-JS). Always returns the same 500-char-capped flash
  * the renderer would show, so both paths surface identical messages.

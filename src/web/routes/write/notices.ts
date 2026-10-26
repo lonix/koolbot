@@ -18,13 +18,25 @@ import { finishRepost } from "./repost-response.js";
 import {
   flashRedirect,
   getString,
+  getRawString,
   parseIntInRange,
   requireSessionContext,
   asyncHandler,
+  refuseForm,
+  rowIsGone,
   Flash,
   TEXT_LIMITS,
-  firstLengthError,
 } from "./helpers.js";
+import {
+  addFieldError,
+  type FormErrors,
+  type FormValues,
+} from "../../form-errors.js";
+import { NOTICE_CREATE_FORM, noticeEditForm } from "../../admin-views.js";
+
+const PAGE = "/admin/notices";
+const ORDER_MIN = -1000;
+const ORDER_MAX = 10000;
 
 export function createNoticesRouter(client: Client): Router {
   const router = Router();
@@ -35,48 +47,94 @@ export function createNoticesRouter(client: Client): Router {
 
   const NOTICE_CATEGORY_KEYS = new Set(Object.keys(NOTICE_CATEGORIES));
 
+  /**
+   * What the create and edit forms submit, checked field by field (#1520).
+   * The create form's blank order means 0; the edit form's is required.
+   */
+  const checkNoticeForm = (
+    req: Parameters<typeof getString>[0],
+    blankOrder: string,
+  ): {
+    errors: FormErrors;
+    values: FormValues;
+    title: string;
+    content: string;
+    category: string;
+    order: number | null;
+  } => {
+    const title = getString(req, "title");
+    const content = getString(req, "content");
+    const category = getString(req, "category");
+    const order = parseIntInRange(
+      getString(req, "order") || blankOrder,
+      ORDER_MIN,
+      ORDER_MAX,
+    );
+    const errors: FormErrors = {};
+    // The length caps mirror what `notice.save()` would otherwise reject as a
+    // Mongoose ValidationError (#508).
+    if (!title) {
+      addFieldError(errors, "title", "Enter a title.");
+    } else if (title.length > TEXT_LIMITS.noticeTitle) {
+      addFieldError(
+        errors,
+        "title",
+        `At most ${TEXT_LIMITS.noticeTitle} characters.`,
+      );
+    }
+    if (!content) {
+      addFieldError(errors, "content", "Enter the notice text.");
+    } else if (content.length > TEXT_LIMITS.noticeContent) {
+      addFieldError(
+        errors,
+        "content",
+        `At most ${TEXT_LIMITS.noticeContent} characters.`,
+      );
+    }
+    if (!category) {
+      addFieldError(errors, "category", "Choose a category.");
+    } else if (!NOTICE_CATEGORY_KEYS.has(category)) {
+      addFieldError(errors, "category", "Choose one of the listed categories.");
+    }
+    if (order === null) {
+      addFieldError(
+        errors,
+        "order",
+        `Use a whole number from ${ORDER_MIN} to ${ORDER_MAX}.`,
+      );
+    }
+    return {
+      errors,
+      values: {
+        title: getRawString(req, "title"),
+        content: getRawString(req, "content"),
+        category,
+        order: getRawString(req, "order"),
+      },
+      title,
+      content,
+      category,
+      order,
+    };
+  };
+
   router.post(
     "/notices/create",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
-      const title = getString(req, "title");
-      const content = getString(req, "content");
-      const category = getString(req, "category");
-      const orderRaw = getString(req, "order");
-
-      if (!title || !content || !category) {
-        flashRedirect(res, "/admin/notices", {
-          type: "err",
-          text: "Title, content, and category are all required.",
-        });
+      const form = checkNoticeForm(req, "0");
+      if (
+        await refuseForm(req, res, {
+          page: PAGE,
+          formId: NOTICE_CREATE_FORM,
+          errors: form.errors,
+          values: form.values,
+        })
+      ) {
         return;
       }
-      const lengthError = firstLengthError([
-        { label: "Title", value: title, max: TEXT_LIMITS.noticeTitle },
-        { label: "Content", value: content, max: TEXT_LIMITS.noticeContent },
-      ]);
-      if (lengthError) {
-        flashRedirect(res, "/admin/notices", {
-          type: "err",
-          text: lengthError,
-        });
-        return;
-      }
-      if (!NOTICE_CATEGORY_KEYS.has(category)) {
-        flashRedirect(res, "/admin/notices", {
-          type: "err",
-          text: `Unknown category: ${category}.`,
-        });
-        return;
-      }
-      const order = parseIntInRange(orderRaw || "0", -1000, 10000);
-      if (order === null) {
-        flashRedirect(res, "/admin/notices", {
-          type: "err",
-          text: "Order must be an integer between -1000 and 10000.",
-        });
-        return;
-      }
+      const { title, content, category } = form;
+      const order = form.order as number;
 
       try {
         const enabled = await ConfigService.getInstance().getBoolean(
@@ -149,47 +207,34 @@ export function createNoticesRouter(client: Client): Router {
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const id = String(req.params.id);
-      const title = getString(req, "title");
-      const content = getString(req, "content");
-      const category = getString(req, "category");
-      const orderRaw = getString(req, "order");
-
-      if (!title || !content || !category) {
-        flashRedirect(res, "/admin/notices", {
-          type: "err",
-          text: "Title, content, and category are all required.",
-        });
+      const form = checkNoticeForm(req, "");
+      // A refused edit is drawn in the row's own form; a notice deleted in
+      // another tab has none, so say so instead.
+      if (Object.keys(form.errors).length > 0) {
+        const gone = await rowIsGone(
+          async () => !!(await Notice.findById(id)),
+          "Notice",
+        );
+        if (gone) {
+          flashRedirect(res, PAGE, {
+            type: "err",
+            text: `Notice ${id} not found.`,
+          });
+          return;
+        }
+      }
+      if (
+        await refuseForm(req, res, {
+          page: PAGE,
+          formId: noticeEditForm(id),
+          errors: form.errors,
+          values: form.values,
+        })
+      ) {
         return;
       }
-      // Mirror the create-route length checks: `notice.save()` would otherwise
-      // reject the oversized field as a Mongoose ValidationError surfaced as a
-      // 500-style flash instead of this readable message (#508).
-      const lengthError = firstLengthError([
-        { label: "Title", value: title, max: TEXT_LIMITS.noticeTitle },
-        { label: "Content", value: content, max: TEXT_LIMITS.noticeContent },
-      ]);
-      if (lengthError) {
-        flashRedirect(res, "/admin/notices", {
-          type: "err",
-          text: lengthError,
-        });
-        return;
-      }
-      if (!NOTICE_CATEGORY_KEYS.has(category)) {
-        flashRedirect(res, "/admin/notices", {
-          type: "err",
-          text: `Unknown category: ${category}.`,
-        });
-        return;
-      }
-      const order = parseIntInRange(orderRaw, -1000, 10000);
-      if (order === null) {
-        flashRedirect(res, "/admin/notices", {
-          type: "err",
-          text: "Order must be an integer between -1000 and 10000.",
-        });
-        return;
-      }
+      const { title, content, category } = form;
+      const order = form.order as number;
 
       try {
         const notice = await Notice.findById(id);

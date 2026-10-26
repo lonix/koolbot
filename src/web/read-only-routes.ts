@@ -1796,328 +1796,355 @@ export function createReadOnlyRouter(
   );
 
   // ---------- Reaction Roles ----------
+  // One renderer for the GET and for a refused form (#1520): the write
+  // routes call it, through `form-pages.ts`, to draw the page again with 422.
+  const renderReactionRoles = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const config = ConfigService.getInstance();
+    const service = ReactionRoleService.getInstance(client);
+    const [enabled, configChannelId, all, archived, channelData, stored] =
+      await Promise.all([
+        config.getBoolean("reactionroles.enabled", false),
+        config.getString("reactionroles.message_channel_id", ""),
+        service.listReactionRoles(common.guildId),
+        ReactionRoleConfig.find({ guildId: common.guildId, isArchived: true })
+          .sort({ archivedAt: -1 })
+          .limit(50)
+          .lean(),
+        fetchChannelData(client, common.guildId),
+        // `null` (not `[]`) on failure: an empty snapshot would render the
+        // schema defaults as if they were stored, and saving the card would
+        // then overwrite the real values with them.
+        config.getAll().catch((err: unknown) => {
+          logger.warn("reaction roles: config snapshot read failed", err);
+          return null;
+        }),
+      ]);
+    // Editable `reactionroles.*` settings (#974). Built directly rather than
+    // through `loadFeatureSettings`: the page already fetched the channel
+    // list above (a second fetch would repeat the Discord round-trip), and
+    // none of these keys has a `dependsOn`, so there is no off-card
+    // dependency state to resolve. Fails closed when the snapshot is
+    // unavailable: no editable card, just a notice.
+    const settingRows = stored
+      ? buildSettingRows(REACTION_ROLES_SETTING_KEYS, stored)
+      : [];
+    const channelNames = channelData.names;
+
+    const active = all.filter((rr) => !rr.isArchived);
+    // Bound mappings (#813) have no owned category/channel, so those ids may
+    // be absent — fall back to an em dash so the table renders cleanly.
+    const resolveChannel = (id?: string | null): string =>
+      id ? (channelNames.get(id) ?? id) : "—";
+    const typeOf = (id?: string | null): ChannelType | null =>
+      id ? (channelData.types.get(id) ?? null) : null;
+    const shape = (rr: {
+      _id?: unknown;
+      emoji: string;
+      roleName: string;
+      roleId: string;
+      categoryId?: string | null;
+      channelId?: string | null;
+      messageId: string;
+      messageChannelId?: string | null;
+      autoCreated?: boolean;
+      mode?: string;
+      groupId?: string | null;
+      isArchived: boolean;
+      archivedAt?: Date | null;
+    }): ReactionRoleRow => ({
+      mappingId: String(rr._id ?? ""),
+      emoji: rr.emoji,
+      roleName: rr.roleName,
+      roleId: rr.roleId,
+      categoryName: resolveChannel(rr.categoryId),
+      categoryType: typeOf(rr.categoryId),
+      channelName: resolveChannel(rr.channelId),
+      channelType: typeOf(rr.channelId),
+      messageId: rr.messageId,
+      pickerChannelName: rr.messageChannelId
+        ? (channelNames.get(rr.messageChannelId) ?? rr.messageChannelId)
+        : null,
+      pickerChannelType: typeOf(rr.messageChannelId),
+      autoCreated: rr.autoCreated ?? true,
+      mode: rr.mode ?? "toggle",
+      groupId: rr.groupId ?? null,
+      isArchived: rr.isArchived,
+      archivedAt: rr.archivedAt ? new Date(rr.archivedAt).toISOString() : null,
+    });
+
+    const permissionNotice = await loadPermissionNotice({
+      client,
+      guildId: common.guildId,
+      enabled,
+      filter: inAreas("Reaction roles"),
+    });
+
+    return renderReactionRolesPage({
+      ...common,
+      enabled,
+      permissionNotice,
+      configChannel: configChannelId
+        ? {
+            name: channelNames.get(configChannelId) ?? configChannelId,
+            id: configChannelId,
+            type: channelData.types.get(configChannelId) ?? null,
+          }
+        : null,
+      active: active.map(shape),
+      archived: archived.map(shape),
+      settingRows,
+      settingsUnavailable: stored === null,
+      textChannels: channelData.textChannels,
+      refusedForm,
+      flash: readFlash(req),
+    });
+  };
+  registerFormPage("/admin/reaction-roles", (req, refused) =>
+    renderReactionRoles(req as AuthenticatedRequest, refused),
+  );
   router.get(
     "/reaction-roles",
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
-      const config = ConfigService.getInstance();
-      const service = ReactionRoleService.getInstance(client);
-      const [enabled, configChannelId, all, archived, channelData, stored] =
-        await Promise.all([
-          config.getBoolean("reactionroles.enabled", false),
-          config.getString("reactionroles.message_channel_id", ""),
-          service.listReactionRoles(common.guildId),
-          ReactionRoleConfig.find({ guildId: common.guildId, isArchived: true })
-            .sort({ archivedAt: -1 })
-            .limit(50)
-            .lean(),
-          fetchChannelData(client, common.guildId),
-          // `null` (not `[]`) on failure: an empty snapshot would render the
-          // schema defaults as if they were stored, and saving the card would
-          // then overwrite the real values with them.
-          config.getAll().catch((err: unknown) => {
-            logger.warn("reaction roles: config snapshot read failed", err);
-            return null;
-          }),
-        ]);
-      // Editable `reactionroles.*` settings (#974). Built directly rather than
-      // through `loadFeatureSettings`: the page already fetched the channel
-      // list above (a second fetch would repeat the Discord round-trip), and
-      // none of these keys has a `dependsOn`, so there is no off-card
-      // dependency state to resolve. Fails closed when the snapshot is
-      // unavailable: no editable card, just a notice.
-      const settingRows = stored
-        ? buildSettingRows(REACTION_ROLES_SETTING_KEYS, stored)
-        : [];
-      const channelNames = channelData.names;
-
-      const active = all.filter((rr) => !rr.isArchived);
-      // Bound mappings (#813) have no owned category/channel, so those ids may
-      // be absent — fall back to an em dash so the table renders cleanly.
-      const resolveChannel = (id?: string | null): string =>
-        id ? (channelNames.get(id) ?? id) : "—";
-      const typeOf = (id?: string | null): ChannelType | null =>
-        id ? (channelData.types.get(id) ?? null) : null;
-      const shape = (rr: {
-        _id?: unknown;
-        emoji: string;
-        roleName: string;
-        roleId: string;
-        categoryId?: string | null;
-        channelId?: string | null;
-        messageId: string;
-        messageChannelId?: string | null;
-        autoCreated?: boolean;
-        mode?: string;
-        groupId?: string | null;
-        isArchived: boolean;
-        archivedAt?: Date | null;
-      }): ReactionRoleRow => ({
-        mappingId: String(rr._id ?? ""),
-        emoji: rr.emoji,
-        roleName: rr.roleName,
-        roleId: rr.roleId,
-        categoryName: resolveChannel(rr.categoryId),
-        categoryType: typeOf(rr.categoryId),
-        channelName: resolveChannel(rr.channelId),
-        channelType: typeOf(rr.channelId),
-        messageId: rr.messageId,
-        pickerChannelName: rr.messageChannelId
-          ? (channelNames.get(rr.messageChannelId) ?? rr.messageChannelId)
-          : null,
-        pickerChannelType: typeOf(rr.messageChannelId),
-        autoCreated: rr.autoCreated ?? true,
-        mode: rr.mode ?? "toggle",
-        groupId: rr.groupId ?? null,
-        isArchived: rr.isArchived,
-        archivedAt: rr.archivedAt
-          ? new Date(rr.archivedAt).toISOString()
-          : null,
-      });
-
-      const permissionNotice = await loadPermissionNotice({
-        client,
-        guildId: common.guildId,
-        enabled,
-        filter: inAreas("Reaction roles"),
-      });
-
-      res.type("text/html").send(
-        renderReactionRolesPage({
-          ...common,
-          enabled,
-          permissionNotice,
-          configChannel: configChannelId
-            ? {
-                name: channelNames.get(configChannelId) ?? configChannelId,
-                id: configChannelId,
-                type: channelData.types.get(configChannelId) ?? null,
-              }
-            : null,
-          active: active.map(shape),
-          archived: archived.map(shape),
-          settingRows,
-          settingsUnavailable: stored === null,
-          textChannels: channelData.textChannels,
-          flash: readFlash(req),
-        }),
-      );
+      res.type("text/html").send(await renderReactionRoles(req, null));
     }),
   );
 
   // ---------- Notices ----------
+  // One renderer for the GET and for a refused form (#1520): the write
+  // routes call it, through `form-pages.ts`, to draw the page again with 422.
+  const renderNotices = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const config = ConfigService.getInstance();
+    const [
+      enabled,
+      channelId,
+      headerMessageId,
+      headerEnabled,
+      stored,
+      notices,
+      channelData,
+    ] = await Promise.all([
+      config.getBoolean("notices.enabled", false),
+      config.getString("notices.channel_id", ""),
+      config.getString("notices.header_message_id", ""),
+      config.getBoolean("notices.header_enabled", true),
+      // `null` (not `[]`) on failure: rendering schema defaults here would
+      // let a save overwrite the real values, so the card is withheld.
+      config.getAll().catch(() => null),
+      Notice.find({}).sort({ category: 1, order: 1 }).lean(),
+      fetchChannelData(client, common.guildId),
+    ]);
+    const channelNames = channelData.names;
+    // Editable `notices.*` settings rendered in place on this page (#972).
+    // The picker reuses the channel fetch above, and none of these keys has
+    // a `dependsOn`, so `loadFeatureSettings` would only add a second fetch.
+    const settingRows = stored
+      ? buildSettingRows(NOTICES_SETTING_KEYS, stored)
+      : [];
+
+    const grouped = new Map<string, typeof notices>();
+    for (const n of notices) {
+      const arr = grouped.get(n.category) ?? [];
+      arr.push(n);
+      grouped.set(n.category, arr);
+    }
+    const groups = Array.from(grouped.entries()).map(([category, list]) => ({
+      category,
+      rows: list.map((n) => ({
+        id: String(n._id),
+        order: n.order,
+        title: n.title,
+        content: n.content,
+        preview:
+          n.content.length > 120 ? `${n.content.slice(0, 120)}…` : n.content,
+        category: n.category,
+        messageId: n.messageId ?? "",
+        updatedAt: new Date(n.updatedAt).toISOString(),
+      })),
+    }));
+
+    const categoryOptions: NoticeCategoryOption[] = Object.entries(
+      NOTICE_CATEGORIES,
+    ).map(([value, info]) => ({
+      value,
+      label: `${info.emoji} ${info.label}`,
+    }));
+
+    const permissionNotice = await loadPermissionNotice({
+      client,
+      guildId: common.guildId,
+      enabled,
+      filter: inAreas("Notices"),
+    });
+
+    return renderNoticesPage({
+      ...common,
+      enabled,
+      permissionNotice,
+      channel: channelId
+        ? {
+            name: channelNames.get(channelId) ?? channelId,
+            id: channelId,
+            type: channelData.types.get(channelId) ?? null,
+          }
+        : null,
+      total: notices.length,
+      headerMessageId,
+      headerEnabled,
+      settingRows,
+      settingsUnavailable: stored === null,
+      textChannels: channelData.textChannels,
+      groups,
+      categoryOptions,
+      refusedForm,
+      flash: readFlash(req),
+    });
+  };
+  registerFormPage("/admin/notices", (req, refused) =>
+    renderNotices(req as AuthenticatedRequest, refused),
+  );
   router.get(
     "/notices",
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
-      const config = ConfigService.getInstance();
-      const [
-        enabled,
-        channelId,
-        headerMessageId,
-        headerEnabled,
-        stored,
-        notices,
-        channelData,
-      ] = await Promise.all([
-        config.getBoolean("notices.enabled", false),
-        config.getString("notices.channel_id", ""),
-        config.getString("notices.header_message_id", ""),
-        config.getBoolean("notices.header_enabled", true),
-        // `null` (not `[]`) on failure: rendering schema defaults here would
-        // let a save overwrite the real values, so the card is withheld.
-        config.getAll().catch(() => null),
-        Notice.find({}).sort({ category: 1, order: 1 }).lean(),
-        fetchChannelData(client, common.guildId),
-      ]);
-      const channelNames = channelData.names;
-      // Editable `notices.*` settings rendered in place on this page (#972).
-      // The picker reuses the channel fetch above, and none of these keys has
-      // a `dependsOn`, so `loadFeatureSettings` would only add a second fetch.
-      const settingRows = stored
-        ? buildSettingRows(NOTICES_SETTING_KEYS, stored)
-        : [];
-
-      const grouped = new Map<string, typeof notices>();
-      for (const n of notices) {
-        const arr = grouped.get(n.category) ?? [];
-        arr.push(n);
-        grouped.set(n.category, arr);
-      }
-      const groups = Array.from(grouped.entries()).map(([category, list]) => ({
-        category,
-        rows: list.map((n) => ({
-          id: String(n._id),
-          order: n.order,
-          title: n.title,
-          content: n.content,
-          preview:
-            n.content.length > 120 ? `${n.content.slice(0, 120)}…` : n.content,
-          category: n.category,
-          messageId: n.messageId ?? "",
-          updatedAt: new Date(n.updatedAt).toISOString(),
-        })),
-      }));
-
-      const categoryOptions: NoticeCategoryOption[] = Object.entries(
-        NOTICE_CATEGORIES,
-      ).map(([value, info]) => ({
-        value,
-        label: `${info.emoji} ${info.label}`,
-      }));
-
-      const permissionNotice = await loadPermissionNotice({
-        client,
-        guildId: common.guildId,
-        enabled,
-        filter: inAreas("Notices"),
-      });
-
-      res.type("text/html").send(
-        renderNoticesPage({
-          ...common,
-          enabled,
-          permissionNotice,
-          channel: channelId
-            ? {
-                name: channelNames.get(channelId) ?? channelId,
-                id: channelId,
-                type: channelData.types.get(channelId) ?? null,
-              }
-            : null,
-          total: notices.length,
-          headerMessageId,
-          headerEnabled,
-          settingRows,
-          settingsUnavailable: stored === null,
-          textChannels: channelData.textChannels,
-          groups,
-          categoryOptions,
-          flash: readFlash(req),
-        }),
-      );
+      res.type("text/html").send(await renderNotices(req, null));
     }),
   );
 
   // ---------- Quotes (#984) ----------
+  // One renderer for the GET and for a refused form (#1520): the write
+  // routes call it, through `form-pages.ts`, to draw the page again with 422.
+  const renderQuotes = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const config = ConfigService.getInstance();
+    const pageSize = 25;
+    const pageRaw = Number.parseInt(String(req.query.page ?? "1"), 10);
+    const requestedPage = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+    const search = String(req.query.q ?? "")
+      .trim()
+      .slice(0, 200);
+
+    const [
+      enabled,
+      channelId,
+      headerMessageId,
+      headerEnabled,
+      maxLength,
+      quoteSettings,
+      firstPage,
+    ] = await Promise.all([
+      config.getBoolean("quotes.enabled", false),
+      config.getString("quotes.channel_id", ""),
+      config.getString("quotes.header_message_id", ""),
+      config.getBoolean("quotes.header_enabled", true),
+      config.getNumber("quotes.max_length", 1000),
+      loadFeatureSettings(client, common.guildId, QUOTES_SETTING_KEYS),
+      quoteService.listQuotes(requestedPage, pageSize, search),
+    ]);
+    // A page past the end (a stale link after deletes) shows the last page
+    // rather than an empty table under "Page 9 of 3".
+    const lastPage = Math.max(1, firstPage.totalPages);
+    const page = Math.min(requestedPage, lastPage);
+    const { quotes, total } =
+      page === requestedPage
+        ? firstPage
+        : await quoteService.listQuotes(page, pageSize, search);
+
+    const channelNames = new Map<string, string>();
+    const channelTypes = new Map<string, ChannelType>();
+    for (const c of quoteSettings.pickers.textChannels ?? []) {
+      channelNames.set(c.id, c.name);
+      channelTypes.set(c.id, c.type);
+    }
+
+    // Show names rather than raw snowflakes: one batched member fetch per
+    // request, best-effort — a miss falls back to the ID.
+    const memberIds = new Set<string>();
+    for (const q of quotes) {
+      memberIds.add(normalizeUserId(q.authorId));
+      memberIds.add(normalizeUserId(q.addedById));
+    }
+    const userLabels = new Map<string, string>();
+    const ids = [...memberIds].filter((id) => /^\d{17,20}$/.test(id));
+    if (ids.length > 0) {
+      try {
+        const guild = await client.guilds.fetch(common.guildId);
+        const members = await guild.members.fetch({ user: ids });
+        for (const [id, member] of members) {
+          userLabels.set(id, member.displayName ?? member.user.username);
+        }
+      } catch (err) {
+        logger.debug("quotes page member-label fetch failed", err);
+      }
+    }
+
+    const rows: QuoteRow[] = quotes.map((q) => {
+      const authorId = normalizeUserId(q.authorId);
+      const addedById = normalizeUserId(q.addedById);
+      const added = q.addedAt ?? q.createdAt;
+      return {
+        id: String(q._id),
+        content: q.content,
+        authorId,
+        authorLabel: userLabels.get(authorId) ?? authorId,
+        addedByLabel: userLabels.get(addedById) ?? addedById,
+        addedAt: added ? new Date(added).toISOString() : "",
+        likes: q.likes ?? 0,
+        dislikes: q.dislikes ?? 0,
+        messageId: q.messageId ?? "",
+      };
+    });
+
+    const permissionNotice = await loadPermissionNotice({
+      client,
+      guildId: common.guildId,
+      enabled,
+      filter: inAreas("Quotes"),
+    });
+
+    return renderQuotesPage({
+      ...common,
+      enabled,
+      permissionNotice,
+      channel: channelId
+        ? {
+            name: channelNames.get(channelId) ?? channelId,
+            id: channelId,
+            type: channelTypes.get(channelId) ?? null,
+          }
+        : null,
+      headerMessageId,
+      headerEnabled,
+      settingRows: quoteSettings.settingRows,
+      settingsPickers: quoteSettings.pickers,
+      dependencyState: quoteSettings.dependencyState,
+      settingsUnavailable: quoteSettings.unavailable,
+      maxLength,
+      rows,
+      total,
+      page,
+      pageSize,
+      search,
+      refusedForm,
+      flash: readFlash(req),
+    });
+  };
+  registerFormPage("/admin/quotes", (req, refused) =>
+    renderQuotes(req as AuthenticatedRequest, refused),
+  );
   router.get(
     "/quotes",
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
-      const config = ConfigService.getInstance();
-      const pageSize = 25;
-      const pageRaw = Number.parseInt(String(req.query.page ?? "1"), 10);
-      const requestedPage =
-        Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
-      const search = String(req.query.q ?? "")
-        .trim()
-        .slice(0, 200);
-
-      const [
-        enabled,
-        channelId,
-        headerMessageId,
-        headerEnabled,
-        maxLength,
-        quoteSettings,
-        firstPage,
-      ] = await Promise.all([
-        config.getBoolean("quotes.enabled", false),
-        config.getString("quotes.channel_id", ""),
-        config.getString("quotes.header_message_id", ""),
-        config.getBoolean("quotes.header_enabled", true),
-        config.getNumber("quotes.max_length", 1000),
-        loadFeatureSettings(client, common.guildId, QUOTES_SETTING_KEYS),
-        quoteService.listQuotes(requestedPage, pageSize, search),
-      ]);
-      // A page past the end (a stale link after deletes) shows the last page
-      // rather than an empty table under "Page 9 of 3".
-      const lastPage = Math.max(1, firstPage.totalPages);
-      const page = Math.min(requestedPage, lastPage);
-      const { quotes, total } =
-        page === requestedPage
-          ? firstPage
-          : await quoteService.listQuotes(page, pageSize, search);
-
-      const channelNames = new Map<string, string>();
-      const channelTypes = new Map<string, ChannelType>();
-      for (const c of quoteSettings.pickers.textChannels ?? []) {
-        channelNames.set(c.id, c.name);
-        channelTypes.set(c.id, c.type);
-      }
-
-      // Show names rather than raw snowflakes: one batched member fetch per
-      // request, best-effort — a miss falls back to the ID.
-      const memberIds = new Set<string>();
-      for (const q of quotes) {
-        memberIds.add(normalizeUserId(q.authorId));
-        memberIds.add(normalizeUserId(q.addedById));
-      }
-      const userLabels = new Map<string, string>();
-      const ids = [...memberIds].filter((id) => /^\d{17,20}$/.test(id));
-      if (ids.length > 0) {
-        try {
-          const guild = await client.guilds.fetch(common.guildId);
-          const members = await guild.members.fetch({ user: ids });
-          for (const [id, member] of members) {
-            userLabels.set(id, member.displayName ?? member.user.username);
-          }
-        } catch (err) {
-          logger.debug("quotes page member-label fetch failed", err);
-        }
-      }
-
-      const rows: QuoteRow[] = quotes.map((q) => {
-        const authorId = normalizeUserId(q.authorId);
-        const addedById = normalizeUserId(q.addedById);
-        const added = q.addedAt ?? q.createdAt;
-        return {
-          id: String(q._id),
-          content: q.content,
-          authorId,
-          authorLabel: userLabels.get(authorId) ?? authorId,
-          addedByLabel: userLabels.get(addedById) ?? addedById,
-          addedAt: added ? new Date(added).toISOString() : "",
-          likes: q.likes ?? 0,
-          dislikes: q.dislikes ?? 0,
-          messageId: q.messageId ?? "",
-        };
-      });
-
-      const permissionNotice = await loadPermissionNotice({
-        client,
-        guildId: common.guildId,
-        enabled,
-        filter: inAreas("Quotes"),
-      });
-
-      res.type("text/html").send(
-        renderQuotesPage({
-          ...common,
-          enabled,
-          permissionNotice,
-          channel: channelId
-            ? {
-                name: channelNames.get(channelId) ?? channelId,
-                id: channelId,
-                type: channelTypes.get(channelId) ?? null,
-              }
-            : null,
-          headerMessageId,
-          headerEnabled,
-          settingRows: quoteSettings.settingRows,
-          settingsPickers: quoteSettings.pickers,
-          dependencyState: quoteSettings.dependencyState,
-          settingsUnavailable: quoteSettings.unavailable,
-          maxLength,
-          rows,
-          total,
-          page,
-          pageSize,
-          search,
-          flash: readFlash(req),
-        }),
-      );
+      res.type("text/html").send(await renderQuotes(req, null));
     }),
   );
 
@@ -2265,48 +2292,58 @@ export function createReadOnlyRouter(
   );
 
   // ---------- Bot Status (issue #557) ----------
+  // One renderer for the GET and for a refused form (#1520): the write
+  // routes call it, through `form-pages.ts`, to draw the page again with 422.
+  const renderBotStatus = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const rows = await BotStatusMessage.find({ guildId: common.guildId })
+      .sort({ pool: 1, order: 1 })
+      .lean();
+
+    const pools = BOT_STATUS_POOLS.map((pool) => {
+      const meta = BOT_STATUS_POOL_META[pool];
+      const items = rows
+        .filter((r) => r.pool === pool)
+        .map((r) => ({
+          id: String(r._id),
+          order: r.order,
+          text: r.text,
+        }));
+      const usingDefaults = items.length === 0;
+      // The export textarea shows the effective list: stored entries when
+      // present, otherwise the built-in defaults the bot is actually using.
+      const effective = usingDefaults
+        ? [...STATUS_POOL_DEFAULTS[pool]]
+        : items.map((i) => i.text);
+      return {
+        pool,
+        label: meta.label,
+        description: meta.description,
+        requiresCount: meta.requiresCount,
+        items,
+        usingDefaults,
+        exportText: effective.join("\n"),
+      };
+    });
+
+    return renderBotStatusPage({
+      ...common,
+      maxLength: STATUS_TEXT_MAX,
+      pools,
+      refusedForm,
+      flash: readFlash(req),
+    });
+  };
+  registerFormPage("/admin/bot-status", (req, refused) =>
+    renderBotStatus(req as AuthenticatedRequest, refused),
+  );
   router.get(
     "/bot-status",
     asyncHandler(async (req, res) => {
-      const common = await commonFromReq(req);
-      const rows = await BotStatusMessage.find({ guildId: common.guildId })
-        .sort({ pool: 1, order: 1 })
-        .lean();
-
-      const pools = BOT_STATUS_POOLS.map((pool) => {
-        const meta = BOT_STATUS_POOL_META[pool];
-        const items = rows
-          .filter((r) => r.pool === pool)
-          .map((r) => ({
-            id: String(r._id),
-            order: r.order,
-            text: r.text,
-          }));
-        const usingDefaults = items.length === 0;
-        // The export textarea shows the effective list: stored entries when
-        // present, otherwise the built-in defaults the bot is actually using.
-        const effective = usingDefaults
-          ? [...STATUS_POOL_DEFAULTS[pool]]
-          : items.map((i) => i.text);
-        return {
-          pool,
-          label: meta.label,
-          description: meta.description,
-          requiresCount: meta.requiresCount,
-          items,
-          usingDefaults,
-          exportText: effective.join("\n"),
-        };
-      });
-
-      res.type("text/html").send(
-        renderBotStatusPage({
-          ...common,
-          maxLength: STATUS_TEXT_MAX,
-          pools,
-          flash: readFlash(req),
-        }),
-      );
+      res.type("text/html").send(await renderBotStatus(req, null));
     }),
   );
 

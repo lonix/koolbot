@@ -3336,6 +3336,137 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // A refused group form (#1520): the first blank option row is marked, and
+      // its line points at the message.
+      name: "Reaction roles (group create form refused)",
+      html: renderReactionRolesPage({
+        ...COMMON,
+        enabled: true,
+        configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
+        active: [],
+        archived: [],
+        settingRows: [],
+        textChannels: CHANNELS,
+        refusedForm: {
+          formId: "reaction-role-group-create",
+          errors: {
+            "roleName-1":
+              "A role group needs at least two options, each with a role name and an emoji.",
+          },
+          values: {
+            groupName: "Colour",
+            mode: "unique",
+            "roleName-0": "Red",
+            "emoji-0": "🔴",
+          },
+        },
+      }),
+    },
+    {
+      // A refused per-row edit (#1520): that notice's details element is open.
+      name: "Notices (edit form refused)",
+      html: renderNoticesPage({
+        ...COMMON,
+        enabled: true,
+        channel: { name: "rules", id: "c1", type: ChannelType.GuildText },
+        total: 1,
+        textChannels: [
+          { id: "c1", name: "rules", type: ChannelType.GuildText },
+        ],
+        settingRows: [],
+        groups: [
+          {
+            category: "rules",
+            rows: [
+              {
+                id: "n1",
+                order: 1,
+                title: "Be nice",
+                content: "Be nice to each other.",
+                preview: "Be nice to each other.",
+                category: "rules",
+                messageId: "msg1",
+                updatedAt: "2026-01-01",
+              },
+            ],
+          },
+        ],
+        categoryOptions: [{ value: "rules", label: "Rules" }],
+        refusedForm: {
+          formId: "notice-edit-n1",
+          errors: { title: "Enter a title." },
+          values: {
+            title: "",
+            content: "Be nice to each other.",
+            category: "rules",
+            order: "1",
+          },
+        },
+      }),
+    },
+    {
+      name: "Quotes (edit form refused)",
+      html: renderQuotesPage({
+        ...COMMON,
+        enabled: true,
+        channel: { name: "quotes", id: "c1", type: ChannelType.GuildText },
+        headerMessageId: "",
+        settingRows: [],
+        maxLength: 1000,
+        rows: [
+          {
+            id: "0123456789abcdef01234567",
+            content: "Stay hydrated.",
+            authorId: "111111111111111111",
+            authorLabel: "Alice",
+            addedByLabel: "Bob",
+            addedAt: "2026-09-01T00:00:00.000Z",
+            likes: 3,
+            dislikes: 0,
+            messageId: "333333333333333333",
+          },
+        ],
+        total: 1,
+        page: 1,
+        pageSize: 25,
+        search: "",
+        refusedForm: {
+          formId: "quote-edit-0123456789abcdef01234567",
+          errors: {
+            author_id:
+              "Enter the Discord user ID of the author: 17 to 20 digits.",
+          },
+          values: { content: "Stay hydrated.", author_id: "alice" },
+        },
+      }),
+    },
+    {
+      // The Import form sits in a closed disclosure; a refusal opens it (#1520).
+      name: "Bot status (import form refused)",
+      html: renderBotStatusPage({
+        ...COMMON,
+        maxLength: 100,
+        pools: [
+          {
+            pool: "playing",
+            label: "Playing",
+            description: "Shown as “Playing …”.",
+            requiresCount: false,
+            items: [{ id: "i1", order: 1, text: "with the config" }],
+            usingDefaults: false,
+            exportText: "with the config",
+          },
+        ],
+        refusedForm: {
+          formId: "bot-status-import-playing",
+          errors: {
+            items: "Paste at least one entry: one per line, or a JSON array.",
+          },
+          values: { items: "", mode: "replace" },
+        },
+      }),
+    },
+    {
       name: "Voice channels",
       html: renderVoiceChannelsPage({
         ...COMMON,
