@@ -2756,6 +2756,21 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The disabled-feature callout with its Enable button and All settings link (#1544).
+      name: "Polls (feature off)",
+      html: renderPollsPage({
+        ...COMMON,
+        enabled: false,
+        defaultDurationHours: 24,
+        cooldownDays: 7,
+        settingRows: [],
+        schedules: [],
+        items: [],
+        textChannels: [],
+        roles: [],
+      }),
+    },
+    {
       name: "Polls",
       html: renderPollsPage({
         ...COMMON,
@@ -5312,6 +5327,21 @@ export function userPages(): A11yPage[] {
             },
           ],
           maxItems: 5000,
+        }),
+      ),
+    },
+    {
+      // The reset card as a danger panel (#1544).
+      name: "/me privacy (reset card)",
+      html: shell(
+        "Privacy",
+        "/me/privacy",
+        renderUserPrivacyBody({
+          featureEnabled: true,
+          included: [],
+          excluded: [],
+          maxItems: 5000,
+          reset: { enabled: true, cooldownHours: 24, csrfToken: "tok" },
         }),
       ),
     },

@@ -25,7 +25,7 @@ export function renderSaveBar(submitLabel: string, name = ""): string {
       <span class="kb-status kb-status--warn" aria-hidden="true"></span>
       <span class="kb-savebar__text" role="status" data-savebar-text>Save your changes</span>
       <button type="button" class="kb-btn kb-btn--ghost" data-savebar-discard hidden>Discard</button>
-      <button type="submit" class="btn btn-primary">${escapeHtml(submitLabel)}</button>
+      <button type="submit" class="kb-btn kb-btn--primary">${escapeHtml(submitLabel)}</button>
     </div>`;
 }
 

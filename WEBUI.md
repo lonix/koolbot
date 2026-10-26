@@ -982,9 +982,9 @@ still shown — greyed with an "off" badge — rather than hidden, so the page s
 discoverable (#610);
 hiding it created a chicken-and-egg where the natural place to enable a
 feature was the very page you couldn't reach. Opening a disabled feature's
-page renders a banner explaining the state with an inline **Enable** button
+page renders a callout titled "<Feature> feature is off." with an inline **Enable** button
 (flips the flag via `/admin/settings/set` and returns you to the page) plus
-an **Open Settings** link.
+an **All settings** link.
 
 Every feature page reads in the same order (#1301): a **status line** (an On or Off badge and chips for
 the facts worth knowing, with a warning chip that links to the setting or the permission when something

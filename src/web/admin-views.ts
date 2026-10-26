@@ -47,6 +47,7 @@ import type { SettingFormat } from "../utils/setting-formats.js";
 import {
   CHEVRON_ICON,
   SETTINGS_FOLD_SCRIPT,
+  renderFeatureDisabledCallout,
   renderStatusLine,
   settingHref,
 } from "./feature-page.js";
@@ -1758,26 +1759,29 @@ export function renderSettingsPage(props: SettingsProps): string {
   // step. See `POST /admin/settings/reset-defaults` in routes/write/settings.ts.
   const confirmTarget = props.guildName ?? props.guildId;
   const dangerSection = `
-<div id="danger-zone" class="card" style="border-color:var(--danger)">
-  <h2>Danger zone</h2>
-  <p class="muted" style="margin:0 0 .75rem">Reset every setting to its built-in default. All keys in the schema are rewritten to their default value, and any orphaned keys left behind by removed features are deleted. Bootstrap / environment variables (Discord token, Mongo URI, WebUI session config) are <strong>not</strong> touched. You may need to <strong>Reload commands</strong> afterwards.</p>
-  <form method="POST" action="/admin/settings/reset-defaults" class="stack" data-confirm="Reset ALL settings to their defaults? This cannot be undone."${confirmListAttr(
+<section id="danger-zone" class="kb-panel kb-panel--danger" aria-labelledby="danger-zone-title">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="danger-zone-title">Danger zone</h2></header>
+  <div class="kb-panel__body kb-stack">
+  <p class="kb-muted">Reset every setting to its built-in default. All keys in the schema are rewritten to their default value, and any orphaned keys left behind by removed features are deleted. Environment settings (Discord token, Mongo URI, Web UI session) are <strong>not</strong> touched. You may need to <strong>Reload commands</strong> afterwards.</p>
+  <form method="POST" action="/admin/settings/reset-defaults" class="kb-stack" data-confirm="Reset ALL settings to their defaults? This cannot be undone."${confirmListAttr(
     [
       "Every setting is rewritten to its built-in default, including channels, roles and feature switches.",
       "Stored keys that are no longer in the schema are deleted.",
-      "Bootstrap and environment values (Discord token, Mongo URI, Web UI session) are not touched.",
+      "Environment values (Discord token, Mongo URI, Web UI session) are not touched.",
       "Scheduled jobs restart from the defaults; reload commands yourself afterwards.",
     ],
   )}>
     <input type="hidden" name="_csrf" value="${csrf}">
-    <label>Type <code>${escapeHtml(confirmTarget)}</code> to confirm:
-      <input type="text" name="confirm" autocomplete="off" placeholder="${escapeHtml(confirmTarget)}" required>
-    </label>
-    <div>
-      <button type="submit" class="btn btn-danger">Reset all settings to defaults</button>
+    <div class="kb-field">
+      <label class="kb-label" for="reset-confirm">Type <code>${escapeHtml(confirmTarget)}</code> to confirm</label>
+      <input class="kb-input" type="text" id="reset-confirm" name="confirm" autocomplete="off" placeholder="${escapeHtml(confirmTarget)}" required>
+    </div>
+    <div class="kb-row">
+      <button type="submit" class="kb-btn kb-btn--danger">Reset all settings to defaults</button>
     </div>
   </form>
-</div>`;
+  </div>
+</section>`;
 
   const body = `
 <h1>All settings</h1>
@@ -2682,41 +2686,6 @@ export function renderPageFlash(flash?: FlashMessage | null): string {
   return flash?.openSettings ? "" : renderFlash(flash);
 }
 
-/**
- * Banner shown at the top of a feature page when that feature is disabled
- * (#610). Feature pages are reachable even while off — their nav link is now
- * greyed rather than hidden — so a disabled page must explain the state and
- * offer a way to enable it instead of looking empty or broken. Renders a
- * warning notice with an inline "Enable" action (flips the `<feature>.enabled`
- * flag via the existing /admin/settings/set route and returns to this same
- * page) plus a link to the full Settings surface.
- *
- * Returns "" when `enabled` is true so callers can drop it in unconditionally.
- */
-function renderFeatureDisabledNotice(opts: {
-  enabled: boolean;
-  label: string;
-  featureKey: string;
-  returnTo: string;
-  csrfToken: string;
-}): string {
-  if (opts.enabled) return "";
-  const label = escapeHtml(opts.label);
-  return `<div class="notice warn feature-disabled">
-  <div class="fd-text"><strong>${label} are disabled.</strong> You can still configure things below, but they won't take effect until you enable the feature. Enable it here, or from Settings.</div>
-  <div class="fd-actions">
-    <form method="POST" action="/admin/settings/set">
-      <input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">
-      <input type="hidden" name="key" value="${escapeHtml(opts.featureKey)}">
-      <input type="hidden" name="value" value="true">
-      <input type="hidden" name="redirect" value="${escapeHtml(opts.returnTo)}">
-      <button type="submit" class="btn btn-primary">Enable ${label}</button>
-    </form>
-    <a class="btn btn-secondary" href="/admin/settings">Open Settings</a>
-  </div>
-</div>`;
-}
-
 function channelOptionsHtml(
   options: ChannelOption[],
   selectedId?: string,
@@ -2826,7 +2795,7 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
 <h1>Announcements</h1>
 <p class="subtitle">Scheduled announcements posted on a cron.</p>
 ${renderPageFlash(props.flash)}
-${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Announcements", featureKey: "announcements.enabled", returnTo: "/admin/announcements", csrfToken: props.csrfToken })}
+${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Announcements", featureKey: "announcements.enabled", returnTo: "/admin/announcements", csrfToken: props.csrfToken })}
 ${renderStatusLine({
   enabled: props.enabled,
   chips: [{ text: countOf(props.rows.length, "schedule") }],
@@ -3659,7 +3628,7 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
 <h1>Events</h1>
 <p class="subtitle">Schedule events that spin up a temporary voice channel shortly before they start, are announced with a Discord event link members can mark Interested on, remind attendees, and clean themselves up afterward.</p>
 ${renderPageFlash(props.flash)}
-${renderFeatureDisabledNotice({
+${renderFeatureDisabledCallout({
   enabled: props.enabled,
   label: "Events",
   featureKey: "events.enabled",
@@ -3894,7 +3863,7 @@ export function renderPollsPage(props: PollsProps): string {
 <h1>Polls</h1>
 <p class="subtitle">Poll schedules and the question library.</p>
 ${renderPageFlash(props.flash)}
-${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Polls", featureKey: "polls.enabled", returnTo: "/admin/polls", csrfToken: props.csrfToken })}
+${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Polls", featureKey: "polls.enabled", returnTo: "/admin/polls", csrfToken: props.csrfToken })}
 ${renderStatusLine({
   enabled: props.enabled,
   chips: [
@@ -4156,7 +4125,7 @@ export function renderReactionRolesPage(props: ReactionRolesProps): string {
 <h1>Reaction Roles</h1>
 <p class="subtitle">Per-message reaction-role mappings.</p>
 ${renderPageFlash(props.flash)}
-${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles", featureKey: "reactionroles.enabled", returnTo: "/admin/reaction-roles", csrfToken: props.csrfToken })}
+${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Reaction roles", featureKey: "reactionroles.enabled", returnTo: "/admin/reaction-roles", csrfToken: props.csrfToken })}
 ${renderStatusLine({
   enabled: props.enabled,
   chips: [
@@ -4399,7 +4368,7 @@ export function renderNoticesPage(props: NoticesProps): string {
 <h1>Notices</h1>
 <p class="subtitle">Notice posts grouped by category. Edit the inline <em>Order</em> field to reorder within a category (lower numbers post first).</p>
 ${renderPageFlash(props.flash)}
-${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Notices", featureKey: "notices.enabled", returnTo: "/admin/notices", csrfToken: props.csrfToken })}
+${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Notices", featureKey: "notices.enabled", returnTo: "/admin/notices", csrfToken: props.csrfToken })}
 
 ${renderStatusLine({
   enabled: props.enabled,
@@ -4596,7 +4565,7 @@ export function renderQuotesPage(props: QuotesProps): string {
 <h1>Quotes</h1>
 <p class="subtitle">Every stored quote, newest first. Edits and deletes update the quote channel as well.</p>
 ${renderPageFlash(props.flash)}
-${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Quotes", featureKey: "quotes.enabled", returnTo: "/admin/quotes", csrfToken: props.csrfToken })}
+${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Quotes", featureKey: "quotes.enabled", returnTo: "/admin/quotes", csrfToken: props.csrfToken })}
 ${renderStatusLine({
   enabled: props.enabled,
   chips: [
@@ -4864,7 +4833,7 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
 <h1>Birthdays</h1>
 <p class="subtitle">Members set their own birthday on <code>/me/birthday</code>. Here you can see who is coming up, correct or remove an entry, and check the message before it goes live.</p>
 ${renderPageFlash(props.flash)}
-${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Birthdays", featureKey: "birthdays.enabled", returnTo: "/admin/birthdays", csrfToken: props.csrfToken })}
+${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Birthdays", featureKey: "birthdays.enabled", returnTo: "/admin/birthdays", csrfToken: props.csrfToken })}
 ${renderStatusLine({
   enabled: props.enabled,
   chips: [
@@ -5515,7 +5484,7 @@ export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
 <h1>Voice Channels</h1>
 <p class="subtitle">Voice-channel category contents and live state.</p>
 ${renderPageFlash(props.flash)}
-${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Voice Channels", featureKey: "voicechannels.enabled", returnTo: "/admin/voice-channels", csrfToken: props.csrfToken })}
+${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Voice channels", featureKey: "voicechannels.enabled", returnTo: "/admin/voice-channels", csrfToken: props.csrfToken })}
 ${renderStatusLine({
   enabled: props.enabled,
   chips: [
@@ -5723,7 +5692,7 @@ export function renderDigestPage(props: DigestProps): string {
 <h1>Weekly Digest</h1>
 <p class="subtitle">Preview the weekly voice digest before it sends — a dry run of the same query and embeds the cron job DMs to qualifying members, with no DMs sent.</p>
 ${renderPageFlash(props.flash)}
-${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Weekly Digest", featureKey: "digest.enabled", returnTo: "/admin/digest", csrfToken: props.csrfToken })}
+${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Weekly digest", featureKey: "digest.enabled", returnTo: "/admin/digest", csrfToken: props.csrfToken })}
 ${renderStatusLine({ enabled: props.enabled, chips: [] })}
 
 <div class="card">
@@ -5944,7 +5913,7 @@ export function renderLeaderboardRolesPage(
 <h1>Leaderboard Roles</h1>
 <p class="subtitle">Reward the top voice-leaderboard members with Discord roles. Each tier gives its role to everyone ranked within its Top N.</p>
 ${renderPageFlash(props.flash)}
-${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Leaderboard roles", featureKey: "leaderboard_roles.enabled", returnTo: "/admin/leaderboard-roles", csrfToken: props.csrfToken })}
+${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Leaderboard roles", featureKey: "leaderboard_roles.enabled", returnTo: "/admin/leaderboard-roles", csrfToken: props.csrfToken })}
 ${trackingNotice}
 ${renderStatusLine({
   enabled: props.enabled,
@@ -6511,7 +6480,7 @@ ${props.casesEnabled ? `<td>${renderRowCaseCell(r, props)}</td>` : ""}
 <h1>Moderation log</h1>
 <p class="subtitle">Actions recorded via <code>/warn</code>, <code>/timeout</code> and <code>/ban</code> plus kicks, bans and timeouts made in Discord itself, copied in from the server's audit log. Query per-member history in Discord with <code>/modlog</code>.</p>
 ${renderPageFlash(props.flash)}
-${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Moderation", featureKey: "moderation.enabled", returnTo: "/admin/moderation", csrfToken: props.csrfToken })}
+${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Moderation", featureKey: "moderation.enabled", returnTo: "/admin/moderation", csrfToken: props.csrfToken })}
 
 ${renderStatusLine({
   enabled: props.enabled,
@@ -6701,7 +6670,7 @@ export function renderTicketsPage(props: TicketsProps): string {
 <h1>Support tickets</h1>
 <p class="subtitle">Private help channels members open with <code>/ticket open</code>. Closing archives the channel (locked, never deleted); reopen restores it.</p>
 ${renderPageFlash(props.flash)}
-${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Tickets", featureKey: "tickets.enabled", returnTo: "/admin/tickets", csrfToken: props.csrfToken })}
+${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Tickets", featureKey: "tickets.enabled", returnTo: "/admin/tickets", csrfToken: props.csrfToken })}
 
 ${renderStatusLine({
   enabled: props.enabled,

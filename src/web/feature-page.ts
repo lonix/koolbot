@@ -8,7 +8,7 @@
  */
 
 import { escapeHtml } from "./html.js";
-import { icon } from "./icons.js";
+import { icon, toneIcon } from "./icons.js";
 
 /** The disclosure chevron; `.kb-disclosure[open]` turns it down. */
 export const CHEVRON_ICON = icon("chevron-right", { className: "kb-chev" });
@@ -96,3 +96,41 @@ export const SETTINGS_FOLD_SCRIPT =
   "var d=el&&el.closest?el.closest('details[data-settings-fold]'):null;" +
   "if(d&&!d.open){d.open=true;try{el.scrollIntoView()}catch(e){}}}" +
   "reveal();window.addEventListener('hashchange',reveal)})();";
+
+/**
+ * The callout at the top of a feature page whose feature is off (#610, #1544).
+ * Feature pages stay reachable while off (the nav link is greyed, not hidden),
+ * so the page says so and offers the fix. The feature being off is a choice,
+ * not a problem, so it is a plain callout rather than a warning. Enable posts
+ * `<featureKey>=true` to `/admin/settings/set` and returns to this page.
+ *
+ * `label` is the nav label in sentence case ("Reaction roles"). The title reads
+ * "<Label> feature is off." so one wording fits singular and plural labels.
+ * Returns "" when `enabled` is true so callers can drop it in unconditionally.
+ */
+export function renderFeatureDisabledCallout(opts: {
+  enabled: boolean;
+  label: string;
+  featureKey: string;
+  returnTo: string;
+  csrfToken: string;
+}): string {
+  if (opts.enabled) return "";
+  const label = escapeHtml(opts.label);
+  const verbLabel = escapeHtml(
+    opts.label.charAt(0).toLowerCase() + opts.label.slice(1),
+  );
+  return `<div class="kb-callout" role="status">
+  ${toneIcon("")}<div class="kb-callout__body"><p class="kb-callout__title">${label} feature is off.</p><p class="kb-callout__text">You can still change things below; they take effect once it is on.</p></div>
+  <div class="kb-callout__actions">
+    <form method="POST" action="/admin/settings/set">
+      <input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">
+      <input type="hidden" name="key" value="${escapeHtml(opts.featureKey)}">
+      <input type="hidden" name="value" value="true">
+      <input type="hidden" name="redirect" value="${escapeHtml(opts.returnTo)}">
+      <button type="submit" class="kb-btn kb-btn--primary kb-btn--sm">Enable ${verbLabel}</button>
+    </form>
+    <a href="/admin/settings">All settings</a>
+  </div>
+</div>`;
+}

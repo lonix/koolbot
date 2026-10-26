@@ -24,6 +24,7 @@ import {
   type SettingRow,
 } from "../../src/web/admin-views.js";
 import {
+  renderFeatureDisabledCallout,
   renderStatusLine,
   SETTINGS_FOLD_SCRIPT,
   settingHref,
@@ -949,5 +950,93 @@ describe("warning chips when the settings cannot be read", () => {
     for (const i of at) {
       expect(src.slice(i - 90, i)).toContain("props.settingsUnavailable");
     }
+  });
+});
+
+describe("renderFeatureDisabledCallout (#1544)", () => {
+  const LABELS: Array<[string, string]> = [
+    ["Announcements", "announcements.enabled"],
+    ["Events", "events.enabled"],
+    ["Polls", "polls.enabled"],
+    ["Reaction roles", "reactionroles.enabled"],
+    ["Notices", "notices.enabled"],
+    ["Quotes", "quotes.enabled"],
+    ["Birthdays", "birthdays.enabled"],
+    ["Voice channels", "voicechannels.enabled"],
+    ["Weekly digest", "digest.enabled"],
+    ["Leaderboard roles", "leaderboard_roles.enabled"],
+    ["Moderation", "moderation.enabled"],
+    ["Tickets", "tickets.enabled"],
+  ];
+
+  it.each(LABELS)("%s reads right and posts %s=true", (label, key) => {
+    const html = renderFeatureDisabledCallout({
+      enabled: false,
+      label,
+      featureKey: key,
+      returnTo: "/admin/x",
+      csrfToken: "tok",
+    });
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const callout = doc.querySelector("div.kb-callout");
+    expect(callout?.className).toBe("kb-callout");
+    expect(callout?.querySelector("svg.kb-icon")).not.toBeNull();
+    expect(callout?.querySelector(".kb-callout__title")?.textContent).toBe(
+      `${label} feature is off.`,
+    );
+    expect(html).not.toContain("are disabled");
+    expect(html).not.toContain("class=\"notice");
+    expect(callout?.querySelector(".kb-callout__text")?.textContent).toBe(
+      "You can still change things below; they take effect once it is on.",
+    );
+    const form = callout?.querySelector("form");
+    expect(form?.getAttribute("action")).toBe("/admin/settings/set");
+    expect(form?.getAttribute("method")).toBe("POST");
+    const field = (n: string): string | null | undefined =>
+      form?.querySelector(`input[name="${n}"]`)?.getAttribute("value");
+    expect(field("_csrf")).toBe("tok");
+    expect(field("key")).toBe(key);
+    expect(field("value")).toBe("true");
+    expect(field("redirect")).toBe("/admin/x");
+    const button = form?.querySelector("button");
+    expect(button?.className).toBe("kb-btn kb-btn--primary kb-btn--sm");
+    expect(button?.textContent).toBe(
+      `Enable ${label.charAt(0).toLowerCase()}${label.slice(1)}`,
+    );
+    const link = callout?.querySelector(".kb-callout__actions a");
+    expect(link?.getAttribute("href")).toBe("/admin/settings");
+    expect(link?.textContent).toBe("All settings");
+  });
+
+  it("renders nothing when the feature is on, and escapes its inputs", () => {
+    expect(
+      renderFeatureDisabledCallout({
+        enabled: true,
+        label: "Polls",
+        featureKey: "polls.enabled",
+        returnTo: "/admin/polls",
+        csrfToken: "tok",
+      }),
+    ).toBe("");
+    const html = renderFeatureDisabledCallout({
+      enabled: false,
+      label: "<b>x",
+      featureKey: "k",
+      returnTo: "/r",
+      csrfToken: "t",
+    });
+    expect(html).not.toContain("<b>x");
+  });
+
+  it("is on every page that had the old banner, in sentence case", () => {
+    const src = readFileSync("src/web/admin-views.ts", "utf8");
+    const labels = [
+      ...src.matchAll(
+        /renderFeatureDisabledCallout\(\{[^}]*?label: "([^"]+)"/g,
+      ),
+    ].map((m) => m[1]);
+    expect(labels).toHaveLength(LABELS.length);
+    for (const l of labels)
+      expect(l).toBe(l.charAt(0) + l.slice(1).toLowerCase());
   });
 });
