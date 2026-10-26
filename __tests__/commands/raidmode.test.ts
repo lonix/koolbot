@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { RAID_ACTION_PERMISSIONS } from "../../src/utils/raid-actions.js";
 import { settingsMetadata } from "../../src/services/config-schema.js";
+import { errorEmbedPayload } from "../test-utils.js";
 
 const mockGetStatus = jest.fn<() => Promise<unknown>>();
 type Requirement = { action: string; label: string; flag: bigint };
@@ -120,8 +121,9 @@ describe("/raidmode", () => {
     const i = interaction("on", { perms: false });
     await execute(i as never);
     expect(i.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.stringMatching(/Moderate Members/),
+      errorEmbedPayload({
+        title: "Moderators only",
+        description: expect.stringMatching(/Moderate Members/),
       }),
     );
     expect(mockSetLockdown).not.toHaveBeenCalled();

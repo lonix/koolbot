@@ -1,8 +1,4 @@
-import {
-  SlashCommandBuilder,
-  ChatInputCommandInteraction,
-  MessageFlags,
-} from "discord.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction } from "discord.js";
 import {
   VoiceChannelTracker,
   TimePeriod,
@@ -12,7 +8,10 @@ import { discordTimestamp } from "../utils/discord-time.js";
 import logger from "../utils/logger.js";
 import { escapeDisplayText, NO_MENTIONS } from "../utils/allowed-mentions.js";
 import { visibleChannelName } from "../utils/channel-visibility.js";
-import { safeReply } from "../utils/safe-reply.js";
+import {
+  replyWithError,
+  replyWithUnexpectedError,
+} from "../utils/error-reply.js";
 import {
   clampToLimit,
   DISCORD_MESSAGE_CONTENT_LIMIT,
@@ -98,10 +97,9 @@ async function executeTop(
     );
 
     if (!topEnabled) {
-      await interaction.reply({
-        content:
-          "The voice statistics leaderboard feature is currently disabled.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "The voice leaderboard is off",
+        next: "Ask an admin to turn it on in the Web UI.",
       });
       return;
     }
@@ -147,11 +145,9 @@ async function executeTop(
     });
   } catch (error) {
     logger.error("Error in voicestats top command:", error);
-    // Public on purpose: once deferred, visibility is fixed and safeReply
-    // edits the public placeholder, so an ephemeral flag would be a lie.
-    await safeReply(interaction, {
-      content: "There was an error while executing this command!",
-    });
+    // Public on purpose: once deferred, visibility is fixed and the helper
+    // edits the public placeholder, so it does not claim to be ephemeral.
+    await replyWithUnexpectedError(interaction);
   }
 }
 
@@ -166,9 +162,9 @@ async function executeUser(
     );
 
     if (!userEnabled) {
-      await interaction.reply({
-        content: "The voice statistics feature is currently disabled.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "Voice statistics are off",
+        next: "Ask an admin to turn them on in the Web UI.",
       });
       return;
     }
@@ -225,8 +221,6 @@ async function executeUser(
   } catch (error) {
     logger.error("Error in voicestats user command:", error);
     // Public on purpose (see executeTop).
-    await safeReply(interaction, {
-      content: "There was an error while executing this command!",
-    });
+    await replyWithUnexpectedError(interaction);
   }
 }

@@ -644,6 +644,7 @@ export function createSettingsRouter(client: Client): Router {
           rejected.map((r) => r.key),
           false,
           reopen,
+          Object.fromEntries(rejected.map((r) => [r.key, r.reason])),
         );
         return;
       }
@@ -777,6 +778,7 @@ export function createSettingsRouter(client: Client): Router {
         failed.map((f) => f.key),
         reload,
         reopen,
+        Object.fromEntries(failed.map((f) => [f.key, f.reason])),
       );
     }),
   );

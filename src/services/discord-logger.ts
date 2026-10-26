@@ -24,9 +24,13 @@ export interface ILogChannel {
   channelId?: string;
 }
 
+/** What an admin should do next when a log post reports a failure. */
+const CHECK_LOG_HINT = "Check the bot's log for the full error.";
+
 export interface ILogMessage {
   title: string;
-  description: string;
+  /** Left out when it would only repeat the title. */
+  description?: string;
   color?: ColorResolvable;
   fields?: Array<{
     name: string;
@@ -213,11 +217,14 @@ export class DiscordLogger {
 
       const embed = new EmbedBuilder()
         .setTitle(message.title)
-        .setDescription(message.description)
         .setColor(message.color ?? embedColor("neutral"))
         .setTimestamp(message.timestamp || new Date());
 
-      if (message.fields) {
+      if (message.description) {
+        embed.setDescription(message.description);
+      }
+
+      if (message.fields && message.fields.length > 0) {
         embed.addFields(message.fields);
       }
 
@@ -252,17 +259,9 @@ export class DiscordLogger {
    */
   public async logBotStartup(): Promise<void> {
     await this.logToChannel("startup", {
-      title: "🚀 Bot Started Successfully",
-      description: "KoolBot has successfully started and is now online.",
+      title: "KoolBot started",
       color: embedColor("ok"),
-      fields: [
-        { name: "Status", value: "✅ Online", inline: true },
-        {
-          name: "Environment",
-          value: env.nodeEnv,
-          inline: true,
-        },
-      ],
+      fields: [{ name: "Environment", value: env.nodeEnv, inline: true }],
       footer: "KoolBot · Logs · Startup",
     });
   }
@@ -272,15 +271,21 @@ export class DiscordLogger {
    */
   public async logBotShutdown(): Promise<void> {
     await this.logToChannel("startup", {
-      title: "🛑 Bot Shutting Down",
-      description: "KoolBot is shutting down gracefully.",
+      title: "KoolBot is shutting down",
       color: embedColor("warn"),
-      fields: [
-        { name: "Status", value: "⚠️ Shutting Down", inline: true },
-        { name: "Reason", value: "Graceful shutdown initiated", inline: true },
-      ],
       footer: "KoolBot · Logs · Shutdown",
     });
+  }
+
+  /**
+   * The configured server as `Name` + `` `id` ``, or just the id when the
+   * guild is not cached (docs/design: ids in mono, after the human name).
+   */
+  private describeServer(): string {
+    const id = env.guildId;
+    if (!id) return "Unknown";
+    const name = this.client.guilds?.cache?.get(id)?.name;
+    return name ? `${name} \`${id}\`` : `\`${id}\``;
   }
 
   /**
@@ -288,18 +293,9 @@ export class DiscordLogger {
    */
   public async logDiscordRegistrationSuccess(): Promise<void> {
     await this.logToChannel("startup", {
-      title: "✅ Discord Registration Successful",
-      description:
-        "Bot has successfully registered with Discord and is ready to receive commands.",
+      title: "Commands registered with Discord",
       color: embedColor("ok"),
-      fields: [
-        { name: "Status", value: "✅ Registered", inline: true },
-        {
-          name: "Guild",
-          value: env.guildId || "Unknown",
-          inline: true,
-        },
-      ],
+      fields: [{ name: "Server", value: this.describeServer(), inline: true }],
       footer: "KoolBot · Logs · Discord",
     });
   }
@@ -309,12 +305,10 @@ export class DiscordLogger {
    */
   public async logDiscordRegistrationFailure(error: string): Promise<void> {
     await this.logToChannel("startup", {
-      title: "❌ Discord Registration Failed",
-      description:
-        "Bot failed to register with Discord. Check logs for details.",
+      title: "Couldn't register commands with Discord",
+      description: CHECK_LOG_HINT,
       color: embedColor("danger"),
       fields: [
-        { name: "Status", value: "❌ Failed", inline: true },
         { name: "Error", value: error.substring(0, 1000), inline: false },
       ],
       footer: "KoolBot · Logs · Discord",
@@ -330,33 +324,27 @@ export class DiscordLogger {
     commandsUpdated?: number;
   }): Promise<void> {
     await this.logToChannel("config", {
-      title: result.success
-        ? "⚙️ Configuration Reloaded"
-        : "❌ Configuration Reload Failed",
-      description: result.message,
+      title: result.success ? "Settings reloaded" : "Couldn't reload settings",
+      description: result.success
+        ? result.message
+        : `${result.message} ${CHECK_LOG_HINT}`,
       color: result.success ? embedColor("ok") : embedColor("danger"),
-      fields: [
-        {
-          name: "Status",
-          value: result.success ? "✅ Success" : "❌ Failed",
-          inline: true,
-        },
-        ...(result.commandsUpdated !== undefined
+      fields:
+        result.commandsUpdated !== undefined
           ? [
               {
-                name: "Commands Updated",
+                name: "Commands updated",
                 value: result.commandsUpdated.toString(),
                 inline: true,
               },
             ]
-          : []),
-      ],
+          : [],
       footer: "KoolBot · Logs · Configuration",
     });
   }
 
   /**
-   * Log service initialization
+   * Log service initialisation
    */
   public async logServiceInit(
     serviceName: string,
@@ -365,22 +353,10 @@ export class DiscordLogger {
   ): Promise<void> {
     await this.logToChannel("startup", {
       title: success
-        ? `✅ ${serviceName} Initialized`
-        : `❌ ${serviceName} Failed`,
-      description:
-        details ||
-        (success
-          ? `${serviceName} service initialized successfully.`
-          : `${serviceName} service failed to initialize.`),
+        ? `${serviceName} started`
+        : `${serviceName} failed to start`,
+      description: details || (success ? undefined : CHECK_LOG_HINT),
       color: success ? embedColor("ok") : embedColor("danger"),
-      fields: [
-        { name: "Service", value: serviceName, inline: true },
-        {
-          name: "Status",
-          value: success ? "✅ Success" : "❌ Failed",
-          inline: true,
-        },
-      ],
       footer: "KoolBot · Logs · Services",
     });
   }
@@ -395,32 +371,26 @@ export class DiscordLogger {
     errors: string[];
   }): Promise<void> {
     await this.logToChannel("cleanup", {
-      title: "🧹 Voice Channel Cleanup Completed",
+      title: "Voice channel clean-up finished",
       description:
         stats.errors.length > 0
-          ? "Cleanup completed with some errors. Check details below."
-          : "Voice channel cleanup completed successfully.",
+          ? `Some steps failed, listed below. ${CHECK_LOG_HINT}`
+          : undefined,
       color: stats.errors.length > 0 ? embedColor("warn") : embedColor("ok"),
       fields: [
         {
-          name: "Sessions Removed",
+          name: "Sessions removed",
           value: stats.sessionsRemoved.toString(),
           inline: true,
         },
         {
-          name: "Data Aggregated",
+          name: "Data aggregated",
           value: stats.dataAggregated.toString(),
           inline: true,
         },
         {
-          name: "Execution Time",
-          value: `${stats.executionTime}ms`,
-          inline: true,
-        },
-        {
-          name: "Status",
-          value:
-            stats.errors.length > 0 ? "⚠️ Completed with errors" : "✅ Success",
+          name: "Run time",
+          value: `${stats.executionTime} ms`,
           inline: true,
         },
         ...(stats.errors.length > 0
@@ -446,22 +416,11 @@ export class DiscordLogger {
   ): Promise<void> {
     await this.logToChannel("startup", {
       title: connected
-        ? "🗄️ Database Connected"
-        : "❌ Database Connection Failed",
-      description:
-        details ||
-        (connected
-          ? "Successfully connected to MongoDB database."
-          : "Failed to connect to MongoDB database."),
+        ? "Connected to the database"
+        : "Couldn't connect to the database",
+      description: details || (connected ? undefined : CHECK_LOG_HINT),
       color: connected ? embedColor("ok") : embedColor("danger"),
-      fields: [
-        {
-          name: "Status",
-          value: connected ? "✅ Connected" : "❌ Disconnected",
-          inline: true,
-        },
-        { name: "Database", value: "MongoDB", inline: true },
-      ],
+      fields: [{ name: "Database", value: "MongoDB", inline: true }],
       footer: "KoolBot · Logs · Database",
     });
   }
@@ -471,14 +430,14 @@ export class DiscordLogger {
    */
   public async logError(error: Error, context: string): Promise<void> {
     await this.logToChannel("errors", {
-      title: "🚨 Error Occurred",
-      description: `An error occurred in ${context}. Check logs for full details.`,
+      title: `Error in ${context}`,
+      description: CHECK_LOG_HINT,
       color: embedColor("danger"),
       fields: [
         { name: "Context", value: context, inline: true },
-        { name: "Error Type", value: error.constructor.name, inline: true },
+        { name: "Error type", value: error.constructor.name, inline: true },
         {
-          name: "Error Message",
+          name: "Error message",
           value: error.message.substring(0, 1000),
           inline: false,
         },
@@ -495,13 +454,10 @@ export class DiscordLogger {
     details?: string,
   ): Promise<void> {
     await this.logToChannel("cron", {
-      title: `✅ Cron Job Completed: ${jobName}`,
-      description: details || `${jobName} cron job executed successfully.`,
+      title: `${jobName} ran`,
+      description: details,
       color: embedColor("ok"),
-      fields: [
-        { name: "Job Name", value: jobName, inline: true },
-        { name: "Status", value: "✅ Success", inline: true },
-      ],
+      fields: [{ name: "Job", value: jobName, inline: true }],
       footer: "KoolBot · Logs · Cron",
     });
   }
@@ -511,12 +467,11 @@ export class DiscordLogger {
    */
   public async logCronFailure(jobName: string, error: string): Promise<void> {
     await this.logToChannel("cron", {
-      title: `❌ Cron Job Failed: ${jobName}`,
-      description: `${jobName} cron job failed to execute.`,
+      title: `${jobName} failed`,
+      description: CHECK_LOG_HINT,
       color: embedColor("danger"),
       fields: [
-        { name: "Job Name", value: jobName, inline: true },
-        { name: "Status", value: "❌ Failed", inline: true },
+        { name: "Job", value: jobName, inline: true },
         { name: "Error", value: error.substring(0, 1000), inline: false },
       ],
       footer: "KoolBot · Logs · Cron",

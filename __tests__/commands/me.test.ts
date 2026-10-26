@@ -1,5 +1,6 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
+import { errorEmbedPayload } from "../test-utils.js";
 
 const mockCreateSession = jest.fn();
 const mockGetInstance = jest.fn(() => ({
@@ -100,9 +101,32 @@ describe("Me Command — execute", () => {
 
     await execute(interaction);
 
-    expect(editReply).toHaveBeenCalledWith({
-      content: expect.stringContaining("web UI is disabled"),
-    });
+    expect(editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "The Web UI is off",
+        description: expect.stringContaining("WEBUI_ENABLED=true"),
+      }),
+    );
+    expect(mockCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps the configuration detail out of a member's reply", async () => {
+    mockValidateWebUIEnvVars.mockReturnValue([
+      "WEBUI_SESSION_SECRET is missing",
+    ]);
+    const { interaction, editReply } = buildInteraction("0");
+
+    await execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "The Web UI isn't set up correctly",
+        description: "Ask an admin to check the Web UI settings.",
+      }),
+    );
+    expect(JSON.stringify(editReply.mock.calls)).not.toContain(
+      "WEBUI_SESSION_SECRET",
+    );
     expect(mockCreateSession).not.toHaveBeenCalled();
   });
 
