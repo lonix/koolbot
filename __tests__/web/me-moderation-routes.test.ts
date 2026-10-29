@@ -25,6 +25,7 @@ import {
   type AdminHarness,
 } from "./admin-harness.js";
 import type { WebSessionContext } from "../../src/web/session.js";
+import { runWithViewer, viewerFromSession } from "../../src/web/app-shell.js";
 
 process.env.WEBUI_SESSION_SECRET = "test-secret-for-me-moderation";
 
@@ -171,7 +172,9 @@ beforeAll(async () => {
     [
       (req, _res, next): void => {
         Object.assign(req, { webSession: current, csrfToken: TEST_CSRF_TOKEN });
-        next();
+        // What the session middleware does for the real app: the layout reads
+        // the viewer (and so the scope line) from here.
+        runWithViewer(viewerFromSession(current), next);
       },
       requireScopeMiddleware("moderator"),
       createMeModerationRouter(client as never),
@@ -360,27 +363,48 @@ describe("access", () => {
 });
 
 describe("header", () => {
-  it("names the role group that gives the moderator the page", async () => {
-    const page = await html("/");
-    expect(page.includes("You see it because you are in")).toBe(true);
-    expect(page.includes('<span class="kb-mention">@Mods</span>')).toBe(true);
-    expect(page.includes("@Hosts")).toBe(false);
-  });
+  /** The three pages a moderator reaches that carry a scope line. */
+  const PAGES = ["/", "/audit", "/cases/case-1"] as const;
 
-  it("falls back to the capability label when no group can be named", async () => {
-    roleGroups.list.mockRejectedValue(new Error("db down"));
+  it.each(PAGES)(
+    "%s says why once, under the title, from the session's own reasons",
+    async (path) => {
+      current = {
+        ...current,
+        displayName: "Mo",
+        scopeReasons: { host: [], staff: ["Mods"], elevated: false },
+      } as typeof current;
+      const page = await html(path);
+      expect(page.split("data-why=").length - 1).toBe(1);
+      expect(page.split("You can moderate because").length - 1).toBe(1);
+      expect(page).toContain(
+        'you are in <span class="kb-mention">@Mods</span>',
+      );
+      expect(page).not.toContain("You see it because");
+      expect(page.indexOf("</h1>")).toBeGreaterThan(-1);
+      expect(page.indexOf("data-why=")).toBeGreaterThan(page.indexOf("</h1>"));
+    },
+  );
+
+  it("names the capability when the session carries no group name", async () => {
     const page = await html("/");
-    expect(page.includes('<span class="kb-mention">@Moderator</span>')).toBe(
-      true,
-    );
+    expect(page).toContain("because you hold the Moderator role");
   });
 
   it("does not claim group membership for an admin session", async () => {
     as("admin", ["member"]);
     const page = await html("/");
-    expect(page.includes("you are a server administrator")).toBe(true);
-    expect(page.includes("@Moderator")).toBe(false);
+    expect(page).toContain("because you are an Administrator");
+    expect(page).not.toContain("@Moderator");
   });
+
+  it.each(PAGES)(
+    "%s has no Mod log / Command audit tab strip: the sidebar is the navigation",
+    async (path) => {
+      const page = await html(path);
+      expect(page).not.toContain('aria-label="Moderation"');
+    },
+  );
 });
 
 describe("tiles", () => {
@@ -590,7 +614,7 @@ describe("actions", () => {
     const page = await html("/?kind=bans");
     expect(
       page.includes(
-        '<a href="/me/moderation?kind=bans#actions" aria-current="page">Bans</a>',
+        '<a href="/me/moderation?kind=bans#actions" aria-current="true">Bans</a>',
       ),
     ).toBe(true);
     expect(

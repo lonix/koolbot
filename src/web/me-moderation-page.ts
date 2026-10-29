@@ -25,7 +25,7 @@ import {
   REVIEW_JOB_NOTE,
 } from "../utils/moderation-labels.js";
 import type { CaseView } from "./moderation-case-groups.js";
-import { channelMention, roleMention } from "./discord-labels.js";
+import { channelMention } from "./discord-labels.js";
 import { CASE_DECISIONS } from "./moderation-case-actions.js";
 import type { ModerationAction } from "../models/moderation-log.js";
 
@@ -64,39 +64,13 @@ export function parseModLogKind(raw: unknown): ModLogKind {
   return MOD_LOG_KINDS.find((k) => k === raw) ?? "all";
 }
 
-/** Why the viewer holds the Moderator scope. */
-export type ModeratorReason =
-  { kind: "admin" } | { kind: "groups"; names: string[] };
-
-function reasonLine(reason: ModeratorReason): string {
-  if (reason.kind === "admin") {
-    return "You see it because you are a server administrator.";
-  }
-  const names = reason.names.length > 0 ? reason.names : ["Moderator"];
-  return `You see it because you are in ${names.map(roleMention).join(", ")}.`;
-}
-
-type Tab = "log" | "audit";
-
-function header(
-  title: string,
-  reason: ModeratorReason,
-  active: Tab | null,
-  crumbs: string,
-): string {
-  const tab = (id: Tab, href: string, label: string): string =>
-    `<a href="${href}"${active === id ? ' aria-current="page"' : ""}>${label}</a>`;
+function header(title: string, crumbs: string): string {
   return `<header class="kb-pagehead">
   <div class="kb-pagehead__text">
     <p class="kb-pagehead__crumbs">${crumbs}</p>
     <h1 class="kb-pagehead__title">${escapeHtml(title)}</h1>
-    <p class="kb-pagehead__sub">${reasonLine(reason)}</p>
   </div>
-</header>
-<nav class="kb-tabs" aria-label="Moderation">
-  ${tab("log", MOD_BASE, "Mod log")}
-  ${tab("audit", `${MOD_BASE}/audit`, "Command audit")}
-</nav>`;
+</header>`;
 }
 
 const crumbsLog = "Moderation";
@@ -156,7 +130,6 @@ export interface OpenCaseItem {
 }
 
 export interface ModLogBodyProps {
-  reason: ModeratorReason;
   /** `moderation.enabled`. Off shows an empty state and queries nothing. */
   enabled: boolean;
   /** Cases are on as well as the master. */
@@ -298,7 +271,7 @@ function renderActions(p: ModLogBodyProps): string {
   const page = Math.min(Math.max(1, p.page), totalPages);
   const kinds = MOD_LOG_KINDS.map(
     (k) =>
-      `<a href="${MOD_BASE}${pageQuery(k, 1)}#actions"${k === p.kind ? ' aria-current="page"' : ""}>${escapeHtml(MOD_LOG_KIND_LABELS[k])}</a>`,
+      `<a href="${MOD_BASE}${pageQuery(k, 1)}#actions"${k === p.kind ? ' aria-current="true"' : ""}>${escapeHtml(MOD_LOG_KIND_LABELS[k])}</a>`,
   ).join("\n  ");
 
   let table: string;
@@ -362,7 +335,7 @@ function renderActions(p: ModLogBodyProps): string {
 }
 
 export function renderModLogBody(p: ModLogBodyProps): string {
-  const head = header("Mod log", p.reason, "log", crumbsLog);
+  const head = header("Mod log", crumbsLog);
   if (!p.enabled) {
     return `${head}
 <div class="kb-empty"><p class="kb-empty__title">Moderation is switched off on this server.</p><p class="kb-empty__text">There is nothing to read yet. A server admin can switch it on.</p></div>`;
@@ -378,7 +351,6 @@ ${renderActions(p)}
 // ---------- One case ----------
 
 export interface ModCaseBodyProps {
-  reason: ModeratorReason;
   csrfToken: string;
   case: CaseView;
   defaultReviewDays: number;
@@ -465,8 +437,6 @@ export function renderModCaseBody(p: ModCaseBodyProps): string {
   const c = p.case;
   const head = header(
     `Case #${c.caseNumber}`,
-    p.reason,
-    "log",
     `<a href="${MOD_BASE}">Moderation</a> / Mod log`,
   );
   const review = c.live
@@ -511,11 +481,8 @@ ${
 }
 
 /** The case id did not match a case on this server, or cases are switched off. */
-export function renderModCaseMissingBody(
-  reason: ModeratorReason,
-  casesEnabled: boolean,
-): string {
-  return `${header("Case not found", reason, "log", `<a href="${MOD_BASE}">Moderation</a> / Mod log`)}
+export function renderModCaseMissingBody(casesEnabled: boolean): string {
+  return `${header("Case not found", `<a href="${MOD_BASE}">Moderation</a> / Mod log`)}
 <div class="kb-empty"><p class="kb-empty__title">${
     casesEnabled
       ? "There is no such case."
@@ -526,7 +493,6 @@ export function renderModCaseMissingBody(
 // ---------- Command audit (read-only) ----------
 
 export interface ModAuditBodyProps {
-  reason: ModeratorReason;
   /** `core.command_audit.enabled`. */
   enabled: boolean;
   commandOptions: string[];
@@ -568,7 +534,7 @@ function resultBadge(result: "success" | "error" | "denied"): string {
 }
 
 export function renderModAuditBody(p: ModAuditBodyProps): string {
-  const head = header("Command audit", p.reason, "audit", crumbsLog);
+  const head = header("Command audit", crumbsLog);
   const totalPages = Math.max(1, Math.ceil(p.total / p.pageSize));
   const page = Math.min(Math.max(1, p.page), totalPages);
   const option = (value: string, label: string, selected: string): string =>

@@ -331,6 +331,35 @@ describe("the shared builder (#1472)", () => {
     expect(count.value).toBe("3");
   });
 
+  it("names the setting to an admin and the number and who to ask to a host (#1528)", () => {
+    const editor = (audience?: "admin" | "host"): Document => {
+      const out = renderPresetEditorForm({
+        csrfInput: "",
+        action: "/x",
+        editing: null,
+        values: {
+          groups_captains_lobby: "on",
+          group_0_name: "A",
+          group_1_name: "B",
+        },
+        maxCount: 2,
+        defaultCount: 2,
+        cancelHref: "/x",
+        ...(audience ? { audience } : {}),
+      });
+      return new JSDOM(out).window.document as Document;
+    };
+    const text = (d: Document): string => d.body.textContent ?? "";
+    const admin = editor("admin");
+    expect(text(admin)).toContain("events.groups.max_count");
+    expect(text(editor())).toContain("events.groups.max_count");
+    const host = editor("host");
+    expect(text(host)).not.toContain("events.groups.max_count");
+    expect(text(host)).toContain("the limit is 2");
+    expect(text(host)).toContain("ask an admin to raise the limit");
+    expect(text(host)).toContain("Up to 2 groups (ask an admin to raise it)");
+  });
+
   it("an editor that cannot be loaded has no builder", () => {
     const page = renderPresetEditorForm({
       csrfInput: "",

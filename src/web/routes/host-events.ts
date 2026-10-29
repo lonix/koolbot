@@ -443,7 +443,7 @@ function nameList(names: string[], limit = 10): string {
 }
 
 const EVENTS_OFF =
-  "Events are turned off, so nobody can be added to a group. Turn on events.enabled first.";
+  "Events are switched off on this server, so nobody can be added to a group. An admin can switch Events on.";
 
 /**
  * The Events master switch (CLAUDE.md: a feature gates on its `*.enabled`

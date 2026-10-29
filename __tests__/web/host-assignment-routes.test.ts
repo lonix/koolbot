@@ -513,7 +513,9 @@ describe("the Events master switch", () => {
     eventsEnabled = false;
     const assign = await post("assign", { userId: BEN, group: "g_logi" });
     expect(flashOf(assign.location).type).toBe("err");
-    expect(flashOf(assign.location).msg).toContain("Events are turned off");
+    expect(flashOf(assign.location).msg).toContain(
+      "Events are switched off on this server",
+    );
     const rand = await post("randomise", { mode: "everyone" });
     expect(flashOf(rand.location).type).toBe("err");
     expect(assignMember).not.toHaveBeenCalled();

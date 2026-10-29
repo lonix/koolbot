@@ -234,7 +234,8 @@ export const SHELL_NAV: readonly ShellNavItem[] = [
     scope: "host",
     label: "Event presets",
     href: "/me/events/presets",
-    icon: "calendar",
+    icon: "users",
+    featureKey: "events.enabled",
     available: true,
   },
   // Moderation. The case page (/me/moderation/cases/:id) has no entry: it is
@@ -417,9 +418,9 @@ export function renderScopeWhy(viewer: ShellViewer, active: string): string {
     because = `you hold the ${escapeHtml(info.capability)} role`;
   }
   return (
-    `<div class="kb-callout" role="note" data-why="${scope}">` +
+    `<p class="kb-pagehead__meta" role="note" data-why="${scope}">` +
     scopeBadge(info.badge, info.icon) +
-    `<span>You can ${info.can} because ${because}.</span></div>`
+    `<span>You can ${info.can} because ${because}.</span></p>`
   );
 }
 

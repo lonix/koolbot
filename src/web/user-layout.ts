@@ -315,6 +315,31 @@ const FLASH_FOCUS_SCRIPT =
   "(function(){var n=document.querySelector('.notice[data-flash]');" +
   "if(!n)return;try{n.focus()}catch(e){}})();";
 
+/**
+ * Puts the scope's "why you see this" line inside the page's own header, under
+ * the title (`.kb-pagehead__meta`, the header's own line style), so a page says
+ * why once and the line is part of the PageHeader (DESIGN.md Layout). The page
+ * bodies are built by our own views, which open with `<header
+ * class="kb-pagehead">` whose text block is its first `div`; the line goes at
+ * the end of that block. A body without a header (a confirm or result step
+ * with no page title) keeps the line first.
+ */
+export function placeScopeWhy(body: string, why: string): string {
+  if (!why) return body;
+  const head = /^\s*<header class="kb-pagehead">[\s\S]*?<\/header>/.exec(
+    body,
+  )?.[0];
+  if (!head) return why + body;
+  // The text block closes right before the header's actions (if any) or its end.
+  const close =
+    /<\/div>(?=\s*(?:<div class="kb-pagehead__actions">[\s\S]*?<\/div>\s*)?<\/header>$)/.exec(
+      head,
+    );
+  if (!close) return why + body;
+  const at = close.index;
+  return head.slice(0, at) + why + head.slice(at) + body.slice(head.length);
+}
+
 export function renderUserPage(opts: UserPageOptions): string {
   const viewer = resolveViewer(opts.viewer, opts.isAdmin);
   const sections = sectionsFor(viewer, opts.navRegistry, viewer.features);
@@ -335,9 +360,10 @@ export function renderUserPage(opts: UserPageOptions): string {
   // sidebar scopes) is one block, so the legacy margins between its parts stay the only spacing
   // inside the column's flex gap.
   const flash = renderFlash(opts.flash);
+  const body = placeScopeWhy(opts.body, renderScopeWhy(viewer, opts.active));
   const inner = tabs
-    ? `${renderScopeWhy(viewer, opts.active)}<div class="kb-stack">${tabs}${flash}<div>${opts.body}</div></div>`
-    : `<div>${renderScopeWhy(viewer, opts.active)}${flash}${opts.body}</div>`;
+    ? `<div class="kb-stack">${tabs}${flash}<div>${body}</div></div>`
+    : `<div>${flash}${body}</div>`;
   // A page with a save bar (#1514): `#main` must not be a scroll container, or the bar cannot stick.
   // The literal only comes from `renderSaveBar` (user text in the body is escaped).
   const hasSaveBar = opts.body.includes('class="kb-savebar"');
