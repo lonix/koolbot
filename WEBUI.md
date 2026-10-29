@@ -1029,6 +1029,21 @@ The **Notices** page's card (#972) edits `notices.enabled`, the notices channel
 are already posted: after saving, use **Resync notices to channel** to repost
 them in the new channel. The status line keeps the total notice count.
 
+**Reordering (#1540).** Notices post to the channel by category, then in the order the page lists them.
+Each row has **Move up** and **Move down** buttons, which work without JavaScript, and a drag handle that
+upgrades mouse use: dropping a row on another row of the same category submits the same form. The server
+renumbers the whole category on every move, so no two notices share a place, and it refuses a move made
+from a page that no longer matches the list, including a notice that was moved to another category in the
+meantime (the page then shows the current order). Each write only applies to a row that still has the place
+the move read, so two admins moving at once cannot overwrite each other; if one of the writes no longer
+matches, the page says the list was changed by someone else. A new notice goes last
+in its category, and so does a notice moved to another category. A move does not touch the channel: the new
+order shows there after **Resync notices to channel**.
+
+The **Presence** page lists each pool's messages with the same **Move up** and **Move down** buttons and
+drag handle. The bot picks a message at random, so the order only decides how a pool reads on the page and in
+its export. A new entry goes last in its pool.
+
 Below the status line, the **Notices** page shows the same bot-permission notice (#1489) for the notices
 channel: posting, keeping the channel clean, and pinning the header (only while the header pin is on),
 under the same rules as the **Quotes** page.
@@ -1942,12 +1957,15 @@ feature, the `events.category_id` channel category, and the
 category or announcement channel is missing, since event channels and
 announcements won't be created without them) plus the resolved event timezone. A notice under the status line names any permission the bot lacks for the
 event features (Create Events or Manage Events, Manage Channels, host access, moves, clan tags, the announcement channel) and links to Bot Permissions.
-A **Schedule event** button at the top opens the New event page (`/admin/events/new`, below). The
-events table lists each event's title, start time, lifecycle state
-(_scheduled_ / _active_ / _ended_ / _cancelled_), and, when at least one event has something in it, an **Expected to show up** column, channel
-and cover image; empty columns are left out and the raw event id is not shown. Ended and cancelled events are folded under
-**Past events (n)**; a finished occurrence that still holds a live series stays in the main list, since its row has the only
-**Cancel series** button. For each upcoming event
+The page opens with a page header (#1525): the title, one sentence, the status line under it, and the actions **Start now** and
+**Schedule event** (the primary button, last). Both open the New event page (`/admin/events/new`, below); **Start now** opens it with **Now**
+already chosen (`?when=now`), as on Your events. Current events are split into **Live now** and **Upcoming**, each a panel with a count.
+Live now holds the events that are running: `active` and the start has arrived (`isEventRunning`), so an event whose channel was prepared
+ahead of its start stays in Upcoming. When nothing is running, Live now says how Start now works. Each table lists the event's title, start time,
+state (_Live_ / _Planned_ / _Ended_ / _Cancelled_, the same words as Your events), and, when at least one event in that table has something in
+it, an **Expected to show up** column, channel and cover image; empty columns are left out per table and the raw event id is not shown. Ended
+and cancelled events are folded under **Past events (n)**; a finished occurrence that still holds a live series stays in Upcoming, since its
+row has the only **Cancel series** button. For each upcoming event
 (the next ten) that column lists who marked **Interested** on its native Discord
 event, with the count, read live from Discord when the page is opened and
 never stored; it shows a short message when the event is not on Discord's Events
@@ -1957,8 +1975,8 @@ old RSVP tally until they end. Events that are still open get two
 lifecycle controls — **Start now** (spin the event up immediately) and
 **Cancel** (a confirm-guarded stop) — and a running (`active`) event also gets
 **End now** (#1193, below), while finished events show no lifecycle
-actions. Every row has a **Host panel** link (see below). A
-**Schedule event** button opens the New event page, where an admin creates events. The page is gated by `events.enabled` (the #610
+actions. Every row has a **Host panel** link (see below). The
+page is gated by `events.enabled` (the #610
 disabled-feature pattern).
 
 **Admins schedule with the same New event form** (#1527). `/admin/events/new` is a page of its own, inside the admin layout (Events stays

@@ -2587,6 +2587,17 @@ export function adminPages(): A11yPage[] {
         },
         rows: [
           {
+            // Live now (#1525): active and the start has arrived.
+            id: "e0",
+            title: "Open mic",
+            when: "2026-01-31 19:00",
+            state: "active",
+            running: true,
+            channelId: "c1",
+            channelName: "Open mic",
+            channelType: ChannelType.GuildVoice,
+          },
+          {
             id: "e1",
             title: "Game night",
             when: "2026-02-01 20:00",
@@ -2684,6 +2695,7 @@ export function adminPages(): A11yPage[] {
             title: "Quiz night",
             when: "2026-02-01 20:00",
             state: "active",
+            running: true,
             channelId: "c1",
             groupCount: 2,
             hasGroupChannels: true,
@@ -2693,6 +2705,7 @@ export function adminPages(): A11yPage[] {
             title: "Game night",
             when: "2026-02-02 20:00",
             state: "active",
+            running: true,
             channelId: "c2",
           },
         ],
@@ -3518,7 +3531,7 @@ export function adminPages(): A11yPage[] {
         ...COMMON,
         enabled: true,
         channel: { name: "rules", id: "c1", type: ChannelType.GuildText },
-        total: 1,
+        total: 3,
         headerMessageId: "900000000000000002",
         headerEnabled: true,
         textChannels: [
@@ -3547,15 +3560,37 @@ export function adminPages(): A11yPage[] {
         groups: [
           {
             category: "rules",
+            // Three rows, so the first (Move up off), a middle and the last
+            // (Move down off) row each draw their buttons (#1540).
             rows: [
               {
                 id: "n1",
-                order: 1,
+                order: 0,
                 title: "Be nice",
                 content: "Be nice to each other.",
                 preview: "Be nice to each other.",
                 category: "rules",
                 messageId: "msg1",
+                updatedAt: "2026-01-01",
+              },
+              {
+                id: "n2",
+                order: 1,
+                title: "No spoilers",
+                content: "Use spoiler tags.",
+                preview: "Use spoiler tags.",
+                category: "rules",
+                messageId: "msg2",
+                updatedAt: "2026-01-01",
+              },
+              {
+                id: "n3",
+                order: 2,
+                title: "Stay on topic",
+                content: "Keep channels on topic.",
+                preview: "Keep channels on topic.",
+                category: "rules",
+                messageId: "msg3",
                 updatedAt: "2026-01-01",
               },
             ],
@@ -3793,7 +3828,11 @@ export function adminPages(): A11yPage[] {
             label: "Playing",
             description: "Shown as “Playing …”.",
             requiresCount: false,
-            items: [{ id: "i1", order: 1, text: "with the config" }],
+            items: [
+              { id: "i1", order: 0, text: "with the config" },
+              { id: "i2", order: 1, text: "with the logs" },
+              { id: "i3", order: 2, text: "with the dashboard" },
+            ],
             usingDefaults: false,
             exportText: "with the config",
           },

@@ -26,6 +26,13 @@ import {
   REVIEW_JOB_NOTE,
 } from "../utils/moderation-labels.js";
 import { icon } from "./icons.js";
+import {
+  REORDER_SCRIPT,
+  REORDER_STATUS_HTML,
+  renderReorderCell,
+  reorderListAttrs,
+  reorderRowAttrs,
+} from "./reorder-view.js";
 import { formView, type FormView, type RefusedForm } from "./form-errors.js";
 import { renderSaveBar } from "./savebar.js";
 import {
@@ -47,7 +54,7 @@ import {
   renderStatusLine,
   settingHref,
 } from "./feature-page.js";
-import { hostPanelPath } from "./host-panel-shared.js";
+import { hostPanelPath, renderEventStateBadge } from "./host-panel-shared.js";
 import { renderEndEventForm } from "./event-end-view.js";
 import {
   escapeHtml,
@@ -2613,6 +2620,10 @@ export interface EventRow {
   title: string;
   when: string;
   state: string;
+  /** `isEventRunning` (#1525): active and the start has arrived. An event whose
+   * channel was prepared ahead of its start is `active` but not running, so it
+   * stays in Upcoming. Absent counts as not running. */
+  running?: boolean;
   /** Legacy KoolBot RSVP tally, for events posted before native-only events
    * (#1175); null when there are none or the event is over. */
   legacyRsvps?: { going: number; maybe: number; cant: number } | null;
@@ -2923,18 +2934,6 @@ ${renderFeatureSettingsCard({
 }
 
 // ---------- Events ----------
-
-function eventStateTag(state: string): string {
-  const cls =
-    state === "active"
-      ? "tag-on"
-      : state === "cancelled"
-        ? "tag-off"
-        : state === "ended"
-          ? "tag-info"
-          : "tag-info";
-  return `<span class="tag ${cls}">${escapeHtml(state)}</span>`;
-}
 
 function renderExpected(e: EventRow): string {
   const x = e.expected;
@@ -3586,7 +3585,7 @@ export function renderEventsPage(props: EventsProps): string {
         : ""
     }</td>
 <td class="mono">${escapeHtml(e.when)}</td>
-<td>${eventStateTag(e.state)}</td>
+<td>${renderEventStateBadge(e.state, e.running === true)}</td>
 ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>${channelCell}</td>\n` : ""}${cols.cover ? `<td>${renderCoverCell(e, csrfInput, props.csrfToken)}</td>\n` : ""}<td class="actions">${actions}</td>
 </tr>`;
   };
@@ -3612,16 +3611,44 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
   const isPast = (e: EventRow): boolean =>
     (e.state === "cancelled" || e.state === "ended") && !e.awaitingSuccessor;
   const currentRows = props.rows.filter((e) => !isPast(e));
+  // Live now and Upcoming (#1525): running is `isEventRunning`, decided by the
+  // route, so an event whose channel was prepared early stays upcoming. A
+  // finished occurrence waiting for its successor is not running either.
+  const liveRows = currentRows.filter(
+    (e) => e.running === true && e.state === "active",
+  );
+  const upcomingRows = currentRows.filter((e) => !liveRows.includes(e));
   const pastRows = props.rows.filter(isPast);
-  const currentHtml =
-    currentRows.length > 0
-      ? renderEventsTable(currentRows)
-      : `<p class="muted">${props.rows.length > 0 ? "No upcoming events." : "No events scheduled yet."}</p>`;
+  const eventsPanel = (
+    id: string,
+    title: string,
+    count: number,
+    inner: string,
+  ): string => `<section class="kb-panel" id="${id}" aria-labelledby="${id}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${id}-h">${title}</h2><span class="kb-panel__meta">${count}</span></header>
+  ${inner}
+</section>`;
+  const liveHtml = eventsPanel(
+    "live-events",
+    "Live now",
+    liveRows.length,
+    liveRows.length > 0
+      ? `<div class="kb-panel__body--flush">${renderEventsTable(liveRows)}</div>`
+      : `<div class="kb-panel__body"><p class="kb-muted">Nothing is running. Choose <strong>Start now</strong> to open an event at once; its voice channel is ready straight away.</p></div>`,
+  );
+  const upcomingHtml = eventsPanel(
+    "upcoming-events",
+    "Upcoming",
+    upcomingRows.length,
+    upcomingRows.length > 0
+      ? `<div class="kb-panel__body--flush">${renderEventsTable(upcomingRows)}</div>`
+      : `<div class="kb-panel__body"><p class="kb-muted">${props.rows.length > 0 ? "No upcoming events." : "No events scheduled yet."}</p></div>`,
+  );
   const pastHtml =
     pastRows.length > 0
       ? `<details class="kb-disclosure" id="past-events">
     <summary>${CHEVRON_ICON}Past events <span class="kb-badge kb-badge--count">${pastRows.length}</span></summary>
-    <div class="kb-disclosure__body">${renderEventsTable(pastRows)}</div>
+    <div class="kb-disclosure__body kb-panel__body--flush">${renderEventsTable(pastRows)}</div>
   </details>`
       : "";
 
@@ -3662,8 +3689,17 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
   );
 
   const body = `
-<h1>Events</h1>
-<p class="subtitle">Schedule events that spin up a temporary voice channel shortly before they start, are announced with a Discord event link members can mark Interested on, remind attendees, and clean themselves up afterward.</p>
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Events</h1>
+    <p class="kb-pagehead__sub">Each event gets a temporary voice channel, a Discord event link and reminders, and cleans itself up afterward.</p>
+    ${statusLine}
+  </div>
+  <div class="kb-pagehead__actions">
+    <a class="kb-btn" href="/admin/events/new?when=now">${icon("zap")}Start now</a>
+    <a class="kb-btn kb-btn--primary" href="/admin/events/new">${icon("calendar-plus")}Schedule event</a>
+  </div>
+</header>
 ${renderPageFlash(props.flash)}
 ${renderFeatureDisabledCallout({
   enabled: props.enabled,
@@ -3672,15 +3708,13 @@ ${renderFeatureDisabledCallout({
   returnTo: "/admin/events",
   csrfToken: props.csrfToken,
 })}
-${statusLine}
 ${permissionNote}
-<div class="kb-pagehead__actions"><a class="kb-btn" href="/admin/events/new">Schedule event</a></div>
-
-<div class="card">
-  <h2>Events</h2>${currentHtml}
-  ${pastHtml}
-  <p class="muted">A cover image is added to a scheduled event from its row in the list above; it is shown on the Discord event.</p>
+<div class="kb-stack">
+${liveHtml}
+${upcomingHtml}
+${pastHtml}
 </div>
+<p class="muted">A cover image is added to a scheduled event from its row in the lists above; it is shown on the Discord event.</p>
 ${renderFeatureSettingsCard({
   intro:
     "Change event settings here without leaving the page. Saved through the shared settings route.",
@@ -4386,10 +4420,10 @@ export function renderNoticesPage(props: NoticesProps): string {
       : props.groups
           .map((g) => {
             const rows = g.rows
-              .map((n) => {
+              .map((n, index) => {
                 const f = formView(props.refusedForm, noticeEditForm(n.id));
-                return `<tr>
-<td><form method="POST" action="/admin/notices/${escapeHtml(n.id)}/order" class="inline-order">${csrfInput}<input type="number" name="order" aria-label="Display order for ${escapeHtml(n.title)}" value="${n.order}" min="-1000" max="10000" required><button type="submit" class="btn" aria-label="Save display order for ${escapeHtml(n.title)}">Save</button></form></td>
+                return `<tr${reorderRowAttrs(`notice-${n.id}`, n.title)}>
+<td>${renderReorderCell({ action: `/admin/notices/${n.id}/move`, scope: n.category, csrfInput, index, count: g.rows.length, label: n.title })}</td>
 <td>${escapeHtml(n.title)}<div class="muted mono">id: ${escapeHtml(n.id)}</div></td>
 <td class="muted">${escapeHtml(n.preview)}</td>
 <td class="mono muted">${escapeHtml(n.messageId)}</td>
@@ -4400,7 +4434,6 @@ export function renderNoticesPage(props: NoticesProps): string {
       <label>Title<input type="text" name="title" maxlength="256" value="${escapeHtml(f.value("title", n.title))}" required${f.attrs("title")}></label>${f.error("title")}
       <label>Content<textarea name="content" rows="6" maxlength="4000" required${f.attrs("content")}>${f.textareaContent("content", n.content)}</textarea></label>${f.error("content")}
       <label>Category<select name="category"${f.attrs("category")}>${noticeCategoryOptionsHtml(props.categoryOptions, f.selected("category", n.category))}</select></label>${f.error("category")}
-      <label>Order<input type="number" name="order" min="-1000" max="10000" value="${escapeHtml(f.value("order", String(n.order)))}" required${f.attrs("order")}></label>${f.error("order")}
       <button type="submit" class="btn btn-primary">Save changes</button>
     </form>
   </details>
@@ -4411,14 +4444,14 @@ export function renderNoticesPage(props: NoticesProps): string {
               .join("");
             return `<div class="card">
   <h2>${escapeHtml(g.category)} <span class="muted">(${g.rows.length})</span></h2>
-  <table><thead><tr><th scope="col">Order</th><th scope="col">Title</th><th scope="col">Content</th><th scope="col">Message ID</th><th scope="col">Updated</th><th scope="col">Actions</th></tr></thead><tbody>${rows}</tbody></table>
+  <table><thead><tr><th scope="col">Order</th><th scope="col">Title</th><th scope="col">Content</th><th scope="col">Message ID</th><th scope="col">Updated</th><th scope="col">Actions</th></tr></thead><tbody${reorderListAttrs(g.category)}>${rows}</tbody></table>
 </div>`;
           })
           .join("");
 
   const body = `
 <h1>Notices</h1>
-<p class="subtitle">Notice posts grouped by category. Edit the inline <em>Order</em> field to reorder within a category (lower numbers post first).</p>
+<p class="subtitle">Notice posts grouped by category. Within a category, notices post in the order listed here. Use <em>Move up</em> and <em>Move down</em> on a row to change its place, or drag a row by its handle.</p>
 ${renderPageFlash(props.flash)}
 ${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Notices", featureKey: "notices.enabled", returnTo: "/admin/notices", csrfToken: props.csrfToken })}
 
@@ -4446,11 +4479,13 @@ ${renderStatusLine({
     <label>Title<input type="text" name="title" maxlength="256" required${create.valueAttr("title")}${create.attrs("title")}></label>${create.error("title")}
     <label>Content<textarea name="content" rows="5" maxlength="4000" required${create.attrs("content")}>${create.refused ? create.textareaContent("content") : ""}</textarea></label>${create.error("content")}
     <label>Category<select name="category" required${create.attrs("category")}>${noticeCategoryOptionsHtml(props.categoryOptions, create.selected("category") || undefined)}</select></label>${create.error("category")}
-    <label>Order (lower posts first)<input type="number" name="order" min="-1000" max="10000" value="${escapeHtml(create.value("order", "0"))}" required${create.attrs("order")}></label>${create.error("order")}
     <button type="submit" class="btn btn-primary">Create notice</button>
   </form>
 </div>
+<p class="muted" id="notices-order-note">A new order shows in the Discord channel after <em>Resync notices to channel</em>. Moving a notice does not touch the channel on its own. A new notice goes last in its category.</p>
+${REORDER_STATUS_HTML}
 ${groupSections}
+${scriptTag(REORDER_SCRIPT)}
 ${renderRepostCard({
   id: "repost-header",
   heading: "Header post",
@@ -5165,10 +5200,10 @@ export function renderStringArrayEditor(
     opts.items.length === 0
       ? `<tr><td colspan="3"><span class="muted">No entries stored.</span></td></tr>`
       : opts.items
-          .map((item) => {
+          .map((item, index) => {
             const f = formView(opts.refusedForm, botStatusEditForm(item.id));
-            return `<tr>
-<td><form method="POST" action="${entryPath(item.id)}/order" class="inline-order">${csrfInput}<input type="number" name="order" aria-label="Display order for ${escapeHtml(item.text)}" value="${item.order}" min="-1000" max="10000" required><button type="submit" class="btn" aria-label="Save display order for ${escapeHtml(item.text)}">Save</button></form></td>
+            return `<tr${reorderRowAttrs(`entry-${item.id}`, item.text)}>
+<td>${renderReorderCell({ action: `${entryPath(item.id)}/move`, scope: opts.collectionId, csrfInput, index, count: opts.items.length, label: item.text })}</td>
 <td>
   <details class="helper edit-details"${f.open()}><summary>${escapeHtml(item.text)}</summary>
     <form method="POST" action="${entryPath(item.id)}/update" class="stack">${csrfInput}
@@ -5197,12 +5232,11 @@ export function renderStringArrayEditor(
   <h2>${escapeHtml(opts.title)} <span class="muted">(${opts.items.length})</span></h2>
   ${opts.description ? `<p class="subtitle">${escapeHtml(opts.description)}</p>` : ""}
   ${defaultsBanner}
-  <table><thead><tr><th scope="col">Order</th><th scope="col">Text</th><th scope="col">Actions</th></tr></thead><tbody>${rows}</tbody></table>
+  <table><thead><tr><th scope="col">Order</th><th scope="col">Text</th><th scope="col">Actions</th></tr></thead><tbody${reorderListAttrs(opts.title)}>${rows}</tbody></table>
   <form method="POST" action="${poolPath}/add" class="stack">
     ${csrfInput}
     <label>Add entry<input type="text" name="text" maxlength="${opts.maxLength}" required${add.valueAttr("text")}${add.attrs("text")}></label>${add.error("text")}
     ${hint}
-    <label>Order<input type="number" name="order" min="-1000" max="10000" value="${escapeHtml(add.value("order", "0"))}" required${add.attrs("order")}></label>${add.error("order")}
     <button type="submit" class="btn btn-primary">Add</button>
   </form>
   <details class="helper"${imp.open()}>
@@ -5265,8 +5299,11 @@ export function renderBotStatusPage(props: BotStatusProps): string {
   const body = `
 <h1>Presence</h1>
 <p class="subtitle">The "Watching …" presence messages the bot rotates through, picked by how many users are in voice. Edit, import, or export each pool below — changes take effect without a redeploy. Empty pools fall back to the built-in defaults.</p>
+<p class="muted">The bot picks one message at random, so the order only decides how a pool reads here and in its export. Use <em>Move up</em> and <em>Move down</em> on a row to change its place, or drag a row by its handle. A new entry goes last.</p>
 ${renderFlash(props.flash)}
+${REORDER_STATUS_HTML}
 ${editors}
+${scriptTag(REORDER_SCRIPT)}
 `;
   return renderAdminPage({
     title: "Presence",

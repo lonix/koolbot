@@ -104,3 +104,29 @@ describe("GET /events: End now text", () => {
     expect(adopted).not.toContain("Discord event is closed");
   });
 });
+
+describe("GET /events: Live now and Upcoming (#1525)", () => {
+  it("splits on isEventRunning: an active event whose start is ahead stays upcoming", async () => {
+    const past = new Date(Date.now() - 10 * 60_000);
+    const ahead = new Date(Date.now() + 10 * 60_000);
+    jest.spyOn(EventService, "getInstance").mockReturnValue({
+      listEvents: jest.fn(async () => [
+        stored("started", { startTime: past }),
+        stored("prepared-early", { startTime: ahead }),
+        stored("planned", { state: "scheduled", startTime: ahead }),
+      ]),
+    } as never);
+    const html = await (await harness.get("/events")).text();
+    const section = (id: string): string =>
+      html.match(
+        new RegExp(`<section[^>]*id="${id}"[\\s\\S]*?</section>`),
+      )?.[0] ?? "";
+    const live = section("live-events");
+    const upcoming = section("upcoming-events");
+    expect(live).toContain("Event started");
+    expect(live).not.toContain("Event prepared-early");
+    expect(upcoming).toContain("Event prepared-early");
+    expect(upcoming).toContain("Event planned");
+    expect(upcoming).not.toContain("Event started");
+  });
+});

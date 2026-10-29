@@ -226,6 +226,7 @@ import {
   type SettingRow,
   messageJumpUrl,
 } from "./admin-views.js";
+import { isEventRunning } from "./host-panel-shared.js";
 
 function deriveCategory(key: string): string {
   const dot = key.indexOf(".");
@@ -1624,6 +1625,7 @@ export function createReadOnlyRouter(
         : { channelName: null, channelType: null };
     };
 
+    const now = new Date();
     const rows = events.map((e) => {
       const counts = countRsvps(e.rsvps);
       const finished = e.state === "ended" || e.state === "cancelled";
@@ -1632,6 +1634,8 @@ export function createReadOnlyRouter(
         title: e.title,
         when: formatEventWhen(e),
         state: e.state,
+        // Live now or Upcoming (#1525): the one definition of running.
+        running: isEventRunning(e, now),
         // Legacy RSVPs (events made before native-only events) stay
         // visible until the event is over.
         legacyRsvps:
@@ -2071,7 +2075,7 @@ export function createReadOnlyRouter(
       // `null` (not `[]`) on failure: rendering schema defaults here would
       // let a save overwrite the real values, so the card is withheld.
       config.getAll().catch(() => null),
-      Notice.find({}).sort({ category: 1, order: 1 }).lean(),
+      Notice.find({}).sort({ category: 1, order: 1, _id: 1 }).lean(),
       fetchChannelData(client, common.guildId),
     ]);
     const channelNames = channelData.names;
@@ -2445,7 +2449,7 @@ export function createReadOnlyRouter(
   ): Promise<string> => {
     const common = await commonFromReq(req);
     const rows = await BotStatusMessage.find({ guildId: common.guildId })
-      .sort({ pool: 1, order: 1 })
+      .sort({ pool: 1, order: 1, _id: 1 })
       .lean();
 
     const pools = BOT_STATUS_POOLS.map((pool) => {
