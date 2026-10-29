@@ -179,3 +179,18 @@ describe("Events page header and sections (#1525)", () => {
     );
   });
 });
+
+describe("Events page tables keep their horizontal scroll (#1525 review)", () => {
+  it("wraps the Live now, Upcoming and Past events tables in a scroll container", () => {
+    const d = doc([
+      row("live", { state: "active", running: true }),
+      row("soon"),
+      row("old", { state: "ended" }),
+    ]);
+    for (const id of ["live-events", "upcoming-events", "past-events"]) {
+      const table = d.querySelector(`#${id} table`);
+      expect(table).not.toBeNull();
+      expect(table?.closest(".kb-panel__body--flush")).not.toBeNull();
+    }
+  });
+});

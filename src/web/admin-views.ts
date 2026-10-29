@@ -3641,7 +3641,7 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
     pastRows.length > 0
       ? `<details class="kb-disclosure" id="past-events">
     <summary>${CHEVRON_ICON}Past events <span class="kb-badge kb-badge--count">${pastRows.length}</span></summary>
-    <div class="kb-disclosure__body">${renderEventsTable(pastRows)}</div>
+    <div class="kb-disclosure__body kb-panel__body--flush">${renderEventsTable(pastRows)}</div>
   </details>`
       : "";
 
