@@ -30,12 +30,12 @@ export async function execute(
         `${url}\n` +
         `\n` +
         `Once you've signed in:\n` +
-        `• **Admin panel:** the link above drops you on \`/admin/\`.\n` +
-        `• **My preferences:** your own settings are at \`/me/\` ` +
+        `- **Admin panel:** the link above drops you on \`/admin/\`.\n` +
+        `- **My preferences:** your own settings are at \`/me/\` ` +
         `(also reachable via the header link on every admin page). ` +
         `Run \`/me\` for a link that opens them directly.\n` +
         `\n` +
-        `This link is single-use and expires in about ${ttlMinutes} minute(s). ` +
+        `This link is single-use and expires in about ${ttlMinutes} ${ttlMinutes === 1 ? "minute" : "minutes"}. ` +
         `If you did not run \`/config\`, ignore this message.`,
     },
     async () =>

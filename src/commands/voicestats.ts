@@ -17,6 +17,13 @@ import {
   DISCORD_MESSAGE_CONTENT_LIMIT,
 } from "../utils/discord-limits.js";
 
+/** How a period reads at the end of a heading. */
+const PERIOD_PHRASE: Record<TimePeriod, string> = {
+  week: "this week",
+  month: "this month",
+  alltime: "overall",
+};
+
 // Helper function to format time in hours and minutes
 function formatTime(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
@@ -133,7 +140,7 @@ async function executeTop(
 
     // Up to 50 rows of "<rank> <username>: <time>" can exceed the 2000-char
     // message limit; drop the tail rather than fail the whole reply (#840).
-    const header = `Top Voice Channel Users (${period}):`;
+    const header = `Top voice channel users ${PERIOD_PHRASE[period]}`;
     const response = clampToLimit(
       rows,
       DISCORD_MESSAGE_CONTENT_LIMIT - header.length - 1,
@@ -195,11 +202,11 @@ async function executeUser(
       .slice(0, 5);
 
     const response = [
-      `**Voice Channel Statistics for <@${user.id}> (${period})**`,
-      `Total Time: ${formatTime(stats.totalTime)}`,
-      `Last Seen: ${lastSeen}`,
+      `**Voice activity for <@${user.id}> ${PERIOD_PHRASE[period]}**`,
+      `Total time: ${formatTime(stats.totalTime)}`,
+      `Last seen: ${lastSeen}`,
       "",
-      "**Recent Sessions:**",
+      "**Recent sessions**",
       ...recentSessions.map((session) => {
         const duration = session.duration
           ? formatTime(session.duration)
@@ -210,7 +217,7 @@ async function executeUser(
           name: session.channelName,
           everyoneCanView: session.everyoneCanView,
         });
-        return `• ${escapeDisplayText(channelName)}: ${duration}`;
+        return `- ${escapeDisplayText(channelName)}: ${duration}`;
       }),
     ].join("\n");
 

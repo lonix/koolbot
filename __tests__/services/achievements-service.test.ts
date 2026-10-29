@@ -737,8 +737,11 @@ describe("AchievementsService", () => {
         content: string;
         allowedMentions: { users: string[] };
       };
-      expect(arg.content).toContain("<@user1>");
-      expect(arg.content).toContain("Voice Legend");
+      // One line: emoji, who earned what, what it means. No heading, no filler.
+      const definition = service.getAccoladeDefinition("voice_legend_8765");
+      expect(arg.content).toBe(
+        `${definition?.emoji} <@user1> earned **${definition?.name}**: ${definition?.description}`,
+      );
       expect(arg.allowedMentions).toEqual({ users: ["user1"] });
     });
 

@@ -314,7 +314,7 @@ describe("LFG buttons", () => {
     expect(btn.editReply).toHaveBeenCalledWith({ content: "refreshed" });
     expect(
       (btn.followUp.mock.calls[0][0] as { content: string }).content,
-    ).toContain("2 spot(s) left");
+    ).toContain("2 spots left");
   });
 
   it("points a joiner at the voice channel when there is one", async () => {

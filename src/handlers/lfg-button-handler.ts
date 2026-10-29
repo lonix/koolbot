@@ -156,6 +156,7 @@ async function handleAction(
       }
 
       await refresh(result.post);
+      const left = spotsLeft(result.post);
       const where = result.post.voiceChannelId
         ? ` Hop into <#${result.post.voiceChannelId}>.`
         : "";
@@ -163,7 +164,7 @@ async function handleAction(
         interaction,
         result.filled
           ? `You're in — that fills the party!${where}`
-          : `You're in — ${spotsLeft(result.post)} spot(s) left.${where}`,
+          : `You're in — ${left} ${left === 1 ? "spot" : "spots"} left.${where}`,
       );
       return;
     }

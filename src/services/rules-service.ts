@@ -177,7 +177,7 @@ export class RulesService {
     const button = new ButtonBuilder()
       .setCustomId(RULES_ACCEPT_CUSTOM_ID)
       .setLabel(truncateText(label, BUTTON_LABEL_LIMIT))
-      .setStyle(ButtonStyle.Success);
+      .setStyle(ButtonStyle.Primary);
     return {
       content: truncateText(
         text || "Press the button to accept the server rules.",

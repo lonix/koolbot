@@ -93,6 +93,23 @@ describe("Me Command — execute", () => {
     const dm = userSend.mock.calls[0][0] as string;
     expect(dm).toContain("/me/");
     expect(dm).not.toMatch(/admin panel/i);
+    expect(dm).toContain("expires in about 10 minutes. ");
+    expect(dm).not.toMatch(/\(s\)/);
+  });
+
+  it("says 'minute' for a link that lasts one minute (#1529)", async () => {
+    mockCreateSession.mockResolvedValue({
+      url: "https://example.test/admin/s/tok",
+      expiresAt: new Date(Date.now() + 60_000),
+      role: "user",
+    });
+    const { interaction, userSend } = buildInteraction("0");
+
+    await execute(interaction);
+
+    expect(userSend.mock.calls[0][0] as string).toContain(
+      "expires in about 1 minute. ",
+    );
   });
 
   it("rejects when the WebUI is disabled", async () => {

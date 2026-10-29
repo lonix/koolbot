@@ -2931,12 +2931,12 @@ export class EventService extends ScheduledService {
       .addFields(
         { name: "When", value: formatEventWhenDiscord(event), inline: false },
         {
-          name: "✅ Going",
+          name: "Going",
           value: String(counts.going),
           inline: true,
         },
-        { name: "🤔 Maybe", value: String(counts.maybe), inline: true },
-        { name: "🚫 Can't", value: String(counts.cant), inline: true },
+        { name: "Maybe", value: String(counts.maybe), inline: true },
+        { name: "Can't", value: String(counts.cant), inline: true },
       );
 
     if (event.description) {
@@ -2963,7 +2963,7 @@ export class EventService extends ScheduledService {
         .setCustomId(`event_rsvp_${event._id}_going`)
         .setLabel("Going")
         .setEmoji("✅")
-        .setStyle(ButtonStyle.Success)
+        .setStyle(ButtonStyle.Primary)
         .setDisabled(finished),
       new ButtonBuilder()
         .setCustomId(`event_rsvp_${event._id}_maybe`)
@@ -2975,7 +2975,7 @@ export class EventService extends ScheduledService {
         .setCustomId(`event_rsvp_${event._id}_cant`)
         .setLabel("Can't")
         .setEmoji("🚫")
-        .setStyle(ButtonStyle.Danger)
+        .setStyle(ButtonStyle.Secondary)
         .setDisabled(finished),
     );
 

@@ -165,7 +165,7 @@ View voice channel activity leaderboards.
 **Example response:**
 
 ```text
-Top Voice Channel Users (week):
+Top voice channel users this week
 🥇 @Alice: 24h 15m
 🥈 @Bob: 18h 32m
 🥉 @Charlie: 12h 45m
@@ -196,14 +196,14 @@ View personal voice channel statistics for yourself or another user.
 **Example response:**
 
 ```text
-Voice Channel Statistics for @Alice (week):
-Total Time: 24h 15m
-Last Seen: January 29, 2026 12:00 PM
+Voice activity for @Alice this week
+Total time: 24h 15m
+Last seen: January 29, 2026 12:00 PM
 
-Recent Sessions:
-• Gaming Room: 3h 45m
-• Study Hall: 2h 15m
-• Music Lounge: 1h 30m
+Recent sessions
+- Gaming Room: 3h 45m
+- Study Hall: 2h 15m
+- Music Lounge: 1h 30m
 ```
 
 ---
@@ -243,7 +243,7 @@ and format (the examples show one possible rendering).
 
 **Private channels:** if the user is in a voice channel you cannot view, the
 reply says "a voice channel" instead of naming it. `/voicestats` applies the
-same rule to its Recent Sessions list. A room that has since been deleted is
+same rule to its recent sessions list. A room that has since been deleted is
 named only if everyone could see it (it was public) while you were in it; the
 name saved at that time is shown. Private rooms, and sessions recorded before
 this was tracked, still show "a voice channel".
@@ -994,12 +994,12 @@ DM is blocked (fallback to ephemeral reply, visible only to you):
 https://bot.example.com/admin/s/9f4b...
 
 Once you've signed in:
-• Admin panel: the link above drops you on /admin/.
-• My preferences: your own settings are at /me/ (also reachable via the
+- Admin panel: the link above drops you on /admin/.
+- My preferences: your own settings are at /me/ (also reachable via the
   header link on every admin page). Run /me for a link that opens them
   directly.
 
-This link is single-use and expires in about 10 minute(s).
+This link is single-use and expires in about 10 minutes.
 If you did not run /config, ignore this message.
 ```
 

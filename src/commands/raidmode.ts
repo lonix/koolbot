@@ -93,7 +93,7 @@ export function buildStatusEmbed(status: RaidStatus): EmbedBuilder {
     });
   }
   return new EmbedBuilder()
-    .setColor(status.lockdown ? embedColor("danger") : embedColor("ok"))
+    .setColor(status.lockdown ? embedColor("warn") : embedColor("ok"))
     .setTitle("🛡️ Anti-raid status")
     .addFields(fields)
     .setFooter({ text: "KoolBot · Moderation · Raid mode" });

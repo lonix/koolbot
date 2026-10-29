@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 import {
+  ButtonStyle,
   Collection,
   PermissionFlagsBits as P,
   type ButtonInteraction,
@@ -533,6 +534,14 @@ describe("buildMessage and postOrUpdateMessage", () => {
     };
     expect(row.components[0].custom_id).toBe(RULES_ACCEPT_CUSTOM_ID);
     expect(row.components[0].label.length).toBeLessThanOrEqual(80);
+  });
+
+  it("styles the accept button Primary, not Success (#1529)", async () => {
+    const built = await service().buildMessage();
+    const row = built.components[0].toJSON() as unknown as {
+      components: { style: number }[];
+    };
+    expect(row.components[0].style).toBe(ButtonStyle.Primary);
   });
 
   it("posts a new message and stores its id", async () => {

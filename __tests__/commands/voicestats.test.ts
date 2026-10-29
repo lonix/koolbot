@@ -250,7 +250,7 @@ describe("VoiceStats Command", () => {
       const content = (editReply.mock.calls[0][0] as { content: string })
         .content;
       const lines = content.split("\n");
-      const headerIdx = lines.indexOf("**Recent Sessions:**");
+      const headerIdx = lines.indexOf("**Recent sessions**");
       expect(headerIdx).toBeGreaterThan(-1);
       return lines.slice(headerIdx + 1);
     }
@@ -269,13 +269,50 @@ describe("VoiceStats Command", () => {
 
       expect(interaction.editReply).toHaveBeenCalledTimes(1);
       expect(recentLines(interaction.editReply)).toEqual([
-        "• session-7: 1h 0m",
-        "• session-6: 1h 0m",
-        "• session-5: 1h 0m",
-        "• session-4: 1h 0m",
-        "• session-3: 1h 0m",
+        "- session-7: 1h 0m",
+        "- session-6: 1h 0m",
+        "- session-5: 1h 0m",
+        "- session-4: 1h 0m",
+        "- session-3: 1h 0m",
       ]);
     });
+
+    it.each([
+      ["week", "this week"],
+      ["month", "this month"],
+      ["alltime", "overall"],
+    ])(
+      "writes the whole reply in sentence case with a - list for %s (#1529)",
+      async (period, phrase) => {
+        mockGetUserStats.mockResolvedValue({
+          userId: "user-1",
+          username: "alice",
+          totalTime: 3600,
+          lastSeen: new Date(base),
+          sessions: [sessions[0]],
+        });
+
+        const interaction = {
+          ...makeViewerInteraction(),
+          options: makeUserInteraction(period).options,
+        } as unknown as MockInteraction;
+        await execute(interaction);
+
+        const content = (
+          interaction.editReply.mock.calls[0][0] as { content: string }
+        ).content;
+        expect(content).toBe(
+          [
+            `**Voice activity for <@user-1> ${phrase}**`,
+            "Total time: 1h 0m",
+            `Last seen: <t:${Math.floor(base / 1000)}:f>`,
+            "",
+            "**Recent sessions**",
+            "- session-1: 1h 0m",
+          ].join("\n"),
+        );
+      },
+    );
 
     // #1153: do not name a channel the caller cannot view.
     it("hides recent-session channel names the caller cannot view or that no longer exist", async () => {
@@ -314,13 +351,13 @@ describe("VoiceStats Command", () => {
         interaction.editReply.mock.calls[0][0] as { content: string }
       ).content;
       expect(content).not.toContain("Staff Room");
-      expect(content).toContain("• a voice channel: 1h 0m");
+      expect(content).toContain("- a voice channel: 1h 0m");
       // Current channel name, not the one stored with the session.
-      expect(content).toContain("• General Renamed: 1h 0m");
-      expect(content).not.toContain("• General: 1h 0m");
+      expect(content).toContain("- General Renamed: 1h 0m");
+      expect(content).not.toContain("- General: 1h 0m");
       // A deleted channel cannot be checked, so it fails closed too.
       expect(content).not.toContain("Old Room");
-      expect(content.match(/• a voice channel: 1h 0m/g)).toHaveLength(2);
+      expect(content.match(/- a voice channel: 1h 0m/g)).toHaveLength(2);
     });
 
     // #1162: a finished room keeps its stored name only if it was public.
@@ -355,25 +392,25 @@ describe("VoiceStats Command", () => {
 
       it("shows the stored name of a deleted room marked public", async () => {
         const content = await run({ everyoneCanView: true });
-        expect(content).toContain("• Game Night: 1h 0m");
+        expect(content).toContain("- Game Night: 1h 0m");
       });
 
       it("hides a deleted room marked private", async () => {
         const content = await run({ everyoneCanView: false });
         expect(content).not.toContain("Game Night");
-        expect(content).toContain("• a voice channel: 1h 0m");
+        expect(content).toContain("- a voice channel: 1h 0m");
       });
 
       it("hides a deleted room with no marker (older data)", async () => {
         const content = await run({});
         expect(content).not.toContain("Game Night");
-        expect(content).toContain("• a voice channel: 1h 0m");
+        expect(content).toContain("- a voice channel: 1h 0m");
       });
 
       it("hides a public-marked room when the guild is not cached", async () => {
         const content = await run({ everyoneCanView: true }, null);
         expect(content).not.toContain("Game Night");
-        expect(content).toContain("• a voice channel: 1h 0m");
+        expect(content).toContain("- a voice channel: 1h 0m");
       });
 
       it("still hides a live room the caller cannot view, whatever the marker says", async () => {
@@ -420,11 +457,11 @@ describe("VoiceStats Command", () => {
       await execute(interaction);
 
       expect(recentLines(interaction.editReply)).toEqual([
-        "• session-7: 1h 0m",
-        "• session-6: 1h 0m",
-        "• session-5: 1h 0m",
-        "• session-4: 1h 0m",
-        "• session-3: 1h 0m",
+        "- session-7: 1h 0m",
+        "- session-6: 1h 0m",
+        "- session-5: 1h 0m",
+        "- session-4: 1h 0m",
+        "- session-3: 1h 0m",
       ]);
       // The stats object passed in must not be mutated by the sort.
       expect(shuffled[0]).toBe(sessions[2]);
@@ -452,8 +489,8 @@ describe("VoiceStats Command", () => {
 
       expect(recentLines(interaction.editReply)).toEqual([
         // ch-1's current name, not the stored "live".
-        "• session-1: ongoing",
-        "• session-1: 1h 0m",
+        "- session-1: ongoing",
+        "- session-1: 1h 0m",
       ]);
     });
 
@@ -499,9 +536,9 @@ describe("VoiceStats Command", () => {
       ).content;
       expect(typeof content).toBe("string");
       expect(content.length).toBeLessThanOrEqual(2000);
-      expect(
-        content.startsWith("Top Voice Channel Users (alltime):\n🥇 "),
-      ).toBe(true);
+      expect(content.startsWith("Top voice channel users overall\n🥇 ")).toBe(
+        true,
+      );
       // Rows are mentions, so even 50 worst-case rows usually fit; if any are
       // dropped they are accounted for, so nothing silently vanishes.
       const shown = (content.match(/: 99999h 59m/g) ?? []).length;
@@ -552,7 +589,7 @@ describe("VoiceStats Command", () => {
       expect(interaction.reply).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
         expect.objectContaining({
-          content: "Top Voice Channel Users (week):\n🥇 <@user-1>: 1h 0m",
+          content: "Top voice channel users this week\n🥇 <@user-1>: 1h 0m",
         }),
       );
     });
