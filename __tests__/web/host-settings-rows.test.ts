@@ -1,4 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
+import { JSDOM } from "jsdom";
 import {
   LEAD_PRESETS,
   LEAD_PRESET_FIELD,
@@ -313,25 +314,35 @@ describe("every control and button of the folds and the confirmation uses the kb
       changes: [{ label: "L", from: "a", to: "b" }],
       reasons: ["r"],
     }),
-  ]
-    .join("\n")
-    .replace(/<script[\s\S]*?<\/script>/g, "");
+  ].join("\n");
+  // Parsed, never regex-filtered; scripts are removed through the DOM (jsdom does not run them).
+  const doc = new JSDOM(`<!doctype html><body>${folds}</body>`).window.document;
+  doc.querySelectorAll("script").forEach((n) => n.remove());
+  const text = doc.body.textContent ?? "";
 
   it("has no button without a kb-btn class, and no old field, check or muted class", () => {
-    const buttons = folds.match(/<button\b[^>]*>/g) ?? [];
+    const buttons = Array.from(doc.querySelectorAll("button"));
     expect(buttons.length).toBeGreaterThan(5);
     // The marker picker's own button is the shared emoji control, not a form button.
-    for (const b of buttons) expect(b).toMatch(/class="kb-(btn|emoji-btn)/);
-    expect(folds).not.toMatch(/class="(field|check|muted|mono)"/);
-    expect(folds).not.toMatch(/<select(?![^>]*class="kb-select)/);
-    expect(folds).not.toMatch(/<input type="text"(?![^>]*class="kb-input)/);
+    for (const b of buttons) {
+      expect(b.className).toMatch(/^kb-(btn|emoji-btn)/);
+    }
+    for (const old of ["field", "check", "muted", "mono"]) {
+      expect(doc.getElementsByClassName(old)).toHaveLength(0);
+    }
+    for (const sel of Array.from(doc.querySelectorAll("select"))) {
+      expect(sel.classList.contains("kb-select")).toBe(true);
+    }
+    for (const inp of Array.from(doc.querySelectorAll('input[type="text"]'))) {
+      expect(inp.classList.contains("kb-input")).toBe(true);
+    }
   });
 
   it("uses danger for Remove selected and Switch groups off, primary for the two saves, plain for the rest", () => {
     const kind = (label: string): string =>
-      new RegExp(`<button[^>]*class="([^"]*)"[^>]*>${label}</button>`).exec(
-        folds,
-      )?.[1] ?? "";
+      Array.from(doc.querySelectorAll("button")).find(
+        (b) => b.textContent === label,
+      )?.className ?? "";
     expect(kind("Remove selected")).toBe("kb-btn kb-btn--danger");
     expect(kind("Switch groups off")).toBe("kb-btn kb-btn--danger");
     expect(kind("Confirm and save")).toBe("kb-btn kb-btn--primary");
@@ -342,16 +353,16 @@ describe("every control and button of the folds and the confirmation uses the kb
   });
 
   it("never repeats an id across the two folds (the series tick is in every form)", () => {
-    const ids = (folds.match(/\sid="[^"]+"/g) ?? []).map((i) => i.trim());
+    const ids = Array.from(doc.querySelectorAll("[id]")).map((n) => n.id);
     expect(ids.length).toBeGreaterThan(10);
     expect(ids.filter((id, i) => ids.indexOf(id) !== i)).toEqual([]);
     expect(
-      folds.match(/Also for the next occurrences</g)?.length,
+      text.match(/Also for the next occurrences/g)?.length,
     ).toBeGreaterThan(2);
   });
 
   it("keeps the text the confirmation already lists off the page", () => {
-    expect(folds).not.toContain("its members are unassigned");
-    expect(folds).not.toContain("Tick the");
+    expect(text).not.toContain("its members are unassigned");
+    expect(text).not.toContain("Tick the");
   });
 });
