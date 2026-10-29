@@ -311,6 +311,32 @@ describe("POST /reaction-roles/bind and /remove-mapping", () => {
     );
   });
 
+  it.each([
+    ["", "", undefined],
+    ["   ", "", undefined],
+    ["", "message-8", "message-8"],
+    ["   ", "message-8", "message-8"],
+    ["message-old", "", "message-old"],
+    [" message-old ", "message-8", "message-old"],
+  ])(
+    "aims at the typed id, else the picked one: typed %j, picked %j",
+    async (typed, listed, want) => {
+      mockBindReactionRole.mockClear();
+      await harness.post("/reaction-roles/bind", {
+        roleId: "role-1",
+        emoji: "🎉",
+        messageId: typed,
+        messageIdListed: listed,
+      });
+      expect(mockBindReactionRole).toHaveBeenCalledWith(
+        session.guildId,
+        "role-1",
+        "🎉",
+        want === undefined ? {} : { messageId: want },
+      );
+    },
+  );
+
   it("marks an oversized emoji", async () => {
     const res = await harness.post("/reaction-roles/bind", {
       roleId: "role-1",

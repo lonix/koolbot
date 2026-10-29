@@ -537,3 +537,81 @@ describe("a refused bind keeps its destination when the list changes state (#153
     expect(box(unreadable).value).toBe(" 9<9> ");
   });
 });
+
+describe("the retained destination of a refused bind, every input and list state (#1530)", () => {
+  const TYPED = ["", "   ", "100000000000000111", " 100000000000000222 "];
+  const IN_LIST = "100000000000000002";
+  const NOT_IN_LIST = "100000000000000999";
+  const dest = (typed: string, listed: string): string =>
+    typed.trim() !== "" ? typed : listed;
+  const states: Array<
+    [string, (typeof MESSAGES & { truncated: boolean }) | null, string[]]
+  > = [
+    ["cut", { ...MESSAGES, truncated: true }, ["", IN_LIST]],
+    ["complete, id listed", { ...MESSAGES, truncated: false }, ["", IN_LIST]],
+    [
+      "complete, id missing",
+      { ...MESSAGES, truncated: false },
+      ["", NOT_IN_LIST],
+    ],
+    ["empty", { options: [], truncated: false }, ["", NOT_IN_LIST]],
+    ["unreadable", null, ["", IN_LIST]],
+  ];
+  const cells = states.flatMap(([state, messages, listedValues]) =>
+    TYPED.flatMap((typed) =>
+      listedValues.map(
+        (listed) =>
+          [state, typed, listed, messages] as [
+            string,
+            string,
+            string,
+            (typeof MESSAGES & { truncated: boolean }) | null,
+          ],
+      ),
+    ),
+  );
+
+  it.each(cells)(
+    "%s, typed %j, picked %j",
+    (state, typed, listed, messages) => {
+      const form = bindForm(
+        page({
+          messages,
+          refusedForm: {
+            formId: "reaction-role-bind",
+            errors: { emoji: "x" },
+            values: {
+              roleId: "",
+              emoji: "",
+              messageId: typed,
+              messageIdListed: listed,
+            },
+          },
+        }),
+      );
+      const want = dest(typed, listed);
+      const box = form.querySelector(
+        "input[name=messageId]",
+      ) as HTMLInputElement | null;
+      if (state === "cut") {
+        expect(
+          (
+            form.querySelector(
+              "select[name=messageIdListed]",
+            ) as HTMLSelectElement
+          ).value,
+        ).toBe(listed);
+        expect(box?.value).toBe(typed);
+      } else if (state === "unreadable") {
+        expect(form.querySelector("select[name^=messageId]")).toBeNull();
+        expect(box?.value).toBe(want);
+      } else {
+        expect(box).toBeNull();
+        expect(
+          (form.querySelector("select[name=messageId]") as HTMLSelectElement)
+            .value,
+        ).toBe(want);
+      }
+    },
+  );
+});

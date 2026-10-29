@@ -4228,6 +4228,20 @@ function groupOptionRows(
     <details${foldedUsed ? " open" : ""}><summary>More options (up to ${MAX_GROUP_ENTRIES})</summary>${rows(visible, MAX_GROUP_ENTRIES)}</details>`;
 }
 
+/**
+ * The message a refused bind form was aimed at: the typed id when it is not
+ * blank, otherwise the picked one, "" for a new message. The write route trims
+ * both fields before choosing in the same order, so a blank typed id (spaces
+ * only) counts as empty there and here. A nonblank id is kept as typed.
+ */
+export function retainedMessageDestination(
+  typed: string,
+  listed: string,
+): string {
+  if (typed.trim() !== "") return typed;
+  return listed.trim() !== "" ? listed : "";
+}
+
 export function renderReactionRolesPage(props: ReactionRolesProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const create = formView(props.refusedForm, REACTION_ROLE_CREATE_FORM);
@@ -4238,10 +4252,10 @@ export function renderReactionRolesPage(props: ReactionRolesProps): string {
   // The destination a refused form was given: the typed id, else the picked one.
   // Whichever control is drawn now echoes it, so a list that changed state since
   // the form was posted does not lose it.
-  const bindDest =
-    bind.value("messageId") !== ""
-      ? bind.value("messageId")
-      : bind.value("messageIdListed");
+  const bindDest = retainedMessageDestination(
+    bind.value("messageId"),
+    bind.value("messageIdListed"),
+  );
   const bindKeeps = bindDest !== "";
   const groupCreate = formView(
     props.refusedForm,
