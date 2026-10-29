@@ -4233,6 +4233,8 @@ export function renderReactionRolesPage(props: ReactionRolesProps): string {
   const create = formView(props.refusedForm, REACTION_ROLE_CREATE_FORM);
   const bind = formView(props.refusedForm, REACTION_ROLE_BIND_FORM);
   const bindRole = bind.control("roleId");
+  // A refused form keeps the message it was given selected, whatever the list holds.
+  const bindKeeps = bind.value("messageId") !== "";
   const groupCreate = formView(
     props.refusedForm,
     REACTION_ROLE_GROUP_CREATE_FORM,
@@ -4349,10 +4351,12 @@ ${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPicker
         messages: props.messages ?? null,
         ariaLabel: "Message",
         noneLabel: REACTION_ROLE_MESSAGE_NEW_LABEL,
-        emptyNote:
-          "There are no reaction-role messages yet, so this posts a new one.",
-        unreadableNote:
-          "The list of reaction-role messages could not be read, so this posts a new one.",
+        emptyNote: bindKeeps
+          ? "There are no reaction-role messages yet. Choose Post a new message to start a new one."
+          : "There are no reaction-role messages yet, so this posts a new one.",
+        unreadableNote: bindKeeps
+          ? "The list of reaction-role messages could not be read, so the message you entered stays selected. Choose Post a new message to start a new one."
+          : "The list of reaction-role messages could not be read, so this posts a new one.",
       })}
     </div>${bind.error("messageId")}
     <button type="submit" class="btn btn-primary">Bind existing role</button>

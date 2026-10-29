@@ -7,8 +7,12 @@
  */
 import { describe, it, expect } from "@jest/globals";
 import { JSDOM } from "jsdom";
-import { renderReactionRolesPage } from "../../src/web/admin-views.js";
 import {
+  renderReactionRolesPage,
+  renderRoleSelectPicker,
+} from "../../src/web/admin-views.js";
+import {
+  CHANNEL_PICKER_SCRIPT,
   REACTION_ROLE_MESSAGE_NEW_LABEL,
   REACTION_ROLE_MESSAGE_NONE_LABEL,
   renderReactionRoleMessageSelect,
@@ -268,5 +272,89 @@ describe("renderReactionRoleMessageSelect noneLabel (#1530)", () => {
     });
     expect(html).toContain("a &lt;b&gt; &amp; c");
     expect(html).not.toContain("&amp;amp;");
+  });
+});
+
+describe("the enhanced role picker keeps its name and the choice (#1530)", () => {
+  const enhanced = (label: boolean): { dom: JSDOM; trigger: Element } => {
+    const picker = renderRoleSelectPicker({
+      id: label ? "r" : undefined,
+      ariaLabel: label ? undefined : "Role",
+      name: "roleId",
+      options: ROLES,
+      selected: "",
+      emptyLabel: "Choose a role",
+    });
+    const dom = new JSDOM(
+      `<!doctype html><body>${label ? '<label for="r">Role</label>' : ""}${picker}</body>`,
+      { runScripts: "outside-only" },
+    );
+    dom.window.eval(CHANNEL_PICKER_SCRIPT);
+    return {
+      dom,
+      trigger: dom.window.document.querySelector(
+        ".kb-picker__trigger",
+      ) as Element,
+    };
+  };
+  const choose = (dom: JSDOM, value: string): void => {
+    const select = dom.window.document.querySelector(
+      "select",
+    ) as HTMLSelectElement;
+    select.value = value;
+    select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  };
+
+  it("names the trigger with the choice when the select has only an aria-label", () => {
+    const { dom, trigger } = enhanced(false);
+    expect(trigger.getAttribute("aria-label")).toBe("Role: Choose a role");
+    choose(dom, "200000000000000002");
+    expect(trigger.getAttribute("aria-label")).toBe("Role: @Artist");
+    choose(dom, "");
+    expect(trigger.getAttribute("aria-label")).toBe("Role: Choose a role");
+  });
+
+  it("leaves a picker with a visible label to name itself from it", () => {
+    const { trigger } = enhanced(true);
+    expect(trigger.hasAttribute("aria-label")).toBe(false);
+    expect(trigger.getAttribute("aria-labelledby")).toContain(trigger.id);
+  });
+});
+
+describe("the notes under the message select when an id is retained (#1530)", () => {
+  const refused = (messages: typeof MESSAGES | null): Element =>
+    bindForm(
+      page({
+        messages,
+        refusedForm: {
+          formId: "reaction-role-bind",
+          errors: { emoji: "x" },
+          values: { roleId: "", emoji: "", messageId: "100000000000000009" },
+        },
+      }),
+    );
+
+  it.each([
+    ["an empty list", { options: [], truncated: false }],
+    ["an unreadable list", null],
+  ])(
+    "does not promise a new message for %s while one stays selected",
+    (_n, messages) => {
+      const form = refused(messages);
+      const select = form.querySelector(
+        "select[name=messageId]",
+      ) as HTMLSelectElement;
+      expect(select.value).toBe("100000000000000009");
+      const note =
+        form.querySelector(".kb-msgpick .kb-help")?.textContent ?? "";
+      expect(note).toContain("Choose Post a new message to start a new one.");
+      expect(note).not.toContain("this posts a new one");
+    },
+  );
+
+  it("keeps the plain wording when no id is retained", () => {
+    expect(bindForm(page({ messages: null })).textContent).toContain(
+      "could not be read, so this posts a new one.",
+    );
   });
 });

@@ -237,6 +237,10 @@ export const CHANNEL_PICKER_SCRIPT =
   "b.setAttribute('aria-label','Show '+(sels.length-lim)+' more selected');chips.appendChild(b)}}" +
   "function paint(){var cur=items[sel.selectedIndex]||items[0];trig.textContent='';" +
   "if(multi){paintChips();trig.appendChild(el('span','kb-picker__add','Add'))}else if(cur)trig.appendChild(mention(cur));trig.appendChild(svg(CHEVRON));attrs();" +
+  // Without a visible label the trigger's name is the select's `aria-label`, and
+  // a fixed name would hide the choice: add it, as the label path does by
+  // pointing at the trigger's own text.
+  "if(!ids.length&&!multi&&cur)trig.setAttribute('aria-label',name+': '+chipLabel(cur));" +
   "for(var k=0;k<rows.length;k++){var on=isOn(k),c=rows[k].querySelector('svg[data-check]');" +
   "rows[k].setAttribute('aria-selected',on?'true':'false');" +
   "if(on&&!c){c=svg(CHECK);c.setAttribute('data-check','');rows[k].appendChild(c)}else if(!on&&c)rows[k].removeChild(c)}" +
