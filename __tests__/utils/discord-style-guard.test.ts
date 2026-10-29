@@ -90,12 +90,6 @@ const FOOTER_UNRESOLVED_ALLOWED: Record<string, string> = {};
  * the open issue that removes the entry. Never add one to silence the guard.
  */
 const FOOTER_PREFIX_ALLOWED: Record<string, string> = {
-  "services/voice-channel-manager.ts:Only the channel owner can use these controls":
-    "voice controls footer; #1519 removes this entry",
-  "handlers/vc-preset-handler.ts:⭐ default preset auto-applies when you spawn a new channel":
-    "voice presets footer; #1519 removes this entry",
-  "commands/remind.ts:Cancel one with /remind cancel id:<id>":
-    "`/remind list` footer; #1532 removes this entry",
   "services/digest-service.ts:${footer}":
     "digest footer; #1526 removes this entry",
 };
