@@ -142,6 +142,14 @@ function bindingsOf(sf: ts.SourceFile, name: string): ts.Expression[] {
 interface Resolved {
   /** Text to run the forbidden-content checks on. */
   texts: string[];
+  /**
+   * Complete footer values the expression can produce, with each same-file
+   * constant substituted into its template or concatenation and any unknown
+   * part (a call, a property read, an unresolved identifier) kept as a
+   * placeholder. A value whose START is unknown is left out. The `KoolBot · `
+   * prefix is checked on these, never on `texts` (which also holds fragments).
+   */
+  values: string[];
   /** Bare identifiers that could not be followed to a literal. */
   unresolved: string[];
 }
@@ -159,36 +167,55 @@ function resolveFooter(
   expr: ts.Expression,
   seen: string[] = [],
 ): Resolved {
-  const out: Resolved = { texts: [], unresolved: [] };
+  const out: Resolved = { texts: [], values: [], unresolved: [] };
   const merge = (r: Resolved): void => {
     out.texts.push(...r.texts);
+    out.values.push(...r.values);
     out.unresolved.push(...r.unresolved);
   };
   if (ts.isParenthesizedExpression(expr) || ts.isAsExpression(expr)) {
     merge(resolveFooter(sf, expr.expression, seen));
   } else if (ts.isStringLiteralLike(expr)) {
     out.texts.push(expr.text);
+    out.values.push(expr.text);
   } else if (ts.isTemplateExpression(expr)) {
     // Keep each `${...}` as written so an interpolated id is still visible;
     // also follow an identifier span to its value.
     let text = expr.head.text;
+    let values: string[] = [expr.head.text];
     for (const span of expr.templateSpans) {
       text += "${" + span.expression.getText(sf) + "}" + span.literal.text;
-      if (ts.isIdentifier(span.expression)) {
-        const r = resolveFooter(sf, span.expression, seen);
-        out.texts.push(...r.texts);
-      }
+      const r = resolveFooter(sf, span.expression, seen);
+      if (ts.isIdentifier(span.expression)) out.texts.push(...r.texts);
+      // A known span is substituted; an unknown one stays as written, so the
+      // text before it is still a known start.
+      const spanValues =
+        r.values.length > 0
+          ? r.values
+          : ["${" + span.expression.getText(sf) + "}"];
+      values = values.flatMap((v) =>
+        spanValues.map((sv) => v + sv + span.literal.text),
+      );
     }
     out.texts.push(text);
+    out.values.push(...values);
   } else if (
     ts.isBinaryExpression(expr) &&
     expr.operatorToken.kind === ts.SyntaxKind.PlusToken
   ) {
     const l = resolveFooter(sf, expr.left, seen);
     const r = resolveFooter(sf, expr.right, seen);
-    merge(l);
-    merge(r);
+    // Fragments feed the forbidden-content checks; the operands' own values
+    // are NOT complete footers, so only the joined values are kept.
+    merge({ texts: l.texts, values: [], unresolved: l.unresolved });
+    merge({ texts: r.texts, values: [], unresolved: r.unresolved });
     out.texts.push(`${l.texts.join("")}${r.texts.join("")}`);
+    // An unknown right side stays as a placeholder; an unknown left side makes
+    // the start unknown, so there is no complete value to check.
+    if (l.values.length > 0) {
+      const rights = r.values.length > 0 ? r.values : ["${…}"];
+      out.values.push(...l.values.flatMap((lv) => rights.map((rv) => lv + rv)));
+    }
   } else if (ts.isConditionalExpression(expr)) {
     merge(resolveFooter(sf, expr.whenTrue, seen));
     merge(resolveFooter(sf, expr.whenFalse, seen));
@@ -252,7 +279,7 @@ function footerExpressions(
 function footerProblems(source: string, file = "source.ts"): string[] {
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
   return footerExpressions(sf).flatMap(({ line, expr }) => {
-    const { texts, unresolved } = resolveFooter(sf, expr);
+    const { texts, values, unresolved } = resolveFooter(sf, expr);
     const problems: string[] = [];
     for (const name of new Set(unresolved)) {
       if (`${file}:${name}` in FOOTER_UNRESOLVED_ALLOWED) continue;
@@ -260,15 +287,19 @@ function footerProblems(source: string, file = "source.ts"): string[] {
         `${line}: footer uses \`${name}\`, which is not a same-file const/let literal; write the footer text where it is used, or list "${file}:${name}" in FOOTER_UNRESOLVED_ALLOWED with a reason`,
       );
     }
-    for (const text of texts) {
+    // The prefix is a property of a COMPLETE footer value, not of the pieces
+    // `texts` also carries (`"Quotes"` in `"KoolBot · " + "Quotes"`).
+    for (const value of new Set(values)) {
       if (
-        !text.startsWith(FOOTER_PREFIX) &&
-        !(`${file}:${text.split("\n")[0]}` in FOOTER_PREFIX_ALLOWED)
+        !value.startsWith(FOOTER_PREFIX) &&
+        !(`${file}:${value.split("\n")[0]}` in FOOTER_PREFIX_ALLOWED)
       ) {
         problems.push(
-          `${line}: footer "${text}" does not start with "${FOOTER_PREFIX}"; name the feature, or list "${file}:${text.split("\n")[0]}" in FOOTER_PREFIX_ALLOWED with the issue that removes it`,
+          `${line}: footer "${value}" does not start with "${FOOTER_PREFIX}"; name the feature, or list "${file}:${value.split("\n")[0]}" in FOOTER_PREFIX_ALLOWED with the issue that removes it`,
         );
       }
+    }
+    for (const text of texts) {
       if (SYSTEM_WORD.test(text)) problems.push(`${line}: contains "System"`);
       if (ID_LABEL.test(text)) problems.push(`${line}: contains "ID:"`);
       if (ID_INTERPOLATION.test(text)) {
@@ -394,6 +425,24 @@ describe("discord footer guard", () => {
       "e.setFooter({ text: closedSummary(reason) });",
     ]) {
       expect(footerProblems(fine)).toEqual([]);
+    }
+  });
+
+  it("checks the KoolBot prefix on the complete footer, not on its fragments (self-test)", () => {
+    for (const fine of [
+      'e.setFooter({ text: "KoolBot · " + "Quotes" });',
+      'const F = "Quotes";\ne.setFooter({ text: `KoolBot · ${F}` });',
+      'const P = "KoolBot · ";\nconst F = "Quotes";\ne.setFooter({ text: P + F });',
+      'const F = "Quotes";\ne.setFooter({ text: ok ? `KoolBot · ${F}` : "KoolBot · Other" });',
+    ]) {
+      expect(footerProblems(fine)).toEqual([]);
+    }
+    for (const bad of [
+      'e.setFooter({ text: "Use " + "/modlog" });',
+      'const F = "Quotes";\ne.setFooter({ text: `Feature: ${F}` });',
+      'const F = "Quotes";\ne.setFooter({ text: ok ? `KoolBot · ${F}` : "Quotes" });',
+    ]) {
+      expect(footerProblems(bad).join("\n")).toContain("does not start with");
     }
   });
 
