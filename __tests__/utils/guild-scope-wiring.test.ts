@@ -55,6 +55,15 @@ describe("guild scope wiring in src/index.ts (#1144)", () => {
     }
   });
 
+  it("answers a component from another guild with the shared error embed", () => {
+    const [body] = listenerBodies("InteractionCreate");
+    const gate = body.slice(body.indexOf("shouldIgnoreGuild("));
+    const reply = gate.slice(0, gate.indexOf("return;"));
+    expect(reply).toContain("replyWithError(interaction, {");
+    expect(reply).toContain(`title: "This bot isn't set up for this server"`);
+    expect(reply).not.toContain("content:");
+  });
+
   // A listener registered outside index.ts is just as exposed, so any file in
   // src/ that attaches its own client listener must gate it too. `ready` is
   // not a guild event.

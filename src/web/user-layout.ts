@@ -174,7 +174,6 @@ const STYLE = [
   ".empty{padding:var(--space-4);color:var(--muted);font-style:italic}",
   ".muted{color:var(--muted)}",
   ".mono{font-family:var(--font-mono);font-size:var(--type-mono-size)}",
-  ".pill{background:var(--fill);color:var(--pill-text);padding:0 var(--space-2);line-height:1.4;border-radius:var(--radius-pill);font-size:var(--type-help-size)}",
   ".tag{display:inline-block;padding:0 var(--space-2);line-height:1.4;border-radius:var(--radius-sm);font-size:var(--type-badge-size);font-weight:600;text-transform:uppercase;letter-spacing:.04em}",
   ".tag-info{background:var(--info-bg);color:var(--info-text)}",
   // Disabled-feature "off" tag on the overview cards, mirroring the admin
@@ -193,10 +192,6 @@ const STYLE = [
   ".prefs-table tbody th[scope=row].mono{font-size:var(--type-mono-size)}",
   ".prefs-table tbody th[scope=row].muted{color:var(--muted)}",
   ".prefs-table tr:last-child td,.prefs-table tr:last-child th[scope=row]{border-bottom:0}",
-  // Control borders use --control (3.97:1); the hairline --border was 1.58:1 (#855).
-  `select.tz-select{width:100%;max-width:28rem;background:var(--bg);color:var(--text);border:1px solid var(--control);border-radius:4px;padding:.45rem .5rem;font-size:.9rem}`,
-  ".tz-preview{margin-top:.75rem;font-size:.9rem;color:var(--text-secondary)}",
-  ".tz-preview .now{font-weight:600;color:var(--text)}",
   ".btn,.btn-secondary,.btn-danger{border:0;padding:var(--space-2) var(--space-4);border-radius:var(--radius-md);cursor:pointer;font-weight:600;font-size:var(--type-ui-size)}",
   // Neutral by default; `.btn-primary` is the one main button of a view (#1512).
   ".btn{background:var(--fill);color:var(--text)}",
@@ -212,11 +207,6 @@ const STYLE = [
   ".btn-secondary:hover{background:var(--fill-hover)}",
   ".btn-danger{background:var(--danger);color:var(--on-primary)}",
   ".btn-danger:hover{background:var(--danger-hover)}",
-  ".preset-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.75rem;margin:.5rem 0}",
-  ".preset-grid label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:var(--muted)}",
-  `.preset-grid input{background:var(--bg);color:var(--text);border:1px solid var(--control);border-radius:4px;padding:.4rem .5rem;font-size:.9rem}`,
-  ".preset-actions{display:flex;gap:.5rem;margin-top:.5rem}",
-  ".preset-actions form{display:inline;margin:0}",
   ".form-actions{margin-top:1rem;display:flex;gap:.5rem;align-items:center}",
   // The shared preset editor's form (`form.stack`, on the member presets page; the admin layout styles its own).
   "form.stack label{display:block;margin:0 0 var(--space-3)}",
@@ -394,6 +384,19 @@ function renderPageNav(active: string, flags: UserFeatureFlags): string {
   // Named so it stays distinguishable from a page body's own nav (the
   // Rewind year picker) — axe `landmark-unique`, #856.
   return `<nav class="kb-tabs" aria-label="My preferences sections">${items}</nav>`;
+}
+
+/**
+ * The PageHeader a member tab opens with: the title and one line of what the
+ * page is for (`sub` is trusted HTML the caller built). `placeScopeWhy` adds the
+ * scope's "why you see this" line at the end of the text block.
+ */
+function pageHeader(title: string, sub: string): string {
+  return (
+    '<header class="kb-pagehead"><div class="kb-pagehead__text">' +
+    `<h1 class="kb-pagehead__title">${escapeHtml(title)}</h1>` +
+    `<p class="kb-pagehead__sub">${sub}</p></div></header>`
+  );
 }
 
 function renderFlash(flash?: UserFlashMessage | null): string {
@@ -1263,12 +1266,16 @@ export function renderUserBirthdayBody(opts: BirthdayPageBodyOptions): string {
       ? ` aria-invalid="true" aria-describedby="${BIRTHDAY_FORM_ID}-${key}-error"`
       : "";
   return [
-    "<h1>Birthday</h1>",
-    `<p class="subtitle">Set your birthday so KoolBot can celebrate it on the day — evaluated in your own timezone (set that on the <a href="/me/timezone">Timezone</a> page). The year is optional; leave it blank to share the date without your age.</p>`,
-    '<form method="POST" action="/me/birthday">',
-    `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
-    '<div class="card">',
     '<div class="kb-stack">',
+    pageHeader(
+      "Birthday",
+      `Set your birthday so KoolBot can celebrate it on the day — evaluated in your own timezone (set that on the <a href="/me/timezone">Timezone</a> page). The year is optional; leave it blank to share the date without your age.`,
+    ),
+    '<section class="kb-panel" aria-labelledby="birthday-title">',
+    '<header class="kb-panel__head"><h2 class="kb-panel__title" id="birthday-title">Your birthday</h2></header>',
+    '<div class="kb-panel__body">',
+    '<form method="POST" action="/me/birthday" class="kb-stack">',
+    `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
     '<div class="kb-fields">',
     '<div class="kb-field"><label class="kb-label" for="bd-month">Month</label>' +
       `<select id="bd-month" name="month" class="kb-select"${mark("date")}>${renderMonthOptions(month)}</select></div>`,
@@ -1278,15 +1285,16 @@ export function renderUserBirthdayBody(opts: BirthdayPageBodyOptions): string {
       `<input id="bd-year" name="year" type="number" min="1900" placeholder="—" class="kb-input" value="${escapeHtml(year)}"${mark("year")}>${f.error("year")}</div>`,
     "</div>",
     f.error("date"),
-    '<div class="form-actions">',
-    '<button class="btn" type="submit">Save birthday</button>',
+    '<div class="kb-row">',
+    '<button class="kb-btn kb-btn--primary" type="submit">Save birthday</button>',
     hasBirthday
       ? `<button class="kb-btn kb-btn--danger" type="submit" name="clear" value="1" data-confirm="Remove your birthday?"${confirmListAttr(birthdayRemoveItems(opts.changeCooldownSeconds))}>Remove my birthday</button>`
       : "",
     "</div>",
-    "</div>",
-    "</div>",
     "</form>",
+    "</div>",
+    "</section>",
+    "</div>",
     `${scriptTag(BIRTHDAY_DAY_SCRIPT)}`,
     f.refused ? scriptTag(FOCUS_FIRST_INVALID_SCRIPT) : "",
   ].join("");
@@ -1322,22 +1330,36 @@ const TZ_PREVIEW_SCRIPT =
  */
 export function renderUserTimezoneBody(opts: TimezonePageBodyOptions): string {
   return [
-    "<h1>Timezone</h1>",
-    `<p class="subtitle">KoolBot renders the times it shows you, such as in <code>/voicestats</code>, in this zone. Leave it on <em>Server default</em> to use the server's timezone (<span class="mono">${escapeHtml(opts.serverTimezone)}</span>).</p>`,
-    '<form method="POST" action="/me/timezone">',
+    '<div class="kb-stack">',
+    pageHeader(
+      "Timezone",
+      `KoolBot renders the times it shows you, such as in <code>/voicestats</code>, in this zone. Leave it on <em>Server default</em> to use the server's timezone (<span class="kb-mono">${escapeHtml(opts.serverTimezone)}</span>).`,
+    ),
+    '<section class="kb-panel" aria-labelledby="timezone-title">',
+    '<header class="kb-panel__head"><h2 class="kb-panel__title" id="timezone-title">Your timezone</h2></header>',
+    '<div class="kb-panel__body">',
+    '<form method="POST" action="/me/timezone" class="kb-stack">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
-    '<div class="card">',
-    '<label for="tz-select"><strong>Your timezone</strong></label>',
+    '<div class="kb-field">',
+    '<label class="kb-label" for="tz-select">Timezone</label>',
     // The shared searchable select (#1436): "Server default" posts "" to clear,
     // a stored zone the runtime no longer lists stays selected as "(custom)".
-    `<div style="margin-top:.5rem">${renderTimezoneSelect("timezone", opts.selected ?? "", { id: "tz-select", defaultZone: opts.serverTimezone, blank: true, firstLabel: "Server default" })}</div>`,
-    `<div class="tz-preview">Current time: <span id="tz-now" class="now" data-server-tz="${escapeHtml(opts.serverTimezone)}">—</span></div>`,
-    '<div class="form-actions">',
-    '<button class="btn" type="submit">Save timezone</button>',
-    '<span class="muted">Pick <em>Server default</em> and save to clear your preference.</span>',
+    renderTimezoneSelect("timezone", opts.selected ?? "", {
+      id: "tz-select",
+      defaultZone: opts.serverTimezone,
+      blank: true,
+      firstLabel: "Server default",
+    }),
+    `<p class="kb-help">Current time: <span id="tz-now" data-server-tz="${escapeHtml(opts.serverTimezone)}">—</span></p>`,
     "</div>",
+    '<div class="kb-row">',
+    '<button class="kb-btn kb-btn--primary" type="submit">Save timezone</button>',
+    '<span class="kb-help">Pick <em>Server default</em> and save to clear your preference.</span>',
     "</div>",
     "</form>",
+    "</div>",
+    "</section>",
+    "</div>",
     `${scriptTag(TIMEZONE_SELECT_SCRIPT)}`,
     `${scriptTag(TZ_PREVIEW_SCRIPT)}`,
   ].join("");
@@ -1512,13 +1534,14 @@ function renderPresetRow(
     `<input type="hidden" name="expectedName" value="${escapeHtml(p.name)}">`;
 
   return [
-    '<div class="card">',
+    `<section class="kb-panel" aria-labelledby="${formId}-title">`,
     // The star alone carried "default" (WCAG 1.4.1, #855); the word does now,
     // with the glyph kept as decoration.
-    `<h2>${escapeHtml(p.name)}${p.isDefault ? ' <span class="pill"><span aria-hidden="true">⭐</span> Default</span>' : ""}</h2>`,
-    `<p class="muted">${summary}</p>`,
+    `<header class="kb-panel__head"><h3 class="kb-panel__title" id="${formId}-title">${escapeHtml(p.name)}${p.isDefault ? ' <span class="kb-badge kb-badge--on"><span aria-hidden="true">⭐</span> Default</span>' : ""}</h3></header>`,
+    '<div class="kb-panel__body kb-stack">',
+    `<p class="kb-help">${summary}</p>`,
     // Edit form (name + channel name + limit + bitrate in one save).
-    '<form method="POST" action="/me/voice/preset/edit">',
+    '<form method="POST" action="/me/voice/preset/edit" class="kb-stack">',
     csrf,
     idFields,
     '<div class="kb-fields">',
@@ -1527,14 +1550,14 @@ function renderPresetRow(
     `<div class="kb-field"><label class="kb-label" for="${formId}-userLimit">User limit</label><input type="number" name="userLimit" class="kb-input" value="${escapeHtml(f.value("userLimit", String(p.userLimit ?? "")))}" min="0" max="99" placeholder="(default)"${fieldAttrs(f, formId, "userLimit")}>${f.error("userLimit")}</div>`,
     `<div class="kb-field"><label class="kb-label" for="${formId}-bitrate">Bitrate (kbps)</label><input type="number" name="bitrate" class="kb-input" value="${escapeHtml(f.value("bitrate", String(p.bitrate ?? "")))}" min="8" max="384" placeholder="(default)"${fieldAttrs(f, formId, "bitrate")}>${f.error("bitrate")}</div>`,
     "</div>",
-    '<div class="form-actions"><button class="btn" type="submit">Save changes</button></div>',
+    '<div class="kb-row"><button class="kb-btn" type="submit">Save changes</button></div>',
     "</form>",
     // Default + delete as separate small forms so each is a single POST.
-    '<div class="preset-actions">',
+    '<div class="kb-row">',
     '<form method="POST" action="/me/voice/preset/default">',
     csrf,
     idFields,
-    `<button class="btn-secondary" type="submit">${p.isDefault ? "Unset default" : "Set as default"}</button>`,
+    `<button class="kb-btn" type="submit">${p.isDefault ? "Unset default" : "Set as default"}</button>`,
     "</form>",
     `<form method="POST" action="/me/voice/preset/delete" data-confirm="Delete the preset '${escapeHtml(p.name)}'?">`,
     csrf,
@@ -1543,6 +1566,7 @@ function renderPresetRow(
     "</form>",
     "</div>",
     "</div>",
+    "</section>",
   ].join("");
 }
 
@@ -1557,35 +1581,44 @@ export function renderUserVoiceBody(opts: VoicePageBodyOptions): string {
   const npHelp = `${VOICE_NAME_PATTERN_FORM_ID}-help`;
   const presetCards =
     opts.presets.length === 0
-      ? '<div class="card"><div class="empty">No saved presets yet. Open a voice channel\'s control panel in Discord and choose <strong>Presets → Save current as preset</strong> to create one.</div></div>'
+      ? '<div class="kb-empty"><p class="kb-empty__title">No saved presets yet</p><p class="kb-empty__text">Open a voice channel\'s control panel in Discord and choose <strong>Presets → Save current as preset</strong> to create one.</p></div>'
       : opts.presets
           .map((p) => renderPresetRow(p, opts.csrfToken, opts.refusedForm))
           .join("");
+  const preview = opts.namePattern
+    ? opts.namePattern
+        .replace(/\{username\}/gi, opts.displayName)
+        .replace(/\{displayname\}/gi, opts.displayName)
+    : "(server default)";
 
   return [
-    "<h1>Voice preferences</h1>",
-    '<p class="subtitle">Manage how your dynamic voice channels are named and the presets you can apply to them.</p>',
+    '<div class="kb-stack">',
+    pageHeader(
+      "Voice preferences",
+      "Manage how your dynamic voice channels are named and the presets you can apply to them.",
+    ),
     // ---- Name pattern ----
-    '<form method="POST" action="/me/voice/name-pattern">',
+    '<section class="kb-panel" aria-labelledby="name-pattern-title">',
+    '<header class="kb-panel__head"><h2 class="kb-panel__title" id="name-pattern-title">Channel name pattern</h2></header>',
+    '<div class="kb-panel__body">',
+    '<form method="POST" action="/me/voice/name-pattern" class="kb-stack">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
-    '<div class="card">',
-    "<h2>Channel name pattern</h2>",
-    `<p class="muted" id="${npHelp}">Applied to every new channel you spawn from the lobby. Use <code>{username}</code> as a placeholder for your display name. Leave blank to use the server default naming.</p>`,
-    `<div class="kb-field"><label class="kb-label" for="${VOICE_NAME_PATTERN_FORM_ID}-namePattern">Name pattern</label><input type="text" name="namePattern" class="kb-input" maxlength="100" value="${escapeHtml(np.value("namePattern", opts.namePattern ?? ""))}" placeholder="e.g. {username}'s Room"${fieldAttrs(np, VOICE_NAME_PATTERN_FORM_ID, "namePattern", npHelp)}>${np.error("namePattern")}</div>`,
-    `<p class="muted" style="margin-top:.5rem">Preview: <span class="mono">${escapeHtml(
-      opts.namePattern
-        ? opts.namePattern
-            .replace(/\{username\}/gi, opts.displayName)
-            .replace(/\{displayname\}/gi, opts.displayName)
-        : "(server default)",
-    )}</span></p>`,
-    '<div class="form-actions"><button class="btn" type="submit">Save name pattern</button>',
-    '<span class="muted">Save an empty value to clear it.</span></div>',
+    `<div class="kb-field"><label class="kb-label" for="${VOICE_NAME_PATTERN_FORM_ID}-namePattern">Name pattern</label><input type="text" name="namePattern" class="kb-input" maxlength="100" value="${escapeHtml(np.value("namePattern", opts.namePattern ?? ""))}" placeholder="e.g. {username}'s Room"${fieldAttrs(np, VOICE_NAME_PATTERN_FORM_ID, "namePattern", npHelp)}>${np.error("namePattern")}` +
+      `<p class="kb-help" id="${npHelp}">Applied to every new channel you spawn from the lobby. Use <code>{username}</code> as a placeholder for your display name. Leave blank to use the server default naming.</p>` +
+      `<p class="kb-help">Preview: <span class="kb-mono">${escapeHtml(preview)}</span></p></div>`,
+    '<div class="kb-row">',
+    '<button class="kb-btn kb-btn--primary" type="submit">Save name pattern</button>',
+    '<span class="kb-help">Save an empty value to clear it.</span>',
     "</div>",
     "</form>",
+    "</div>",
+    "</section>",
     // ---- Presets ----
-    `<h2>Saved presets <span class="muted" style="font-size:.85rem">(max ${opts.maxPerUser})</span></h2>`,
-    presetCards,
+    '<section class="kb-panel" aria-labelledby="presets-title">',
+    `<header class="kb-panel__head"><h2 class="kb-panel__title" id="presets-title">Saved presets</h2><span class="kb-panel__meta">Up to ${opts.maxPerUser}</span></header>`,
+    `<div class="kb-panel__body kb-stack">${presetCards}</div>`,
+    "</section>",
+    "</div>",
     opts.refusedForm ? scriptTag(FOCUS_FIRST_INVALID_SCRIPT) : "",
   ].join("");
 }
@@ -1650,30 +1683,35 @@ function renderTrackingOptOutCard(
     ? "reset your data below to remove it"
     : "only a data reset removes it, and this server has not enabled one";
   const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(optOut.csrfToken)}">`;
+  const head =
+    '<header class="kb-panel__head"><h2 class="kb-panel__title" id="tracking-title">Activity tracking</h2></header>';
   if (optOut.optedOutAt) {
     return [
-      '<div id="tracking" class="card">',
-      "<h2>Activity tracking</h2>",
+      '<section id="tracking" class="kb-panel" aria-labelledby="tracking-title">',
+      head,
+      '<div class="kb-panel__body kb-stack">',
       `<p><strong>You are opted out</strong> (since ${escapeHtml(optOut.optedOutAt.toISOString().slice(0, 10))}). ` +
         "KoolBot does not record your messages, reactions, poll votes or voice sessions, " +
         "and no longer adds you to other members' voice history. Older entries in other " +
         "members' records can still mention you.</p>",
-      '<p class="muted">What was stored before you opted out is still there, and still shows on ' +
+      '<p class="kb-help">What was stored before you opted out is still there, and still shows on ' +
         `leaderboards, digests and your Rewind — ${removeIt}. Opting back ` +
         "in starts tracking again from that moment (time in voice counts from the next channel " +
         "you join); nothing from the time you were opted out can be restored, because it was " +
         "never recorded.</p>",
-      '<form method="POST" action="/me/privacy/tracking" class="stack">',
+      '<form method="POST" action="/me/privacy/tracking" class="kb-row">',
       csrf,
       '<input type="hidden" name="action" value="opt-in">',
-      '<div class="form-actions"><button class="btn" type="submit">Opt back in to tracking</button></div>',
+      '<button class="kb-btn" type="submit">Opt back in to tracking</button>',
       "</form>",
       "</div>",
+      "</section>",
     ].join("");
   }
   return [
-    '<div id="tracking" class="card">',
-    "<h2>Activity tracking</h2>",
+    '<section id="tracking" class="kb-panel" aria-labelledby="tracking-title">',
+    head,
+    '<div class="kb-panel__body kb-stack">',
     "<p>KoolBot records your messages, reactions, poll votes and time in voice channels " +
       "to power stats, leaderboards, achievements, digests and Rewind. You can opt out.</p>",
     "<ul>",
@@ -1687,12 +1725,13 @@ function renderTrackingOptOutCard(
     "<li>KoolBot has to remember that you opted out, so the opt-out itself is stored — it is " +
       "the one thing a reset does not remove. Opting back in deletes it.</li>",
     "</ul>",
-    '<form method="POST" action="/me/privacy/tracking" class="stack">',
+    '<form method="POST" action="/me/privacy/tracking" class="kb-row">',
     csrf,
     '<input type="hidden" name="action" value="opt-out">',
-    '<div class="form-actions"><button class="btn" type="submit">Opt out of tracking</button></div>',
+    '<button class="kb-btn" type="submit">Opt out of tracking</button>',
     "</form>",
     "</div>",
+    "</section>",
   ].join("");
 }
 
@@ -1725,7 +1764,7 @@ function renderPrivacyResetCard(
   const word = PRIVACY_RESET_CONFIRM_WORD;
   const cooldown =
     reset.cooldownHours > 0
-      ? `<p class="muted">You can reset once every ${reset.cooldownHours} hour${reset.cooldownHours === 1 ? "" : "s"}.</p>`
+      ? `<p class="kb-help">You can reset once every ${reset.cooldownHours} hour${reset.cooldownHours === 1 ? "" : "s"}.</p>`
       : "";
   return [
     '<section id="reset" class="kb-panel kb-panel--danger" aria-labelledby="reset-title">',
@@ -1771,15 +1810,16 @@ function renderPrivacyTable(
   const body = rows
     .map(
       (row) =>
-        `<tr><th scope="row" class="mono">${escapeHtml(row.collection)}</th>` +
+        `<tr><th scope="row" class="kb-mono">${escapeHtml(row.collection)}</th>` +
         `<td>${escapeHtml(row.note)}</td></tr>`,
     )
     .join("");
+  // The panel's title names the table; the caption says it to a screen reader.
   return (
-    '<table class="prefs-table">' +
-    `<caption class="muted" style="text-align:left;padding:.25rem .5rem">${escapeHtml(caption)}</caption>` +
+    '<div class="kb-panel__body kb-panel__body--flush"><table class="kb-table">' +
+    `<caption class="kb-visually-hidden">${escapeHtml(caption)}</caption>` +
     `<thead><tr><th scope="col">Collection</th><th scope="col">${escapeHtml(noteHeading)}</th></tr></thead>` +
-    `<tbody>${body}</tbody></table>`
+    `<tbody>${body}</tbody></table></div>`
   );
 }
 
@@ -1799,17 +1839,21 @@ export function renderUserPrivacyBody(opts: PrivacyPageBodyOptions): string {
     label: "self-service data export",
   });
   const download = opts.featureEnabled
-    ? '<div class="form-actions">' +
-      '<a class="btn" href="/me/privacy/export" download>Download my data (JSON)</a>' +
-      '<span class="muted">Served as a file, not a page. Large histories may take a moment.</span>' +
+    ? '<div class="kb-row">' +
+      '<a class="kb-btn kb-btn--primary" href="/me/privacy/export" download>Download my data (JSON)</a>' +
+      '<span class="kb-help">Served as a file, not a page. Large histories may take a moment.</span>' +
       "</div>"
     : "";
   return [
-    "<h1>Privacy</h1>",
-    '<p class="subtitle">What KoolBot stores about you on this server, and how to get a copy of it.</p>',
+    '<div class="kb-stack">',
+    pageHeader(
+      "Privacy",
+      "What KoolBot stores about you on this server, and how to get a copy of it.",
+    ),
     disabledNotice,
-    '<div class="card">',
-    "<h2>Download your data</h2>",
+    '<section class="kb-panel" aria-labelledby="download-title">',
+    '<header class="kb-panel__head"><h2 class="kb-panel__title" id="download-title">Download your data</h2></header>',
+    '<div class="kb-panel__body kb-stack">',
     "<p>One JSON file with every row KoolBot holds that is about <strong>you</strong> — " +
       "your voice history, activity counters, preferences, quotes, RSVPs and reminders. " +
       "It is a record" +
@@ -1817,33 +1861,34 @@ export function renderUserPrivacyBody(opts: PrivacyPageBodyOptions): string {
         ? "."
         : ', not a recap: for the readable version of your year, see <a href="/me/rewind">Rewind</a>.') +
       "</p>",
-    `<p class="muted">Long histories are capped at ${opts.maxItems} entries per collection; ` +
+    `<p class="kb-help">Long histories are capped at ${opts.maxItems} entries per collection; ` +
       "anything clipped is listed under <code>truncated</code> in the file. Each download is " +
       "recorded in the server's Web UI audit log.</p>",
     download,
     "</div>",
-    '<div class="card">',
-    "<h2>What's in the file</h2>",
+    "</section>",
+    '<section class="kb-panel" aria-labelledby="included-title">',
+    '<header class="kb-panel__head"><h2 class="kb-panel__title" id="included-title">What\'s in the file</h2></header>',
     renderPrivacyTable(
       "Collections included in your export.",
       opts.included,
       "What it holds",
     ),
-    '<p class="muted" style="margin-top:.75rem">Where a row is shared with other members ' +
+    '<footer class="kb-panel__foot">Where a row is shared with other members ' +
       "(poll turnout, event RSVPs, leaderboard role rosters), the export contains only your " +
-      "own slice of it — never the other members on that row.</p>",
-    "</div>",
-    '<div class="card">',
-    "<h2>What's not in it</h2>",
-    "<p>Some things KoolBot stores are deliberately out of reach of this download.</p>",
+      "own slice of it — never the other members on that row.</footer>",
+    "</section>",
+    '<section class="kb-panel" aria-labelledby="excluded-title">',
+    '<header class="kb-panel__head"><h2 class="kb-panel__title" id="excluded-title">What\'s not in it</h2></header>',
+    '<div class="kb-panel__body"><p>Some things KoolBot stores are deliberately out of reach of this download.</p></div>',
     renderPrivacyTable(
       "Collections deliberately excluded from your export.",
       opts.excluded,
       "Why it's excluded",
     ),
-    '<p class="muted" style="margin-top:.75rem">Moderation records in particular are not ' +
-      "self-service: ask a server moderator if you need to know where you stand.</p>",
-    "</div>",
+    '<footer class="kb-panel__foot">Moderation records in particular are not ' +
+      "self-service: ask a server moderator if you need to know where you stand.</footer>",
+    "</section>",
     opts.trackingOptOut &&
     ((opts.featureEnabled && opts.trackingOptOut.offered) ||
       opts.trackingOptOut.optedOutAt)
@@ -1852,5 +1897,6 @@ export function renderUserPrivacyBody(opts: PrivacyPageBodyOptions): string {
     resetAvailable && opts.reset
       ? renderPrivacyResetCard(opts.reset, opts.trackingOptOut)
       : "",
+    "</div>",
   ].join("");
 }
