@@ -187,7 +187,9 @@ const STYLE = [
   ".prefs-table{width:100%;border-collapse:collapse}",
   ".prefs-table th,.prefs-table td{text-align:left;padding:.6rem .5rem;vertical-align:top;border-bottom:1px solid var(--chrome)}",
   ".prefs-table th{font-weight:600;color:var(--text-secondary);font-size:.85rem;text-transform:uppercase;letter-spacing:.04em}",
-  ".prefs-table tr:last-child td{border-bottom:0}",
+  // A row header (`th scope=row`) reads as a body cell; only assistive tech hears the difference.
+  ".prefs-table tbody th[scope=row]{font-weight:500;color:inherit;font-size:inherit;text-transform:none;letter-spacing:normal}",
+  ".prefs-table tr:last-child td,.prefs-table tr:last-child th[scope=row]{border-bottom:0}",
   // Control borders use --control (3.97:1); the hairline --border was 1.58:1 (#855).
   `select.tz-select{width:100%;max-width:28rem;background:var(--bg);color:var(--text);border:1px solid var(--control);border-radius:4px;padding:.45rem .5rem;font-size:.9rem}`,
   ".tz-preview{margin-top:.75rem;font-size:.9rem;color:var(--text-secondary)}",
@@ -1731,7 +1733,7 @@ function renderPrivacyTable(
   const body = rows
     .map(
       (row) =>
-        `<tr><td class="mono">${escapeHtml(row.collection)}</td>` +
+        `<tr><th scope="row" class="mono">${escapeHtml(row.collection)}</th>` +
         `<td>${escapeHtml(row.note)}</td></tr>`,
     )
     .join("");

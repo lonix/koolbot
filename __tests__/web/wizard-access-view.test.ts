@@ -119,7 +119,7 @@ describe("renderAccessReview", () => {
     expect(html).toContain("Event host");
     // The role cell is a mention, escaped (#1394).
     expect(html).toContain(
-      '<td><span class="kb-mention">@&lt;img src=x onerror=alert(1)&gt;</span></td>',
+      '<th scope="row"><span class="kb-mention">@&lt;img src=x onerror=alert(1)&gt;</span></th>',
     );
   });
 

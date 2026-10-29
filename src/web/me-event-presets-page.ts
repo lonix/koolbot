@@ -34,7 +34,7 @@ export interface MyEventPresetsPageProps {
 function presetRow(entry: PresetEntry, csrfInput: string): string {
   const id = encodeURIComponent(entry.id);
   return `<tr>
-<td>${escapeHtml(entry.label)}${entry.description ? `<br><span class="muted">${escapeHtml(entry.description)}</span>` : ""}</td>
+<th scope="row">${escapeHtml(entry.label)}${entry.description ? `<br><span class="muted">${escapeHtml(entry.description)}</span>` : ""}</th>
 <td>${groupSummary(entry)}</td>
 <td class="actions"><a class="btn" href="/me/events/presets?edit=${id}#editor" aria-label="Edit ${escapeHtml(entry.label)}">Edit</a>
 <form method="POST" action="/me/events/presets/delete" class="inline" data-confirm="Delete your preset '${escapeHtml(entry.label)}'? Events that already used it keep their groups. A copy an admin published to the server library stays.">${csrfInput}

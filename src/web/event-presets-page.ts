@@ -254,7 +254,7 @@ function entryRow(entry: PresetEntry, csrfInput: string): string {
   </form>`
     : "";
   return `<tr>
-<td>${escapeHtml(entry.label)}${entry.description ? `<br><span class="muted">${escapeHtml(entry.description)}</span>` : ""}</td>
+<th scope="row">${escapeHtml(entry.label)}${entry.description ? `<br><span class="muted">${escapeHtml(entry.description)}</span>` : ""}</th>
 <td>${library ? "Your preset" : "Built-in"}</td>
 <td>${groupSummary(entry)}</td>
 <td><span class="tag ${entry.enabled ? "tag-on" : "tag-off"}">${entry.enabled ? "on" : "off"}</span></td>
@@ -491,7 +491,7 @@ function hostPresetRow(
     <button type="submit" class="btn" aria-label="Publish ${escapeHtml(row.entry.label)}">Publish</button>
   </form>`;
   return `<tr>
-<td>${escapeHtml(row.entry.label)}${row.entry.description ? `<br><span class="muted">${escapeHtml(row.entry.description)}</span>` : ""}</td>
+<th scope="row">${escapeHtml(row.entry.label)}${row.entry.description ? `<br><span class="muted">${escapeHtml(row.entry.description)}</span>` : ""}</th>
 <td>${owner}</td>
 <td>${groupSummary(row.entry)}</td>
 <td>${published ? '<span class="tag tag-on">published</span>' : '<span class="tag tag-off">not published</span>'}</td>

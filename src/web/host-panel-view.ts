@@ -235,7 +235,7 @@ function renderGroupsFold(e: HostPanelEvent): string {
   const body = e.groups
     .map(
       (g) =>
-        `<tr><td>${g.marker ? `${escapeHtml(g.marker)} ` : ""}${escapeHtml(g.name)}</td>` +
+        `<tr><th scope="row">${g.marker ? `${escapeHtml(g.marker)} ` : ""}${escapeHtml(g.name)}</th>` +
         `<td>${escapeHtml(KIND_LABEL[g.kind] ?? g.kind)}</td>` +
         `<td>${g.size === null ? '<span class="kb-muted">No limit</span>' : escapeHtml(g.size)}</td>` +
         `<td>${g.tag ? escapeHtml(g.tag) : '<span class="kb-muted">None</span>'}</td>` +
