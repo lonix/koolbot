@@ -40,6 +40,8 @@ const mockDeleteMany = jest.fn<() => Promise<unknown>>();
 const mockInsertMany = jest.fn<() => Promise<unknown>>();
 const mockCountDocuments = jest.fn<() => Promise<number>>();
 const mockLean = jest.fn<() => Promise<unknown>>();
+const mockFind = jest.fn<(q: unknown) => Promise<unknown[]>>();
+const mockBulkWrite = jest.fn<(ops: unknown[]) => Promise<unknown>>();
 
 /** Documents created via `new BotStatusMessage({...})`. */
 const created: Array<Record<string, unknown>> = [];
@@ -59,6 +61,13 @@ class MockBotStatusMessage {
   static deleteMany = mockDeleteMany;
   static insertMany = mockInsertMany;
   static countDocuments = mockCountDocuments;
+  static bulkWrite = mockBulkWrite;
+  // `.find(...).sort(...).lean()` — the pool a move re-reads.
+  static find = (
+    q: unknown,
+  ): { sort: () => { lean: () => Promise<unknown> } } => ({
+    sort: () => ({ lean: () => mockFind(q) }),
+  });
   // `.findOne(...).sort(...).lean()` — the append-mode order lookup.
   static findOne = (): { sort: () => { lean: () => Promise<unknown> } } => ({
     sort: () => ({ lean: mockLean }),
@@ -143,6 +152,8 @@ beforeEach(async () => {
   mockInsertMany.mockResolvedValue([]);
   mockCountDocuments.mockResolvedValue(0);
   mockLean.mockResolvedValue(null);
+  mockFind.mockResolvedValue([]);
+  mockBulkWrite.mockResolvedValue({});
   harness = await startAdminHarness([
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
@@ -187,17 +198,15 @@ describe("POST /bot-status/pool/:pool/add", () => {
     expect(created).toHaveLength(0);
   });
 
-  it("marks empty status text and keeps the order that was typed", async () => {
+  it("marks empty status text", async () => {
     const res = await harness.post("/bot-status/pool/lonely/add", {
       text: "   ",
-      order: "4",
     });
     const r = await refusal(res);
     expect(r.invalidIds).toEqual(["bot-status-add-lonely-text"]);
     expect(r.errorLines["bot-status-add-lonely-text-error"]).toBe(
       "Enter the status text.",
     );
-    expect(r.html).toContain('value="4"');
     expect(created).toHaveLength(0);
     expect(mockRecordAudit).not.toHaveBeenCalled();
   });
@@ -228,31 +237,17 @@ describe("POST /bot-status/pool/:pool/add", () => {
     );
   });
 
-  it("marks an out-of-range order and keeps the text", async () => {
-    const res = await harness.post("/bot-status/pool/lonely/add", {
-      text: "alone",
-      order: "50000",
-    });
-    const r = await refusal(res);
-    expect(r.invalidIds).toEqual(["bot-status-add-lonely-order"]);
-    expect(r.errorLines["bot-status-add-lonely-order-error"]).toBe(
-      "Use a whole number from -1000 to 10000.",
-    );
-    expect(r.html).toContain('value="alone"');
-    expect(r.html).toContain('value="50000"');
-    expect(created).toHaveLength(0);
-  });
-
-  it("stores the entry, refreshes the live pools and audits it", async () => {
+  it("stores the entry last in its pool, ignoring a posted order, refreshes the live pools and audits it", async () => {
+    mockLean.mockResolvedValue({ order: 7 });
     const res = await harness.post("/bot-status/pool/lonely/add", {
       text: "  waiting alone  ",
-      order: "5",
+      order: "-1000",
     });
     expect(created[0]).toMatchObject({
       guildId: session.guildId,
       pool: "lonely",
       text: "waiting alone",
-      order: 5,
+      order: 8,
       createdBy: session.discordUserId,
     });
     expect(mockRefreshStatusPools).toHaveBeenCalled();
@@ -261,7 +256,7 @@ describe("POST /bot-status/pool/:pool/add", () => {
       action: "bot-status.add",
       targetId: "entry-new",
       result: "success",
-      details: { pool: "lonely", order: 5 },
+      details: { pool: "lonely", order: 8 },
     });
   });
 
@@ -275,7 +270,7 @@ describe("POST /bot-status/pool/:pool/add", () => {
   });
 });
 
-describe("POST /bot-status/entry/:id/{update,order,delete}", () => {
+describe("POST /bot-status/entry/:id/{update,delete}", () => {
   it("treats a malformed id as not-found instead of a CastError 500", async () => {
     mockFindById.mockRejectedValue(new Error("Cast to ObjectId failed"));
     const res = await harness.post("/bot-status/entry/not-an-id/update", {
@@ -349,30 +344,6 @@ describe("POST /bot-status/entry/:id/{update,order,delete}", () => {
       targetId: "entry-1",
       result: "success",
     });
-  });
-
-  it("records the before/after order on a reorder", async () => {
-    const entry = ownedEntry({ order: 3 });
-    mockFindById.mockResolvedValue(entry);
-    const res = await harness.post("/bot-status/entry/entry-1/order", {
-      order: "9",
-    });
-    expect(entry.order).toBe(9);
-    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
-      "3 → 9",
-    );
-    expect(lastAudit()).toMatchObject({
-      action: "bot-status.reorder",
-      details: { from: 3, to: 9 },
-    });
-  });
-
-  it("validates the order before looking the entry up", async () => {
-    const res = await harness.post("/bot-status/entry/entry-1/order", {
-      order: "50000",
-    });
-    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
-    expect(mockFindById).not.toHaveBeenCalled();
   });
 
   it("deletes an owned entry and refreshes the pools", async () => {
@@ -511,5 +482,144 @@ describe("POST /bot-status/pool/:pool/seed", () => {
       action: "bot-status.seed",
       result: "failure",
     });
+  });
+});
+
+describe("POST /bot-status/entry/:id/move", () => {
+  const ids = ["e-a", "e-b", "e-c"];
+  /** A pool stored as `[e-a, e-b, e-c]` with the given order numbers. */
+  function stored(orders: number[] = [0, 1, 2]): void {
+    mockFind.mockResolvedValue(
+      ids.map((id, i) => ({ _id: id, order: orders[i] })),
+    );
+    mockFindById.mockResolvedValue(ownedEntry({ _id: "e-b" }));
+  }
+  const move = (
+    id: string,
+    from: number,
+    to: number,
+    count = 3,
+  ): Promise<Awaited<ReturnType<AdminHarness["post"]>>> =>
+    harness.post(`/bot-status/entry/${id}/move`, {
+      from: String(from),
+      to: String(to),
+      count: String(count),
+    });
+  const written = (): Array<{ id: unknown; order: number }> =>
+    (
+      mockBulkWrite.mock.calls[0][0] as Array<{
+        updateOne: {
+          filter: { _id: unknown };
+          update: { $set: { order: number } };
+        };
+      }>
+    ).map((op) => ({
+      id: op.updateOne.filter._id,
+      order: op.updateOne.update.$set.order,
+    }));
+
+  it("moves an entry up, writes only the rows that changed and refreshes the live pools", async () => {
+    stored();
+    const res = await move("e-b", 1, 0);
+    expect(res.status).toBe(303);
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("#entry-e-b");
+    const flash = parseFlashRedirect(location.split("#")[0]);
+    expect(flash.type).toBe("ok");
+    expect(flash.msg).toContain("position 1 of 3");
+    expect(flash.msg).toContain("picks a message at random");
+    expect(written()).toEqual([
+      { id: "e-b", order: 0 },
+      { id: "e-a", order: 1 },
+    ]);
+    expect(mockRefreshStatusPools).toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      action: "bot-status.reorder",
+      targetId: "e-b",
+      result: "success",
+      details: { pool: "single", from: 1, to: 0, renumbered: 2 },
+    });
+  });
+
+  it("moves an entry down to the last place", async () => {
+    stored();
+    await move("e-b", 1, 2);
+    expect(written()).toEqual([
+      { id: "e-c", order: 1 },
+      { id: "e-b", order: 2 },
+    ]);
+  });
+
+  it("ends ties: every entry gets its own place", async () => {
+    stored([4, 4, 4]);
+    await move("e-b", 1, 0);
+    expect(written()).toEqual([
+      { id: "e-b", order: 0 },
+      { id: "e-a", order: 1 },
+      { id: "e-c", order: 2 },
+    ]);
+  });
+
+  it("re-reads only the entry's own pool in this guild", async () => {
+    stored();
+    await move("e-b", 1, 0);
+    expect(mockFind).toHaveBeenCalledWith({
+      guildId: session.guildId,
+      pool: "single",
+    });
+  });
+
+  it("refuses a move from a stale page and writes nothing", async () => {
+    stored();
+    const res = await move("e-b", 1, 0, 2);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("warn");
+    expect(flash.msg).toContain("nothing was moved");
+    expect(mockBulkWrite).not.toHaveBeenCalled();
+    expect(mockRefreshStatusPools).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      result: "failure",
+      errorMessage: "stale",
+    });
+  });
+
+  it("refuses a place past the end of the pool", async () => {
+    stored();
+    await move("e-b", 1, 3);
+    expect(mockBulkWrite).not.toHaveBeenCalled();
+  });
+
+  it("changes nothing when the entry is already at that place", async () => {
+    stored();
+    const res = await move("e-b", 1, 1);
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockBulkWrite).not.toHaveBeenCalled();
+  });
+
+  it("reads the move before looking the entry up", async () => {
+    const res = await harness.post("/bot-status/entry/e-b/move", {
+      from: "1",
+      to: "up",
+      count: "3",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+    expect(mockFindById).not.toHaveBeenCalled();
+  });
+
+  it("refuses an entry owned by another guild", async () => {
+    mockFindById.mockResolvedValue(ownedEntry({ guildId: "another-guild" }));
+    const res = await move("e-b", 1, 0);
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+    expect(mockBulkWrite).not.toHaveBeenCalled();
+  });
+
+  it("turns a write error into a flash and a failure audit", async () => {
+    stored();
+    mockBulkWrite.mockRejectedValue(new Error("db down"));
+    const res = await move("e-b", 1, 0);
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+      "db down",
+    );
+    expect(lastAudit()).toMatchObject({ result: "failure" });
   });
 });

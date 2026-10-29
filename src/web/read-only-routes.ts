@@ -2071,7 +2071,7 @@ export function createReadOnlyRouter(
       // `null` (not `[]`) on failure: rendering schema defaults here would
       // let a save overwrite the real values, so the card is withheld.
       config.getAll().catch(() => null),
-      Notice.find({}).sort({ category: 1, order: 1 }).lean(),
+      Notice.find({}).sort({ category: 1, order: 1, _id: 1 }).lean(),
       fetchChannelData(client, common.guildId),
     ]);
     const channelNames = channelData.names;
@@ -2445,7 +2445,7 @@ export function createReadOnlyRouter(
   ): Promise<string> => {
     const common = await commonFromReq(req);
     const rows = await BotStatusMessage.find({ guildId: common.guildId })
-      .sort({ pool: 1, order: 1 })
+      .sort({ pool: 1, order: 1, _id: 1 })
       .lean();
 
     const pools = BOT_STATUS_POOLS.map((pool) => {

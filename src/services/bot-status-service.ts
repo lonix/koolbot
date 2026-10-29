@@ -76,7 +76,7 @@ export class BotStatusService {
         this.statusPools = defaultStatusPools();
       } else {
         const rows = await BotStatusMessage.find({ guildId })
-          .sort({ pool: 1, order: 1 })
+          .sort({ pool: 1, order: 1, _id: 1 })
           .lean();
 
         const next = defaultStatusPools();

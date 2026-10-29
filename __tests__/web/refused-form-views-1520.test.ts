@@ -238,7 +238,7 @@ describe("the per-row edit forms", () => {
       notices({
         formId: "notice-edit-n1",
         errors: { title: "Enter a title." },
-        values: { title: "", content: "New", category: "rules", order: "9" },
+        values: { title: "", content: "New", category: "rules" },
       }),
     );
     const open = d.querySelectorAll("details.edit-details[open]");
@@ -249,9 +249,8 @@ describe("the per-row edit forms", () => {
     expect(
       open[0].querySelector<HTMLSelectElement>("[name=category]")?.value,
     ).toBe("rules");
-    expect(open[0].querySelector<HTMLInputElement>("[name=order]")?.value).toBe(
-      "9",
-    );
+    // Order is not a field any more (#1540).
+    expect(open[0].querySelector("[name=order]")).toBeNull();
     const other = d.querySelector(
       'form[action="/admin/notices/n0/update"] [name=title]',
     ) as HTMLInputElement;
@@ -310,22 +309,14 @@ describe("the Presence add and import forms", () => {
       presence({
         formId: "bot-status-add-multiple",
         errors: { text: "This pool needs the {count} placeholder." },
-        values: { text: "people", order: "2" },
+        values: { text: "people" },
       }),
     );
     const invalid = d.querySelectorAll('[aria-invalid="true"]');
     expect(invalid).toHaveLength(1);
     expect(invalid[0].id).toBe("bot-status-add-multiple-text");
-    expect(
-      d.querySelector<HTMLInputElement>(
-        'form[action="/admin/bot-status/pool/multiple/add"] [name=order]',
-      )?.value,
-    ).toBe("2");
-    expect(
-      d.querySelector<HTMLInputElement>(
-        'form[action="/admin/bot-status/pool/lonely/add"] [name=order]',
-      )?.value,
-    ).toBe("0");
+    // Order is not a field any more (#1540).
+    expect(d.querySelector("[name=order]")).toBeNull();
   });
 
   it("opens the Import / export section of the refused pool, with the typed list", () => {

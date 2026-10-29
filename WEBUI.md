@@ -1029,6 +1029,18 @@ The **Notices** page's card (#972) edits `notices.enabled`, the notices channel
 are already posted: after saving, use **Resync notices to channel** to repost
 them in the new channel. The status line keeps the total notice count.
 
+**Reordering (#1540).** Notices post to the channel by category, then in the order the page lists them.
+Each row has **Move up** and **Move down** buttons, which work without JavaScript, and a drag handle that
+upgrades mouse use: dropping a row on another row of the same category submits the same form. The server
+renumbers the whole category on every move, so no two notices share a place, and it refuses a move made
+from a page that no longer matches the list (the page then shows the current order). A new notice goes last
+in its category, and so does a notice moved to another category. A move does not touch the channel: the new
+order shows there after **Resync notices to channel**.
+
+The **Presence** page lists each pool's messages with the same **Move up** and **Move down** buttons and
+drag handle. The bot picks a message at random, so the order only decides how a pool reads on the page and in
+its export. A new entry goes last in its pool.
+
 Below the status line, the **Notices** page shows the same bot-permission notice (#1489) for the notices
 channel: posting, keeping the channel clean, and pinning the header (only while the header pin is on),
 under the same rules as the **Quotes** page.

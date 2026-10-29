@@ -545,8 +545,6 @@ const STYLE = [
   ".helper{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.4rem .6rem;font-size:.85rem}",
   ".helper summary{cursor:pointer;color:var(--text-secondary);font-weight:600}",
   ".helper ul{margin:.4rem 0;padding-left:1.2rem}",
-  "form.inline-order{display:flex;gap:.25rem;align-items:center;margin:0}",
-  `form.inline-order input[type=number]{width:5rem;background:var(--bg);color:var(--text);border:1px solid var(--control);border-radius:6px;padding:.25rem .4rem;font:inherit;font-size:.85rem}`,
   ".edit-details{flex:0 0 100%;margin-bottom:.35rem}",
   ".edit-details form.stack{margin-top:.5rem}",
   "button[disabled]{opacity:.5;cursor:not-allowed}",
