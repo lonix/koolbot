@@ -2,8 +2,9 @@
 /**
  * The feature pages use the setting controls (#1533): a schedule is a picker, a
  * colour a swatch with an empty-state box, a poll duration a bounded box and the
- * poll answers one box each. Checked on the DOM the page sends, with the form
- * posting as a browser without JavaScript would (every named control).
+ * poll answers one box each. Checked on the DOM the page sends. Posting the
+ * rendered forms without a script is checked in the write-routes tests
+ * (`rendered-form.ts` serialises the markup as a browser would).
  */
 import { describe, it, expect } from "@jest/globals";
 import { JSDOM } from "jsdom";

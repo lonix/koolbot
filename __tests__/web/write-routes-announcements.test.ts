@@ -1,3 +1,4 @@
+/* global HTMLInputElement */
 /**
  * Route-handler tests for the Announcements write router (issue #849).
  *
@@ -78,6 +79,7 @@ const { requireCsrf } = await import("../../src/web/csrf.js");
 const { registerFormPage } = await import("../../src/web/form-pages.js");
 const { renderAnnouncementsPage } =
   await import("../../src/web/admin-views.js");
+const { renderedFormBody, setField } = await import("./rendered-form.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
 
 const client = { user: { id: "bot" } } as unknown as Client;
@@ -673,5 +675,74 @@ describe("POST /announcements/post-once and /post-vc-stats", () => {
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("no channel configured");
     expect(lastAudit()).toMatchObject({ result: "failure" });
+  });
+});
+
+// A browser without JavaScript posts what the page rendered. The page comes
+// from a refused one-off post, whose other form is drawn untouched.
+describe("the announcement forms as rendered, posted without a script", () => {
+  const page = async (): Promise<string> =>
+    (await harness.post("/announcements/post-once", {})).text();
+
+  it("creates a plain announcement from an untouched create form: the default schedule, no embed", async () => {
+    const body = renderedFormBody(
+      await page(),
+      "/announcements/create",
+      (f) => {
+        setField(f, "channelId", "channel-9");
+        setField(f, "message", "Hello");
+      },
+    );
+    // The swatch always posts a colour; the ticked No colour box is what says none.
+    expect(body).toMatchObject({
+      cron: "0 9 * * *",
+      cron_mode: "daily",
+      embedColor: "#99aab5",
+      use_default_embedColor: "true",
+    });
+    await harness.post("/announcements/create", body);
+    expect(mockCreateAnnouncement.mock.calls[0][0]).toMatchObject({
+      cronSchedule: "0 9 * * *",
+      embedData: undefined,
+    });
+  });
+
+  it("builds a weekly schedule and takes the colour once its box is unticked", async () => {
+    const body = renderedFormBody(
+      await page(),
+      "/announcements/create",
+      (f) => {
+        setField(f, "channelId", "channel-9");
+        setField(f, "message", "Hello");
+        setField(f, "cron_mode", "weekly");
+        setField(f, "cron_dow", "5");
+        setField(f, "embedColor", "#ff8800");
+        (
+          f.querySelector("[name=use_default_embedColor]") as HTMLInputElement
+        ).checked = false;
+      },
+    );
+    expect(body.use_default_embedColor).toBeUndefined();
+    await harness.post("/announcements/create", body);
+    expect(mockCreateAnnouncement.mock.calls[0][0]).toMatchObject({
+      cronSchedule: "0 9 * * 5",
+      embedData: { color: 0xff8800 },
+    });
+  });
+
+  it("posts the one-off form without a colour while its box is ticked", async () => {
+    const res = await harness.post("/announcements/create", {});
+    const body = renderedFormBody(
+      await res.text(),
+      "/announcements/post-once",
+      (f) => {
+        setField(f, "channelId", "channel-9");
+        setField(f, "message", "Hello");
+      },
+    );
+    await harness.post("/announcements/post-once", body);
+    expect(mockPostOnce).toHaveBeenCalledWith(
+      expect.objectContaining({ channelId: "channel-9", embedData: undefined }),
+    );
   });
 });

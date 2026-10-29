@@ -95,6 +95,7 @@ const { createRoleGroupsRouter, permissionsFromNames } =
   await import("../../src/web/routes/write/role-groups.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
 const { registerFormPage } = await import("../../src/web/form-pages.js");
+const { renderedFormBody, setField } = await import("./rendered-form.js");
 const { renderRoleGroupsPage } =
   await import("../../src/web/role-groups-views.js");
 const { signRoleDeleteReview } = await import("../../src/web/review-token.js");
@@ -425,6 +426,37 @@ describe("a refused Role groups form (#1523)", () => {
     expect(html).toMatch(/name="perm" value="ManageMessages" checked/);
     expect(html).toMatch(/name="editPermissions" value="1" checked/);
     expect(svc.create).not.toHaveBeenCalled();
+  });
+
+  // A browser without JavaScript posts what the page rendered (the box ticked, the swatch grey).
+  it("creates a group with no colour from an untouched Add form, and keeps the colour of an untouched Edit form", async () => {
+    await mount();
+    const refused = await harness.post("/role-groups/create", {
+      name: "x",
+      colour: "bad",
+    });
+    const html = await refused.text();
+    const add = renderedFormBody(html, "/role-groups/create", (f) =>
+      setField(f, "name", "Helpers2"),
+    );
+    expect(add).toMatchObject({
+      colour: "#99aab5",
+      use_default_colour: "true",
+    });
+    await harness.post("/role-groups/create", add);
+    expect(svc.create).toHaveBeenCalledWith(
+      "guild-1",
+      expect.objectContaining({ name: "Helpers2", colour: null }),
+    );
+    // The stored group has no colour, so its Edit form is drawn with the box ticked.
+    const edit = renderedFormBody(html, "/role-groups/g1/edit");
+    expect(edit.use_default_colour).toBe("true");
+    await harness.post("/role-groups/g1/edit", edit);
+    expect(svc.update).toHaveBeenCalledWith(
+      "guild-1",
+      "g1",
+      expect.objectContaining({ colour: null }),
+    );
   });
 
   // The swatch always posts a colour; the box ("No colour" on Add) wins over it.

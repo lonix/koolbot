@@ -79,6 +79,7 @@ const { createPollsRouter } =
 const { requireCsrf } = await import("../../src/web/csrf.js");
 const { registerFormPage } = await import("../../src/web/form-pages.js");
 const { renderPollsPage } = await import("../../src/web/admin-views.js");
+const { renderedFormBody, setField } = await import("./rendered-form.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
 
 const client = { user: { id: "bot" } } as unknown as Client;
@@ -793,5 +794,98 @@ describe("POST /polls/items/import-text", () => {
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("unparseable");
+  });
+});
+
+// A browser without JavaScript posts what the page rendered. The page comes
+// from a refused post, whose other forms are drawn untouched.
+describe("the polls forms as rendered, posted without a script", () => {
+  const page = async (): Promise<string> =>
+    (await harness.post("/polls/items/create", {})).text();
+
+  it("creates the default schedule from an untouched create form", async () => {
+    const body = renderedFormBody(
+      await page(),
+      "/polls/schedules/create",
+      (f) => setField(f, "channelId", "channel-9"),
+    );
+    expect(body).toMatchObject({
+      cron: "0 12 * * *",
+      cron_mode: "daily",
+      durationHours: "24",
+    });
+    await harness.post("/polls/schedules/create", body);
+    expect(mockCreateSchedule.mock.calls[0][0]).toMatchObject({
+      channelId: "channel-9",
+      cronSchedule: "0 12 * * *",
+      pollDuration: 24,
+    });
+  });
+
+  it("builds a weekly schedule when the mode and weekday are chosen", async () => {
+    const body = renderedFormBody(
+      await page(),
+      "/polls/schedules/create",
+      (f) => {
+        setField(f, "channelId", "channel-9");
+        setField(f, "cron_mode", "weekly");
+        setField(f, "cron_dow", "1");
+        setField(f, "cron_time", "18:45");
+      },
+    );
+    await harness.post("/polls/schedules/create", body);
+    expect(mockCreateSchedule.mock.calls[0][0]).toMatchObject({
+      cronSchedule: "45 18 * * 1",
+    });
+  });
+
+  it("saves an untouched edit form with the schedule it was drawn with", async () => {
+    const body = renderedFormBody(
+      await page(),
+      "/polls/schedules/sched-1/edit",
+    );
+    await harness.post("/polls/schedules/sched-1/edit", body);
+    expect(mockUpdateSchedule).toHaveBeenCalledWith(
+      "sched-1",
+      expect.objectContaining({
+        channelId: "channel-9",
+        cronSchedule: "0 12 * * 5",
+        pollDuration: 24,
+      }),
+      session.guildId,
+    );
+  });
+
+  it("posts one repeated answers field from the filled boxes, commas kept", async () => {
+    const res = await harness.post("/polls/schedules/create", {});
+    const body = renderedFormBody(
+      await res.text(),
+      "/polls/items/create",
+      (f) => {
+        setField(f, "question", "Best snack?");
+        setField(f, "answers", "Crisps, salted", 0);
+        setField(f, "answers", "Fruit", 1);
+      },
+    );
+    expect(body.answers).toHaveLength(10);
+    await harness.post("/polls/items/create", body);
+    expect(mockCreatePollItem.mock.calls[0][0]).toMatchObject({
+      question: "Best snack?",
+      answers: ["Crisps, salted", "Fruit"],
+    });
+  });
+
+  it("saves an untouched question edit form with its stored answers", async () => {
+    mockListPollItems.mockResolvedValue([{ _id: "item-1" }]);
+    const body = renderedFormBody(await page(), "/polls/items/item-1/edit");
+    await harness.post("/polls/items/item-1/edit", body);
+    expect(mockUpdatePollItem).toHaveBeenCalledWith(
+      "item-1",
+      expect.objectContaining({
+        question: "Stored question?",
+        answers: ["Yes", "No"],
+      }),
+      session.guildId,
+    );
   });
 });
