@@ -106,15 +106,51 @@ describe("Bind an existing role (#1530)", () => {
       "There are no reaction-role messages yet, so this posts a new one.",
     );
     expect(none.querySelector('a[href="/admin/reaction-roles"]')).toBeNull();
-    const unread = bindForm(page({ messages: null }));
-    expect(unread.textContent).toContain(
-      "could not be read, so this posts a new one.",
+  });
+
+  it("falls back to a text box for the message id when the list cannot be read", () => {
+    const form = bindForm(page({ messages: null }));
+    expect(form.querySelector("select[name=messageId]")).toBeNull();
+    const input = form.querySelector(
+      "input[name=messageId]",
+    ) as HTMLInputElement;
+    expect(input.type).toBe("text");
+    expect(input.required).toBe(false);
+    expect(input.maxLength).toBe(30);
+    expect(input.value).toBe("");
+    input.value = "100000000000000042";
+    const win = form.ownerDocument.defaultView as unknown as {
+      FormData: new (f: Element) => { get(n: string): unknown };
+    };
+    expect(new win.FormData(form).get("messageId")).toBe("100000000000000042");
+    expect(form.textContent).toContain("Message ID (optional)");
+    expect(input.closest("label")?.textContent).toContain(
+      "Leave empty to post a new message. The id of an existing reaction-role message adds this mapping to it.",
     );
-    expect(unread.textContent).not.toContain("stored choice");
-    expect(
-      (unread.querySelector("select[name=messageId]") as HTMLSelectElement)
-        .options,
-    ).toHaveLength(1);
+  });
+
+  it("keeps a typed message id as typed when a refused form falls back to the text box", () => {
+    const form = bindForm(
+      page({
+        messages: null,
+        refusedForm: {
+          formId: "reaction-role-bind",
+          errors: { messageId: "That is not a message of mine <b>" },
+          values: { roleId: "", emoji: "🎨", messageId: " 12<3> " },
+        },
+      }),
+    );
+    const input = form.querySelector(
+      "input[name=messageId]",
+    ) as HTMLInputElement;
+    expect(input.value).toBe(" 12<3> ");
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(input.getAttribute("aria-describedby")).toBe(
+      "reaction-role-bind-messageId-error",
+    );
+    expect(form.querySelector("p.kb-field__error")?.textContent).toBe(
+      "That is not a message of mine <b>",
+    );
   });
 
   it("uses the emoji field, keeping the text box that takes custom emoji", () => {
@@ -256,15 +292,6 @@ describe("renderReactionRoleMessageSelect noneLabel (#1530)", () => {
     );
   });
 
-  it("escapes a custom unreadable-list line once", () => {
-    const html = renderReactionRoleMessageSelect("m", "", {
-      messages: null,
-      unreadableNote: "a <b> & c",
-    });
-    expect(html).toContain("a &lt;b&gt; &amp; c");
-    expect(html).not.toContain("&amp;amp;");
-  });
-
   it("escapes a custom empty-list line once", () => {
     const html = renderReactionRoleMessageSelect("m", "", {
       messages: { options: [], truncated: false },
@@ -334,27 +361,21 @@ describe("the notes under the message select when an id is retained (#1530)", ()
       }),
     );
 
-  it.each([
-    ["an empty list", { options: [], truncated: false }],
-    ["an unreadable list", null],
-  ])(
-    "does not promise a new message for %s while one stays selected",
-    (_n, messages) => {
-      const form = refused(messages);
-      const select = form.querySelector(
-        "select[name=messageId]",
-      ) as HTMLSelectElement;
-      expect(select.value).toBe("100000000000000009");
-      const note =
-        form.querySelector(".kb-msgpick .kb-help")?.textContent ?? "";
-      expect(note).toContain("Choose Post a new message to start a new one.");
-      expect(note).not.toContain("this posts a new one");
-    },
-  );
+  it("does not promise a new message for an empty list while one stays selected", () => {
+    const form = refused({ options: [], truncated: false });
+    const select = form.querySelector(
+      "select[name=messageId]",
+    ) as HTMLSelectElement;
+    expect(select.value).toBe("100000000000000009");
+    const note = form.querySelector(".kb-msgpick .kb-help")?.textContent ?? "";
+    expect(note).toContain("Choose Post a new message to start a new one.");
+    expect(note).not.toContain("this posts a new one");
+  });
 
   it("keeps the plain wording when no id is retained", () => {
-    expect(bindForm(page({ messages: null })).textContent).toContain(
-      "could not be read, so this posts a new one.",
-    );
+    expect(
+      bindForm(page({ messages: { options: [], truncated: false } }))
+        .textContent,
+    ).toContain("yet, so this posts a new one.");
   });
 });

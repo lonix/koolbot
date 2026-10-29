@@ -486,8 +486,6 @@ export interface ReactionRoleMessageSelectOptions extends ControlAttrs {
   ariaLabel?: string;
   /** The line shown when the guild has no reaction-role messages yet; the default points at the Reaction Roles page. */
   emptyNote?: string;
-  /** The line shown when the list could not be read; the default says the stored choice is kept, which a new entry does not have. */
-  unreadableNote?: string;
 }
 
 /** What the empty option is called: `{roles}` then mentions the channel. */
@@ -541,9 +539,7 @@ export function renderReactionRoleMessageSelect(
   let note = "";
   if (o.messages === null) {
     note =
-      o.unreadableNote !== undefined
-        ? escapeHtml(o.unreadableNote)
-        : "The list of reaction-role messages could not be read. The stored choice is kept.";
+      "The list of reaction-role messages could not be read. The stored choice is kept.";
   } else if (list.length === 0) {
     note =
       o.emptyNote !== undefined

@@ -4344,21 +4344,29 @@ ${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPicker
         maxLength: 100,
       })}
     </div>${bind.error("emoji")}
-    <div class="kb-field">
+${
+  props.messages
+    ? `    <div class="kb-field">
       <span class="kb-label">Message <span class="muted">(optional — add to an existing picker message)</span></span>
       ${renderReactionRoleMessageSelect("messageId", bind.value("messageId"), {
         ...bind.control("messageId"),
-        messages: props.messages ?? null,
+        messages: props.messages,
         ariaLabel: "Message",
         noneLabel: REACTION_ROLE_MESSAGE_NEW_LABEL,
         emptyNote: bindKeeps
           ? "There are no reaction-role messages yet. Choose Post a new message to start a new one."
           : "There are no reaction-role messages yet, so this posts a new one.",
-        unreadableNote: bindKeeps
-          ? "The list of reaction-role messages could not be read, so the message you entered stays selected. Choose Post a new message to start a new one."
-          : "The list of reaction-role messages could not be read, so this posts a new one.",
       })}
-    </div>${bind.error("messageId")}
+    </div>`
+    : // The list could not be read: a typed id is the only way to reach an existing message.
+      `    <div class="kb-field">
+      <label class="kb-field">
+        <span class="kb-label">Message ID (optional)</span>
+        <input type="text" class="kb-input" name="messageId" maxlength="30"${bind.valueAttr("messageId")}${bind.attrs("messageId")}>
+        <span class="kb-help">Leave empty to post a new message. The id of an existing reaction-role message adds this mapping to it.</span>
+      </label>
+    </div>`
+}${bind.error("messageId")}
     <button type="submit" class="btn btn-primary">Bind existing role</button>
   </form>
 </div>
