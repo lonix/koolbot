@@ -1900,8 +1900,8 @@ describe("/me/voice (#656)", () => {
       expect(
         doc
           .querySelector('form[action="/me/voice/preset/edit"]')!
-          .closest(".card")!
-          .querySelector("h2")!.textContent,
+          .closest(".kb-panel")!
+          .querySelector(".kb-panel__title")!.textContent,
       ).toContain("Squad");
       expect(
         doc

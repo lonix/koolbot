@@ -81,12 +81,6 @@ describe("renderUserPage accessibility (#855)", () => {
     expect(html).not.toContain("#6b7280");
     // --control survives only as the control border, never as text.
     expect(html).not.toContain("color:var(--control)");
-    expect(html).toContain(
-      "border:1px solid var(--control);border-radius:4px;padding:.45rem .5rem",
-    );
-    expect(html).toContain(
-      ".preset-grid input{background:var(--bg);color:var(--text);border:1px solid var(--control);",
-    );
   });
 
   it("leaves the column's gutters and reflow, including the Rewind hero's, to kb.css", () => {
@@ -131,9 +125,9 @@ describe("renderUserVoiceBody (#855)", () => {
       maxPerUser: 5,
     });
     expect(html).toContain(
-      '<h2>Chill <span class="pill"><span aria-hidden="true">⭐</span> Default</span></h2>',
+      '>Chill <span class="kb-badge kb-badge--on"><span aria-hidden="true">⭐</span> Default</span></h3>',
     );
-    expect(html).toContain("<h2>Ranked</h2>");
+    expect(html).toContain(">Ranked</h3>");
   });
 });
 
@@ -488,8 +482,7 @@ describe("renderUserPage layout and shared rules on the design tokens (#1541)", 
   const sheet = (html: string): string =>
     /<style>([\s\S]*?)<\/style>/.exec(html)?.[1] ?? "";
   // Tab-only rules go with the tab that moves to the kb- components (#1508, #1543).
-  const TAB_ONLY =
-    /\.page-nav|\.feature-list|\.prefs-table|\.tz-|\.preset-|\.form-actions/;
+  const TAB_ONLY = /\.page-nav|\.feature-list|\.prefs-table|\.form-actions/;
   const sharedRules = (css: string): string[] =>
     css
       .split("}")
