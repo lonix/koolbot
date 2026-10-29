@@ -14,11 +14,9 @@ const mockTrackerGetInstance = jest.fn(() => ({
 
 const mockGetPrefs = jest.fn();
 const mockGetTimezone = jest.fn();
-const mockGetPrefsWithTimezone = jest.fn();
 const mockPrefsGetInstance = jest.fn(() => ({
   getPrefs: mockGetPrefs,
   getTimezone: mockGetTimezone,
-  getPrefsWithTimezone: mockGetPrefsWithTimezone,
 }));
 
 const mockAchievementsGetInstance = jest.fn(() => ({}));
@@ -133,10 +131,6 @@ describe("DigestService", () => {
       rewind: true,
     });
     mockGetTimezone.mockResolvedValue(null);
-    mockGetPrefsWithTimezone.mockResolvedValue({
-      prefs: { achievements: true, digest: true, rewind: true },
-      timezone: null,
-    });
     mockDigestStateFindOne.mockResolvedValue(null);
     mockDigestStateFindOneAndUpdate.mockResolvedValue({});
     mockUserAchievementsFindOne.mockResolvedValue(null);
@@ -211,9 +205,10 @@ describe("DigestService", () => {
         // 60 minutes — clears min_active_minutes=30
         { userId: "u1", username: "u1", totalTime: 60 * 60 },
       ]);
-      mockGetPrefsWithTimezone.mockResolvedValue({
-        prefs: { achievements: true, digest: false, rewind: true },
-        timezone: null,
+      mockGetPrefs.mockResolvedValue({
+        achievements: true,
+        digest: false,
+        rewind: true,
       });
 
       const svc: ServiceInstance = DigestService.getInstance(makeClient());
@@ -234,9 +229,10 @@ describe("DigestService", () => {
       mockGetTopUsers.mockResolvedValue([
         { userId: "u1", username: "u1", totalTime: 60 * 60 },
       ]);
-      mockGetPrefsWithTimezone.mockResolvedValue({
-        prefs: { achievements: false, digest: false, rewind: false },
-        timezone: null,
+      mockGetPrefs.mockResolvedValue({
+        achievements: false,
+        digest: false,
+        rewind: false,
       });
 
       const svc: ServiceInstance = DigestService.getInstance(makeClient());
@@ -270,6 +266,51 @@ describe("DigestService", () => {
       expect(text).not.toContain("[free](");
       expect(text).toContain("\\<@555\\>");
       expect(text).toContain("\\*\\*b\\*\\*");
+    });
+
+    it("names the server first and the way to stop it in the footer (#1526)", async () => {
+      mockGetTopUsers.mockResolvedValue([
+        { userId: "u1", username: "u1", totalTime: 60 * 60 },
+      ]);
+      const client = {
+        users: { fetch: mockUsersFetch },
+        guilds: { cache: new Map([["guild-1", { name: "Koolbot Dev" }]]) },
+      } as unknown as Client;
+
+      await DigestService.getInstance(client).runNow();
+
+      const payload = mockUserSend.mock.calls[0][0] as {
+        embeds: Array<{
+          data: {
+            title: string;
+            description: string;
+            footer: { text: string };
+          };
+        }>;
+      };
+      const { title, description, footer } = payload.embeds[0].data;
+      expect(title).toBe("📊 Your weekly digest from Koolbot Dev");
+      expect(footer.text).toBe(
+        "KoolBot · Digest · Turn this off in /me → Notifications",
+      );
+      // The window is two Discord timestamps, never a formatted date string.
+      expect(description).toMatch(/<t:\d+:D> – <t:\d+:D>/);
+      expect(description).not.toMatch(/[A-Z][a-z]{2} \d{1,2}/);
+    });
+
+    it("says 'your server' when the guild is not cached (#1526)", async () => {
+      mockGetTopUsers.mockResolvedValue([
+        { userId: "u1", username: "u1", totalTime: 60 * 60 },
+      ]);
+
+      await DigestService.getInstance(makeClient()).runNow();
+
+      const payload = mockUserSend.mock.calls[0][0] as {
+        embeds: Array<{ data: { title: string } }>;
+      };
+      expect(payload.embeds[0].data.title).toBe(
+        "📊 Your weekly digest from your server",
+      );
     });
 
     it("sends a DM and persists DigestState when prefs.digest is true", async () => {
@@ -326,8 +367,8 @@ describe("DigestService", () => {
 
       expect(result!.qualifying).toBe(1);
       expect(result!.sent).toBe(1);
-      expect(mockGetPrefsWithTimezone).toHaveBeenCalledTimes(1);
-      expect(mockGetPrefsWithTimezone).toHaveBeenCalledWith("u1", "guild-1");
+      expect(mockGetPrefs).toHaveBeenCalledTimes(1);
+      expect(mockGetPrefs).toHaveBeenCalledWith("u1", "guild-1");
     });
   });
 
@@ -386,13 +427,10 @@ describe("DigestService", () => {
         { userId: "u1", username: "u1", totalTime: 60 * 60 },
         { userId: "u2", username: "u2", totalTime: 60 * 45 },
       ]);
-      mockGetPrefsWithTimezone.mockImplementation(async (userId: unknown) => ({
-        prefs: {
-          achievements: true,
-          digest: userId !== "u2", // u2 opted out
-          rewind: true,
-        },
-        timezone: null,
+      mockGetPrefs.mockImplementation(async (userId: unknown) => ({
+        achievements: true,
+        digest: userId !== "u2", // u2 opted out
+        rewind: true,
       }));
 
       const svc: ServiceInstance = DigestService.getInstance(makeClient());
@@ -404,7 +442,7 @@ describe("DigestService", () => {
       expect(preview.entries).toHaveLength(1);
       expect(preview.entries[0]).toMatchObject({ username: "u1", rank: 1 });
       // The rendered entry carries the real embed structure (reused builder).
-      expect(preview.entries[0].title).toContain("weekly voice digest");
+      expect(preview.entries[0].title).toContain("weekly digest");
       expect(preview.entries[0].fields.length).toBeGreaterThan(0);
       // Still no side effects.
       expect(mockUserSend).not.toHaveBeenCalled();

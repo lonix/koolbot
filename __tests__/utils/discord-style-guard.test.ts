@@ -89,10 +89,7 @@ const FOOTER_UNRESOLVED_ALLOWED: Record<string, string> = {};
  * Footers that do not start with `KoolBot · ` yet, keyed `file:text`, each with
  * the open issue that removes the entry. Never add one to silence the guard.
  */
-const FOOTER_PREFIX_ALLOWED: Record<string, string> = {
-  "services/digest-service.ts:${footer}":
-    "digest footer; #1526 removes this entry",
-};
+const FOOTER_PREFIX_ALLOWED: Record<string, string> = {};
 
 const FOOTER_PREFIX = "KoolBot · ";
 const SYSTEM_WORD = /\bSystem\b/;

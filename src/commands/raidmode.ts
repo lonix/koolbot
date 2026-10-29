@@ -1,4 +1,5 @@
 import {
+  type APIEmbedField,
   SlashCommandBuilder,
   ChatInputCommandInteraction,
   EmbedBuilder,
@@ -41,40 +42,61 @@ function countsLine(c: ActionCounts): string {
   return `${c.actioned} acted on, ${c.wouldAction} would have been (dry run), ${c.skipped} skipped, ${c.failed} failed`;
 }
 
-/** Render the status snapshot. Pure, for direct testing. */
+/** Render the status snapshot, one field per fact. Pure, for direct testing. */
 export function buildStatusEmbed(status: RaidStatus): EmbedBuilder {
-  const lines: string[] = [];
+  const fields: APIEmbedField[] = [];
   if (status.inactiveReason) {
-    lines.push(`**Inactive:** ${status.inactiveReason}`);
+    fields.push({ name: "Inactive", value: status.inactiveReason });
   }
-  lines.push(
-    `**Lockdown:** ${
-      status.lockdown
-        ? `on since <t:${Math.floor((status.since ?? Date.now()) / 1000)}:R>${
+  fields.push(
+    {
+      name: "Lockdown",
+      value: status.lockdown
+        ? `On since <t:${Math.floor((status.since ?? Date.now()) / 1000)}:R>${
             status.startedBy ? ` (by <@${status.startedBy}>)` : " (automatic)"
           }`
-        : "off"
-    }`,
-    `**Mode:** ${status.dryRun ? "dry run (nobody is acted on)" : "live"}`,
-    `**Joins in the last ${status.windowSeconds}s:** ${status.joinsInWindow} (lockdown above ${status.joinThreshold})`,
-    `**Lockdown action:** ${status.lockdownAction}${status.lockdown ? " (fixed for this lockdown)" : ""}`,
-    `**New-account gate:** ${
-      status.minAccountAgeHours > 0
-        ? `under ${status.minAccountAgeHours}h old gets ${status.newAccountAction}`
-        : "off"
-    }`,
-    `**This lockdown so far:** ${countsLine(status.counts)}`,
-    `**New-account gate since the bot started:** ${countsLine(status.gateCounts)}`,
+        : "Off",
+    },
+    {
+      name: "Mode",
+      value: status.dryRun ? "Dry run (nobody is acted on)" : "Live",
+      inline: true,
+    },
+    {
+      name: `Joins in the last ${status.windowSeconds} s`,
+      value: `${status.joinsInWindow} (lockdown above ${status.joinThreshold})`,
+      inline: true,
+    },
+    {
+      name: "Lockdown action",
+      value: `${status.lockdownAction}${status.lockdown ? " (fixed for this lockdown)" : ""}`,
+      inline: true,
+    },
+    {
+      name: "New-account gate",
+      value:
+        status.minAccountAgeHours > 0
+          ? `Under ${status.minAccountAgeHours} h old gets ${status.newAccountAction}`
+          : "Off",
+    },
+    { name: "This lockdown so far", value: countsLine(status.counts) },
+    {
+      name: "New-account gate since the bot started",
+      value: countsLine(status.gateCounts),
+    },
   );
   if (status.unrecorded > 0) {
-    lines.push(
-      `**Warning:** ${status.unrecorded} log row(s) could not be written to the database yet and are being retried.`,
-    );
+    const rows = `${status.unrecorded} log ${status.unrecorded === 1 ? "row" : "rows"}`;
+    fields.push({
+      name: "Warning",
+      value: `${rows} could not be written to the database yet and ${status.unrecorded === 1 ? "is" : "are"} being retried.`,
+    });
   }
   return new EmbedBuilder()
     .setColor(status.lockdown ? embedColor("danger") : embedColor("ok"))
     .setTitle("🛡️ Anti-raid status")
-    .setDescription(lines.join("\n"));
+    .addFields(fields)
+    .setFooter({ text: "KoolBot · Moderation · Raid mode" });
 }
 
 export async function execute(

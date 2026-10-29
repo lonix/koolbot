@@ -315,8 +315,8 @@ describe("Achievements Command", () => {
       await execute(interaction);
 
       expect(editReply).toHaveBeenCalledTimes(1);
-      const field = embedFields(editReply).find((f) =>
-        f.name.includes("Recent Achievements"),
+      const field = embedFields(editReply).find(
+        (f) => f.name === "Recent achievements",
       );
       expect(field).toBeDefined();
       expect(field!.value.length).toBeLessThanOrEqual(1024);
@@ -340,8 +340,8 @@ describe("Achievements Command", () => {
 
       await execute(interaction);
 
-      const field = embedFields(editReply).find((f) =>
-        f.name.includes("Recent Achievements"),
+      const field = embedFields(editReply).find(
+        (f) => f.name === "Recent achievements",
       );
       expect(field!.value.length).toBeLessThanOrEqual(1024);
       expect(field!.value).not.toContain("…and");
