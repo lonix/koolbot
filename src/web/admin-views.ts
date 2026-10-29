@@ -830,7 +830,7 @@ export function renderCronPicker(
     ` on <select class="cron-dow" aria-label="Day of week"${part("dow")}${lockAttr}>${dowOptions}</select>` +
     `</span>` +
     `<span class="cron-dom-wrap"${hide(state.mode !== "monthly")}>` +
-    ` on day <input type="number" class="cron-dom" aria-label="Day of month"${namedParts ? "" : ' min="1" max="31"'} value="${state.dayOfMonth}" style="width:5rem"${part("dom")}${lockAttr}>` +
+    ` on day ${namedParts ? '<input type="text" inputmode="numeric" autocomplete="off" class="cron-dom" aria-label="Day of month"' : '<input type="number" class="cron-dom" aria-label="Day of month" min="1" max="31"'} value="${state.dayOfMonth}" style="width:5rem"${part("dom")}${lockAttr}>` +
     `</span>` +
     `<span class="cron-custom-wrap"${hide(state.mode !== "custom")}>` +
     `<input type="text" class="cron-custom" aria-label="Cron expression" value="${escapeHtml(state.raw)}" placeholder="0 16 * * 5" style="width:12rem"${part("custom")}${lockAttr}>` +

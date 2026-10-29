@@ -1,4 +1,4 @@
-/* global HTMLInputElement, HTMLDetailsElement, Element, Document */
+/* global HTMLInputElement, HTMLSelectElement, HTMLDetailsElement, Element, Document */
 /**
  * The feature pages use the setting controls (#1533): a schedule is a picker, a
  * colour a swatch with an empty-state box, a poll duration a bounded box and the
@@ -109,10 +109,29 @@ describe("the schedule picker on the feature forms", () => {
     ]);
   });
 
-  it("puts no range on the day box: a part the mode does not use must not block the save", () => {
+  it("puts no range or step on the day box: a part the mode does not use must not block the save", () => {
     const dom = create.querySelector(".cron-dom");
-    expect(dom?.hasAttribute("min")).toBe(false);
-    expect(dom?.hasAttribute("max")).toBe(false);
+    expect(dom?.getAttribute("type")).toBe("text");
+    for (const a of ["min", "max", "step", "pattern"]) {
+      expect(dom?.hasAttribute(a)).toBe(false);
+    }
+  });
+
+  it("cannot be blocked by a part the chosen mode does not use", () => {
+    // Typed in Monthly, then the mode changed: the script hides the day box but
+    // does not disable it, so it must have no constraint that can fail.
+    const fresh = announcements();
+    const f = form(fresh, "/announcements/create");
+    (f.querySelector(".cron-dom") as HTMLInputElement).value = "1.5";
+    (f.querySelector(".cron-mode") as HTMLSelectElement).value = "daily";
+    for (const part of f.querySelectorAll<HTMLInputElement>(
+      ".cron-picker input",
+    )) {
+      expect(part.validity.valid).toBe(true);
+    }
+    expect(f.querySelector(".cron-dom")?.getAttribute("inputmode")).toBe(
+      "numeric",
+    );
   });
 
   it("shows every part until the script hides the unused ones", () => {
