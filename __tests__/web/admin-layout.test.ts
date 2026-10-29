@@ -8,6 +8,7 @@ import {
   resolveNavFeatureStatus,
   setAdminUpdateBadgeProvider,
 } from "../../src/web/admin-layout.js";
+import { icon } from "../../src/web/icons.js";
 import { getBotVersion } from "../../src/utils/version.js";
 
 describe("admin-layout escapeHtml", () => {
@@ -508,9 +509,11 @@ describe("renderAdminPage sidebar grouped by task (#613, #1296)", () => {
   it("links Event presets next to Events and marks only the page it is on (#1298)", () => {
     const on = navOf(render(status(), "/admin/events/presets"));
     expect(on).toContain(
-      '<a href="/admin/events/presets" aria-current="page">Event presets</a>',
+      `<a href="/admin/events/presets" aria-current="page">${icon("calendar-cog")}Event presets</a>`,
     );
-    expect(on).toContain('<a href="/admin/events">Events</a>');
+    expect(on).toContain(
+      `<a href="/admin/events">${icon("calendar")}Events</a>`,
+    );
     expect(on.match(/aria-current="page"/g)).toHaveLength(1);
     // Gated on Events like the Events page: greyed in the fold while it is off.
     const off = navOf(render(status(["events.enabled"])));
@@ -519,16 +522,16 @@ describe("renderAdminPage sidebar grouped by task (#613, #1296)", () => {
 
   it("labels the renamed pages and keeps their routes", () => {
     const nav = navOf(render());
-    const labelled: Array<[string, string]> = [
-      ["/admin/permissions", "Command permissions"],
-      ["/admin/bot-status", "Presence"],
-      ["/admin/bootstrap", "Environment"],
-      ["/admin/adopt/history", "Adoption history"],
-      ["/admin/settings", "All settings"],
-      ["/admin/bot-permissions", "Bot permissions"],
+    const labelled: Array<[string, string, Parameters<typeof icon>[0]]> = [
+      ["/admin/permissions", "Command permissions", "key-round"],
+      ["/admin/bot-status", "Presence", "activity"],
+      ["/admin/bootstrap", "Environment", "server-cog"],
+      ["/admin/adopt/history", "Adoption history", "history"],
+      ["/admin/settings", "All settings", "sliders-horizontal"],
+      ["/admin/bot-permissions", "Bot permissions", "shield-check"],
     ];
-    for (const [href, label] of labelled) {
-      expect(nav).toContain(`<a href="${href}">${label}</a>`);
+    for (const [href, label, name] of labelled) {
+      expect(nav).toContain(`<a href="${href}">${icon(name)}${label}</a>`);
     }
   });
 
@@ -655,7 +658,7 @@ describe("renderAdminPage sidebar grouped by task (#613, #1296)", () => {
     setPermissionIssueCount("guild-1", 3);
     try {
       expect(navOf(render())).toContain(
-        '<a href="/admin/bot-permissions">Bot permissions<span class="kb-badge kb-badge--warn kb-badge--count kb-sidenav__end" title="Missing permissions affect enabled features">3</span></a>',
+        `<a href="/admin/bot-permissions">${icon("shield-check")}Bot permissions<span class="kb-badge kb-badge--warn kb-badge--count kb-sidenav__end" title="Missing permissions affect enabled features">3</span></a>`,
       );
     } finally {
       resetPermissionIssueCount();

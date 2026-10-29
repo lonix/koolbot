@@ -184,7 +184,8 @@ export function renderNewEventBody(props: NewEventViewProps): string {
         <p class="kb-help">An event that starts now cannot repeat.</p>
       </div>`
     : "";
-  return `<header class="kb-pagehead">
+  return `<div class="kb-stack">
+<header class="kb-pagehead">
   <div class="kb-pagehead__text">
     <h1 class="kb-pagehead__title">New event</h1>
     <p class="kb-pagehead__sub">You will be the host. Plan it for later, or start it right now and the voice channels are ready at once.</p>
@@ -245,5 +246,6 @@ ${permissionLine}<form method="POST" action="${escapeHtml(props.formAction ?? "/
 ${scriptTag(groupRowsScript())}
 ${scriptTag(TIMEZONE_SELECT_SCRIPT)}
 ${scriptTag(EVENT_GROUPS_SCRIPT)}
-${EVENT_WHEN_SCRIPT}${refusal ? `\n${scriptTag(FOCUS_FIRST_INVALID_SCRIPT)}` : ""}`;
+${EVENT_WHEN_SCRIPT}${refusal ? `\n${scriptTag(FOCUS_FIRST_INVALID_SCRIPT)}` : ""}
+</div>`;
 }

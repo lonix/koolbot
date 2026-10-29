@@ -447,14 +447,14 @@ export function renderDashboardBody(props: DashboardViewProps): string {
   <div class="kb-stack">${right}</div>
 </div>`
     : `<div class="kb-stack">${right}</div>`;
-  return `<header class="kb-pagehead">
+  return `<div class="kb-stack">
+<header class="kb-pagehead">
   <div class="kb-pagehead__text">
     <h1 class="kb-pagehead__title">Dashboard</h1>
     <p class="kb-pagehead__sub">Where KoolBot stands today. Each card opens the page where you act; nothing here changes a setting.</p>
   </div>
 </header>
 ${props.flashHtml}
-<div class="kb-stack">
 <div class="kb-tiles">
 ${versionTile(props.version)}
 ${discordTile(data)}

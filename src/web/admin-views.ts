@@ -3689,6 +3689,7 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
   );
 
   const body = `
+<div class="kb-stack">
 <header class="kb-pagehead">
   <div class="kb-pagehead__text">
     <h1 class="kb-pagehead__title">Events</h1>
@@ -3730,6 +3731,7 @@ ${renderFeatureSettingsCard({
   flash: props.flash,
 })}
 ${scriptTag(EVENT_COVER_UPLOAD_SCRIPT)}
+</div>
 `;
 
   return renderAdminPage({

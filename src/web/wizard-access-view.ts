@@ -238,6 +238,7 @@ export function renderWizardAccessPage(props: WizardAccessPageProps): string {
       : "";
 
   const body = `
+<div class="kb-stack">
 <header class="kb-pagehead"><div class="kb-pagehead__text"><h1 class="kb-pagehead__title">Setup wizard</h1><p class="kb-pagehead__sub">Map your Discord roles to what people can do, before any channel is set up. Nothing changes until you apply on the last step.</p></div></header>
 ${renderWizardSteps("access")}
 ${flash}
@@ -255,6 +256,7 @@ ${members}
     <a href="/admin/wizard" class="kb-btn kb-btn--ghost">Back to features</a>
   </div>
 </form>
+</div>
 `;
   return renderAdminPage({
     title: "Wizard: Access",
