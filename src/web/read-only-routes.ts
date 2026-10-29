@@ -226,6 +226,7 @@ import {
   type SettingRow,
   messageJumpUrl,
 } from "./admin-views.js";
+import { isEventRunning } from "./host-panel-shared.js";
 
 function deriveCategory(key: string): string {
   const dot = key.indexOf(".");
@@ -1624,6 +1625,7 @@ export function createReadOnlyRouter(
         : { channelName: null, channelType: null };
     };
 
+    const now = new Date();
     const rows = events.map((e) => {
       const counts = countRsvps(e.rsvps);
       const finished = e.state === "ended" || e.state === "cancelled";
@@ -1632,6 +1634,8 @@ export function createReadOnlyRouter(
         title: e.title,
         when: formatEventWhen(e),
         state: e.state,
+        // Live now or Upcoming (#1525): the one definition of running.
+        running: isEventRunning(e, now),
         // Legacy RSVPs (events made before native-only events) stay
         // visible until the event is over.
         legacyRsvps:

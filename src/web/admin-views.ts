@@ -47,7 +47,7 @@ import {
   renderStatusLine,
   settingHref,
 } from "./feature-page.js";
-import { hostPanelPath } from "./host-panel-shared.js";
+import { hostPanelPath, renderEventStateBadge } from "./host-panel-shared.js";
 import { renderEndEventForm } from "./event-end-view.js";
 import {
   escapeHtml,
@@ -2613,6 +2613,10 @@ export interface EventRow {
   title: string;
   when: string;
   state: string;
+  /** `isEventRunning` (#1525): active and the start has arrived. An event whose
+   * channel was prepared ahead of its start is `active` but not running, so it
+   * stays in Upcoming. Absent counts as not running. */
+  running?: boolean;
   /** Legacy KoolBot RSVP tally, for events posted before native-only events
    * (#1175); null when there are none or the event is over. */
   legacyRsvps?: { going: number; maybe: number; cant: number } | null;
@@ -2923,18 +2927,6 @@ ${renderFeatureSettingsCard({
 }
 
 // ---------- Events ----------
-
-function eventStateTag(state: string): string {
-  const cls =
-    state === "active"
-      ? "tag-on"
-      : state === "cancelled"
-        ? "tag-off"
-        : state === "ended"
-          ? "tag-info"
-          : "tag-info";
-  return `<span class="tag ${cls}">${escapeHtml(state)}</span>`;
-}
 
 function renderExpected(e: EventRow): string {
   const x = e.expected;
@@ -3586,7 +3578,7 @@ export function renderEventsPage(props: EventsProps): string {
         : ""
     }</td>
 <td class="mono">${escapeHtml(e.when)}</td>
-<td>${eventStateTag(e.state)}</td>
+<td>${renderEventStateBadge(e.state, e.running === true)}</td>
 ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>${channelCell}</td>\n` : ""}${cols.cover ? `<td>${renderCoverCell(e, csrfInput, props.csrfToken)}</td>\n` : ""}<td class="actions">${actions}</td>
 </tr>`;
   };
@@ -3612,16 +3604,44 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
   const isPast = (e: EventRow): boolean =>
     (e.state === "cancelled" || e.state === "ended") && !e.awaitingSuccessor;
   const currentRows = props.rows.filter((e) => !isPast(e));
+  // Live now and Upcoming (#1525): running is `isEventRunning`, decided by the
+  // route, so an event whose channel was prepared early stays upcoming. A
+  // finished occurrence waiting for its successor is not running either.
+  const liveRows = currentRows.filter(
+    (e) => e.running === true && e.state === "active",
+  );
+  const upcomingRows = currentRows.filter((e) => !liveRows.includes(e));
   const pastRows = props.rows.filter(isPast);
-  const currentHtml =
-    currentRows.length > 0
-      ? renderEventsTable(currentRows)
-      : `<p class="muted">${props.rows.length > 0 ? "No upcoming events." : "No events scheduled yet."}</p>`;
+  const eventsPanel = (
+    id: string,
+    title: string,
+    count: number,
+    inner: string,
+  ): string => `<section class="kb-panel" id="${id}" aria-labelledby="${id}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${id}-h">${title}</h2><span class="kb-panel__meta">${count}</span></header>
+  ${inner}
+</section>`;
+  const liveHtml = eventsPanel(
+    "live-events",
+    "Live now",
+    liveRows.length,
+    liveRows.length > 0
+      ? `<div class="kb-panel__body--flush">${renderEventsTable(liveRows)}</div>`
+      : `<div class="kb-panel__body"><p class="kb-muted">Nothing is running. Choose <strong>Start now</strong> to open an event at once; its voice channel is ready straight away.</p></div>`,
+  );
+  const upcomingHtml = eventsPanel(
+    "upcoming-events",
+    "Upcoming",
+    upcomingRows.length,
+    upcomingRows.length > 0
+      ? `<div class="kb-panel__body--flush">${renderEventsTable(upcomingRows)}</div>`
+      : `<div class="kb-panel__body"><p class="kb-muted">${props.rows.length > 0 ? "No upcoming events." : "No events scheduled yet."}</p></div>`,
+  );
   const pastHtml =
     pastRows.length > 0
       ? `<details class="kb-disclosure" id="past-events">
     <summary>${CHEVRON_ICON}Past events <span class="kb-badge kb-badge--count">${pastRows.length}</span></summary>
-    <div class="kb-disclosure__body">${renderEventsTable(pastRows)}</div>
+    <div class="kb-disclosure__body kb-panel__body--flush">${renderEventsTable(pastRows)}</div>
   </details>`
       : "";
 
@@ -3662,8 +3682,17 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
   );
 
   const body = `
-<h1>Events</h1>
-<p class="subtitle">Schedule events that spin up a temporary voice channel shortly before they start, are announced with a Discord event link members can mark Interested on, remind attendees, and clean themselves up afterward.</p>
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Events</h1>
+    <p class="kb-pagehead__sub">Each event gets a temporary voice channel, a Discord event link and reminders, and cleans itself up afterward.</p>
+    ${statusLine}
+  </div>
+  <div class="kb-pagehead__actions">
+    <a class="kb-btn" href="/admin/events/new?when=now">${icon("zap")}Start now</a>
+    <a class="kb-btn kb-btn--primary" href="/admin/events/new">${icon("calendar-plus")}Schedule event</a>
+  </div>
+</header>
 ${renderPageFlash(props.flash)}
 ${renderFeatureDisabledCallout({
   enabled: props.enabled,
@@ -3672,15 +3701,13 @@ ${renderFeatureDisabledCallout({
   returnTo: "/admin/events",
   csrfToken: props.csrfToken,
 })}
-${statusLine}
 ${permissionNote}
-<div class="kb-pagehead__actions"><a class="kb-btn" href="/admin/events/new">Schedule event</a></div>
-
-<div class="card">
-  <h2>Events</h2>${currentHtml}
-  ${pastHtml}
-  <p class="muted">A cover image is added to a scheduled event from its row in the list above; it is shown on the Discord event.</p>
+<div class="kb-stack">
+${liveHtml}
+${upcomingHtml}
+${pastHtml}
 </div>
+<p class="muted">A cover image is added to a scheduled event from its row in the lists above; it is shown on the Discord event.</p>
 ${renderFeatureSettingsCard({
   intro:
     "Change event settings here without leaving the page. Saved through the shared settings route.",

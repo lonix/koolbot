@@ -646,7 +646,9 @@ describe("the Events page", () => {
     const doc = eventsPage([eventRow()]);
     const link = doc.querySelector<HTMLElement>('a[href="/admin/events/new"]');
     expect(link?.textContent).toBe("Schedule event");
-    expect(link?.className).toBe("kb-btn");
+    // The one primary button of the header, last (#1525).
+    expect(link?.className).toBe("kb-btn kb-btn--primary");
+    expect(link?.closest(".kb-pagehead__actions")).not.toBeNull();
     // The form lives on its own page (#1527): none on the list.
     expect(doc.getElementById("schedule-event")).toBeNull();
     expect(doc.querySelector("form[data-event-form]")).toBeNull();
