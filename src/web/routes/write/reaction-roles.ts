@@ -204,7 +204,9 @@ export function createReactionRolesRouter(client: Client): Router {
       const session = requireSessionContext(req);
       const roleId = getString(req, "roleId");
       const emoji = getString(req, "emoji");
-      const messageId = getString(req, "messageId");
+      // A typed id (the box under a list cut at the cap) wins over the picked one.
+      const messageId =
+        getString(req, "messageId") || getString(req, "messageIdListed");
 
       const errors: FormErrors = {};
       if (!roleId) addFieldError(errors, "roleId", "Choose a role.");
@@ -218,6 +220,7 @@ export function createReactionRolesRouter(client: Client): Router {
             roleId: getRawString(req, "roleId"),
             emoji: getRawString(req, "emoji"),
             messageId: getRawString(req, "messageId"),
+            messageIdListed: getRawString(req, "messageIdListed"),
           },
         })
       ) {

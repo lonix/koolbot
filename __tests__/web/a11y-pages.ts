@@ -3859,6 +3859,45 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The list is cut at the cap (#1530): the select plus a Message ID box for older messages.
+      name: "Reaction roles (message list cut at the cap)",
+      html: renderReactionRolesPage({
+        ...COMMON,
+        enabled: true,
+        configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
+        active: [],
+        archived: [],
+        settingRows: [],
+        textChannels: CHANNELS,
+        roles: ROLES,
+        messages: { ...WELCOME_MESSAGES, truncated: true },
+      }),
+    },
+    {
+      name: "Reaction roles (bind form refused, message list cut at the cap)",
+      html: renderReactionRolesPage({
+        ...COMMON,
+        enabled: true,
+        configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
+        active: [],
+        archived: [],
+        settingRows: [],
+        textChannels: CHANNELS,
+        roles: ROLES,
+        messages: { ...WELCOME_MESSAGES, truncated: true },
+        refusedForm: {
+          formId: "reaction-role-bind",
+          errors: { messageId: "That message is not one the bot posted." },
+          values: {
+            roleId: "r2",
+            emoji: "🎨",
+            messageId: "123456789012345678",
+            messageIdListed: "",
+          },
+        },
+      }),
+    },
+    {
       // A refused bind form that kept a message id, with the unreadable list (#1530).
       name: "Reaction roles (bind form refused, message list unreadable)",
       html: renderReactionRolesPage({

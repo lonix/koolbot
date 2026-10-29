@@ -282,6 +282,35 @@ describe("POST /reaction-roles/bind and /remove-mapping", () => {
     expect(mockBindReactionRole).not.toHaveBeenCalled();
   });
 
+  it("binds onto the message picked from a list cut at the cap", async () => {
+    await harness.post("/reaction-roles/bind", {
+      roleId: "role-1",
+      emoji: "🎉",
+      messageIdListed: "message-8",
+    });
+    expect(mockBindReactionRole).toHaveBeenCalledWith(
+      session.guildId,
+      "role-1",
+      "🎉",
+      { messageId: "message-8" },
+    );
+  });
+
+  it("lets a typed older message id win over the picked one", async () => {
+    await harness.post("/reaction-roles/bind", {
+      roleId: "role-1",
+      emoji: "🎉",
+      messageId: "message-old",
+      messageIdListed: "message-8",
+    });
+    expect(mockBindReactionRole).toHaveBeenCalledWith(
+      session.guildId,
+      "role-1",
+      "🎉",
+      { messageId: "message-old" },
+    );
+  });
+
   it("marks an oversized emoji", async () => {
     const res = await harness.post("/reaction-roles/bind", {
       roleId: "role-1",

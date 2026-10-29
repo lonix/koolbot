@@ -4234,7 +4234,10 @@ export function renderReactionRolesPage(props: ReactionRolesProps): string {
   const bind = formView(props.refusedForm, REACTION_ROLE_BIND_FORM);
   const bindRole = bind.control("roleId");
   // A refused form keeps the message it was given selected, whatever the list holds.
-  const bindKeeps = bind.value("messageId") !== "";
+  const bindKeeps =
+    bind.value(props.messages?.truncated ? "messageIdListed" : "messageId") !==
+    "";
+  const bindCut = props.messages?.truncated === true;
   const groupCreate = formView(
     props.refusedForm,
     REACTION_ROLE_GROUP_CREATE_FORM,
@@ -4348,25 +4351,33 @@ ${
   props.messages
     ? `    <div class="kb-field">
       <span class="kb-label">Message <span class="muted">(optional — add to an existing picker message)</span></span>
-      ${renderReactionRoleMessageSelect("messageId", bind.value("messageId"), {
-        ...bind.control("messageId"),
-        messages: props.messages,
-        ariaLabel: "Message",
-        noneLabel: REACTION_ROLE_MESSAGE_NEW_LABEL,
-        emptyNote: bindKeeps
-          ? "There are no reaction-role messages yet. Choose Post a new message to start a new one."
-          : "There are no reaction-role messages yet, so this posts a new one.",
-      })}
+      ${renderReactionRoleMessageSelect(
+        bindCut ? "messageIdListed" : "messageId",
+        bind.value(bindCut ? "messageIdListed" : "messageId"),
+        {
+          ...bind.control(bindCut ? "messageIdListed" : "messageId"),
+          messages: props.messages,
+          ariaLabel: "Message",
+          noneLabel: REACTION_ROLE_MESSAGE_NEW_LABEL,
+          emptyNote: bindKeeps
+            ? "There are no reaction-role messages yet. Choose Post a new message to start a new one."
+            : "There are no reaction-role messages yet, so this posts a new one.",
+        },
+      )}
     </div>`
-    : // The list could not be read: a typed id is the only way to reach an existing message.
-      `    <div class="kb-field">
+    : ""
+}${
+    // Without the list, or with it cut at the cap, a typed id is the way to an older message.
+    !props.messages || bindCut
+      ? `    <div class="kb-field">
       <label class="kb-field">
         <span class="kb-label">Message ID (optional)</span>
         <input type="text" class="kb-input" name="messageId" maxlength="30"${bind.valueAttr("messageId")}${bind.attrs("messageId")}>
-        <span class="kb-help">Leave empty to post a new message. The id of an existing reaction-role message adds this mapping to it.</span>
+        <span class="kb-help">${bindCut ? "Not in the list? Enter the id of an older reaction-role message. It wins over the choice above." : "Leave empty to post a new message. The id of an existing reaction-role message adds this mapping to it."}</span>
       </label>
     </div>`
-}${bind.error("messageId")}
+      : ""
+  }${bind.error("messageId")}${bind.error("messageIdListed")}
     <button type="submit" class="btn btn-primary">Bind existing role</button>
   </form>
 </div>

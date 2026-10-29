@@ -1,4 +1,4 @@
-/* global Document, Element, HTMLInputElement, HTMLSelectElement */
+/* global FormData, Document, Element, HTMLInputElement, HTMLSelectElement */
 /**
  * The Reaction roles forms and the Channel claims pairing choose a role, a
  * message and an emoji instead of typing ids (#1530): the picker markup, the
@@ -377,5 +377,96 @@ describe("the notes under the message select when an id is retained (#1530)", ()
       bindForm(page({ messages: { options: [], truncated: false } }))
         .textContent,
     ).toContain("yet, so this posts a new one.");
+  });
+});
+
+describe("a list cut at the cap still reaches older messages (#1530)", () => {
+  const CUT = { ...MESSAGES, truncated: true };
+  const post = (form: Element, fields: Record<string, string>): FormData => {
+    const win = form.ownerDocument.defaultView as unknown as {
+      FormData: new (f: Element) => FormData;
+    };
+    for (const [name, value] of Object.entries(fields)) {
+      (form.querySelector(`[name=${name}]`) as HTMLInputElement).value = value;
+    }
+    return new win.FormData(form);
+  };
+
+  it("offers the select and a Message ID box that posts under its own name", () => {
+    const form = bindForm(page({ messages: CUT }));
+    const select = form.querySelector(
+      "select[name=messageIdListed]",
+    ) as HTMLSelectElement;
+    expect([...select.options].map((o) => o.text)[0]).toBe(
+      "Post a new message",
+    );
+    const box = form.querySelector("input[name=messageId]") as HTMLInputElement;
+    expect(box.type).toBe("text");
+    expect(box.maxLength).toBe(30);
+    expect(box.value).toBe("");
+    expect(box.closest("label")?.textContent).toContain(
+      "Not in the list? Enter the id of an older reaction-role message.",
+    );
+    expect(form.querySelectorAll("[name=messageId]")).toHaveLength(1);
+  });
+
+  it("posts the typed older id, the picked newest one, or neither", () => {
+    const form = bindForm(page({ messages: CUT }));
+    const typed = post(form, {
+      messageId: "100000000000000777",
+      messageIdListed: "",
+    });
+    expect([typed.get("messageId"), typed.get("messageIdListed")]).toEqual([
+      "100000000000000777",
+      "",
+    ]);
+    const picked = post(form, {
+      messageId: "",
+      messageIdListed: "100000000000000002",
+    });
+    expect([picked.get("messageId"), picked.get("messageIdListed")]).toEqual([
+      "",
+      "100000000000000002",
+    ]);
+    const none = post(form, { messageId: "", messageIdListed: "" });
+    expect([none.get("messageId"), none.get("messageIdListed")]).toEqual([
+      "",
+      "",
+    ]);
+  });
+
+  it("draws a refused form with both fields as typed and no ids when not refused", () => {
+    expect(bindForm(page({ messages: CUT })).querySelector("[id]")).toBeNull();
+    const form = bindForm(
+      page({
+        messages: CUT,
+        refusedForm: {
+          formId: "reaction-role-bind",
+          errors: { messageId: "Not mine <b>" },
+          values: {
+            roleId: "",
+            emoji: "🎨",
+            messageId: " 9<9> ",
+            messageIdListed: "100000000000000002",
+          },
+        },
+      }),
+    );
+    expect(
+      (form.querySelector("input[name=messageId]") as HTMLInputElement).value,
+    ).toBe(" 9<9> ");
+    expect(
+      (form.querySelector("select[name=messageIdListed]") as HTMLSelectElement)
+        .value,
+    ).toBe("100000000000000002");
+    expect(form.querySelector("p.kb-field__error")?.textContent).toBe(
+      "Not mine <b>",
+    );
+  });
+
+  it("keeps the plain select when the list is not cut", () => {
+    const form = bindForm(page());
+    expect(form.querySelector("select[name=messageId]")).not.toBeNull();
+    expect(form.querySelector("input[name=messageId]")).toBeNull();
   });
 });
