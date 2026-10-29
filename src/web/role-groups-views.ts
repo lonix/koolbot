@@ -245,7 +245,7 @@ ${permissionChecks(g.permissions, f)}</fieldset>
 <label>Colour <input type="text" name="colour" value="${escapeHtml(f.value("colour", formatColour(g.colour)))}" placeholder="#RRGGBB (empty = leave as is)" maxlength="7"${f.attrs("colour")}></label>${f.error("colour")}`
 }
 <label>When its Discord role changes <select name="syncPolicy">${syncPolicyOptions(g.syncPolicy, globalPolicy, f)}</select></label>
-<button type="submit" class="btn btn-primary">Save group</button>
+<button type="submit" class="btn">Save group</button>
 </form></details>`;
 }
 

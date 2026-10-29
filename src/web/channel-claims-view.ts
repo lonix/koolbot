@@ -325,9 +325,21 @@ function renderForm(props: ClaimsPageProps, csrf: string): string {
 ${csrf}
 ${renderSuggestions(scan, props, pairings, feeds)}
 <table><caption class="visually-hidden">Categories and channels</caption><thead><tr><th scope="col">Category / channel</th><th scope="col">Action</th><th scope="col">Feature</th><th scope="col">Options</th></tr></thead><tbody>${rows.join("")}</tbody></table>
-<button type="submit" class="btn btn-primary">Preview changes</button>
+<button type="submit" class="${planCanApply(props) ? "btn" : "btn btn-primary"}">Preview changes</button>
 <span class="muted">Nothing is written to Discord yet.</span>
 </form>`;
+}
+
+/** True when the page shows a plan whose Apply button is offered (#1512). */
+function planCanApply(props: ClaimsPageProps): boolean {
+  const { plan } = props;
+  return Boolean(
+    plan &&
+    plan.plan.errors.length === 0 &&
+    plan.errors.length === 0 &&
+    plan.plan.operations.length > 0 &&
+    props.previewToken,
+  );
 }
 
 function renderPlan(props: ClaimsPageProps, csrf: string): string {

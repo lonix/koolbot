@@ -50,6 +50,8 @@ import type { SettingFormat } from "../utils/setting-formats.js";
 import {
   CHEVRON_ICON,
   SETTINGS_FOLD_SCRIPT,
+  mainButtonClass,
+  mainKbButtonClass,
   renderFeatureDisabledCallout,
   renderStatusLine,
   settingHref,
@@ -1787,7 +1789,7 @@ export function renderSettingsPage(props: SettingsProps): string {
     <label for="import-yaml">YAML to import</label>
     <textarea id="import-yaml" name="yaml" rows="12" aria-describedby="import-yaml-help" placeholder="voicechannels.enabled: true&#10;quotes.max_length: 500"></textarea>
     <div>
-      <button type="submit" class="btn btn-primary">Preview import</button>
+      <button type="submit" class="btn">Preview import</button>
     </div>
   </form>
 </div>`;
@@ -2094,7 +2096,7 @@ export function renderPermissionsPage(props: PermissionsProps): string {
     <input type="hidden" name="command" value="${escapedCmd}">
     <label class="visually-hidden" for="${selectId}">Allowed roles for /${escapedCmd}</label>
     ${picker}
-    <button type="submit" class="btn btn-primary btn-sm">Save</button>
+    <button type="submit" class="btn btn-sm">Save</button>
   </form>
 </td>
 </tr>`;
@@ -2814,7 +2816,7 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
 <td>${a.placeholders ? '<span class="tag tag-info">yes</span>' : '<span class="muted">no</span>'}</td>
 <td class="muted">${escapeHtml(a.createdAt)}</td>
 <td class="actions">
-  <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/post-now">${csrfInput}<button type="submit" class="btn btn-primary">Post now</button></form>
+  <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/post-now">${csrfInput}<button type="submit" class="btn">Post now</button></form>
   <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/toggle">${csrfInput}<button type="submit" class="btn">${a.enabled ? "Disable" : "Enable"}</button></form>
   <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/delete" data-confirm="Delete announcement ${escapeHtml(a.id)}?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
 </td>
@@ -2841,7 +2843,7 @@ ${renderStatusLine({
   <h2>Schedules</h2>${tableHtml}
   <form method="POST" action="/admin/announcements/post-vc-stats" class="inline-form">
     ${csrfInput}
-    <button type="submit" class="btn btn-primary">Post weekly VC stats now</button>
+    <button type="submit" class="btn">Post weekly VC stats now</button>
     <span class="muted">Posts the weekly voice-stats announcement immediately, off schedule.</span>
   </form>
 </div>
@@ -2876,7 +2878,7 @@ ${renderStatusLine({
         <input type="text" name="embedColor" pattern="^#?[0-9A-Fa-f]{6}$" placeholder="#5865F2"${create.valueAttr("embedColor")}${create.attrs("embedColor")}>
       </label>${create.error("embedColor")}
     </fieldset>
-    <button type="submit" class="btn btn-primary">Create announcement</button>
+    <button type="submit" class="${mainButtonClass(props.enabled)}">Create announcement</button>
   </form>
 </div>
 <div class="card">
@@ -2907,7 +2909,7 @@ ${renderStatusLine({
         <input type="text" name="embedColor" pattern="^#?[0-9A-Fa-f]{6}$" placeholder="#5865F2"${once.valueAttr("embedColor")}${once.attrs("embedColor")}>
       </label>${once.error("embedColor")}
     </fieldset>
-    <button type="submit" class="btn btn-primary">Post now</button>
+    <button type="submit" class="btn">Post now</button>
   </form>
 </div>
 ${renderFeatureSettingsCard({
@@ -2983,7 +2985,7 @@ function renderCoverCell(
       <label>Image (PNG, JPEG or GIF, up to ${COVER_MAX_BYTES / (1024 * 1024)} MB)
         <input type="file" accept="image/png,image/jpeg,image/gif">
       </label>
-      <button type="submit" class="btn btn-primary">${c.hasCover ? "Replace cover" : "Upload cover"}</button>
+      <button type="submit" class="btn">${c.hasCover ? "Replace cover" : "Upload cover"}</button>
       <span class="cover-msg muted" role="status" aria-live="polite"></span>
     </form>
   </details>
@@ -3698,7 +3700,7 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
   </div>
   <div class="kb-pagehead__actions">
     <a class="kb-btn" href="/admin/events/new?when=now">${icon("zap")}Start now</a>
-    <a class="kb-btn kb-btn--primary" href="/admin/events/new">${icon("calendar-plus")}Schedule event</a>
+    <a class="${mainKbButtonClass(props.enabled)}" href="/admin/events/new">${icon("calendar-plus")}Schedule event</a>
   </div>
 </header>
 ${renderPageFlash(props.flash)}
@@ -3864,7 +3866,7 @@ export function renderPollsPage(props: PollsProps): string {
       <label>Cron schedule<input type="text" name="cron" value="${escapeHtml(f.value("cron", s.cron))}" required${f.attrs("cron")}></label>${f.error("cron")}
       <label>Duration (hours, 1–768)<input type="number" name="durationHours" min="1" max="768" value="${escapeHtml(f.value("durationHours", String(s.durationHours)))}" required${f.attrs("durationHours")}></label>${f.error("durationHours")}
       <label>Ping role<select name="pingRoleId"${f.attrs("pingRoleId")}>${roleOptionsHtml(props.roles, f.selected("pingRoleId", s.pingRoleId ?? "") || undefined)}</select></label>${f.error("pingRoleId")}
-      <button type="submit" class="btn btn-primary">Save changes</button>
+      <button type="submit" class="btn">Save changes</button>
     </form>
   </details>
   <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/toggle">${csrfInput}<button type="submit" class="btn">${s.enabled ? "Disable" : "Enable"}</button></form>
@@ -3892,7 +3894,7 @@ export function renderPollsPage(props: PollsProps): string {
       <label>Answers (comma-separated, 2–10 options, ≤55 chars each)<input type="text" name="answers" maxlength="600" value="${escapeHtml(f.value("answers", it.answers.join(", ")))}" required${f.attrs("answers")}></label>${f.error("answers")}
       <label>Tags (comma-separated, optional)<input type="text" name="tags" value="${escapeHtml(f.value("tags", it.tags.join(", ")))}"${f.attrs("tags")}></label>${f.error("tags")}
       <label class="checkbox"><input type="checkbox" name="multiSelect" value="1"${f.checked("multiSelect", it.multiSelect) ? " checked" : ""}> Allow multiple answer selections</label>
-      <button type="submit" class="btn btn-primary">Save changes</button>
+      <button type="submit" class="btn">Save changes</button>
     </form>
   </details>
   <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/toggle">${csrfInput}<button type="submit" class="btn">${it.enabled ? "Disable" : "Enable"}</button></form>
@@ -3942,7 +3944,7 @@ ${renderStatusLine({
     <label>Ping role
       <select name="pingRoleId"${newSchedule.attrs("pingRoleId")}>${roleOptionsHtml(props.roles, newSchedule.selected("pingRoleId") || undefined)}</select>
     </label>${newSchedule.error("pingRoleId")}
-    <button type="submit" class="btn btn-primary">Create schedule</button>
+    <button type="submit" class="${mainButtonClass(props.enabled)}">Create schedule</button>
   </form>
 </div>
 <div class="card">
@@ -3970,7 +3972,7 @@ ${renderStatusLine({
       <input type="checkbox" name="multiSelect" value="1"${newItem.checked("multiSelect") ? " checked" : ""}>
       Allow multiple answer selections
     </label>
-    <button type="submit" class="btn btn-primary">Add question</button>
+    <button type="submit" class="btn">Add question</button>
   </form>
 </div>
 <div class="card">
@@ -3985,7 +3987,7 @@ ${renderStatusLine({
     <label>Poll library (YAML or JSON)
       <textarea id="poll-import-content" name="content" rows="10" maxlength="200000" placeholder="polls:&#10;  - question: Favourite colour?&#10;    answers: [Red, Green, Blue]&#10;    multiselect: false&#10;    tags: [fun]" required></textarea>
     </label>
-    <button type="submit" class="btn btn-primary">Import</button>
+    <button type="submit" class="btn">Import</button>
   </form>
 </div>
 ${renderFeatureSettingsCard({
@@ -4252,7 +4254,7 @@ ${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPicker
       </select>
     </label>${create.error("mode")}
     <p class="muted">For one-of-set (pick exactly one) behaviour, use <strong>Create a role group</strong> below — a single message can't enforce "unique" against itself.</p>
-    <button type="submit" class="btn btn-primary">Create reaction role</button>
+    <button type="submit" class="${mainButtonClass(props.enabled)}">Create reaction role</button>
   </form>
 </div>
 <div class="card">
@@ -4269,7 +4271,7 @@ ${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPicker
     <label>Message ID <span class="muted">(optional — add to an existing picker message)</span>
       <input type="text" name="messageId" maxlength="30" placeholder="(new message)"${bind.valueAttr("messageId")}${bind.attrs("messageId")}>
     </label>${bind.error("messageId")}
-    <button type="submit" class="btn btn-primary">Bind existing role</button>
+    <button type="submit" class="btn">Bind existing role</button>
   </form>
 </div>
 <div class="card">
@@ -4288,7 +4290,7 @@ ${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPicker
       </select>
     </label>${groupCreate.error("mode")}
     ${groupOptionRows("Role group", (i) => [`Role name${i < 2 ? " (required)" : ""}`, `Emoji${i < 2 ? " (required)" : ""}`], groupCreate)}
-    <button type="submit" class="btn btn-primary">Create role group</button>
+    <button type="submit" class="btn">Create role group</button>
   </form>
 </div>
 <div class="card">
@@ -4314,7 +4316,7 @@ ${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPicker
       </select>
     </label>${groupGenerate.error("mode")}
     ${groupOptionRows("Custom role group", (i) => [`Custom role name${i < 1 ? " (custom only)" : ""}`, "Emoji"], groupGenerate)}
-    <button type="submit" class="btn btn-primary">Generate roles</button>
+    <button type="submit" class="btn">Generate roles</button>
   </form>
 </div>
 <div class="card">
@@ -4436,7 +4438,7 @@ export function renderNoticesPage(props: NoticesProps): string {
       <label>Title<input type="text" name="title" maxlength="256" value="${escapeHtml(f.value("title", n.title))}" required${f.attrs("title")}></label>${f.error("title")}
       <label>Content<textarea name="content" rows="6" maxlength="4000" required${f.attrs("content")}>${f.textareaContent("content", n.content)}</textarea></label>${f.error("content")}
       <label>Category<select name="category"${f.attrs("category")}>${noticeCategoryOptionsHtml(props.categoryOptions, f.selected("category", n.category))}</select></label>${f.error("category")}
-      <button type="submit" class="btn btn-primary">Save changes</button>
+      <button type="submit" class="btn">Save changes</button>
     </form>
   </details>
   <form method="POST" action="/admin/notices/${escapeHtml(n.id)}/delete" data-confirm="Delete notice '${escapeHtml(n.title)}'?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
@@ -4481,7 +4483,7 @@ ${renderStatusLine({
     <label>Title<input type="text" name="title" maxlength="256" required${create.valueAttr("title")}${create.attrs("title")}></label>${create.error("title")}
     <label>Content<textarea name="content" rows="5" maxlength="4000" required${create.attrs("content")}>${create.refused ? create.textareaContent("content") : ""}</textarea></label>${create.error("content")}
     <label>Category<select name="category" required${create.attrs("category")}>${noticeCategoryOptionsHtml(props.categoryOptions, create.selected("category") || undefined)}</select></label>${create.error("category")}
-    <button type="submit" class="btn btn-primary">Create notice</button>
+    <button type="submit" class="${mainButtonClass(props.enabled)}">Create notice</button>
   </form>
 </div>
 <p class="muted" id="notices-order-note">A new order shows in the Discord channel after <em>Resync notices to channel</em>. Moving a notice does not touch the channel on its own. A new notice goes last in its category.</p>
@@ -4520,7 +4522,7 @@ ${renderRepostCard({
     ],
   )}>
     ${csrfInput}
-    <button type="submit" class="btn btn-primary">Resync notices to channel</button>
+    <button type="submit" class="btn">Resync notices to channel</button>
     <span class="muted">Deletes and reposts every notice message in the channel.</span>
   </form>
 </div>
@@ -4627,7 +4629,7 @@ export function renderQuotesPage(props: QuotesProps): string {
     <form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/edit${escapeHtml(quotesQueryString(props.search, page))}" class="stack">${csrfInput}
       <label>Quote<textarea name="content" rows="4" maxlength="${props.maxLength}" required${f.attrs("content")}>${f.textareaContent("content", q.content)}</textarea></label>${f.error("content")}
       <label>Author (Discord user ID)<input type="text" name="author_id" inputmode="numeric" pattern="\\d{17,20}" value="${escapeHtml(f.value("author_id", q.authorId))}" required${f.attrs("author_id")}></label>${f.error("author_id")}
-      <button type="submit" class="btn btn-primary">Save changes</button>
+      <button type="submit" class="btn">Save changes</button>
     </form>
   </details>
   <form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/delete" data-confirm="Delete quote ${escapeHtml(q.id)}? Its channel post is removed too.">${csrfInput}<button type="submit" class="btn btn-danger" aria-label="Delete quote ${escapeHtml(q.id)}">Delete</button></form>
@@ -4726,7 +4728,7 @@ ${renderRepostCard({
     ],
   )}>
     ${csrfInput}
-    <button type="submit" class="btn btn-primary"${props.enabled ? "" : " disabled"}>Resync quote channel</button>
+    <button type="submit" class="btn"${props.enabled ? "" : " disabled"}>Resync quote channel</button>
     <span class="muted">Clears the channel, posts a fresh header and reposts every quote with its saved vote tally.</span>
   </form>
   <p class="inline-form"><a class="btn" href="/admin/quotes/export">Export quotes (JSON)</a> <span class="muted">The same backup <code>/quote export</code> produces; restore it with <code>/quote import</code>.</span></p>
@@ -4878,7 +4880,7 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
       <label>Month<select name="month" required${f.attrs("month")}>${monthOptions(Number(f.selected("month", String(b.month))))}</select></label>${f.error("month")}
       <label>Day<select name="day" required${f.attrs("day")}>${dayOptions(Number(f.selected("day", String(b.day))))}</select></label>${f.error("day")}
       ${clearYear}
-      <button type="submit" class="btn btn-primary">Save changes</button>
+      <button type="submit" class="btn">Save changes</button>
     </form>
   </details>
   <form method="POST" action="/admin/birthdays/${id}/remove" data-confirm="Remove the birthday for ${escapeHtml(b.userLabel)}? Any birthday role they hold is taken back and the bot's birthday posts about them are deleted."${confirmListAttr(
@@ -4963,7 +4965,7 @@ ${renderStatusLine({
   <h2>Run the check</h2>
   <form method="POST" action="/admin/birthdays/run-now" class="inline-form" data-confirm="Run the birthday check now?"${CONFIRM_NEUTRAL_ATTR}>
     ${csrfInput}
-    <button type="submit" class="btn btn-primary"${runDisabled ? " disabled" : ""}>Run now</button>
+    <button type="submit" class="btn"${runDisabled ? " disabled" : ""}>Run now</button>
     <span class="muted">${runHint}</span>
   </form>
 </div>
@@ -5210,7 +5212,7 @@ export function renderStringArrayEditor(
   <details class="helper edit-details"${f.open()}><summary>${escapeHtml(item.text)}</summary>
     <form method="POST" action="${entryPath(item.id)}/update" class="stack">${csrfInput}
       <label>Text<input type="text" name="text" maxlength="${opts.maxLength}" value="${escapeHtml(f.value("text", item.text))}" required${f.attrs("text")}></label>${f.error("text")}
-      <button type="submit" class="btn btn-primary">Save changes</button>
+      <button type="submit" class="btn">Save changes</button>
     </form>
   </details>
   <div class="muted mono">id: ${escapeHtml(item.id)}</div>
@@ -5239,7 +5241,7 @@ export function renderStringArrayEditor(
     ${csrfInput}
     <label>Add entry<input type="text" name="text" maxlength="${opts.maxLength}" required${add.valueAttr("text")}${add.attrs("text")}></label>${add.error("text")}
     ${hint}
-    <button type="submit" class="btn btn-primary">Add</button>
+    <button type="submit" class="btn">Add</button>
   </form>
   <details class="helper"${imp.open()}>
     <summary>Import / export</summary>
@@ -5249,7 +5251,7 @@ export function renderStringArrayEditor(
       <label>Entries<textarea name="items" rows="8"${imp.attrs("items")}>${imp.textareaContent("items", opts.exportText)}</textarea></label>${imp.error("items")}
       <label class="inline-form"><input type="radio" name="mode" value="replace"${imp.selected("mode", "replace") !== "append" ? " checked" : ""}> Replace pool</label>
       <label class="inline-form"><input type="radio" name="mode" value="append"${imp.selected("mode", "replace") === "append" ? " checked" : ""}> Append to pool</label>
-      <button type="submit" class="btn btn-primary">Import</button>
+      <button type="submit" class="btn">Import</button>
     </form>
   </details>
 </div>`;
@@ -5824,7 +5826,7 @@ ${renderStatusLine({ enabled: props.enabled, chips: [] })}
 <div class="card">
   <h2>Actions</h2>
   <form method="GET" action="/admin/digest" class="inline-form">
-    <button type="submit" name="preview" value="1" class="btn btn-primary"${props.enabled ? "" : " disabled"}>Preview digest</button>
+    <button type="submit" name="preview" value="1" class="${mainButtonClass(props.enabled)}"${props.enabled ? "" : " disabled"}>Preview digest</button>
     <span class="muted">Renders the digest for the most recent complete week without sending anything.</span>
   </form>
   <form method="POST" action="/admin/digest/send-now" class="inline-form" style="margin-top:.75rem" data-confirm="Send the weekly digest to all qualifying members right now?"${CONFIRM_NEUTRAL_ATTR}>
@@ -6089,7 +6091,7 @@ ${renderStatusLine({
   ${holdersHtml}
   <form method="POST" action="/admin/leaderboard-roles/run-now" class="inline-form" style="margin-top:.75rem" data-confirm="Recalculate leaderboard roles now? Roles are granted and revoked immediately."${CONFIRM_NEUTRAL_ATTR}>
     ${csrfInput}
-    <button type="submit" class="btn btn-primary"${runDisabled ? " disabled" : ""}>Run now</button>
+    <button type="submit" class="btn"${runDisabled ? " disabled" : ""}>Run now</button>
     <span class="muted">${runHint}</span>
   </form>
 </div>
@@ -6111,7 +6113,7 @@ ${renderStatusLine({
     <template id="lb-tier-template">${renderTierEditorRow(props.roles, null)}</template>
     <div class="actions" style="margin-top:.75rem">
       <button type="button" class="btn" id="lb-tier-add" hidden>Add tier</button>
-      <button type="submit" class="btn btn-primary">Save tiers</button>
+      <button type="submit" class="${mainButtonClass(props.enabled)}">Save tiers</button>
     </div>
   </form>`
   }
@@ -6315,7 +6317,7 @@ ${props.enabled ? "" : `<p class="muted">Enable <code>core.command_audit.enabled
     <label>To
       <input type="date" name="to" value="${escapeHtml(props.filters.to)}">
     </label>
-    <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+    <button type="submit" class="btn btn-sm">Apply</button>
     <a class="btn btn-sm" href="/admin/audit/commands">Reset</a>
   </form>
 </div>
@@ -6488,7 +6490,7 @@ function renderRowCaseCell(row: ModerationRow, props: ModerationProps): string {
       <label>Review in (days)<input type="number" name="review_in_days" min="1" max="3650" value="${escapeHtml(f.value("review_in_days", String(props.defaultReviewDays ?? 90)))}"${f.attrs("review_in_days", "")}></label>${f.error("review_in_days")}
       <p class="muted">Clear the days for a case with no review date.</p>
       <label>Note<input type="text" name="note" maxlength="500"${f.valueAttr("note")}${f.attrs("note")}></label>${f.error("note")}
-      <button type="submit" class="btn btn-primary btn-sm">Open case</button>
+      <button type="submit" class="btn btn-sm">Open case</button>
     </form>
   </details>`;
 }
@@ -6539,7 +6541,7 @@ function renderCaseActions(c: CaseView, props: ModerationProps): string {
         <button type="submit" class="btn btn-sm btn-danger" formaction="${base}/permanent" data-confirm="${escapeHtml(DECISION_CONFIRM_TEXT.permanent ?? "")}"${confirmListAttr(
           PERMANENT_CONFIRM_ITEMS,
         )}>${DECISION_LABELS.permanent}</button>
-        <button type="submit" class="btn btn-primary btn-sm" formaction="${base}/readmit" data-confirm="${escapeHtml(DECISION_CONFIRM_TEXT.readmit ?? "")}"${CONFIRM_NEUTRAL_ATTR}>${DECISION_LABELS.readmit}</button>
+        <button type="submit" class="btn btn-sm" formaction="${base}/readmit" data-confirm="${escapeHtml(DECISION_CONFIRM_TEXT.readmit ?? "")}"${CONFIRM_NEUTRAL_ATTR}>${DECISION_LABELS.readmit}</button>
       </div>
       <p class="muted">${DECISION_LABELS.uphold}: the member stays out and the next review is set (clear the days for none). ${DECISION_LABELS.extend}: needs a new date. ${DECISION_LABELS.permanent}: closes the case with no more reviews. ${DECISION_LABELS.readmit}: records the decision only; lift the ban in Discord yourself.</p>
     </form>`;
@@ -6689,7 +6691,7 @@ ${renderCasesSection(props)}
         ${userOptionsHtml}
       </select>
     </label>
-    <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+    <button type="submit" class="btn btn-sm">Apply</button>
     <a class="btn btn-sm" href="/admin/moderation">Reset</a>
   </form>
 </div>
@@ -6882,7 +6884,7 @@ ${renderStatusLine({
         ${statusOptionsHtml}
       </select>
     </label>
-    <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+    <button type="submit" class="btn btn-sm">Apply</button>
     <a class="btn btn-sm" href="/admin/tickets">Reset</a>
   </form>
 </div>

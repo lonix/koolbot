@@ -198,12 +198,16 @@ const STYLE = [
   ".tz-preview{margin-top:.75rem;font-size:.9rem;color:var(--text-secondary)}",
   ".tz-preview .now{font-weight:600;color:var(--text)}",
   ".btn,.btn-secondary,.btn-danger{border:0;padding:var(--space-2) var(--space-4);border-radius:var(--radius-md);cursor:pointer;font-weight:600;font-size:var(--type-ui-size)}",
-  ".btn{background:var(--primary);color:var(--on-primary)}",
-  ".btn:hover{background:var(--primary-hover)}",
+  // Neutral by default; `.btn-primary` is the one main button of a view (#1512).
+  ".btn{background:var(--fill);color:var(--text)}",
+  ".btn:hover{background:var(--fill-hover)}",
+  ".btn-primary{background:var(--primary);color:var(--on-primary)}",
+  ".btn-primary:hover{background:var(--primary-hover)}",
   // The Privacy page's download control is a link (a plain GET), not a form
   // button, so it needs the block/decoration bits a <button> gets for free.
-  "a.btn{display:inline-block;text-decoration:none;color:var(--on-primary)}",
-  "a.btn:hover{text-decoration:none;color:var(--on-primary)}",
+  "a.btn{display:inline-block;text-decoration:none;color:var(--text)}",
+  "a.btn:hover{text-decoration:none;color:var(--text)}",
+  "a.btn-primary,a.btn-primary:hover{color:var(--on-primary)}",
   ".btn-secondary{background:var(--fill);color:var(--text)}",
   ".btn-secondary:hover{background:var(--fill-hover)}",
   ".btn-danger{background:var(--danger);color:var(--on-primary)}",
@@ -574,7 +578,7 @@ export function renderUserIndexBody(opts: {
               '<span class="kb-badge kb-badge--on">Live</span>' +
               `<strong>${escapeHtml(e.title)}</strong>` +
               `<span class="kb-muted">${escapeHtml(e.when)}</span>` +
-              `<a class="kb-btn kb-btn--sm kb-btn--primary" href="${escapeHtml(hostPanelPath(e.id))}" aria-label="Open the host panel for ${escapeHtml(e.title)}">Host panel</a>` +
+              `<a class="kb-btn kb-btn--sm${live.length === 1 ? " kb-btn--primary" : ""}" href="${escapeHtml(hostPanelPath(e.id))}" aria-label="Open the host panel for ${escapeHtml(e.title)}">Host panel</a>` +
               "</div>",
           )
           .join("") +
@@ -1414,7 +1418,7 @@ export function renderUserNotificationsBody(
     '<section class="kb-panel" aria-label="Direct-message notification channels">',
     `<div class="kb-panel__body"><div class="kb-settings">${rows}</div>`,
     '<div class="form-actions">',
-    '<button class="btn" type="submit">Save preferences</button>',
+    '<button class="btn btn-primary" type="submit">Save preferences</button>',
     '<span class="muted">DMs are opt-in: every channel starts off until you enable it here.</span>',
     "</div>",
     "</div>",
