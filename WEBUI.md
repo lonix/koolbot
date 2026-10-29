@@ -3787,7 +3787,11 @@ is off. A "Remove my birthday" button clears the stored date; it is a danger but
 opens the confirmation dialog first, listing what the removal does (the saved date, a birthday
 role you hold, the bot's birthday posts about you, and the wait before a birthday can be set
 again when `birthdays.change_cooldown_seconds` is above 0). Without JavaScript the form posts at
-once. The daily birthday
+once. A refused save (#1535) comes back as the page itself, with the month, day and year as posted.
+A day the month does not have, or no month or day, marks both selects with one line under them; a
+year that is not valid marks the year. The change cooldown, and a failure that is not about one
+field, is a message above the form (the typed values are kept). Refusing a removal stays a message
+after a redirect. The daily birthday
 announcement itself is evaluated in the member's `/me/timezone`
 preference so it fires on their local day (`#524`).
 
@@ -3812,7 +3816,11 @@ max-per-user cap, name/limit/bitrate bounds, and name-pattern length are
 identical on both surfaces — and records a `WebAuditLog` row
 (`user.voice.namepattern.set`, `user.voice.preset.edit|default|delete`).
 The whole page is gated by `voicechannels.presets.enabled` and answers
-`404` (its writes too) while it is off; saved presets stay stored.
+`404` (its writes too) while it is off; saved presets stay stored. A refused name pattern or preset
+edit (#1535) comes back as the page itself: the form that was refused shows what was posted, the
+field it is about has `aria-invalid="true"` and a line saying what to change, and focus moves to it.
+The other presets' forms are untouched. A refusal that is not about a field (for example "Preset no
+longer exists." for a preset another tab removed) is a message after a redirect.
 
 The bare **Rewind** page (`/me/rewind`) lands on the most recent year you
 actually have data for, so visiting right after the year rolls over shows

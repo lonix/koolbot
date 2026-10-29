@@ -51,12 +51,16 @@ import {
   renderUserRewindBody,
   renderUserTimezoneBody,
   renderUserVoiceBody,
+  BIRTHDAY_FORM_ID,
   PRIVACY_RESET_CONFIRM_WORD,
+  VOICE_NAME_PATTERN_FORM_ID,
+  voicePresetFormId,
   type UserFeatureFlags,
   type UserFlashMessage,
   type VoicePresetView,
 } from "./user-layout.js";
 import {
+  BirthdayFieldError,
   BirthdayService,
   type BirthdayPurgeResult,
 } from "../services/birthday-service.js";
@@ -64,6 +68,12 @@ import {
   UserVoicePrefsService,
   VoicePrefsValidationError,
 } from "../services/user-voice-prefs-service.js";
+import {
+  addFieldError,
+  type FormErrors,
+  type FormValues,
+  type RefusedForm,
+} from "./form-errors.js";
 import {
   formatDateTimeInZone,
   formatInZone,
@@ -547,6 +557,33 @@ function parseIntField(raw: unknown): number | null {
   const trimmed = raw.trim();
   if (trimmed === "") return null;
   return Number.parseInt(trimmed, 10);
+}
+
+/**
+ * `text` with a full stop at the end, unless it already ends a sentence. A
+ * flash is built as "Could not save X: <reason>", and a reason can come with
+ * its own full stop (#1535).
+ */
+function withFinalStop(text: string): string {
+  const t = text.trimEnd();
+  return /[.!?]$/.test(t) ? t : `${t}.`;
+}
+
+/**
+ * What a form posted, as typed, for the fixed `names` of the form: a refused
+ * save puts them back in the fields. Never indexed by a posted name, and each
+ * value is bounded.
+ */
+function postedValues(
+  body: Record<string, unknown>,
+  names: readonly string[],
+): FormValues {
+  const values: FormValues = {};
+  for (const name of names) {
+    const v = Object.entries(body).find(([k]) => k === name)?.[1];
+    values[name] = typeof v === "string" ? v.slice(0, 200) : "";
+  }
+  return values;
 }
 
 function toPresetViews(
@@ -1075,29 +1112,32 @@ export function createUserRouter(
   );
 
   // ---------- Birthday (#657) ----------
-  router.get(
-    "/birthday",
-    asyncHandler(async (req, res) => {
-      const session = req.webSession;
-      if (!session) {
-        res.status(500).type("text/plain").send("session missing");
-        return;
-      }
-      const { userId, guildId } = assertSelfScope(session, {
-        userId: session.discordUserId,
-        guildId: session.guildId,
-      });
-      const selected = await BirthdayService.getInstance(client).getBirthday(
-        userId,
-        guildId,
-      );
-      const flash = readFlashFromQuery(req);
-      const flags = await readUserFeatureFlags();
-      const changeCooldownSeconds = await ConfigService.getInstance().getNumber(
-        "birthdays.change_cooldown_seconds",
-        300,
-      );
-      res.type("text/html").send(
+  // The page, for a fresh GET and for a refused save (#1535), which is answered
+  // in the same response (422) so what was typed is not lost.
+  async function sendBirthdayPage(
+    req: Request,
+    res: Response,
+    session: WebSessionContext,
+    refusal?: { refused: RefusedForm; flash?: UserFlashMessage },
+  ): Promise<void> {
+    const { userId, guildId } = assertSelfScope(session, {
+      userId: session.discordUserId,
+      guildId: session.guildId,
+    });
+    const selected = await BirthdayService.getInstance(client).getBirthday(
+      userId,
+      guildId,
+    );
+    const flash = refusal ? (refusal.flash ?? null) : readFlashFromQuery(req);
+    const flags = await readUserFeatureFlags();
+    const changeCooldownSeconds = await ConfigService.getInstance().getNumber(
+      "birthdays.change_cooldown_seconds",
+      300,
+    );
+    res
+      .status(refusal ? 422 : 200)
+      .type("text/html")
+      .send(
         renderUserPage({
           title: "Birthday",
           active: "/me/birthday",
@@ -1105,6 +1145,7 @@ export function createUserRouter(
             csrfToken: getCsrfToken(req),
             selected,
             changeCooldownSeconds,
+            refusedForm: refusal?.refused ?? null,
           }),
           csrfToken: getCsrfToken(req),
           remainingMs: getDisplayedRemainingMs(session),
@@ -1113,6 +1154,17 @@ export function createUserRouter(
           ...flags,
         }),
       );
+  }
+
+  router.get(
+    "/birthday",
+    asyncHandler(async (req, res) => {
+      const session = req.webSession;
+      if (!session) {
+        res.status(500).type("text/plain").send("session missing");
+        return;
+      }
+      await sendBirthdayPage(req, res, session);
     }),
   );
 
@@ -1144,6 +1196,8 @@ export function createUserRouter(
 
       let result: "success" | "failure" = "success";
       let errorMessage: string | null = null;
+      let fieldError: BirthdayFieldError | null = null;
+      let dateMissing = false;
       let after = before;
       let purge: BirthdayPurgeResult | null = null;
       try {
@@ -1160,7 +1214,11 @@ export function createUserRouter(
           }
           after = null;
         } else if (month === null || day === null) {
-          throw new Error("Please choose a month and a day.");
+          dateMissing = true;
+          throw new BirthdayFieldError(
+            "Please choose a month and a day.",
+            "date",
+          );
         } else {
           after = await service.setBirthday(userId, guildId, {
             month,
@@ -1171,6 +1229,7 @@ export function createUserRouter(
       } catch (err) {
         result = "failure";
         errorMessage = err instanceof Error ? err.message : String(err);
+        if (err instanceof BirthdayFieldError) fieldError = err;
         logger.error(
           `Failed to ${clearing ? "remove" : "save"} birthday: ${sanitizeForLog(errorMessage)}`,
         );
@@ -1189,11 +1248,48 @@ export function createUserRouter(
         errorMessage,
       });
 
+      // A refused save comes back as the page itself, with what was posted. A
+      // refusal about the date or the year marks that field; any other (the
+      // change cooldown, a failed read) is a callout, as it is not about one
+      // field. The refused removal stays a redirect: nothing was typed.
+      if (result === "failure" && !clearing) {
+        const errors: FormErrors = {};
+        if (fieldError) {
+          addFieldError(
+            errors,
+            fieldError.field,
+            fieldError.field === "year"
+              ? "Enter a four-digit year from 1900 up to this year, or leave it blank."
+              : dateMissing
+                ? "Choose a month and a day."
+                : "That date does not exist. Choose a day that fits the month.",
+          );
+        }
+        await sendBirthdayPage(req, res, session, {
+          refused: {
+            formId: BIRTHDAY_FORM_ID,
+            errors,
+            values: postedValues(body, ["month", "day", "year"]),
+          },
+          flash: fieldError
+            ? undefined
+            : {
+                type: "err",
+                text: withFinalStop(
+                  `Could not save your birthday: ${errorMessage ?? "unknown error"}`,
+                ),
+              },
+        });
+        return;
+      }
+
       let flash: UserFlashMessage;
       if (result === "failure") {
         flash = {
           type: "err",
-          text: `Could not ${clearing ? "remove" : "save"} your birthday: ${errorMessage ?? "unknown error"}.`,
+          text: withFinalStop(
+            `Could not remove your birthday: ${errorMessage ?? "unknown error"}`,
+          ),
         };
       } else if (after === null) {
         flash = { type: "ok", text: "Removed your birthday." };
@@ -1363,34 +1459,50 @@ export function createUserRouter(
   // 404 (`requireSurfaceOn`, #1292); a member's saved name pattern and presets
   // stay stored and are back when the feature is turned on.
 
-  router.get(
-    "/voice",
-    asyncHandler(async (req, res) => {
-      const session = req.webSession;
-      if (!session) {
-        res.status(500).type("text/plain").send("session missing");
-        return;
-      }
-      const { userId } = assertSelfScope(session, {
-        userId: session.discordUserId,
-        guildId: session.guildId,
-      });
+  // The page, for a fresh GET and for a refused save (#1535): answered in the
+  // same response (422) so what was typed in that one form is not lost.
+  async function sendVoicePage(
+    req: Request,
+    res: Response,
+    session: WebSessionContext,
+    refusal?: {
+      refused: RefusedForm;
+      flash?: UserFlashMessage;
+      /**
+       * The preset the refused draft belongs to. It is checked against the very
+       * list that is drawn, so a draft can never land in the card of a preset
+       * that took its place; on a mismatch nothing is sent and false returns.
+       */
+      presetIdentity?: { index: number; name: string };
+    },
+  ): Promise<boolean> {
+    const { userId } = assertSelfScope(session, {
+      userId: session.discordUserId,
+      guildId: session.guildId,
+    });
 
-      const service = UserVoicePrefsService.getInstance();
-      const prefs = await service.getPrefs(userId);
-      const displayName = await resolveDisplayName(
-        client,
-        session.guildId,
-        userId,
-      );
-      const maxPerUser = await ConfigService.getInstance().getNumber(
-        "voicechannels.presets.max_per_user",
-        3,
-      );
-      const flash = readFlashFromQuery(req);
-      const flags = await readUserFeatureFlags();
+    const service = UserVoicePrefsService.getInstance();
+    const prefs = await service.getPrefs(userId);
+    const identity = refusal?.presetIdentity;
+    if (identity && prefs.presets[identity.index]?.name !== identity.name) {
+      return false;
+    }
+    const displayName = await resolveDisplayName(
+      client,
+      session.guildId,
+      userId,
+    );
+    const maxPerUser = await ConfigService.getInstance().getNumber(
+      "voicechannels.presets.max_per_user",
+      3,
+    );
+    const flash = refusal ? (refusal.flash ?? null) : readFlashFromQuery(req);
+    const flags = await readUserFeatureFlags();
 
-      res.type("text/html").send(
+    res
+      .status(refusal ? 422 : 200)
+      .type("text/html")
+      .send(
         renderUserPage({
           title: "Voice preferences",
           active: "/me/voice",
@@ -1400,6 +1512,7 @@ export function createUserRouter(
             displayName,
             presets: toPresetViews(prefs.presets),
             maxPerUser,
+            refusedForm: refusal?.refused ?? null,
           }),
           csrfToken: getCsrfToken(req),
           remainingMs: getDisplayedRemainingMs(session),
@@ -1408,6 +1521,18 @@ export function createUserRouter(
           ...flags,
         }),
       );
+    return true;
+  }
+
+  router.get(
+    "/voice",
+    asyncHandler(async (req, res) => {
+      const session = req.webSession;
+      if (!session) {
+        res.status(500).type("text/plain").send("session missing");
+        return;
+      }
+      await sendVoicePage(req, res, session);
     }),
   );
 
@@ -1434,6 +1559,7 @@ export function createUserRouter(
       let result: "success" | "failure" = "success";
       let errorMessage: string | null = null;
       let stored: string | null = null;
+      let refusal: VoicePrefsValidationError | null = null;
       try {
         stored = await UserVoicePrefsService.getInstance().setNamePattern(
           userId,
@@ -1442,6 +1568,7 @@ export function createUserRouter(
       } catch (err) {
         result = "failure";
         errorMessage = err instanceof Error ? err.message : String(err);
+        if (err instanceof VoicePrefsValidationError) refusal = err;
       }
 
       await recordAudit(session, {
@@ -1455,11 +1582,32 @@ export function createUserRouter(
         errorMessage,
       });
 
+      // A refused pattern comes back as the page itself with what was typed and
+      // the field marked (#1535); a failure that is not a refusal stays a flash.
+      if (refusal) {
+        const errors: FormErrors = {};
+        if (refusal.field)
+          addFieldError(errors, refusal.field, refusal.message);
+        await sendVoicePage(req, res, session, {
+          refused: {
+            formId: VOICE_NAME_PATTERN_FORM_ID,
+            errors,
+            values: { namePattern: raw },
+          },
+          flash: refusal.field
+            ? undefined
+            : { type: "err", text: withFinalStop(refusal.message) },
+        });
+        return;
+      }
+
       const flash: UserFlashMessage =
         result === "failure"
           ? {
               type: "err",
-              text: `Could not save your name pattern: ${errorMessage ?? "unknown error"}.`,
+              text: withFinalStop(
+                `Could not save your name pattern: ${errorMessage ?? "unknown error"}`,
+              ),
             }
           : stored === null
             ? { type: "ok", text: "Cleared your name pattern." }
@@ -1482,6 +1630,17 @@ export function createUserRouter(
       flash: UserFlashMessage;
       details: Record<string, unknown>;
     }>,
+    // A refusal that names a field of the form: answers with the page and
+    // returns true, or returns false to leave it as a flash (#1535).
+    answerRefusal?: (ctx: {
+      req: Request;
+      res: Response;
+      session: WebSessionContext;
+      index: number;
+      expectedName: string;
+      body: Record<string, unknown>;
+      err: VoicePrefsValidationError;
+    }) => Promise<boolean>,
   ): RequestHandler =>
     asyncHandler(async (req, res) => {
       const session = req.webSession;
@@ -1503,6 +1662,7 @@ export function createUserRouter(
       let errorMessage: string | null = null;
       let flash: UserFlashMessage;
       let details: Record<string, unknown> = {};
+      let fieldRefusal: VoicePrefsValidationError | null = null;
 
       if (index === undefined || index === null || Number.isNaN(index)) {
         result = "failure";
@@ -1525,12 +1685,15 @@ export function createUserRouter(
         } catch (err) {
           result = "failure";
           errorMessage = err instanceof Error ? err.message : String(err);
+          if (err instanceof VoicePrefsValidationError && err.field) {
+            fieldRefusal = err;
+          }
           flash = {
             type: err instanceof VoicePrefsValidationError ? "warn" : "err",
             text:
               err instanceof VoicePrefsValidationError
                 ? errorMessage
-                : `Could not update the preset: ${errorMessage}.`,
+                : withFinalStop(`Could not update the preset: ${errorMessage}`),
           };
         }
       }
@@ -1553,6 +1716,23 @@ export function createUserRouter(
         errorMessage,
       });
 
+      if (
+        fieldRefusal &&
+        answerRefusal &&
+        index !== undefined &&
+        (await answerRefusal({
+          req,
+          res,
+          session,
+          index,
+          expectedName,
+          body,
+          err: fieldRefusal,
+        }))
+      ) {
+        return;
+      }
+
       res.redirect(303, flashUrl("/me/voice", flash));
     });
 
@@ -1570,10 +1750,16 @@ export function createUserRouter(
         // NaN means "present but not a number" — surface a friendly error
         // rather than passing it to the validator as a bound check.
         if (Number.isNaN(userLimit)) {
-          throw new VoicePrefsValidationError("User limit must be a number.");
+          throw new VoicePrefsValidationError(
+            "User limit must be a number.",
+            "userLimit",
+          );
         }
         if (Number.isNaN(bitrate)) {
-          throw new VoicePrefsValidationError("Bitrate must be a number.");
+          throw new VoicePrefsValidationError(
+            "Bitrate must be a number.",
+            "bitrate",
+          );
         }
         const saved = await service.editPreset(
           userId,
@@ -1585,6 +1771,27 @@ export function createUserRouter(
           flash: { type: "ok", text: `Saved changes to "${saved.name}".` },
           details: { name: saved.name },
         };
+      },
+      async ({ req, res, session, index, expectedName, body, err }) => {
+        // The draft is shown only if the row is still the one the form was
+        // drawn for, checked against the list that is rendered; a preset
+        // another tab removed or shifted has no form to mark, so that stays the
+        // flash (#1535).
+        const errors: FormErrors = {};
+        if (err.field) addFieldError(errors, err.field, err.message);
+        return sendVoicePage(req, res, session, {
+          presetIdentity: { index, name: expectedName },
+          refused: {
+            formId: voicePresetFormId(index),
+            errors,
+            values: postedValues(body, [
+              "name",
+              "channelName",
+              "userLimit",
+              "bitrate",
+            ]),
+          },
+        });
       },
     ),
   );

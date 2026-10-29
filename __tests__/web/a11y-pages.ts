@@ -6127,6 +6127,24 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      name: "/me birthday (rejected date)",
+      html: shell(
+        "Birthday",
+        "/me/birthday",
+        renderUserBirthdayBody({
+          csrfToken: COMMON.csrfToken,
+          selected: { month: 4, day: 12, year: null },
+          refusedForm: {
+            formId: "birthday",
+            errors: {
+              date: "That date does not exist. Choose a day that fits the month.",
+            },
+            values: { month: "2", day: "30", year: "" },
+          },
+        }),
+      ),
+    },
+    {
       name: "/me timezone",
       html: shell(
         "Timezone",
@@ -6158,6 +6176,42 @@ export function userPages(): A11yPage[] {
             },
           ],
           maxPerUser: 5,
+        }),
+      ),
+    },
+    {
+      name: "/me voice (rejected user limit)",
+      html: shell(
+        "Voice",
+        "/me/voice",
+        renderUserVoiceBody({
+          csrfToken: COMMON.csrfToken,
+          namePattern: "{user}'s room",
+          displayName: "Alice",
+          presets: [
+            {
+              index: 0,
+              name: "Chill",
+              channelName: "Chill zone",
+              userLimit: null,
+              bitrate: null,
+              isDefault: true,
+            },
+          ],
+          maxPerUser: 5,
+          refusedForm: {
+            formId: "voice-preset-0",
+            errors: {
+              userLimit:
+                "User limit must be a whole number between 0 and 99 (0 = unlimited).",
+            },
+            values: {
+              name: "Chill",
+              channelName: "Chill zone",
+              userLimit: "150",
+              bitrate: "",
+            },
+          },
         }),
       ),
     },

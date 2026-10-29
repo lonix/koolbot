@@ -20,6 +20,8 @@ import {
 } from "./setting-pickers.js";
 import { hostPanelPath } from "./host-panel-shared.js";
 import { icon, type IconName } from "./icons.js";
+import { formView, type FormView, type RefusedForm } from "./form-errors.js";
+import { FOCUS_FIRST_INVALID_SCRIPT } from "./event-field-errors.js";
 import { renderSwitch } from "./setting-controls.js";
 import type { MeSurfaceFlags } from "./me-surfaces.js";
 import {
@@ -1108,7 +1110,16 @@ export interface BirthdayPageBodyOptions {
    * long until a birthday can be set again. Absent or 0 adds no line.
    */
   changeCooldownSeconds?: number;
+  /**
+   * The save the server just refused (#1535): the page shows what was posted
+   * and marks the field it is about. `formId` is {@link BIRTHDAY_FORM_ID}.
+   * The field keys are `date` (month and day together) and `year`.
+   */
+  refusedForm?: RefusedForm | null;
 }
+
+/** The `formId` of the Birthday form's {@link RefusedForm}. */
+export const BIRTHDAY_FORM_ID = "birthday";
 
 /**
  * The consequence list of the member's *Remove my birthday* dialog, mirroring
@@ -1129,21 +1140,23 @@ export function birthdayRemoveItems(changeCooldownSeconds = 0): string[] {
   return items;
 }
 
-function renderMonthOptions(selected: number | null): string {
-  const blank = `<option value=""${selected === null ? " selected" : ""}>— Month —</option>`;
+// A refused form echoes what was posted, as the text it was posted as; a
+// stored value is compared the same way.
+function renderMonthOptions(selected: string): string {
+  const blank = `<option value=""${selected === "" ? " selected" : ""}>— Month —</option>`;
   const months = MONTH_NAMES.map((name, i) => {
     const value = i + 1;
-    const sel = value === selected ? " selected" : "";
+    const sel = String(value) === selected ? " selected" : "";
     return `<option value="${value}"${sel}>${escapeHtml(name)}</option>`;
   }).join("");
   return blank + months;
 }
 
-function renderDayOptions(selected: number | null): string {
-  const blank = `<option value=""${selected === null ? " selected" : ""}>— Day —</option>`;
+function renderDayOptions(selected: string): string {
+  const blank = `<option value=""${selected === "" ? " selected" : ""}>— Day —</option>`;
   const days = Array.from({ length: 31 }, (_, i) => {
     const value = i + 1;
-    const sel = value === selected ? " selected" : "";
+    const sel = String(value) === selected ? " selected" : "";
     return `<option value="${value}"${sel}>${value}</option>`;
   }).join("");
   return blank + days;
@@ -1174,24 +1187,34 @@ const BIRTHDAY_DAY_SCRIPT =
  * the stored birthday.
  */
 export function renderUserBirthdayBody(opts: BirthdayPageBodyOptions): string {
-  const month = opts.selected?.month ?? null;
-  const day = opts.selected?.day ?? null;
-  const year = opts.selected?.year ?? null;
+  const f = formView(opts.refusedForm, BIRTHDAY_FORM_ID);
+  const month = f.selected("month", String(opts.selected?.month ?? ""));
+  const day = f.selected("day", String(opts.selected?.day ?? ""));
+  const year = f.value("year", String(opts.selected?.year ?? ""));
   const hasBirthday = opts.selected !== null;
+  // The controls keep their fixed ids (the label and BIRTHDAY_DAY_SCRIPT use
+  // them), so the marks are built here instead of with `f.attrs`. Month and day
+  // are one refusal ("date") and share its one error line.
+  const mark = (key: "date" | "year"): string =>
+    f.error(key)
+      ? ` aria-invalid="true" aria-describedby="${BIRTHDAY_FORM_ID}-${key}-error"`
+      : "";
   return [
     "<h1>Birthday</h1>",
     `<p class="subtitle">Set your birthday so KoolBot can celebrate it on the day — evaluated in your own timezone (set that on the <a href="/me/timezone">Timezone</a> page). The year is optional; leave it blank to share the date without your age.</p>`,
     '<form method="POST" action="/me/birthday">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
     '<div class="card">',
-    '<div style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:flex-end">',
-    '<div><label for="bd-month"><strong>Month</strong></label>' +
-      `<div style="margin-top:.35rem"><select id="bd-month" name="month" class="tz-select" style="max-width:12rem">${renderMonthOptions(month)}</select></div></div>`,
-    '<div><label for="bd-day"><strong>Day</strong></label>' +
-      `<div style="margin-top:.35rem"><select id="bd-day" name="day" class="tz-select" style="max-width:6rem">${renderDayOptions(day)}</select></div></div>`,
-    '<div><label for="bd-year"><strong>Year</strong> <span class="muted">(optional)</span></label>' +
-      `<div style="margin-top:.35rem"><input id="bd-year" name="year" type="number" min="1900" placeholder="—" class="tz-select" style="max-width:8rem" value="${year ?? ""}"></div></div>`,
+    '<div class="kb-stack">',
+    '<div class="kb-fields">',
+    '<div class="kb-field"><label class="kb-label" for="bd-month">Month</label>' +
+      `<select id="bd-month" name="month" class="kb-select"${mark("date")}>${renderMonthOptions(month)}</select></div>`,
+    '<div class="kb-field"><label class="kb-label" for="bd-day">Day</label>' +
+      `<select id="bd-day" name="day" class="kb-select"${mark("date")}>${renderDayOptions(day)}</select></div>`,
+    '<div class="kb-field"><label class="kb-label" for="bd-year">Year <span class="kb-help">(optional)</span></label>' +
+      `<input id="bd-year" name="year" type="number" min="1900" placeholder="—" class="kb-input" value="${escapeHtml(year)}"${mark("year")}>${f.error("year")}</div>`,
     "</div>",
+    f.error("date"),
     '<div class="form-actions">',
     '<button class="btn" type="submit">Save birthday</button>',
     hasBirthday
@@ -1199,8 +1222,10 @@ export function renderUserBirthdayBody(opts: BirthdayPageBodyOptions): string {
       : "",
     "</div>",
     "</div>",
+    "</div>",
     "</form>",
     `${scriptTag(BIRTHDAY_DAY_SCRIPT)}`,
+    f.refused ? scriptTag(FOCUS_FIRST_INVALID_SCRIPT) : "",
   ].join("");
 }
 
@@ -1363,9 +1388,52 @@ export interface VoicePageBodyOptions {
   presets: VoicePresetView[];
   /** Configured max presets per user (shown as guidance). */
   maxPerUser: number;
+  /**
+   * The save the server just refused (#1535): that one form shows what was
+   * posted and marks the field. `formId` is {@link VOICE_NAME_PATTERN_FORM_ID}
+   * or {@link voicePresetFormId}.
+   */
+  refusedForm?: RefusedForm | null;
 }
 
-function renderPresetRow(p: VoicePresetView, csrfToken: string): string {
+/** The `formId` of the name pattern form's {@link RefusedForm}. */
+export const VOICE_NAME_PATTERN_FORM_ID = "voice-name-pattern";
+
+/** The `formId` of one preset's edit form (`index` is the preset's row). */
+export function voicePresetFormId(index: number): string {
+  return `voice-preset-${index}`;
+}
+
+/**
+ * ` id` (always, so the label can point at it), plus `aria-invalid` and
+ * `aria-describedby` for a control the last save refused. `describedBy` lists
+ * help text the control already points at.
+ */
+function fieldAttrs(
+  f: FormView,
+  formId: string,
+  name: string,
+  describedBy = "",
+): string {
+  const id = `${formId}-${name}`;
+  const invalid = f.error(name) !== "";
+  const ids = [describedBy, invalid ? `${id}-error` : ""]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    ` id="${escapeHtml(id)}"` +
+    (invalid ? ' aria-invalid="true"' : "") +
+    (ids ? ` aria-describedby="${escapeHtml(ids)}"` : "")
+  );
+}
+
+function renderPresetRow(
+  p: VoicePresetView,
+  csrfToken: string,
+  refusedForm?: RefusedForm | null,
+): string {
+  const formId = voicePresetFormId(p.index);
+  const f = formView(refusedForm, formId);
   const bits: string[] = [];
   if (p.channelName) bits.push(`name "${escapeHtml(p.channelName)}"`);
   if (p.userLimit !== null)
@@ -1390,11 +1458,11 @@ function renderPresetRow(p: VoicePresetView, csrfToken: string): string {
     '<form method="POST" action="/me/voice/preset/edit">',
     csrf,
     idFields,
-    '<div class="preset-grid">',
-    `<label>Preset name<input type="text" name="name" value="${escapeHtml(p.name)}" maxlength="50" required></label>`,
-    `<label>Channel name<input type="text" name="channelName" value="${escapeHtml(p.channelName ?? "")}" maxlength="100" placeholder="(unchanged)"></label>`,
-    `<label>User limit<input type="number" name="userLimit" value="${p.userLimit ?? ""}" min="0" max="99" placeholder="(default)"></label>`,
-    `<label>Bitrate (kbps)<input type="number" name="bitrate" value="${p.bitrate ?? ""}" min="8" max="384" placeholder="(default)"></label>`,
+    '<div class="kb-fields">',
+    `<div class="kb-field"><label class="kb-label" for="${formId}-name">Preset name</label><input type="text" name="name" class="kb-input" value="${escapeHtml(f.value("name", p.name))}" maxlength="50" required${fieldAttrs(f, formId, "name")}>${f.error("name")}</div>`,
+    `<div class="kb-field"><label class="kb-label" for="${formId}-channelName">Channel name</label><input type="text" name="channelName" class="kb-input" value="${escapeHtml(f.value("channelName", p.channelName ?? ""))}" maxlength="100" placeholder="(unchanged)"${fieldAttrs(f, formId, "channelName")}>${f.error("channelName")}</div>`,
+    `<div class="kb-field"><label class="kb-label" for="${formId}-userLimit">User limit</label><input type="number" name="userLimit" class="kb-input" value="${escapeHtml(f.value("userLimit", String(p.userLimit ?? "")))}" min="0" max="99" placeholder="(default)"${fieldAttrs(f, formId, "userLimit")}>${f.error("userLimit")}</div>`,
+    `<div class="kb-field"><label class="kb-label" for="${formId}-bitrate">Bitrate (kbps)</label><input type="number" name="bitrate" class="kb-input" value="${escapeHtml(f.value("bitrate", String(p.bitrate ?? "")))}" min="8" max="384" placeholder="(default)"${fieldAttrs(f, formId, "bitrate")}>${f.error("bitrate")}</div>`,
     "</div>",
     '<div class="form-actions"><button class="btn" type="submit">Save changes</button></div>',
     "</form>",
@@ -1422,10 +1490,14 @@ function renderPresetRow(p: VoicePresetView, csrfToken: string): string {
  * channel — the web surface manages the ones you already have.
  */
 export function renderUserVoiceBody(opts: VoicePageBodyOptions): string {
+  const np = formView(opts.refusedForm, VOICE_NAME_PATTERN_FORM_ID);
+  const npHelp = `${VOICE_NAME_PATTERN_FORM_ID}-help`;
   const presetCards =
     opts.presets.length === 0
       ? '<div class="card"><div class="empty">No saved presets yet. Open a voice channel\'s control panel in Discord and choose <strong>Presets → Save current as preset</strong> to create one.</div></div>'
-      : opts.presets.map((p) => renderPresetRow(p, opts.csrfToken)).join("");
+      : opts.presets
+          .map((p) => renderPresetRow(p, opts.csrfToken, opts.refusedForm))
+          .join("");
 
   return [
     "<h1>Voice preferences</h1>",
@@ -1435,8 +1507,8 @@ export function renderUserVoiceBody(opts: VoicePageBodyOptions): string {
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
     '<div class="card">',
     "<h2>Channel name pattern</h2>",
-    '<p class="muted">Applied to every new channel you spawn from the lobby. Use <code>{username}</code> as a placeholder for your display name. Leave blank to use the server default naming.</p>',
-    `<div style="margin-top:.5rem"><input type="text" name="namePattern" class="tz-select" maxlength="100" value="${escapeHtml(opts.namePattern ?? "")}" placeholder="e.g. {username}'s Room"></div>`,
+    `<p class="muted" id="${npHelp}">Applied to every new channel you spawn from the lobby. Use <code>{username}</code> as a placeholder for your display name. Leave blank to use the server default naming.</p>`,
+    `<div class="kb-field"><label class="kb-label" for="${VOICE_NAME_PATTERN_FORM_ID}-namePattern">Name pattern</label><input type="text" name="namePattern" class="kb-input" maxlength="100" value="${escapeHtml(np.value("namePattern", opts.namePattern ?? ""))}" placeholder="e.g. {username}'s Room"${fieldAttrs(np, VOICE_NAME_PATTERN_FORM_ID, "namePattern", npHelp)}>${np.error("namePattern")}</div>`,
     `<p class="muted" style="margin-top:.5rem">Preview: <span class="mono">${escapeHtml(
       opts.namePattern
         ? opts.namePattern
@@ -1451,6 +1523,7 @@ export function renderUserVoiceBody(opts: VoicePageBodyOptions): string {
     // ---- Presets ----
     `<h2>Saved presets <span class="muted" style="font-size:.85rem">(max ${opts.maxPerUser})</span></h2>`,
     presetCards,
+    opts.refusedForm ? scriptTag(FOCUS_FIRST_INVALID_SCRIPT) : "",
   ].join("");
 }
 

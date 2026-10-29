@@ -98,6 +98,9 @@ function makeRes(): {
   return res;
 }
 
+/** What the tests read from a form control. */
+type InputEl = { value: string };
+
 describe("assertSelfScope", () => {
   const sessionAdmin: WebSessionContext = {
     sessionId: "s1",
@@ -1790,6 +1793,313 @@ describe("/me/voice (#656)", () => {
     expect(out.redirectedTo).toContain("flash=err");
     expect(editPreset).not.toHaveBeenCalled();
   });
+
+  describe("a refused save (#1535)", () => {
+    const prefs = {
+      namePattern: "{username} HQ",
+      presets: [
+        {
+          name: "Squad",
+          channelName: "Squad HQ",
+          userLimit: 5,
+          bitrate: 96,
+          isDefault: false,
+        },
+        { name: "Chill", userLimit: 2, isDefault: false },
+      ],
+    };
+
+    it("a refused name pattern comes back as the page with the typed text and the field marked", async () => {
+      const { VoicePrefsValidationError } =
+        await import("../../src/services/user-voice-prefs-service.js");
+      const setNamePattern = jest
+        .fn<(u: string, raw: string) => Promise<string | null>>()
+        .mockRejectedValue(
+          new VoicePrefsValidationError(
+            "Name pattern must be 100 characters or less.",
+            "namePattern",
+          ),
+        );
+      const out = await dispatch({
+        method: "POST",
+        url: "/voice/name-pattern",
+        body: { _csrf: csrf(), namePattern: "x".repeat(150) },
+        csrfHeader: csrf(),
+        prefs,
+        serviceImpl: { setNamePattern },
+      });
+      expect(out.statusCode).toBe(422);
+      expect(out.redirectedTo).toBeUndefined();
+      const doc = new JSDOM(out.body).window.document;
+      const input = doc.querySelector(
+        'input[name="namePattern"]',
+      ) as unknown as InputEl;
+      expect(input.value).toBe("x".repeat(150));
+      expect(input.getAttribute("aria-invalid")).toBe("true");
+      const described = input.getAttribute("aria-describedby")!.split(" ");
+      expect(described).toContain("voice-name-pattern-namePattern-error");
+      expect(
+        doc.getElementById("voice-name-pattern-namePattern-error")!.textContent,
+      ).toBe("Name pattern must be 100 characters or less.");
+      // The label points at the control, and no flash takes the focus.
+      expect(doc.querySelector("label.kb-label")!.getAttribute("for")).toBe(
+        input.id,
+      );
+      expect(doc.querySelector("[data-flash]")).toBeNull();
+      expect(out.audit).toMatchObject({ result: "failure" });
+    });
+
+    it("a refused preset edit keeps the posted values in that one preset's form and marks the field", async () => {
+      const { VoicePrefsValidationError } =
+        await import("../../src/services/user-voice-prefs-service.js");
+      const editPreset = jest
+        .fn()
+        .mockRejectedValue(
+          new VoicePrefsValidationError(
+            "User limit must be a whole number between 0 and 99 (0 = unlimited).",
+            "userLimit",
+          ),
+        );
+      const out = await dispatch({
+        method: "POST",
+        url: "/voice/preset/edit",
+        body: {
+          _csrf: csrf(),
+          index: "0",
+          expectedName: "Squad",
+          name: "Squad 2",
+          channelName: "Typed room",
+          userLimit: "150",
+          bitrate: "64",
+        },
+        csrfHeader: csrf(),
+        prefs,
+        serviceImpl: { editPreset },
+      });
+      expect(out.statusCode).toBe(422);
+      const doc = new JSDOM(out.body).window.document;
+      const limit = doc.getElementById(
+        "voice-preset-0-userLimit",
+      ) as unknown as InputEl;
+      expect(limit.value).toBe("150");
+      expect(limit.getAttribute("aria-invalid")).toBe("true");
+      expect(limit.getAttribute("aria-describedby")).toBe(
+        "voice-preset-0-userLimit-error",
+      );
+      expect(
+        doc.getElementById("voice-preset-0-userLimit-error")!.className,
+      ).toBe("kb-field__error");
+      expect(
+        (doc.getElementById("voice-preset-0-name") as unknown as InputEl).value,
+      ).toBe("Squad 2");
+      expect(
+        (doc.getElementById("voice-preset-0-channelName") as unknown as InputEl)
+          .value,
+      ).toBe("Typed room");
+      // The stored name still heads the card and rides in the hidden field.
+      expect(
+        doc
+          .querySelector('form[action="/me/voice/preset/edit"]')!
+          .closest(".card")!
+          .querySelector("h2")!.textContent,
+      ).toContain("Squad");
+      expect(
+        doc
+          .querySelector(
+            'form[action="/me/voice/preset/edit"] input[name="expectedName"]',
+          )!
+          .getAttribute("value"),
+      ).toBe("Squad");
+      // The other preset's form is untouched, and only this one is marked.
+      expect(
+        (doc.getElementById("voice-preset-1-name") as unknown as InputEl).value,
+      ).toBe("Chill");
+      expect(doc.querySelectorAll('[aria-invalid="true"]')).toHaveLength(1);
+    });
+
+    it("a non-numeric user limit is refused in the route and marks the user limit", async () => {
+      const editPreset = jest.fn();
+      const out = await dispatch({
+        method: "POST",
+        url: "/voice/preset/edit",
+        body: {
+          _csrf: csrf(),
+          index: "0",
+          expectedName: "Squad",
+          name: "Squad",
+          userLimit: "abc",
+        },
+        csrfHeader: csrf(),
+        prefs,
+        serviceImpl: { editPreset },
+      });
+      expect(out.statusCode).toBe(422);
+      expect(editPreset).not.toHaveBeenCalled();
+      const doc = new JSDOM(out.body).window.document;
+      expect(
+        doc.getElementById("voice-preset-0-userLimit-error")!.textContent,
+      ).toBe("User limit must be a number.");
+    });
+
+    it("a refusal for a preset another tab removed stays a flash, not a form of another preset", async () => {
+      const { VoicePrefsValidationError } =
+        await import("../../src/services/user-voice-prefs-service.js");
+      const out = await dispatch({
+        method: "POST",
+        url: "/voice/preset/edit",
+        body: {
+          _csrf: csrf(),
+          index: "0",
+          expectedName: "Gone",
+          name: "Squad",
+          bitrate: "9999",
+        },
+        csrfHeader: csrf(),
+        prefs,
+        serviceImpl: {
+          editPreset: jest
+            .fn()
+            .mockRejectedValue(
+              new VoicePrefsValidationError(
+                "Bitrate is out of range.",
+                "bitrate",
+              ),
+            ),
+        },
+      });
+      expect(out.statusCode).toBe(303);
+      expect(out.redirectedTo).toContain("flash=warn");
+    });
+
+    it("a preset deleted between the refusal and the render never puts its draft in another preset's card", async () => {
+      const { VoicePrefsValidationError } =
+        await import("../../src/services/user-voice-prefs-service.js");
+      const both = prefs;
+      const survivor = { namePattern: "x", presets: [prefs.presets[1]] };
+      // Every read after the first sees the list without "Squad".
+      const getPrefs = jest
+        .fn<() => Promise<unknown>>()
+        .mockResolvedValueOnce(both)
+        .mockResolvedValue(survivor);
+      const out = await dispatch({
+        method: "POST",
+        url: "/voice/preset/edit",
+        body: {
+          _csrf: csrf(),
+          index: "0",
+          expectedName: "Squad",
+          name: "Squad draft",
+          userLimit: "150",
+        },
+        csrfHeader: csrf(),
+        prefs,
+        serviceImpl: {
+          getPrefs,
+          editPreset: jest
+            .fn()
+            .mockRejectedValue(
+              new VoicePrefsValidationError(
+                "Limit is out of range.",
+                "userLimit",
+              ),
+            ),
+        },
+      });
+      if (out.statusCode === 422) {
+        // Rendered from the snapshot that still holds Squad: the draft is in
+        // Squad's card, whose hidden expectedName is Squad.
+        const doc = new JSDOM(out.body).window.document;
+        const draft = doc.getElementById("voice-preset-0-name")!;
+        expect((draft as unknown as InputEl).value).toBe("Squad draft");
+        expect(
+          draft
+            .closest("form")!
+            .querySelector('input[name="expectedName"]')!
+            .getAttribute("value"),
+        ).toBe("Squad");
+      } else {
+        expect(out.statusCode).toBe(303);
+        expect(out.redirectedTo).toContain("flash=warn");
+      }
+    });
+
+    it("a stale-row refusal stays a callout", async () => {
+      const { VoicePrefsValidationError } =
+        await import("../../src/services/user-voice-prefs-service.js");
+      const out = await dispatch({
+        method: "POST",
+        url: "/voice/preset/edit",
+        body: {
+          _csrf: csrf(),
+          index: "0",
+          expectedName: "Squad",
+          name: "Squad",
+        },
+        csrfHeader: csrf(),
+        prefs,
+        serviceImpl: {
+          editPreset: jest
+            .fn()
+            .mockRejectedValue(
+              new VoicePrefsValidationError("Preset no longer exists."),
+            ),
+        },
+      });
+      expect(out.statusCode).toBe(303);
+      expect(out.redirectedTo).toContain("flash=warn");
+    });
+
+    it("a reason that already ends in a full stop is not given another, on the pattern and the preset routes", async () => {
+      const pattern = await dispatch({
+        method: "POST",
+        url: "/voice/name-pattern",
+        body: { _csrf: csrf(), namePattern: "x" },
+        csrfHeader: csrf(),
+        serviceImpl: {
+          setNamePattern: jest
+            .fn<() => Promise<string | null>>()
+            .mockRejectedValue(new Error("The database is down.")),
+        },
+      });
+      expect(
+        new URLSearchParams(pattern.redirectedTo!.split("?")[1]).get("msg"),
+      ).toBe("Could not save your name pattern: The database is down.");
+      const preset = await dispatch({
+        method: "POST",
+        url: "/voice/preset/edit",
+        body: { _csrf: csrf(), index: "0", expectedName: "Squad", name: "S" },
+        csrfHeader: csrf(),
+        prefs,
+        serviceImpl: {
+          editPreset: jest
+            .fn()
+            .mockRejectedValue(new Error("The database is down.")),
+        },
+      });
+      expect(
+        new URLSearchParams(preset.redirectedTo!.split("?")[1]).get("msg"),
+      ).toBe("Could not update the preset: The database is down.");
+    });
+
+    it("echoes only the fixed fields, never a posted name such as __proto__", async () => {
+      const out = await dispatch({
+        method: "POST",
+        url: "/voice/preset/edit",
+        body: Object.fromEntries([
+          ["_csrf", csrf()],
+          ["index", "0"],
+          ["expectedName", "Squad"],
+          ["name", "Squad"],
+          ["userLimit", "abc"],
+          ["__proto__", "polluted"],
+        ]),
+        csrfHeader: csrf(),
+        prefs,
+      });
+      expect(out.statusCode).toBe(422);
+      expect(out.body).not.toContain("polluted");
+    });
+  });
 });
 
 describe("/me/timezone (#524)", () => {
@@ -2077,6 +2387,7 @@ describe("/me/birthday clear (#1033)", () => {
   async function dispatch(opts: {
     body: Record<string, unknown>;
     purgeImpl?: jest.Mock;
+    setImpl?: jest.Mock;
     get?: { cooldownSeconds: number };
   }): Promise<{
     html: string;
@@ -2135,9 +2446,11 @@ describe("/me/birthday clear (#1033)", () => {
     const getBirthday = jest
       .fn<() => Promise<unknown>>()
       .mockResolvedValue({ month: 6, day: 16, year: 1990 });
-    const setBirthday = jest
-      .fn<() => Promise<unknown>>()
-      .mockResolvedValue({ month: 3, day: 4, year: null });
+    const setBirthday =
+      opts.setImpl ??
+      jest
+        .fn<() => Promise<unknown>>()
+        .mockResolvedValue({ month: 3, day: 4, year: null });
     const purgeForUser =
       opts.purgeImpl ??
       jest.fn<() => Promise<PurgeResult>>().mockResolvedValue(CLEAN_PURGE);
@@ -2314,6 +2627,144 @@ describe("/me/birthday clear (#1033)", () => {
     });
     expect(flashOf(out.redirectedTo).get("flash")).toBe("err");
     expect(out.audit).toMatchObject({ result: "failure" });
+  });
+
+  describe("a refused save (#1535)", () => {
+    const rejected = async (
+      err: Error,
+      body: Record<string, unknown>,
+    ): Promise<{
+      doc: JSDOM["window"]["document"];
+      out: Awaited<ReturnType<typeof dispatch>>;
+    }> => {
+      const out = await dispatch({
+        body: { _csrf: csrf(), ...body },
+        setImpl: jest.fn<() => Promise<unknown>>().mockRejectedValue(err),
+      });
+      return { out, doc: new JSDOM(out.html).window.document };
+    };
+
+    it("a missing month or day marks both selects with one error line, answers 422 and keeps the year", async () => {
+      const { out, doc } = await dispatch({
+        body: { _csrf: csrf(), month: "", day: "", year: "1990" },
+      }).then((o) => ({ out: o, doc: new JSDOM(o.html).window.document }));
+      expect(out.statusCode).toBe(422);
+      expect(out.redirectedTo).toBeUndefined();
+      expect(out.setBirthday).not.toHaveBeenCalled();
+      for (const id of ["bd-month", "bd-day"]) {
+        const el = doc.getElementById(id)!;
+        expect(el.getAttribute("aria-invalid")).toBe("true");
+        expect(el.getAttribute("aria-describedby")).toBe("birthday-date-error");
+      }
+      const line = doc.getElementById("birthday-date-error")!;
+      expect(line.className).toBe("kb-field__error");
+      expect(line.textContent).toBe("Choose a month and a day.");
+      expect((doc.getElementById("bd-year") as unknown as InputEl).value).toBe(
+        "1990",
+      );
+      expect(doc.getElementById("bd-year")!.hasAttribute("aria-invalid")).toBe(
+        false,
+      );
+      // The field line carries the reason, so no flash competes for focus.
+      expect(doc.querySelector("[data-flash]")).toBeNull();
+      expect(out.audit).toMatchObject({ result: "failure" });
+    });
+
+    it("an impossible date keeps the posted month and day and marks the date", async () => {
+      const { BirthdayFieldError } =
+        await import("../../src/services/birthday-service.js");
+      const { out, doc } = await rejected(
+        new BirthdayFieldError('"2/30" is not a valid month/day', "date"),
+        { month: "2", day: "30" },
+      );
+      expect(out.statusCode).toBe(422);
+      expect(
+        doc.querySelector("#bd-month option[selected]")!.getAttribute("value"),
+      ).toBe("2");
+      expect(
+        doc.querySelector("#bd-day option[selected]")!.getAttribute("value"),
+      ).toBe("30");
+      expect(doc.getElementById("birthday-date-error")!.textContent).toBe(
+        "That date does not exist. Choose a day that fits the month.",
+      );
+    });
+
+    it("a refused year marks the year only and keeps what was typed", async () => {
+      const { BirthdayFieldError } =
+        await import("../../src/services/birthday-service.js");
+      const { out, doc } = await rejected(
+        new BirthdayFieldError('"1800" is not a valid birth year', "year"),
+        { month: "3", day: "4", year: "1800" },
+      );
+      expect(out.statusCode).toBe(422);
+      const year = doc.getElementById("bd-year") as unknown as InputEl;
+      expect(year.value).toBe("1800");
+      expect(year.getAttribute("aria-invalid")).toBe("true");
+      expect(year.getAttribute("aria-describedby")).toBe("birthday-year-error");
+      expect(doc.getElementById("birthday-year-error")!.className).toBe(
+        "kb-field__error",
+      );
+      expect(doc.getElementById("bd-month")!.hasAttribute("aria-invalid")).toBe(
+        false,
+      );
+      expect(
+        doc.querySelector("#bd-month option[selected]")!.getAttribute("value"),
+      ).toBe("3");
+    });
+
+    it("the change cooldown is a callout with the typed values kept, not a marked field, with one full stop", async () => {
+      const { out, doc } = await rejected(
+        new Error(
+          "you changed your birthday recently. Please wait 4 minutes before changing it again",
+        ),
+        { month: "5", day: "6", year: "" },
+      );
+      expect(out.statusCode).toBe(422);
+      expect(doc.querySelector('[aria-invalid="true"]')).toBeNull();
+      const flash = doc.querySelector("[data-flash]")!;
+      expect(flash.textContent).toBe(
+        "Could not save your birthday: you changed your birthday recently. Please wait 4 minutes before changing it again.",
+      );
+      expect(
+        doc.querySelector("#bd-month option[selected]")!.getAttribute("value"),
+      ).toBe("5");
+    });
+
+    it("a reason that already ends in a full stop is not given another, on a refused save and a refused removal", async () => {
+      const { doc } = await rejected(new Error("the database said no."), {
+        month: "5",
+        day: "6",
+      });
+      expect(doc.querySelector("[data-flash]")!.textContent).toBe(
+        "Could not save your birthday: the database said no.",
+      );
+      const removal = await dispatch({
+        body: { _csrf: csrf(), clear: "1" },
+        purgeImpl: jest.fn<() => Promise<PurgeResult>>().mockResolvedValue({
+          ...CLEAN_PURGE,
+          removed: 0,
+          error: "the role could not be taken back.",
+        }),
+      });
+      expect(flashOf(removal.redirectedTo).get("msg")).toBe(
+        "Could not remove your birthday: the role could not be taken back.",
+      );
+    });
+
+    it("echoes only the three posted fields, never a posted name such as __proto__", async () => {
+      const out = await dispatch({
+        body: Object.fromEntries([
+          ["_csrf", csrf()],
+          ["__proto__", "polluted"],
+          ["month", ""],
+          ["day", ""],
+          ["year", "1999"],
+        ]),
+      });
+      expect(out.statusCode).toBe(422);
+      expect(out.html).not.toContain("polluted");
+      expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    });
   });
 
   it("still saves a date through setBirthday", async () => {

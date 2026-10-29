@@ -1010,6 +1010,10 @@ describe("BirthdayService", () => {
       await expect(
         svc.setBirthday("u1", "g1", { month: 2, day: 30 }),
       ).rejects.toThrow(/valid month\/day/);
+      // The refusal names the field, so the page marks it without reading the text (#1535).
+      await expect(
+        svc.setBirthday("u1", "g1", { month: 2, day: 30 }),
+      ).rejects.toMatchObject({ name: "BirthdayFieldError", field: "date" });
       expect(mockBirthdayFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
@@ -1021,7 +1025,7 @@ describe("BirthdayService", () => {
       ).rejects.toThrow(/valid birth year/);
       await expect(
         svc.setBirthday("u1", "g1", { month: 6, day: 16, year: 1800 }),
-      ).rejects.toThrow(/valid birth year/);
+      ).rejects.toMatchObject({ name: "BirthdayFieldError", field: "year" });
       expect(mockBirthdayFindOneAndUpdate).not.toHaveBeenCalled();
     });
   });
@@ -1072,6 +1076,10 @@ describe("BirthdayService", () => {
       await expect(
         svc.setBirthday("u1", "g1", { month: 6, day: 16 }),
       ).rejects.toThrow(/changed your birthday recently.*wait \d+ minutes?/);
+      // The cooldown is not about one field of the form (#1535).
+      await expect(
+        svc.setBirthday("u1", "g1", { month: 6, day: 16 }),
+      ).rejects.toMatchObject({ name: "Error" });
       expect(mockBirthdayFindOneAndUpdate).toHaveBeenCalledTimes(1);
     });
 

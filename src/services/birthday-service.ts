@@ -318,6 +318,23 @@ export function renderBirthdayMessage(
  */
 const birthdaySaveLock = createKeyedLock();
 
+/**
+ * A refused birthday save that is about one part of the form (#1535): `date`
+ * is the month and day together (a day the month does not have), `year` the
+ * optional year. The message is unchanged; the web page uses `field` to mark
+ * the control, never the wording. A refusal without a field (the change
+ * cooldown, a failed read) is a plain Error and is not about one field.
+ */
+export class BirthdayFieldError extends Error {
+  readonly field: "date" | "year";
+
+  constructor(message: string, field: "date" | "year") {
+    super(message);
+    this.name = "BirthdayFieldError";
+    this.field = field;
+  }
+}
+
 export class BirthdayService extends ScheduledService<BirthdayRunSummary | null> {
   private static instance: BirthdayService;
 
@@ -413,7 +430,10 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
 
     const { month, day } = input;
     if (!isValidMonthDay(month, day)) {
-      throw new Error(`"${month}/${day}" is not a valid month/day`);
+      throw new BirthdayFieldError(
+        `"${month}/${day}" is not a valid month/day`,
+        "date",
+      );
     }
 
     let year: number | undefined;
@@ -424,7 +444,10 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         input.year < 1900 ||
         input.year > currentYear
       ) {
-        throw new Error(`"${input.year}" is not a valid birth year`);
+        throw new BirthdayFieldError(
+          `"${input.year}" is not a valid birth year`,
+          "year",
+        );
       }
       year = input.year;
     }
