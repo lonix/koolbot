@@ -81,6 +81,21 @@ export interface FormView {
    * points at (help text). Empty for a form that was not refused.
    */
   attrs(name: string, describedBy?: string): string;
+  /**
+   * The same as {@link attrs}, as the fields of a `ControlAttrs` for the
+   * setting-picker renderers (the emoji field): like `attrs`, nothing at all
+   * for a form that was not refused, otherwise `id`, and `invalid` with the
+   * error id in `describedBy` when the field was refused.
+   */
+  control(
+    name: string,
+    describedBy?: string,
+  ): {
+    id?: string;
+    invalid?: boolean;
+    describedBy?: string;
+    describedByBase?: string;
+  };
   /** The `p.kb-field__error` line for a refused field, otherwise "". */
   error(name: string): string;
   /** ` open` for a disclosure that holds a refused form, otherwise "". */
@@ -123,6 +138,18 @@ export function formView(
         out += ` aria-describedby="${escapeHtml(describedBy)}"`;
       }
       return out;
+    },
+    control: (name, describedBy = ""): ReturnType<FormView["control"]> => {
+      if (!state) return describedBy ? { describedBy } : {};
+      const invalid = hasError(name);
+      const ids = [describedBy, invalid ? errorId(name) : ""]
+        .filter(Boolean)
+        .join(" ");
+      return {
+        id: idOf(name),
+        ...(invalid ? { invalid: true, describedByBase: describedBy } : {}),
+        ...(ids ? { describedBy: ids } : {}),
+      };
     },
     error: (name): string =>
       state && hasError(name)

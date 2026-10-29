@@ -1942,24 +1942,37 @@ export function createReadOnlyRouter(
     const common = await commonFromReq(req);
     const config = ConfigService.getInstance();
     const service = ReactionRoleService.getInstance(client);
-    const [enabled, configChannelId, all, archived, channelData, stored] =
-      await Promise.all([
-        config.getBoolean("reactionroles.enabled", false),
-        config.getString("reactionroles.message_channel_id", ""),
-        service.listReactionRoles(common.guildId),
-        ReactionRoleConfig.find({ guildId: common.guildId, isArchived: true })
-          .sort({ archivedAt: -1 })
-          .limit(50)
-          .lean(),
-        fetchChannelData(client, common.guildId),
-        // `null` (not `[]`) on failure: an empty snapshot would render the
-        // schema defaults as if they were stored, and saving the card would
-        // then overwrite the real values with them.
-        config.getAll().catch((err: unknown) => {
-          logger.warn("reaction roles: config snapshot read failed", err);
-          return null;
-        }),
-      ]);
+    const [
+      enabled,
+      configChannelId,
+      all,
+      archived,
+      channelData,
+      roleData,
+      stored,
+    ] = await Promise.all([
+      config.getBoolean("reactionroles.enabled", false),
+      config.getString("reactionroles.message_channel_id", ""),
+      service.listReactionRoles(common.guildId),
+      ReactionRoleConfig.find({ guildId: common.guildId, isArchived: true })
+        .sort({ archivedAt: -1 })
+        .limit(50)
+        .lean(),
+      fetchChannelData(client, common.guildId),
+      fetchRoleData(client, common.guildId),
+      // `null` (not `[]`) on failure: an empty snapshot would render the
+      // schema defaults as if they were stored, and saving the card would
+      // then overwrite the real values with them.
+      config.getAll().catch((err: unknown) => {
+        logger.warn("reaction roles: config snapshot read failed", err);
+        return null;
+      }),
+    ]);
+    // The bot's own picker messages for the bind form's message select.
+    const messages = await fetchReactionRoleMessages(
+      common.guildId,
+      channelData,
+    );
     // Editable `reactionroles.*` settings (#974). Built directly rather than
     // through `loadFeatureSettings`: the page already fetched the channel
     // list above (a second fetch would repeat the Discord round-trip), and
@@ -2036,6 +2049,8 @@ export function createReadOnlyRouter(
       settingRows,
       settingsUnavailable: stored === null,
       textChannels: channelData.textChannels,
+      roles: roleData.roles,
+      messages,
       refusedForm,
       flash: readFlash(req),
     });

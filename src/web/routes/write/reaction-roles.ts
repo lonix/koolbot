@@ -207,7 +207,7 @@ export function createReactionRolesRouter(client: Client): Router {
       const messageId = getString(req, "messageId");
 
       const errors: FormErrors = {};
-      if (!roleId) addFieldError(errors, "roleId", "Enter the role ID.");
+      if (!roleId) addFieldError(errors, "roleId", "Choose a role.");
       checkEmoji(errors, emoji);
       if (
         await refuseForm(req, res, {

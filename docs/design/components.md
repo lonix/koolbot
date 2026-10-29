@@ -245,11 +245,13 @@ An IANA zone for a setting or an event (#1426).
 
 ### MessageSelect
 
-One of the bot's own reaction-role messages, for `welcome.roles_message_id` (#1433). The stored value is the message id; the operator never types it.
+One of the bot's own reaction-role messages, for `welcome.roles_message_id` (#1433) and for _Bind an existing role_ on the Reaction Roles
+page (#1530). The stored value is the message id; the operator never types it.
 
 **Markup.** `span.kb-msgpick` → `select.kb-select` and an optional `span.kb-help` under it.
 
-- The first option is empty, _Link the channel instead_. Each message is an option labelled where it is and what it hands out
+- The first option is empty, _Link the channel instead_; the Reaction Roles form calls it _Post a new message_ (`noneLabel`).
+  Each message is an option labelled where it is and what it hands out
   (`# roles · 🎮 Gamer, 🎨 Artist +2`, at most 100 characters), newest first, at most 50.
 - Labels come from stored rows and the channel names the page already holds: no Discord call per option. A channel that is gone reads
   `⚠ <id> (unavailable)`.

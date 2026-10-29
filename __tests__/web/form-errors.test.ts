@@ -86,4 +86,19 @@ describe("formView for the refused form", () => {
       ' aria-describedby="help-id"',
     );
   });
+
+  it("hands a control the same ids and error line as attrs does (#1530)", () => {
+    expect(v.control("cron", "help-id")).toEqual({
+      id: "demo-create-cron",
+      invalid: true,
+      describedByBase: "help-id",
+      describedBy: "help-id demo-create-cron-error",
+    });
+    expect(v.control("channelId")).toEqual({ id: "demo-create-channelId" });
+    const plain = formView(null, "demo-create");
+    expect(plain.control("cron")).toEqual({});
+    expect(plain.control("cron", "help-id")).toEqual({
+      describedBy: "help-id",
+    });
+  });
 });

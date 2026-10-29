@@ -3452,6 +3452,9 @@ export function adminPages(): A11yPage[] {
         ...COMMON,
         enabled: true,
         configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
+        // The bind form's role picker and message select (#1530).
+        roles: ROLES,
+        messages: WELCOME_MESSAGES,
         active: [
           {
             mappingId: "m1",

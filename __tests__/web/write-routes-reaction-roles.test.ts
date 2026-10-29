@@ -275,7 +275,7 @@ describe("POST /reaction-roles/bind and /remove-mapping", () => {
     const r = await refusal(res);
     expect(r.invalidIds).toEqual(["reaction-role-bind-roleId"]);
     expect(r.errorLines["reaction-role-bind-roleId-error"]).toBe(
-      "Enter the role ID.",
+      "Choose a role.",
     );
     expect(r.html).toContain('value="🎉"');
     expect(r.html).toContain('value=" 777 "');
