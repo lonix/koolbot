@@ -6256,6 +6256,14 @@ export function userPages(): A11yPage[] {
       html: shell("Rewind", "/me/rewind", renderUserRewindBody(REWIND)),
     },
     {
+      name: "/me rewind (nothing to recap yet)",
+      html: shell(
+        "Rewind",
+        "/me/rewind",
+        renderUserRewindBody({ ...REWIND, year: 2024, hasData: false }),
+      ),
+    },
+    {
       name: "/me rewind (by room kind)",
       html: shell(
         "Rewind",

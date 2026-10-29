@@ -423,6 +423,7 @@ The container for one topic on a page: a header with title, a meta note and acti
 - Put the panel's status in the head (a badge after the title), not as the first line of the body.
 - Fine print (where data comes from, what is not sent) goes in the footer, in muted.
 - A panel nested in a panel, and team cards inside one, drop to `bg`.
+- A list row with a second line (a badge's description and date) puts them in `span.kb-list__desc` under the name inside `kb-list__main`.
 - `kb-panel--danger` edges the panel in `err-bg` for steps that delete things.
 
 ### StatTile
@@ -481,6 +482,23 @@ number reads first, large.
 
 Keep ids in `kb-mono` after the human name ("Koolbot Dev `1361…`"), not instead of it.
 
+### RewindHero
+
+The one headline number of the Rewind page: the year's voice time, large, on a solid `lore-deep` panel.
+
+**Markup.** `div.kb-hero--lore` → `p.kb-hero__value` (`stat-hero` style, tabular figures), then `p.kb-hero__line` for the fun comparison and
+`p.kb-hero__line.kb-hero__line--sub` for the session count. The edge is `lore`; all text is `lore-text` (10.7:1).
+
+- One per page, never inside a panel. It is not a gradient; `DESIGN.md` → _Colour_ retires the old indigo one.
+- The value wraps rather than truncating, and the panel's padding drops to `space-4` under 760px.
+
+### YearChips
+
+The years a member has a Rewind for, as chips above the page.
+
+**Markup.** `nav.kb-years[aria-label="Rewind year"]` → plain links; the shown year has `aria-current="page"`: `lore` ground, `lore-text`, bold and underlined,
+so the state is not colour alone.
+
 ### Heatmap
 
 When people are active: a weekday-by-hour grid and a bar list. The only place the lore colours appear.
@@ -490,6 +508,7 @@ weekday a `span.kb-heatmap__row` and 24 `span.kb-heatmap__cell[data-l=0..4]`; th
 (`is-peak` on the top one) with label, `span.kb-bars__track > span.kb-bars__fill[style=width:N%]`, and `span.kb-bars__val`.
 
 - Intensity is `lore-fill` at four opacities; the peak is `lore-peak` and is named in text beside the chart.
+- Rewind keeps its weekday and its hour-of-day distributions apart, so it shows two bar lists (7 and 24 rows) and no grid; the panel's meta names the peak.
 - Always pair the grid with the bar list or a table: the grid alone is not readable as numbers.
 
 ### UptimeStrip

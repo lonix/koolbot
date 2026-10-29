@@ -209,55 +209,6 @@ const STYLE = [
   ".preset-actions{display:flex;gap:.5rem;margin-top:.5rem}",
   ".preset-actions form{display:inline;margin:0}",
   ".form-actions{margin-top:1rem;display:flex;gap:.5rem;align-items:center}",
-  ".rw-hero{background:linear-gradient(135deg,var(--lore-deep) 0%,var(--lore) 100%);border:1px solid var(--lore-fill);border-radius:8px;padding:1.5rem;margin:0 0 1rem;text-align:center}",
-  ".rw-hero .total{font-size:2.5rem;font-weight:700;color:var(--on-primary);line-height:1.1}",
-  ".rw-hero .compare{margin-top:.4rem;color:var(--lore-text);font-size:1rem}",
-  ".rw-hero .sub{margin-top:.6rem;color:var(--lore-peak);font-size:.85rem}",
-  ".rw-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.75rem;margin:0 0 1rem}",
-  ".rw-stat{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.85rem 1rem}",
-  ".rw-stat .label{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}",
-  ".rw-stat .value{font-size:1.2rem;color:var(--text);font-weight:600;margin-top:.2rem}",
-  ".rw-stat .detail{font-size:.8rem;color:var(--muted);margin-top:.1rem}",
-  ".rw-channels{list-style:none;padding:0;margin:0}",
-  ".rw-channels li{display:flex;justify-content:space-between;align-items:baseline;padding:.4rem 0;border-bottom:1px solid var(--chrome);gap:.5rem}",
-  ".rw-channels li:last-child{border-bottom:0}",
-  ".rw-channels .name{color:var(--text);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-  ".rw-channels .dur{color:var(--muted);font-size:.85rem;flex-shrink:0}",
-  ".rw-badges{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.6rem}",
-  ".rw-badge{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.6rem .8rem;display:flex;gap:.6rem;align-items:flex-start}",
-  ".rw-badge .emoji{font-size:1.4rem;line-height:1}",
-  ".rw-badge .body{flex:1;min-width:0}",
-  ".rw-badge .body .name{font-weight:600;color:var(--text);font-size:.9rem}",
-  ".rw-badge .body .desc{color:var(--muted);font-size:.75rem;margin-top:.15rem}",
-  `.rw-badge .body .date{color:var(--muted);font-size:.7rem;margin-top:.2rem}`,
-  ".rw-year-picker{display:flex;gap:.4rem;flex-wrap:wrap;margin:0 0 1rem}",
-  ".rw-year-picker a{padding:.3rem .7rem;border-radius:999px;background:var(--surface);border:1px solid var(--border);color:var(--text-secondary);font-size:.8rem;font-weight:600}",
-  ".rw-year-picker a:hover{background:var(--chrome);text-decoration:none;color:var(--on-primary)}",
-  ".rw-year-picker a.current{background:var(--lore);border-color:var(--lore-fill);color:var(--on-primary)}",
-  ".rw-journey{display:flex;justify-content:space-around;gap:.5rem;flex-wrap:wrap}",
-  ".rw-journey .step{text-align:center;flex:1;min-width:100px}",
-  ".rw-journey .step .num{font-size:1.4rem;font-weight:700;color:var(--text)}",
-  ".rw-journey .step .when{font-size:.75rem;color:var(--muted);margin-top:.15rem}",
-  `.rw-journey .step .label{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.2rem}`,
-  // Voice activity heatmap (#675): a vertical 24-bar hour histogram and a
-  // horizontal 7-bar weekday breakdown, sharing the indigo Rewind palette.
-  ".rw-heat .peak{font-size:.95rem;color:var(--text-secondary);margin:0 0 .9rem}",
-  ".rw-heat .peak strong{color:var(--lore-peak)}",
-  ".rw-heat .heat-section{margin:0 0 1.1rem}",
-  ".rw-heat .heat-section:last-child{margin-bottom:0}",
-  ".rw-heat .heat-title{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:0 0 .45rem}",
-  ".rw-hours{display:flex;align-items:flex-end;gap:2px;height:84px}",
-  ".rw-hours .hb{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%}",
-  ".rw-hours .hb .fill{background:var(--lore-fill);border-radius:2px 2px 0 0;min-height:2px}",
-  ".rw-hours .hb.peak .fill{background:var(--lore-peak)}",
-  `.rw-hour-axis{display:flex;justify-content:space-between;font-size:.65rem;color:var(--muted);margin-top:.3rem}`,
-  ".rw-days{display:flex;flex-direction:column;gap:.32rem}",
-  ".rw-days .db{display:flex;align-items:center;gap:.55rem}",
-  ".rw-days .db .dl{width:2.4rem;font-size:.75rem;color:var(--muted);flex-shrink:0}",
-  ".rw-days .db .track{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;height:.95rem;overflow:hidden}",
-  ".rw-days .db .track .fill{height:100%;background:var(--lore-fill)}",
-  ".rw-days .db.peak .track .fill{background:var(--lore-peak)}",
-  `.rw-days .db .dv{width:5rem;text-align:right;font-size:.7rem;color:var(--muted);flex-shrink:0}`,
   // The shared preset editor's form (`form.stack`, on the member presets page; the admin layout styles its own).
   "form.stack label{display:block;margin:0 0 var(--space-3)}",
   "form.stack input[type=text],form.stack input[type=number],form.stack select{display:block;max-width:100%}",
@@ -265,8 +216,7 @@ const STYLE = [
   "form.inline{display:inline}",
   `.skip-link{position:absolute;left:-999px;top:0;z-index:100;background:var(--primary);color:var(--on-primary);padding:var(--space-2) var(--space-3);border-radius:0 0 var(--radius-sm) 0;font-weight:600}`,
   ".skip-link:focus{left:0;text-decoration:none}",
-  // Reflow (WCAG 1.4.10, #855): the column's own gutters tighten in kb.css; the Rewind hero here.
-  "@media (max-width:760px){.rw-hero{padding:1rem}.rw-hero .total{font-size:1.8rem}}",
+  // Reflow (WCAG 1.4.10, #855): the column's gutters and the Rewind hero tighten in kb.css.
 ].join("");
 
 // Same DOM hooks (`#session-countdown`, `data-remaining-ms`,
@@ -605,10 +555,7 @@ export function renderUserIndexBody(opts: {
   // Read-only poll-participation summary (#655). Only rendered when the
   // route supplies a summary (capture on + the member has a tracking row).
   const poll = opts.pollParticipation;
-  const tile = (label: string, value: string): string =>
-    '<div class="kb-tile">' +
-    `<div class="kb-tile__top"><p class="kb-overline">${label}</p></div>` +
-    `<div class="kb-tile__value">${value}</div></div>`;
+  const tile = (label: string, value: string): string => statTile(label, value);
   const pollPanel = poll
     ? '<section class="kb-panel" aria-labelledby="poll-participation-h">' +
       '<header class="kb-panel__head"><h2 class="kb-panel__title" id="poll-participation-h">Poll participation</h2></header>' +
@@ -722,65 +669,111 @@ export interface RewindBodyOptions {
   pollVotesCast: number;
 }
 
+/** A StatTile (components.md). `value` and `detail` are HTML the caller has already escaped. */
+function statTile(label: string, value: string, detail = ""): string {
+  return (
+    '<div class="kb-tile">' +
+    `<div class="kb-tile__top"><p class="kb-overline">${label}</p></div>` +
+    `<div class="kb-tile__value">${value}</div>` +
+    (detail ? `<div class="kb-tile__detail">${detail}</div>` : "") +
+    "</div>"
+  );
+}
+
+/** A Panel (components.md) with a title and one body. `body` is HTML the caller has already escaped. */
+function panel(
+  title: string,
+  body: string,
+  opts: { flush?: boolean; meta?: string } = {},
+): string {
+  return (
+    '<section class="kb-panel"><header class="kb-panel__head">' +
+    `<h2 class="kb-panel__title">${title}</h2>` +
+    (opts.meta ? `<span class="kb-panel__meta">${opts.meta}</span>` : "") +
+    "</header>" +
+    `<div class="kb-panel__body${opts.flush ? " kb-panel__body--flush" : ""}">${body}</div></section>`
+  );
+}
+
+/** An EmptyState (components.md): what is missing, then how it fills up. */
+function emptyState(title: string, text: string): string {
+  return `<div class="kb-empty"><p class="kb-empty__title">${title}</p><p class="kb-empty__text">${text}</p></div>`;
+}
+
+/** A name and a figure per row, in a `kb-list`. Both are HTML the caller has already escaped. */
+function nameValueList(rows: { name: string; value: string }[]): string {
+  return (
+    '<ul class="kb-list">' +
+    rows
+      .map(
+        (r) =>
+          `<li><span class="kb-list__main">${r.name}</span><span class="kb-muted">${r.value}</span></li>`,
+      )
+      .join("") +
+    "</ul>"
+  );
+}
+
+/**
+ * The year chips. The shown year carries `aria-current="page"`, and the
+ * stylesheet adds weight and an underline to the `lore` ground so the state
+ * is not colour alone (#1524).
+ */
 function renderYearPicker(current: number, years: number[]): string {
   if (years.length <= 1) return "";
   const items = years
     .map((y) => {
-      const cls = y === current ? ' class="current"' : "";
-      return `<a href="/me/rewind/${y}"${cls}>${y}</a>`;
+      const cur = y === current ? ' aria-current="page"' : "";
+      return `<a href="/me/rewind/${y}"${cur}>${y}</a>`;
     })
     .join("");
-  return `<nav class="rw-year-picker" aria-label="Rewind year">${items}</nav>`;
+  return `<nav class="kb-years" aria-label="Rewind year">${items}</nav>`;
 }
 
 function renderBadges(badges: RewindBadgeView[]): string {
   if (badges.length === 0) {
-    return '<div class="empty">None this year — there\'s always next year!</div>';
+    return emptyState(
+      "No badges this year.",
+      "Badges you earn show up here, with the day you earned them.",
+    );
   }
   return (
-    '<div class="rw-badges">' +
+    '<ul class="kb-list">' +
     badges
       .map(
         (b) =>
-          '<div class="rw-badge">' +
-          `<div class="emoji">${escapeHtml(b.emoji)}</div>` +
-          '<div class="body">' +
-          `<div class="name">${escapeHtml(b.name)}</div>` +
-          `<div class="desc">${escapeHtml(b.description)}</div>` +
-          `<div class="date">Earned ${escapeHtml(b.earnedAt)}</div>` +
-          "</div></div>",
+          `<li><span>${escapeHtml(b.emoji)}</span>` +
+          '<span class="kb-list__main">' +
+          `<strong>${escapeHtml(b.name)}</strong>` +
+          `<span class="kb-list__desc">${escapeHtml(b.description)}</span>` +
+          `<span class="kb-list__desc">Earned ${escapeHtml(b.earnedAt)}</span>` +
+          "</span></li>",
       )
       .join("") +
-    "</div>"
+    "</ul>"
   );
 }
 
 function renderJourney(j: RewindBodyOptions["weeklyJourney"]): string {
   if (!j.first && !j.last && !j.best) {
-    return '<div class="empty">No qualifying weekly leaderboards this year.</div>';
+    return emptyState(
+      "No weekly ranking yet.",
+      "Your first, best and last place on the weekly leaderboard show up here once you have placed.",
+    );
   }
   const cell = (
     label: string,
     entry: { isoYear: number; isoWeek: number; rank: number } | null,
-  ): string => {
-    if (!entry) {
-      return (
-        '<div class="step">' +
-        `<div class="label">${escapeHtml(label)}</div>` +
-        '<div class="num">—</div>' +
-        "</div>"
-      );
-    }
-    return (
-      '<div class="step">' +
-      `<div class="label">${escapeHtml(label)}</div>` +
-      `<div class="num">#${entry.rank}</div>` +
-      `<div class="when">${entry.isoYear} · W${entry.isoWeek}</div>` +
-      "</div>"
-    );
-  };
+  ): string =>
+    entry
+      ? statTile(
+          escapeHtml(label),
+          `#${entry.rank}`,
+          `${entry.isoYear} · W${entry.isoWeek}`,
+        )
+      : statTile(escapeHtml(label), "—");
   return (
-    '<div class="rw-journey">' +
+    '<div class="kb-tiles">' +
     cell("First", j.first) +
     cell("Best", j.best) +
     cell("Last", j.last) +
@@ -789,51 +782,50 @@ function renderJourney(j: RewindBodyOptions["weeklyJourney"]): string {
 }
 
 /**
- * Text-message activity card (#496). Reuses the voice Rewind styling
- * (`.rw-stat`, `.rw-channels`). Returns "" when the user has no text
- * activity for the year so the route can append it unconditionally and
- * the card simply disappears.
+ * Text-message activity (#496): two StatTiles and a list of channels.
+ * Returns "" when the user has no text activity for the year so the route
+ * can append it unconditionally and the block simply disappears.
  */
 function renderTextActivity(opts: RewindBodyOptions): string {
   if (opts.messagesSent <= 0) return "";
 
   const peak = opts.peakMessageDay
-    ? `<div class="value">${escapeHtml(opts.peakMessageDay.date)}</div><div class="detail">${opts.peakMessageDay.count} message${opts.peakMessageDay.count === 1 ? "" : "s"} that day</div>`
-    : '<div class="value">—</div>';
+    ? statTile(
+        "Peak message day",
+        escapeHtml(opts.peakMessageDay.date),
+        `${opts.peakMessageDay.count} message${opts.peakMessageDay.count === 1 ? "" : "s"} that day`,
+      )
+    : statTile("Peak message day", "—");
 
   const channels =
     opts.topTextChannels.length === 0
-      ? '<div class="empty">No tracked text channels this year.</div>'
-      : '<ul class="rw-channels">' +
-        opts.topTextChannels
-          .map(
-            (c) =>
-              "<li>" +
-              `<span class="name">${channelMention({ name: c.channelName, type: c.channelType })}</span>` +
-              `<span class="dur">${c.count} msg${c.count === 1 ? "" : "s"}</span>` +
-              "</li>",
-          )
-          .join("") +
-        "</ul>";
+      ? emptyState(
+          "No tracked text channels this year.",
+          "Channels you write in show up here, busiest first.",
+        )
+      : nameValueList(
+          opts.topTextChannels.map((c) => ({
+            name: channelMention({ name: c.channelName, type: c.channelType }),
+            value: `${c.count} msg${c.count === 1 ? "" : "s"}`,
+          })),
+        );
 
   return [
     "<h2>Text activity</h2>",
-    '<div class="rw-grid">',
-    '<div class="rw-stat"><div class="label">Messages sent</div>' +
-      `<div class="value">${opts.messagesSent}</div></div>`,
-    '<div class="rw-stat"><div class="label">Peak message day</div>' +
-      peak +
-      "</div>",
+    '<div class="kb-tiles">',
+    statTile("Messages sent", String(opts.messagesSent)),
+    peak,
     "</div>",
-    '<div class="card"><h2>Top text channels</h2>' + channels + "</div>",
+    panel("Top text channels", channels, {
+      flush: opts.topTextChannels.length > 0,
+    }),
   ].join("");
 }
 
 /**
- * Reaction-activity stat pair (#653). Reuses the voice/text `.rw-stat`
- * styling. Returns "" when the user gave and received no reactions this
- * year (no data or reaction tracking off) so the route can append it
- * unconditionally and the block simply disappears.
+ * Reaction-activity tiles (#653). Returns "" when the user gave and received
+ * no reactions this year (no data or reaction tracking off) so the route can
+ * append it unconditionally and the block simply disappears.
  */
 function renderReactionActivity(opts: RewindBodyOptions): string {
   const given = opts.reactionsGiven > 0 ? opts.reactionsGiven : 0;
@@ -842,11 +834,9 @@ function renderReactionActivity(opts: RewindBodyOptions): string {
 
   return [
     "<h2>Reactions</h2>",
-    '<div class="rw-grid">',
-    '<div class="rw-stat"><div class="label">Reactions given</div>' +
-      `<div class="value">${given}</div></div>`,
-    '<div class="rw-stat"><div class="label">Reactions received</div>' +
-      `<div class="value">${received}</div></div>`,
+    '<div class="kb-tiles">',
+    statTile("Reactions given", String(given)),
+    statTile("Reactions received", String(received)),
     "</div>",
   ].join("");
 }
@@ -861,13 +851,37 @@ function heatMinutesLabel(minutes: number): string {
   return `${hours} hr ${mins} min`;
 }
 
+/** A bar list (components.md, Heatmap): label, bar, figure; the top row is `is-peak`. */
+function barList(
+  rows: { label: string; weight: number; value: string }[],
+  peak: number | null,
+): string {
+  const max = rows.reduce((m, r) => (r.weight > m ? r.weight : m), 0);
+  return (
+    '<div class="kb-bars">' +
+    rows
+      .map((r, i) => {
+        const pct = max > 0 ? Math.round((r.weight / max) * 100) : 0;
+        return (
+          `<div class="kb-bars__row${i === peak ? " is-peak" : ""}">` +
+          `<span>${escapeHtml(r.label)}</span>` +
+          `<span class="kb-bars__track"><span class="kb-bars__fill" style="width:${pct}%"></span></span>` +
+          `<span class="kb-bars__val">${escapeHtml(r.value)}</span></div>`
+        );
+      })
+      .join("") +
+    "</div>"
+  );
+}
+
 /**
- * Voice activity heatmap card (#675): a 24-bar hour-of-day histogram and a
- * 7-bar weekday breakdown, both duration-weighted in the member's timezone,
- * with the peak hour/day called out. Reuses the indigo Rewind palette.
+ * "When you're online" (#675): the weekday and the hour of day as two bar
+ * lists, both duration-weighted in the member's timezone, with the peak named
+ * in the panel's head and marked `is-peak` in its list. Rewind stores the two
+ * distributions apart, so a weekday-by-hour grid cannot be drawn (#1524).
  * Returns "" when neither axis has any positive activity (no data or voice
- * tracking off) so the route can append it unconditionally and the card
- * simply disappears — mirroring the text/reaction blocks.
+ * tracking off) so the route can append it unconditionally and the panel
+ * simply disappears.
  */
 function renderActivityHeatmap(opts: RewindBodyOptions): string {
   const hours = opts.hourOfDayDistribution ?? [];
@@ -876,73 +890,48 @@ function renderActivityHeatmap(opts: RewindBodyOptions): string {
   const peakDayIdx = peakIndex(days);
   if (peakHour === null && peakDayIdx === null) return "";
 
-  const maxHour = hours.reduce((m, v) => (v > m ? v : m), 0);
-  const maxDay = days.reduce((m, v) => (v > m ? v : m), 0);
-
   const peakParts: string[] = [];
   if (peakDayIdx !== null) peakParts.push(escapeHtml(DAY_NAMES[peakDayIdx]));
   if (peakHour !== null) peakParts.push(escapeHtml(formatHourLabel(peakHour)));
-  const peakLabel = peakParts.length
-    ? `<p class="peak">Most active: <strong>${peakParts.join(" · ")}</strong></p>`
-    : "";
-
-  const hourSection =
-    peakHour === null
-      ? ""
-      : '<div class="heat-section"><p class="heat-title">By hour of day</p>' +
-        '<div class="rw-hours">' +
-        hours
-          .map((v, h) => {
-            const pct = maxHour > 0 ? Math.round((v / maxHour) * 100) : 0;
-            const cls = h === peakHour ? " peak" : "";
-            return (
-              // `title` is mouse-hover only; the visually-hidden text carries
-              // the same value for assistive tech (WCAG 1.4.1, #855).
-              `<div class="hb${cls}" title="${escapeHtml(formatHourLabel(h))}: ${escapeHtml(heatMinutesLabel(v))}">` +
-              `<span class="kb-visually-hidden">${escapeHtml(formatHourLabel(h))}: ${escapeHtml(heatMinutesLabel(v))}</span>` +
-              `<div class="fill" style="height:${pct}%"></div></div>`
-            );
-          })
-          .join("") +
-        "</div>" +
-        '<div class="rw-hour-axis"><span>12 AM</span><span>6 AM</span>' +
-        "<span>12 PM</span><span>6 PM</span><span>11 PM</span></div></div>";
+  const peakLabel = `Most active: <strong>${peakParts.join(" · ")}</strong>`;
 
   const daySection =
     peakDayIdx === null
       ? ""
-      : '<div class="heat-section"><p class="heat-title">By day of week</p>' +
-        '<div class="rw-days">' +
-        days
-          .map((v, d) => {
-            const pct = maxDay > 0 ? Math.round((v / maxDay) * 100) : 0;
-            const cls = d === peakDayIdx ? " peak" : "";
-            return (
-              `<div class="db${cls}">` +
-              `<span class="dl">${escapeHtml(DAY_NAMES[d].slice(0, 3))}</span>` +
-              `<span class="track"><span class="fill" style="width:${pct}%"></span></span>` +
-              `<span class="dv">${escapeHtml(heatMinutesLabel(v))}</span>` +
-              "</div>"
-            );
-          })
-          .join("") +
-        "</div></div>";
+      : '<p class="kb-overline">By day of week</p>' +
+        barList(
+          days.map((v, d) => ({
+            label: DAY_NAMES[d].slice(0, 3),
+            weight: v,
+            value: heatMinutesLabel(v),
+          })),
+          peakDayIdx,
+        );
 
-  return (
-    '<div class="card"><h2>When you\'re online</h2>' +
-    '<div class="rw-heat">' +
-    peakLabel +
-    hourSection +
-    daySection +
-    "</div></div>"
+  const hourSection =
+    peakHour === null
+      ? ""
+      : '<p class="kb-overline">By hour of day</p>' +
+        barList(
+          hours.map((v, h) => ({
+            label: formatHourLabel(h),
+            weight: v,
+            value: heatMinutesLabel(v),
+          })),
+          peakHour,
+        );
+
+  return panel(
+    "When you're online",
+    `<div class="kb-stack">${daySection}${hourSection}</div>`,
+    { meta: peakLabel },
   );
 }
 
 /**
- * Poll-participation stat (#655). A single "Votes cast" stat reusing the
- * voice/text/reaction `.rw-stat` styling. Returns "" when the user cast no
- * votes this year (no data or poll-participation capture off) so the route
- * can append it unconditionally and the block simply disappears.
+ * Poll-participation tile (#655). Returns "" when the user cast no votes this
+ * year (no data or poll-participation capture off) so the route can append
+ * it unconditionally and the block simply disappears.
  */
 function renderPollActivity(opts: RewindBodyOptions): string {
   const votes = opts.pollVotesCast > 0 ? opts.pollVotesCast : 0;
@@ -950,9 +939,8 @@ function renderPollActivity(opts: RewindBodyOptions): string {
 
   return [
     "<h2>Polls</h2>",
-    '<div class="rw-grid">',
-    '<div class="rw-stat"><div class="label">Poll votes cast</div>' +
-      `<div class="value">${votes}</div></div>`,
+    '<div class="kb-tiles">',
+    statTile("Poll votes cast", String(votes)),
     "</div>",
   ].join("");
 }
@@ -984,36 +972,46 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
       `<h1>Rewind ${opts.year}</h1>`,
       '<p class="subtitle">Your personal year-in-review.</p>',
       picker,
-      '<div class="card">',
-      "<h2>Nothing to recap yet</h2>",
-      `<p class="muted">We didn't find any voice or text activity or badges for you in ${opts.year}. Hop into a tracked voice channel or send a few messages and your stats will start filling in.</p>`,
-      "</div>",
+      '<div class="kb-panel"><div class="kb-panel__body">',
+      emptyState(
+        "Nothing to recap yet",
+        `We didn't find any voice or text activity or badges for you in ${opts.year}. Hop into a tracked voice channel or send a few messages and your stats will start filling in.`,
+      ),
+      "</div></div>",
     ].join("");
   }
 
+  // The year's headline (#1524): a solid lore-deep panel, the total in `stat-hero`.
   const hero = [
-    '<div class="rw-hero">',
-    `<div class="total">${escapeHtml(opts.totalDuration)}</div>`,
+    '<div class="kb-hero--lore">',
+    `<p class="kb-hero__value">${escapeHtml(opts.totalDuration)}</p>`,
     opts.funComparison
-      ? `<div class="compare">${escapeHtml(opts.funComparison)}</div>`
+      ? `<p class="kb-hero__line">${escapeHtml(opts.funComparison)}</p>`
       : "",
-    `<div class="sub">${opts.sessionCount} session${opts.sessionCount === 1 ? "" : "s"} across ${opts.daysActive} day${opts.daysActive === 1 ? "" : "s"}</div>`,
+    `<p class="kb-hero__line kb-hero__line--sub">${opts.sessionCount} session${opts.sessionCount === 1 ? "" : "s"} across ${opts.daysActive} day${opts.daysActive === 1 ? "" : "s"}</p>`,
     "</div>",
   ].join("");
 
   const peak = opts.peakDay
-    ? `<div class="value">${escapeHtml(opts.peakDay.date)}</div><div class="detail">${escapeHtml(opts.peakDay.duration)} that day</div>`
-    : '<div class="value">—</div>';
+    ? statTile(
+        "Peak day",
+        escapeHtml(opts.peakDay.date),
+        `${escapeHtml(opts.peakDay.duration)} that day`,
+      )
+    : statTile("Peak day", "—");
 
   // Longest single session (#568): show its duration, then the date (and
-  // channel when known) as the supporting detail.
+  // room kind) as the supporting detail.
   const longestSession = opts.longestSession
-    ? `<div class="value">${escapeHtml(opts.longestSession.duration)}</div>` +
-      `<div class="detail">on ${escapeHtml(opts.longestSession.date)} in ${escapeHtml(
-        ROOM_KIND_SINGULAR[opts.longestSession.roomKind] ??
-          ROOM_KIND_SINGULAR.other,
-      )}</div>`
-    : '<div class="value">—</div>';
+    ? statTile(
+        "Longest session",
+        escapeHtml(opts.longestSession.duration),
+        `on ${escapeHtml(opts.longestSession.date)} in ${escapeHtml(
+          ROOM_KIND_SINGULAR[opts.longestSession.roomKind] ??
+            ROOM_KIND_SINGULAR.other,
+        )}`,
+      )
+    : statTile("Longest session", "—");
 
   // Voice time by kind of room (#1420), in place of per-room names.
   // A summary that never went through snapshot normalisation may omit it.
@@ -1021,87 +1019,88 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
   const voiceKinds =
     kindRows.length === 0
       ? ""
-      : '<div class="card"><h2>Where you spent your voice time</h2>' +
-        '<ul class="rw-channels">' +
-        kindRows
-          .map(
-            (k) =>
-              "<li>" +
-              `<span class="name">${escapeHtml(ROOM_KIND_PLURAL[k.kind] ?? ROOM_KIND_PLURAL.other)}</span>` +
-              `<span class="dur">${escapeHtml(k.duration)}</span>` +
-              "</li>",
-          )
-          .join("") +
-        "</ul></div>";
+      : panel(
+          "Where you spent your voice time",
+          nameValueList(
+            kindRows.map((k) => ({
+              name: escapeHtml(
+                ROOM_KIND_PLURAL[k.kind] ?? ROOM_KIND_PLURAL.other,
+              ),
+              value: escapeHtml(k.duration),
+            })),
+          ),
+          { flush: true },
+        );
 
   const streak = opts.longestStreakDays
-    ? `<div class="value">${opts.longestStreakDays} day${opts.longestStreakDays === 1 ? "" : "s"}</div>` +
-      (opts.longestStreakRange
-        ? `<div class="detail">${escapeHtml(opts.longestStreakRange.startDate)} → ${escapeHtml(opts.longestStreakRange.endDate)}</div>`
-        : "")
-    : '<div class="value">—</div>';
+    ? statTile(
+        "Longest streak",
+        `${opts.longestStreakDays} day${opts.longestStreakDays === 1 ? "" : "s"}`,
+        opts.longestStreakRange
+          ? `${escapeHtml(opts.longestStreakRange.startDate)} → ${escapeHtml(opts.longestStreakRange.endDate)}`
+          : "",
+      )
+    : statTile("Longest streak", "—");
 
   const rankStat =
     opts.annualRank !== null
-      ? `<div class="value">#${opts.annualRank}</div><div class="detail">of ${opts.annualGuildMembers} active members</div>`
-      : '<div class="value">—</div>';
+      ? statTile(
+          "Annual rank",
+          `#${opts.annualRank}`,
+          `of ${opts.annualGuildMembers} active members`,
+        )
+      : statTile("Annual rank", "—");
 
   const medianStat =
     opts.percentAboveMedian !== null
-      ? opts.percentAboveMedian >= 0
-        ? `<div class="value">+${opts.percentAboveMedian}%</div><div class="detail">vs. the guild median</div>`
-        : `<div class="value">${opts.percentAboveMedian}%</div><div class="detail">vs. the guild median</div>`
-      : '<div class="value">—</div>';
+      ? statTile(
+          "Above median",
+          `${opts.percentAboveMedian >= 0 ? "+" : ""}${opts.percentAboveMedian}%`,
+          "vs. the guild median",
+        )
+      : statTile("Above median", "—");
 
   // Top voice companions (#567) — with dynamic VCs *who* you sat with
   // matters more than the throwaway room, so this replaces Top channels.
   const companions =
     opts.topCompanions.length === 0
-      ? '<div class="empty">No voice companions yet — hop in a channel with someone!</div>'
-      : '<ul class="rw-channels">' +
-        opts.topCompanions
-          .map(
-            (c) =>
-              "<li>" +
-              `<span class="name">${escapeHtml(c.displayName)}</span>` +
-              `<span class="dur">${escapeHtml(c.duration)}</span>` +
-              "</li>",
-          )
-          .join("") +
-        "</ul>";
+      ? emptyState(
+          "No voice companions yet.",
+          "People you share a voice channel with show up here, most time first.",
+        )
+      : nameValueList(
+          opts.topCompanions.map((c) => ({
+            name: escapeHtml(c.displayName),
+            value: escapeHtml(c.duration),
+          })),
+        );
 
   return [
     `<h1>Rewind ${opts.year}</h1>`,
     '<p class="subtitle">Your personal year-in-review.</p>',
     picker,
     hero,
-    '<div class="rw-grid">',
-    '<div class="rw-stat"><div class="label">Peak day</div>' + peak + "</div>",
-    '<div class="rw-stat"><div class="label">Longest session</div>' +
-      longestSession +
-      "</div>",
-    '<div class="rw-stat"><div class="label">Longest streak</div>' +
-      streak +
-      "</div>",
-    '<div class="rw-stat"><div class="label">Annual rank</div>' +
-      rankStat +
-      "</div>",
-    '<div class="rw-stat"><div class="label">Above median</div>' +
-      medianStat +
-      "</div>",
+    '<div class="kb-tiles">',
+    peak,
+    longestSession,
+    streak,
+    rankStat,
+    medianStat,
     "</div>",
     voiceKinds,
-    '<div class="card"><h2>Top voice companions</h2>' + companions + "</div>",
+    panel("Top voice companions", companions, {
+      flush: opts.topCompanions.length > 0,
+    }),
     renderTextActivity(opts),
     renderReactionActivity(opts),
     renderActivityHeatmap(opts),
     renderPollActivity(opts),
-    '<div class="card"><h2>Rank journey</h2>' +
-      renderJourney(opts.weeklyJourney) +
-      "</div>",
-    '<div class="card"><h2>Badges earned this year</h2>' +
-      renderBadges([...opts.accolades, ...opts.achievements]) +
-      "</div>",
+    panel("Rank journey", renderJourney(opts.weeklyJourney)),
+    panel(
+      "Badges earned this year",
+      renderBadges([...opts.accolades, ...opts.achievements]),
+      { flush: opts.accolades.length + opts.achievements.length > 0 },
+    ),
   ].join("");
 }
 
