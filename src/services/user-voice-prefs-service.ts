@@ -34,11 +34,23 @@ export const NAME_PATTERN_MAX = 100;
  * `.message` directly (Discord reply / web flash) — keep messages friendly.
  */
 export class VoicePrefsValidationError extends Error {
-  constructor(message: string) {
+  /**
+   * The form field the refusal is about, when it is about exactly one. The web
+   * page marks that field; a refusal without one (a stale row, the preset
+   * limit) is not about a field and is shown as a message (#1535).
+   */
+  readonly field?: VoicePrefsField;
+
+  constructor(message: string, field?: VoicePrefsField) {
     super(message);
     this.name = "VoicePrefsValidationError";
+    this.field = field;
   }
 }
+
+/** The names of the fields of the /me Voice forms, as the forms post them. */
+export type VoicePrefsField =
+  "namePattern" | "name" | "channelName" | "userLimit" | "bitrate";
 
 export interface PresetSnapshot {
   channelName?: string;
@@ -106,6 +118,7 @@ export class UserVoicePrefsService {
     if (name.length === 0 || name.length > PRESET_NAME_MAX) {
       throw new VoicePrefsValidationError(
         `Preset name must be 1–${PRESET_NAME_MAX} characters.`,
+        "name",
       );
     }
     return name;
@@ -122,6 +135,7 @@ export class UserVoicePrefsService {
     if (pattern.length > NAME_PATTERN_MAX) {
       throw new VoicePrefsValidationError(
         `Name pattern must be ${NAME_PATTERN_MAX} characters or less.`,
+        "namePattern",
       );
     }
     return pattern;
@@ -135,6 +149,7 @@ export class UserVoicePrefsService {
     if (name.length > CHANNEL_NAME_MAX) {
       throw new VoicePrefsValidationError(
         `Channel name must be ${CHANNEL_NAME_MAX} characters or less.`,
+        "channelName",
       );
     }
     return name;
@@ -150,6 +165,7 @@ export class UserVoicePrefsService {
     ) {
       throw new VoicePrefsValidationError(
         `User limit must be a whole number between ${USER_LIMIT_MIN} and ${USER_LIMIT_MAX} (0 = unlimited).`,
+        "userLimit",
       );
     }
     return raw;
@@ -161,6 +177,7 @@ export class UserVoicePrefsService {
     if (!Number.isInteger(raw) || raw < BITRATE_MIN || raw > BITRATE_MAX) {
       throw new VoicePrefsValidationError(
         `Bitrate must be a whole number between ${BITRATE_MIN} and ${BITRATE_MAX} kbps.`,
+        "bitrate",
       );
     }
     return raw;
@@ -277,6 +294,7 @@ export class UserVoicePrefsService {
     if (collision !== -1) {
       throw new VoicePrefsValidationError(
         `You already have a preset named "${newName}".`,
+        "name",
       );
     }
 
@@ -318,6 +336,7 @@ export class UserVoicePrefsService {
     if (collision !== -1) {
       throw new VoicePrefsValidationError(
         `You already have a preset named "${name}".`,
+        "name",
       );
     }
 

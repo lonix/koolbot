@@ -5,6 +5,9 @@ import {
   renderUserBirthdayBody,
 } from "../../src/web/user-layout.js";
 
+/** What the tests read from a form control. */
+type InputEl = { value: string };
+
 describe("renderUserBirthdayBody day dropdown (#704)", () => {
   const base = { csrfToken: "tok" };
 
@@ -111,5 +114,71 @@ describe("renderUserBirthdayBody remove button (#1521)", () => {
   it("renders no remove button without a stored birthday", () => {
     const html = renderUserBirthdayBody({ csrfToken: "tok", selected: null });
     expect(html).not.toContain('name="clear"');
+  });
+});
+
+describe("renderUserBirthdayBody refused form (#1535)", () => {
+  const refused = (errors: Record<string, string>) => ({
+    formId: "birthday",
+    errors,
+    values: { month: "2", day: "30", year: "1800" },
+  });
+
+  it("uses the kb- field components for the three controls, with or without a refusal", () => {
+    for (const refusedForm of [null, refused({})]) {
+      const doc = new JSDOM(
+        renderUserBirthdayBody({ csrfToken: "t", selected: null, refusedForm }),
+      ).window.document;
+      expect(doc.querySelectorAll(".kb-field > label.kb-label")).toHaveLength(
+        3,
+      );
+      expect(doc.querySelectorAll("select.kb-select")).toHaveLength(2);
+      expect(doc.querySelectorAll("input.kb-input")).toHaveLength(1);
+      expect(doc.querySelector("[style]")).toBeNull();
+    }
+  });
+
+  it("marks nothing for a form that was not refused", () => {
+    const html = renderUserBirthdayBody({ csrfToken: "t", selected: null });
+    expect(html).not.toContain("aria-invalid");
+    expect(html).not.toContain("kb-field__error");
+  });
+
+  it("shows the posted values, not the stored birthday, and marks the date and year", () => {
+    const doc = new JSDOM(
+      renderUserBirthdayBody({
+        csrfToken: "t",
+        selected: { month: 6, day: 15, year: 1990 },
+        refusedForm: refused({ date: "No such day.", year: "Bad year." }),
+      }),
+    ).window.document;
+    expect(
+      doc.querySelector("#bd-month option[selected]")!.getAttribute("value"),
+    ).toBe("2");
+    expect(
+      doc.querySelector("#bd-day option[selected]")!.getAttribute("value"),
+    ).toBe("30");
+    expect((doc.getElementById("bd-year") as unknown as InputEl).value).toBe(
+      "1800",
+    );
+    expect(doc.querySelectorAll('[aria-invalid="true"]')).toHaveLength(3);
+    // Every control points at an error line that exists.
+    for (const el of doc.querySelectorAll('[aria-invalid="true"]')) {
+      const target = doc.getElementById(el.getAttribute("aria-describedby")!);
+      expect(target?.classList.contains("kb-field__error")).toBe(true);
+    }
+  });
+
+  it("escapes what was typed", () => {
+    const html = renderUserBirthdayBody({
+      csrfToken: "t",
+      selected: null,
+      refusedForm: {
+        formId: "birthday",
+        errors: { year: "Bad year." },
+        values: { month: "", day: "", year: '"><script>x</script>' },
+      },
+    });
+    expect(html).not.toContain("<script>x</script>");
   });
 });

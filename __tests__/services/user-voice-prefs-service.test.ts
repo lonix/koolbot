@@ -272,3 +272,41 @@ describe("UserVoicePrefsService.getSummary (#1508)", () => {
     });
   });
 });
+
+describe("UserVoicePrefsService names the refused field (#1535)", () => {
+  const service = UserVoicePrefsService.getInstance();
+  const fieldOf = (fn: () => unknown): string | undefined => {
+    try {
+      fn();
+    } catch (err) {
+      return (err as InstanceType<typeof VoicePrefsValidationError>).field;
+    }
+    return "none";
+  };
+
+  it.each([
+    ["name", () => service.validatePresetName("  ")],
+    ["namePattern", () => service.validateNamePattern("x".repeat(101))],
+    ["channelName", () => service.validateChannelName("x".repeat(101))],
+    ["userLimit", () => service.validateUserLimit(100)],
+    ["bitrate", () => service.validateBitrate(7)],
+  ])("a refused %s carries that field", (field, run) => {
+    expect(fieldOf(run)).toBe(field);
+  });
+
+  it("a name collision is about the name, a stale row is about no field", async () => {
+    const doc = makeDoc({
+      presets: [
+        { name: "A", isDefault: false },
+        { name: "B", isDefault: false },
+      ],
+    });
+    stubGetPrefs(doc);
+    await expect(
+      service.editPreset("u1", 0, { name: "b" }, "A"),
+    ).rejects.toMatchObject({ field: "name" });
+    await expect(
+      service.editPreset("u1", 0, { name: "C" }, "Gone"),
+    ).rejects.toMatchObject({ field: undefined });
+  });
+});
