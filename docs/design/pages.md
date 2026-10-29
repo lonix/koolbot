@@ -162,7 +162,7 @@ leaves adopted events out as the overview card does. A failed read says so inste
 
 ### NewEventPage
 
-Creating an event, here as an event host. Admins get the same form from the Events page.
+Creating an event, here as an event host. Admins get the same form on a page of their own, `/admin/events/new`, which the Events page opens, with *Repeat* added.
 
 1. **When** first: *Now*, *In 15 min*, *In 30 min*, *In 1 hour*, *Pick date & time*. *Now* creates the channels at once and announces the event as
    happening now. Native date and time inputs; the timezone select puts the server's zone first.

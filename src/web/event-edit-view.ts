@@ -1,7 +1,7 @@
 /**
  * Body of the "Edit event" page (#1298), rendered inside `renderUserPage` at
  * `/me/events/:id/host/edit`. Reuses the field names, patterns and limits of the
- * create form (`renderEventsPage`), pre-filled. Built only from the shared `kb-`
+ * create form (`/admin/events/new`), pre-filled. Built only from the shared `kb-`
  * components (PageHeader, Panel, Field, Button, KeyValue; docs/design/components.md),
  * which both layouts load, so it needs no page-local styles.
  *

@@ -1002,7 +1002,7 @@ describe("refused-form pages (#1517)", () => {
       "/admin/moderation",
       "/admin/role-groups",
       "/admin/events/presets",
-      "/admin/events",
+      "/admin/events/new",
     ]) {
       expect(getFormPage(path)).toBeInstanceOf(Function);
     }

@@ -142,7 +142,7 @@ export function formatDateTimeInZone(date: Date, tz?: string | null): string {
  * `2026-02-30`), verified by round-tripping the instant back through the
  * same zone — `fromZonedTime` otherwise silently rolls invalid dates over.
  *
- * Shared by the Events schedule form (which reads the organiser's chosen zone) and
+ * Shared by the New event form (which reads the organiser's chosen zone) and
  * `/remind set` (which reads the member's own `/me/timezone` preference),
  * so both interpret a typed date and time identically.
  *

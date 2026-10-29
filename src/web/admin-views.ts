@@ -6,11 +6,6 @@
 
 import { CONFIRM_NEUTRAL_ATTR, confirmListAttr, scriptTag } from "./html.js";
 import {
-  EVENT_WHEN_CHOICES,
-  EVENT_WHEN_LABELS,
-  EVENT_WHEN_SCRIPT,
-} from "./event-when.js";
-import {
   channelGroupLabel,
   channelKindOf,
   channelMention,
@@ -99,7 +94,6 @@ import {
   GROUP_SIZE_MAX,
   GROUP_SIZE_MIN,
   GROUP_TAG_MAX,
-  resolveGroupCountLimits,
 } from "../services/event-groups.js";
 import {
   EVENT_GROUP_PRESETS,
@@ -110,7 +104,6 @@ import {
 import {
   deriveTagScript,
   groupBuilderScript,
-  groupRowsScript,
   groupSetRowScript,
   markerColoursScript,
   renderGroupBuilder,
@@ -2684,24 +2677,8 @@ export interface EventsProps extends CommonProps {
    * notice instead of controls pre-filled with schema defaults.
    */
   settingsUnavailable?: boolean;
-  /** Group rows the form offers and the cap (#1188); defaults 2 and 15. */
-  groupLimits?: { defaultCount: number; maxCount: number };
-  /**
-   * The presets the picker offers (#1200): the enabled built-ins and library
-   * presets. Absent = every built-in, as before the library existed.
-   */
-  groupPresets?: readonly EventGroupPreset[];
-  /** Shown above the picker when the preset library could not be read. */
-  groupPresetsNotice?: string | null;
-  /** The host's last group setup, to prefill the form (#1406); absent = defaults. */
-  groupRemembered?: { prefill: GroupFormPrefill; resetHref: string } | null;
-  /** The Schedule form, when the last save was refused (#1523). */
-  refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
 }
-
-/** Form id of the Schedule a new event form on the Events page (#1523). */
-export const EVENT_CREATE_FORM = "event-create";
 
 export function renderFlash(flash?: FlashMessage | null, id = ""): string {
   if (!flash) return "";
@@ -3550,23 +3527,7 @@ interface EventCols {
 }
 
 export function renderEventsPage(props: EventsProps): string {
-  const groupLimits = resolveGroupCountLimits(
-    props.groupLimits?.defaultCount ?? 2,
-    props.groupLimits?.maxCount ?? 15,
-  );
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
-  const create = formView(props.refusedForm, EVENT_CREATE_FORM);
-  // A refused form also says so at the top (when no flash is already there).
-  // That notice is what makes the Groups section put back the rows the admin
-  // had filled in: its draft is restored whenever the page comes back with an
-  // error notice (#1523).
-  const refusedNotice =
-    create.refused && !props.flash
-      ? renderFlash({
-          type: "err",
-          text: "Not saved. Check the fields marked below.",
-        })
-      : "";
 
   const renderEventRow = (e: EventRow, cols: EventCols): string => {
     const finished = e.state === "cancelled" || e.state === "ended";
@@ -3691,18 +3652,19 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
       { text: `${countOf(props.rows.length, "event")} scheduled` },
     ],
   });
-  // The findings that belong to a field of the schedule form sit next to it
-  // (#1478); the rest (the Events list card, the announcement channel, a check
-  // that could not run) stay in one block under the status line.
-  const { block: permissionNote, inline: permissionInline } =
-    splitEventFormNotice(props.permissionNotice ?? null, {
-      canLinkToPage: true,
-    });
+  // The findings that belong to a field of the schedule form sit next to it on
+  // the New event page (#1478, #1527); the rest (the Events list card, the
+  // announcement channel, a check that could not run) stay in one block under
+  // the status line.
+  const { block: permissionNote } = splitEventFormNotice(
+    props.permissionNotice ?? null,
+    { canLinkToPage: true },
+  );
 
   const body = `
 <h1>Events</h1>
 <p class="subtitle">Schedule events that spin up a temporary voice channel shortly before they start, are announced with a Discord event link members can mark Interested on, remind attendees, and clean themselves up afterward.</p>
-${renderPageFlash(props.flash)}${refusedNotice}
+${renderPageFlash(props.flash)}
 ${renderFeatureDisabledCallout({
   enabled: props.enabled,
   label: "Events",
@@ -3712,58 +3674,11 @@ ${renderFeatureDisabledCallout({
 })}
 ${statusLine}
 ${permissionNote}
-<div class="kb-pagehead__actions"><a class="kb-btn" href="#schedule-event">Schedule event</a></div>
+<div class="kb-pagehead__actions"><a class="kb-btn" href="/admin/events/new">Schedule event</a></div>
 
 <div class="card">
   <h2>Events</h2>${currentHtml}
   ${pastHtml}
-</div>
-<div class="card" id="schedule-event">
-  <h2>Schedule a new event</h2>
-  <form method="POST" action="/admin/events/create" class="stack" data-event-form>
-    ${csrfInput}
-    <label>Title
-      <input type="text" name="title" required maxlength="100" placeholder="Game Night"${create.valueAttr("title")}${create.attrs("title")}>
-    </label>${create.error("title")}
-    <label>Description
-      <textarea name="description" rows="3" maxlength="1000" placeholder="What's happening?"${create.attrs("description")}>${create.textareaContent("description")}</textarea>
-    </label>${create.error("description")}
-    <label>When
-      <select name="when" data-when${create.attrs("when")}>
-        ${EVENT_WHEN_CHOICES.map((w) => `<option value="${w}"${w === create.selected("when", "pick") ? " selected" : ""}>${EVENT_WHEN_LABELS[w]}</option>`).join("")}
-      </select>
-    </label>
-    <label data-when-pick>Date
-      <input type="date" name="date" pattern="\\d{4}-\\d{2}-\\d{2}" placeholder="YYYY-MM-DD"${create.valueAttr("date")}${create.attrs("date")}>
-    </label>${create.error("date")}
-    <label data-when-pick>Time
-      <input type="time" name="time" pattern="\\d{2}:\\d{2}" placeholder="HH:MM"${create.valueAttr("time")}${create.attrs("time")}>
-    </label>${create.error("time")}
-    <label>Duration (minutes, optional)
-      <input type="number" name="duration" min="1" max="1440" placeholder="120"${create.valueAttr("duration")}${create.attrs("duration")}>
-    </label>${create.error("duration")}
-    <div>
-      <label for="admin-event-timezone">Timezone (optional)</label>
-      ${renderTimezoneSelect("timezone", create.value("timezone"), { id: "admin-event-timezone", defaultZone: props.timezone, blank: true })}
-    </div>
-    <label>Repeat
-      <select name="recurrence"${create.attrs("recurrence")}>
-        ${[
-          ["none", "Does not repeat"],
-          ["weekly", "Weekly"],
-          ["biweekly", "Every 2 weeks"],
-          ["monthly", "Monthly"],
-        ]
-          .map(
-            ([value, label]) =>
-              `<option value="${value}"${value === create.selected("recurrence", "none") ? " selected" : ""}>${label}</option>`,
-          )
-          .join("\n        ")}
-      </select>
-    </label>${create.error("recurrence")}
-    ${renderGroupsSection(groupLimits, props.groupPresets, props.groupPresetsNotice ?? null, undefined, props.groupRemembered ?? null, permissionInline)}
-    <button type="submit" class="btn btn-primary">Schedule event</button>
-  </form>
   <p class="muted">A cover image is added to a scheduled event from its row in the list above; it is shown on the Discord event.</p>
 </div>
 ${renderFeatureSettingsCard({
@@ -3781,9 +3696,6 @@ ${renderFeatureSettingsCard({
   flash: props.flash,
 })}
 ${scriptTag(EVENT_COVER_UPLOAD_SCRIPT)}
-${scriptTag(groupRowsScript())}
-${scriptTag(EVENT_GROUPS_SCRIPT)}
-${EVENT_WHEN_SCRIPT}
 `;
 
   return renderAdminPage({

@@ -1,12 +1,12 @@
 /* global HTMLDetailsElement, HTMLInputElement, HTMLOptionElement, HTMLSelectElement, HTMLFormElement, HTMLElement, Document */
 /**
  * The picker and the admin page of the preset library (#1200). The markup and
- * the page script come from `renderEventsPage` / `renderEventPresetsPage`, and
+ * the page script come from `renderAdminNewEventPage` / `renderEventPresetsPage`, and
  * the scripts are run for real in jsdom, so what is tested is what ships.
  */
 import { describe, it, expect } from "@jest/globals";
 import { JSDOM } from "jsdom";
-import { renderEventsPage } from "../../src/web/admin-views.js";
+import { renderAdminNewEvent } from "./new-event-page-helper.js";
 import {
   EVENT_PRESETS_SCRIPT,
   renderEventPresetsPage,
@@ -21,6 +21,9 @@ import {
   EVENT_GROUP_PRESETS,
   type EventGroupPreset,
 } from "../../src/content/event-group-presets.js";
+
+/** Where the page shows a flash, as the New event page draws it (#1527). */
+const BACK_LINK = '<p><a href="/admin/events">Back to Events</a></p>';
 
 const COMMON = {
   csrfToken: "csrf-tok",
@@ -53,7 +56,7 @@ function page(
   maxCount = 15,
   notice: string | null = null,
 ): string {
-  return renderEventsPage({
+  return renderAdminNewEvent({
     ...COMMON,
     groupLimits: { defaultCount: 2, maxCount },
     ...(presets ? { groupPresets: presets } : {}),
@@ -65,8 +68,8 @@ function boot(html: string, restore?: Record<string, unknown>): JSDOM {
   let doc = html;
   if (restore) {
     doc = doc.replace(
-      "<h1>Events</h1>",
-      '<h1>Events</h1><div class="notice err" data-flash>Groups: nope</div>',
+      BACK_LINK,
+      `${BACK_LINK}<div class="notice err" data-flash>Groups: nope</div>`,
     );
   }
   const dom = new JSDOM(doc, {
@@ -1269,7 +1272,7 @@ describe("the preset editors' header row and derived tags (#1406)", () => {
 
 describe("the event form with a remembered setup (#1406)", () => {
   const remembered = {
-    resetHref: "/admin/events?defaults=1#schedule-event",
+    resetHref: "/admin/events/new?defaults=1",
     prefill: {
       presetId: "",
       groupLabel: "Squad",
@@ -1288,7 +1291,7 @@ describe("the event form with a remembered setup (#1406)", () => {
     },
   };
   const html = (): string =>
-    renderEventsPage({
+    renderAdminNewEvent({
       ...COMMON,
       groupLimits: { defaultCount: 2, maxCount: 15 },
       groupRemembered: remembered,
@@ -1316,7 +1319,7 @@ describe("the event form with a remembered setup (#1406)", () => {
 
   it("a later explicit choice still wins: picking a preset replaces the remembered rows", () => {
     const dom = boot(
-      renderEventsPage({
+      renderAdminNewEvent({
         ...COMMON,
         groupLimits: { defaultCount: 2, maxCount: 15 },
         groupPresets: [libraryPreset],
@@ -1331,11 +1334,11 @@ describe("the event form with a remembered setup (#1406)", () => {
 
 describe("a refused submit after the reset link, with a remembered setup (#1406)", () => {
   it("does not bring the remembered extra rows back next to the restored draft", () => {
-    const html = renderEventsPage({
+    const html = renderAdminNewEvent({
       ...COMMON,
       groupLimits: { defaultCount: 2, maxCount: 15 },
       groupRemembered: {
-        resetHref: "/admin/events?defaults=1#schedule-event",
+        resetHref: "/admin/events/new?defaults=1",
         prefill: {
           presetId: "",
           groupLabel: "",
@@ -1378,11 +1381,11 @@ describe("a refused submit after the reset link, with a remembered setup (#1406)
 
 describe("a refused submit at the full cap, with a remembered captains lobby (#1406)", () => {
   it("restores the draft's third team when the lobby was unticked before submitting", () => {
-    const html = renderEventsPage({
+    const html = renderAdminNewEvent({
       ...COMMON,
       groupLimits: { defaultCount: 2, maxCount: 3 },
       groupRemembered: {
-        resetHref: "/admin/events?defaults=1#schedule-event",
+        resetHref: "/admin/events/new?defaults=1",
         prefill: {
           presetId: "",
           groupLabel: "",
@@ -1418,11 +1421,11 @@ describe("a refused submit at the full cap, with a remembered captains lobby (#1
 
 describe("a refused submit at the full cap, leaders switched off with a ticked lobby (#1406)", () => {
   it("restores the draft's third team when the lobby is ticked but disabled", () => {
-    const html = renderEventsPage({
+    const html = renderAdminNewEvent({
       ...COMMON,
       groupLimits: { defaultCount: 2, maxCount: 3 },
       groupRemembered: {
-        resetHref: "/admin/events?defaults=1#schedule-event",
+        resetHref: "/admin/events/new?defaults=1",
         prefill: {
           presetId: "",
           groupLabel: "",
@@ -1483,11 +1486,11 @@ describe("restoring a refused draft: the whole grid of switches and row counts (
   it.each(cases)(
     "remembered leaders=%s lobby=%s, draft leaders=%s lobby=%s, %i rows",
     (rc, rl, dc, dl, n) => {
-      const html = renderEventsPage({
+      const html = renderAdminNewEvent({
         ...COMMON,
         groupLimits: { defaultCount: 2, maxCount: CAP },
         groupRemembered: {
-          resetHref: "/admin/events?defaults=1#schedule-event",
+          resetHref: "/admin/events/new?defaults=1",
           prefill: {
             presetId: "",
             groupLabel: "",
@@ -1559,7 +1562,7 @@ describe("replacing the rows after an over-cap restore (#1406)", () => {
   };
   // Four rows restored at a cap of 3: the server refused them.
   function overCap(): JSDOM {
-    const html = renderEventsPage({
+    const html = renderAdminNewEvent({
       ...COMMON,
       groupLimits: { defaultCount: 2, maxCount: 3 },
       groupPresets: [twoTeams],

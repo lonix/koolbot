@@ -24,10 +24,18 @@ export const EVENT_FORM_FIELDS = [
   "time",
   "timezone",
   "duration",
+  "recurrence",
   "groups",
 ] as const;
 
 export type EventFormField = (typeof EVENT_FORM_FIELDS)[number];
+
+/** Whether a refused form's error key names a field of the event form. */
+export function isEventFormField(
+  name: string | undefined,
+): name is EventFormField {
+  return (EVENT_FORM_FIELDS as readonly string[]).includes(name ?? "");
+}
 
 /** A refusal: always a message, and the field when it is about exactly one. */
 export interface EventFormRefusal {

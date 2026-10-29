@@ -2,14 +2,14 @@
 /**
  * The group setup form's collapse, preset cards, quick builder, derived values
  * and emoji picker (#1299), run for real in jsdom. The markup and scripts come
- * from `renderEventsPage`, so what is tested is what ships.
+ * from `renderAdminNewEventPage`, so what is tested is what ships.
  */
 import { describe, it, expect } from "@jest/globals";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { JSDOM } from "jsdom";
 import { renderMyEventPresetsBody } from "../../src/web/me-event-presets-page.js";
-import { renderEventsPage } from "../../src/web/admin-views.js";
+import { renderAdminNewEvent } from "./new-event-page-helper.js";
 import {
   MARKER_CHOICES,
   MARKER_COLOURS,
@@ -25,6 +25,9 @@ import {
 } from "../../src/services/event-groups.js";
 import { EVENT_GROUP_PRESETS } from "../../src/content/event-group-presets.js";
 
+/** Where the page shows a flash, as the New event page draws it (#1527). */
+const BACK_LINK = '<p><a href="/admin/events">Back to Events</a></p>';
+
 const COMMON = {
   csrfToken: "csrf-tok",
   remainingMs: 60_000,
@@ -39,7 +42,7 @@ const COMMON = {
 type Win = JSDOM["window"];
 
 function boot(maxCount = 15, defaultCount = 2): JSDOM {
-  const html = renderEventsPage({
+  const html = renderAdminNewEvent({
     ...COMMON,
     groupLimits: { defaultCount, maxCount },
   } as never);
@@ -602,12 +605,12 @@ function window0Sync(dom: JSDOM): void {
 
 describe("a refused submit puts the form back (#1299)", () => {
   it("restores the chosen card, the rows and the markers, with the rows open", () => {
-    const html = renderEventsPage({
+    const html = renderAdminNewEvent({
       ...COMMON,
       groupLimits: { defaultCount: 2, maxCount: 15 },
     } as never).replace(
-      "<h1>Events</h1>",
-      '<h1>Events</h1><div class="notice err" data-flash>Groups: nope</div>',
+      BACK_LINK,
+      `${BACK_LINK}<div class="notice err" data-flash>Groups: nope</div>`,
     );
     const dom = new JSDOM(html, {
       url: "http://localhost/admin/events",
@@ -713,14 +716,14 @@ describe("edits by hand are remembered, even to empty (#1299)", () => {
   });
 
   it("is kept when the draft is restored after a refused submit", () => {
-    const html = renderEventsPage({
+    const html = renderAdminNewEvent({
       ...COMMON,
       groupLimits: { defaultCount: 3, maxCount: 15 },
     } as never);
     const run = (restore: Record<string, unknown>): JSDOM => {
       const page = html.replace(
-        "<h1>Events</h1>",
-        '<h1>Events</h1><div class="notice err" data-flash>Groups: nope</div>',
+        BACK_LINK,
+        `${BACK_LINK}<div class="notice err" data-flash>Groups: nope</div>`,
       );
       const dom = new JSDOM(page, {
         url: "http://localhost/admin/events",
@@ -884,7 +887,7 @@ describe("what the group form hides is hidden by the stylesheet too (#1299)", ()
     }
   };
   const bootStyled = (): JSDOM => {
-    const html = renderEventsPage({
+    const html = renderAdminNewEvent({
       ...COMMON,
       groupLimits: { defaultCount: 2, maxCount: 15 },
     } as never);
@@ -900,7 +903,7 @@ describe("what the group form hides is hidden by the stylesheet too (#1299)", ()
   };
 
   it("every element the server renders hidden is display none", () => {
-    const html = renderEventsPage({
+    const html = renderAdminNewEvent({
       ...COMMON,
       groupLimits: { defaultCount: 2, maxCount: 15 },
     } as never);

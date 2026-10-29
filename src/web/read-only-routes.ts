@@ -169,6 +169,11 @@ import {
   queryGuildVoiceHeatmap,
 } from "../services/voice-activity-analytics.js";
 import { getServerTimezone, resolveTimezone } from "../utils/timezone.js";
+import {
+  ADMIN_NEW_EVENT_PATH,
+  refusedNewEventForm,
+  renderAdminNewEventPage,
+} from "./admin-new-event-page.js";
 import { BOOTSTRAP_VARS, bootstrapDisplay } from "./bootstrap-vars.js";
 import { getEnv, getEnvConfigValue } from "../config/env.js";
 import {
@@ -1554,10 +1559,7 @@ export function createReadOnlyRouter(
   );
 
   // ---------- Events ----------
-  const renderEvents = async (
-    req: AuthenticatedRequest,
-    refusedForm: RefusedForm | null,
-  ): Promise<string> => {
+  const renderEvents = async (req: AuthenticatedRequest): Promise<string> => {
     const common = await commonFromReq(req);
     const service = EventService.getInstance(client);
     const config = ConfigService.getInstance();
@@ -1568,8 +1570,6 @@ export function createReadOnlyRouter(
       tz,
       events,
       eventSettings,
-      groupDefaultCount,
-      groupMaxCount,
     ] = await Promise.all([
       config.getBoolean("events.enabled", false),
       config.getString("events.category_id", ""),
@@ -1578,8 +1578,6 @@ export function createReadOnlyRouter(
       service.listEvents(common.guildId),
       // Editable `events.*` settings card (#975).
       loadFeatureSettings(client, common.guildId, EVENTS_SETTING_KEYS),
-      config.getNumber("events.groups.default_count", 2),
-      config.getNumber("events.groups.max_count", 15),
     ]);
 
     // "Expected to show up": who marked Interested on the native event, read
@@ -1671,33 +1669,7 @@ export function createReadOnlyRouter(
       };
     });
 
-    // The picker's presets: enabled built-ins plus enabled library presets
-    // (#1200). Never throws; an unreadable library fails closed and says so.
-    // The viewing admin's own personal presets are included (#1216).
-    const presetCatalog = await loadPresetCatalog(common.guildId, {
-      ownerId: req.webSession?.discordUserId,
-    });
-
-    // The admin's last group setup (#1406), unless they asked for the defaults.
-    // A failed read is "no prefill" and never blocks the form.
-    const offeredPresets = enabledPresets(presetCatalog);
-    const prefill =
-      req.query.defaults === "1"
-        ? null
-        : await loadGroupPrefill(
-            common.guildId,
-            req.webSession?.discordUserId,
-            {
-              maxCount: resolveGroupCountLimits(
-                groupDefaultCount,
-                groupMaxCount,
-              ).maxCount,
-              presets: offeredPresets,
-            },
-          );
-
     return renderEventsPage({
-      refusedForm,
       ...common,
       enabled,
       categoryConfigured: categoryId.length > 0,
@@ -1711,31 +1683,124 @@ export function createReadOnlyRouter(
       settingsPickers: eventSettings.pickers,
       dependencyState: eventSettings.dependencyState,
       settingsUnavailable: eventSettings.unavailable,
-      groupLimits: {
-        defaultCount: groupDefaultCount,
-        maxCount: groupMaxCount,
-      },
-      groupPresets: offeredPresets,
-      groupPresetsNotice: catalogNotice(
-        presetCatalog.state,
-        presetCatalog.personalUnreadable,
-      ),
-      groupRemembered: prefill
-        ? {
-            prefill,
-            resetHref: "/admin/events?defaults=1#schedule-event",
-          }
-        : null,
       flash: readFlash(req),
     });
   };
-  registerFormPage("/admin/events", (req, refused) =>
-    renderEvents(req as AuthenticatedRequest, refused),
-  );
   router.get(
     "/events",
     asyncHandler(async (req, res) => {
-      res.type("text/html").send(await renderEvents(req, null));
+      res.type("text/html").send(await renderEvents(req));
+    }),
+  );
+
+  // New event (#1527): the shared New event form, inside the admin layout. One
+  // renderer for the GET and for a refused post (`POST /admin/events/create`
+  // calls it through `form-pages.ts` and answers 422): the refused field is
+  // marked and everything typed, the Groups rows included, is put back.
+  const renderAdminNewEvent = async (
+    req: AuthenticatedRequest,
+    refusedForm: RefusedForm | null,
+  ): Promise<string> => {
+    const common = await commonFromReq(req);
+    const config = ConfigService.getInstance();
+    const [
+      enabled,
+      categoryId,
+      announcementChannelId,
+      tz,
+      defaultDuration,
+      defaultCount,
+      configuredMax,
+    ] = await Promise.all([
+      config.getBoolean("events.enabled", false),
+      config.getString("events.category_id", ""),
+      config.getString("events.announcement_channel_id", ""),
+      config.getString("events.timezone", ""),
+      config.getNumber("events.default_duration_minutes", 120),
+      config.getNumber("events.groups.default_count", 2),
+      config.getNumber("events.groups.max_count", 15),
+    ]);
+    const zone = resolveTimezone(tz);
+    const limits = resolveGroupCountLimits(defaultCount, configuredMax);
+    // The enabled built-ins plus the library's (#1200), and the viewing admin's
+    // own personal presets (#1216). Never throws; an unreadable library says so.
+    const catalog = await loadPresetCatalog(common.guildId, {
+      ownerId: req.webSession?.discordUserId,
+    });
+    const presets = enabledPresets(catalog);
+    const startNow = req.query.when === "now";
+    // The admin's last group setup (#1406), unless they asked for the defaults.
+    // A refused form shows the rows as they were posted instead. A failed read
+    // is "no prefill" and never blocks the form.
+    const remembered =
+      refusedForm || req.query.defaults === "1"
+        ? null
+        : await loadGroupPrefill(
+            common.guildId,
+            req.webSession?.discordUserId,
+            {
+              maxCount: limits.maxCount,
+              presets,
+            },
+          );
+    const refusedView = refusedForm
+      ? refusedNewEventForm(refusedForm, zone, defaultDuration)
+      : null;
+    const permissionNotice = await loadPermissionNotice({
+      client,
+      guildId: common.guildId,
+      enabled,
+      filter: inAreas("Events"),
+    });
+    return renderAdminNewEventPage({
+      enabled,
+      csrfToken: common.csrfToken,
+      remainingMs: common.remainingMs,
+      navFeatureStatus: common.navFeatureStatus,
+      flash: readFlash(req),
+      form: {
+        csrfToken: common.csrfToken,
+        timezone: zone,
+        defaultDurationMinutes: defaultDuration,
+        groupLimits: limits,
+        groupPresets: presets,
+        groupPresetsNotice: catalogNotice(
+          catalog.state,
+          catalog.personalUnreadable,
+        ),
+        groupRemembered: refusedView
+          ? {
+              prefill: refusedView.groups.prefill,
+              resetHref: null,
+              enabled: refusedView.groups.enabled,
+            }
+          : remembered
+            ? {
+                prefill: remembered,
+                resetHref: `${ADMIN_NEW_EVENT_PATH}?${startNow ? "when=now&" : ""}defaults=1`,
+              }
+            : null,
+        setupNotice: !categoryId
+          ? "No channel category is set, so event channels cannot be created yet."
+          : !announcementChannelId
+            ? "No announcement channel is set, so events will not be announced."
+            : null,
+        permissionNotice,
+        // `?when=now` is the header's Start now; anything else is the default.
+        initialWhen: refusedView?.initialWhen ?? (startNow ? "now" : "pick"),
+        ...(refusedView
+          ? { refusal: refusedView.refusal, values: refusedView.values }
+          : {}),
+      },
+    });
+  };
+  registerFormPage(ADMIN_NEW_EVENT_PATH, (req, refused) =>
+    renderAdminNewEvent(req as AuthenticatedRequest, refused),
+  );
+  router.get(
+    "/events/new",
+    asyncHandler(async (req, res) => {
+      res.type("text/html").send(await renderAdminNewEvent(req, null));
     }),
   );
 

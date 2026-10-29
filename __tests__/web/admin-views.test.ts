@@ -1,4 +1,5 @@
 import { ChannelType } from "discord.js";
+import { renderAdminNewEvent } from "./new-event-page-helper.js";
 import { describe, it, expect } from "@jest/globals";
 import { calmDashboard } from "./dashboard-fixtures.js";
 import {
@@ -1625,12 +1626,8 @@ describe("renderEventsPage", () => {
     expect(html).toContain("Events feature is off.");
   });
 
-  it("offers a repeat selector on the create form", () => {
-    const html = renderEventsPage({
-      ...EVENTS_COMMON,
-      enabled: true,
-      rows: [],
-    });
+  it("offers a repeat selector on the New event page", () => {
+    const html = renderAdminNewEvent({ enabled: true });
     expect(html).toContain('name="recurrence"');
     for (const value of ["none", "weekly", "biweekly", "monthly"]) {
       expect(html).toContain(`<option value="${value}"`);
@@ -1888,12 +1885,8 @@ describe("renderEventsPage", () => {
     expect(html).toContain("events.announcement_channel_id");
   });
 
-  it("renders the create form", () => {
-    const html = renderEventsPage({
-      ...EVENTS_COMMON,
-      enabled: true,
-      rows: [],
-    });
+  it("renders the New event page's form, posting to the create route", () => {
+    const html = renderAdminNewEvent({ enabled: true });
     expect(html).toContain("/admin/events/create");
     expect(html).toContain('name="title"');
     expect(html).toContain('name="date"');

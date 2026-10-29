@@ -1,5 +1,5 @@
 /**
- * GET /admin/events (#1406): the create form is prefilled from the signed-in
+ * GET /admin/events/new (#1406, #1527): the create form is prefilled from the signed-in
  * admin's own remembered group setup, validated against today's limits, and
  * `?defaults=1` brings back the normal defaults without reading it. A failed
  * read never blocks the page.
@@ -108,10 +108,10 @@ const remembered = {
   tagsSuffix: false,
 };
 
-describe("GET /events: remembered group setup", () => {
+describe("GET /events/new: remembered group setup", () => {
   it("prefills from the signed-in admin's own setup and offers the way back", async () => {
     mockLoadPrefill.mockResolvedValue(remembered);
-    const html = await (await harness.get("/events")).text();
+    const html = await (await harness.get("/events/new")).text();
     const [guildId, ownerId, ctx] = mockLoadPrefill.mock.calls[0] as [
       string,
       string,
@@ -122,21 +122,28 @@ describe("GET /events: remembered group setup", () => {
     // Validated against the cap the form itself uses.
     expect(ctx.maxCount).toBe(6);
     expect(html).toContain("Prefilled from your last event.");
-    expect(html).toContain('href="/admin/events?defaults=1#schedule-event"');
+    expect(html).toContain('href="/admin/events/new?defaults=1"');
     expect(html).toMatch(/name="groups_enabled" value="1" checked/);
     expect(html).toMatch(/name="group_0_name"[^>]*value="Red"/);
   });
 
+  it("keeps the deep link: ?when=now offers the way back with it and selects Now", async () => {
+    mockLoadPrefill.mockResolvedValue(remembered);
+    const html = await (await harness.get("/events/new?when=now")).text();
+    expect(html).toContain('href="/admin/events/new?when=now&amp;defaults=1"');
+    expect(html).toMatch(/name="when" value="now"[^>]*checked/);
+  });
+
   it("shows the defaults for ?defaults=1 and does not read the store", async () => {
     mockLoadPrefill.mockResolvedValue(remembered);
-    const html = await (await harness.get("/events?defaults=1")).text();
+    const html = await (await harness.get("/events/new?defaults=1")).text();
     expect(mockLoadPrefill).not.toHaveBeenCalled();
     expect(html).not.toContain("Prefilled from your last event.");
     expect(html).not.toMatch(/name="groups_enabled" value="1" checked/);
   });
 
   it("shows the defaults when there is nothing to prefill", async () => {
-    const res = await harness.get("/events");
+    const res = await harness.get("/events/new");
     expect(res.status).toBe(200);
     expect(await res.text()).not.toContain("Prefilled from your last event.");
   });

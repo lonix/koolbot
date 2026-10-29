@@ -7,7 +7,6 @@
 import { describe, it, expect } from "@jest/globals";
 import { JSDOM } from "jsdom";
 import { renderNewEventBody } from "../../src/web/event-new-view.js";
-import { renderEventsPage } from "../../src/web/admin-views.js";
 
 const DRAFT_KEY = "koolbot-event-form-draft";
 
@@ -88,41 +87,34 @@ describe("the When script hides the date and time (#1305)", () => {
     expect(block.style.display).toBe("");
   });
 
-  it("does the same on the admin form's select, whose labels are display:flex", () => {
-    const html = renderEventsPage({
-      csrfToken: "csrf-tok",
-      remainingMs: 60_000,
-      categoryConfigured: true,
-      announcementConfigured: true,
-      timezone: "UTC",
-      settingRows: [],
-      enabled: true,
-      rows: [],
-    } as never);
-    const dom = new JSDOM(html, {
-      url: "http://localhost/admin/events",
-      runScripts: "outside-only",
-    });
-    const when = [
-      ...html.matchAll(/<script nonce="[^"]*">([\s\S]*?)<\/script>/g),
-    ]
-      .map((m) => m[1])
-      .find((code) => code.includes("data-when-pick"));
-    if (!when) throw new Error("when script not found");
-    dom.window.eval(when);
-    const select = dom.window.document.querySelector(
-      "select[name=when]",
-    ) as unknown as HTMLInputElement;
-    const labels = [
-      ...dom.window.document.querySelectorAll("label[data-when-pick]"),
-    ] as HTMLElement[];
-    expect(labels).toHaveLength(2);
-    select.value = "now";
-    select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-    for (const l of labels) expect(l.style.display).toBe("none");
-    select.value = "pick";
-    select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-    for (const l of labels) expect(l.style.display).toBe("");
+  it("does the same on the admin form, and leaves Repeat shown", () => {
+    // The body is the page's own; the admin layout's session scripts need `fetch`.
+    const dom = boot(
+      `<!doctype html><html><body>${renderNewEventBody({
+        csrfToken: "csrf-tok",
+        timezone: "UTC",
+        defaultDurationMinutes: 120,
+        groupLimits: { defaultCount: 2, maxCount: 15 },
+        groupPresets: [],
+        groupPresetsNotice: null,
+        allowRecurrence: true,
+        timezoneBlank: true,
+      })}</body></html>`,
+    );
+    const block = pickBlock(dom);
+    const repeat = dom.window.document.querySelector(
+      "select[name=recurrence]",
+    ) as HTMLElement;
+    expect(repeat).not.toBeNull();
+    expect(block.contains(repeat)).toBe(false);
+    expect(block.hidden).toBe(false);
+    choose(dom, "now");
+    expect(block.hidden).toBe(true);
+    expect(block.style.display).toBe("none");
+    expect(repeat.closest("[hidden]")).toBeNull();
+    choose(dom, "pick");
+    expect(block.hidden).toBe(false);
+    expect(block.style.display).toBe("");
   });
 });
 

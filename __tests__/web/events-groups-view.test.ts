@@ -1,5 +1,6 @@
 import { describe, it, expect } from "@jest/globals";
 import { renderEventsPage } from "../../src/web/admin-views.js";
+import { renderAdminNewEvent } from "./new-event-page-helper.js";
 import { EVENT_GROUP_PRESETS } from "../../src/content/event-group-presets.js";
 
 const COMMON = {
@@ -14,9 +15,9 @@ const COMMON = {
 };
 
 const render = (extra: Record<string, unknown> = {}): string =>
-  renderEventsPage({ ...COMMON, ...extra } as never);
+  renderAdminNewEvent({ ...COMMON, ...extra } as never);
 
-describe("renderEventsPage Groups section (#1188)", () => {
+describe("the New event page Groups section (#1188)", () => {
   it("is part of the create form and off until ticked", () => {
     const html = render();
     expect(html).toContain("Split into groups (teams, squads, rooms…)");
@@ -28,7 +29,7 @@ describe("renderEventsPage Groups section (#1188)", () => {
     const form = html.slice(html.indexOf('action="/admin/events/create"'));
     expect(form.indexOf("groups_enabled")).toBeGreaterThan(-1);
     expect(form.indexOf("groups_enabled")).toBeLessThan(
-      form.indexOf("Schedule event</button>"),
+      form.indexOf("Create event</button>"),
     );
   });
 
@@ -183,7 +184,8 @@ describe("renderEventsPage Groups section (#1188)", () => {
   });
 
   it("shows the group count next to the title of an event with groups only", () => {
-    const html = render({
+    const html = renderEventsPage({
+      ...COMMON,
       rows: [
         {
           id: "e1",
@@ -227,14 +229,14 @@ describe("renderEventsPage Groups section (#1188)", () => {
     };
     const remembered = (p: Record<string, unknown> = {}): unknown => ({
       prefill: { ...prefill, ...p },
-      resetHref: "/admin/events?defaults=1#schedule-event",
+      resetHref: "/admin/events/new?defaults=1",
     });
 
     it("prefills rows, switches, wording and lead time, and says so", () => {
       const html = render({ groupRemembered: remembered() });
       expect(html).toContain("Prefilled from your last event.");
       expect(html).toContain(
-        '<a href="/admin/events?defaults=1#schedule-event">Start from the defaults instead</a>',
+        '<a href="/admin/events/new?defaults=1">Start from the defaults instead</a>',
       );
       expect(html).toMatch(/name="groups_enabled" value="1" checked/);
       expect(html).toMatch(/name="groups_captains" value="1" checked/);
