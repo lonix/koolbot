@@ -189,6 +189,9 @@ const STYLE = [
   ".prefs-table th{font-weight:600;color:var(--text-secondary);font-size:.85rem;text-transform:uppercase;letter-spacing:.04em}",
   // A row header (`th scope=row`) reads as a body cell; only assistive tech hears the difference.
   ".prefs-table tbody th[scope=row]{font-weight:500;color:inherit;font-size:inherit;text-transform:none;letter-spacing:normal}",
+  // The row header rule above sets size and colour, so the cell's own classes are restated after it.
+  ".prefs-table tbody th[scope=row].mono{font-size:var(--type-mono-size)}",
+  ".prefs-table tbody th[scope=row].muted{color:var(--muted)}",
   ".prefs-table tr:last-child td,.prefs-table tr:last-child th[scope=row]{border-bottom:0}",
   // Control borders use --control (3.97:1); the hairline --border was 1.58:1 (#855).
   `select.tz-select{width:100%;max-width:28rem;background:var(--bg);color:var(--text);border:1px solid var(--control);border-radius:4px;padding:.45rem .5rem;font-size:.9rem}`,
