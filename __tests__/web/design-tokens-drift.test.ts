@@ -138,6 +138,21 @@ describe("design token drift (#1315)", () => {
     expect(found).toEqual([]);
   });
 
+  it("leaves no spacing, size or offset literal in the Rewind block of kb.css (#1524)", () => {
+    const start = kbCss.indexOf("/* ---------- Rewind ---------- */");
+    expect(start).toBeGreaterThan(-1);
+    const end = kbCss.indexOf("/* ---------- ", start + 1);
+    const block = kbCss.slice(start, end);
+    const found = block
+      .split("\n")
+      .filter((line) =>
+        /(padding|margin|gap|width|height|offset|radius)[a-z-]*:[^;}]*[0-9.]+(rem|em|px)\b/.test(
+          line,
+        ),
+      );
+    expect(found).toEqual([]);
+  });
+
   it.each([
     ["color:#fff;background:#0f1115", ["#fff", "#0f1115"]],
     ["color:#000", ["#000"]],
