@@ -816,9 +816,6 @@ export class QuoteChannelManager {
           value: `<@${normalizedAddedById}>`,
           inline: true,
         },
-        // `/quote edit` takes this id, so members need it somewhere; it is a
-        // field rather than the footer (#1331).
-        { name: "Quote ID", value: `\`${quoteId}\``, inline: true },
       ];
       // When restoring from a backup the actual user reactions can't be
       // recreated (a bot can't react on a user's behalf), so surface the
@@ -959,7 +956,6 @@ export class QuoteChannelManager {
             value: `<@${normalizedAddedById}>`,
             inline: true,
           },
-          { name: "Quote ID", value: `\`${quoteId}\``, inline: true },
         )
         .setFooter({ text: QUOTES_FOOTER })
         .setTimestamp();

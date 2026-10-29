@@ -3,7 +3,10 @@
  *
  * 1. A footer reads `KoolBot · <Feature>`: it never contains the word
  *    "System" and never a database id (`ID: ...`, `${quote._id}`, `${noticeId}`).
- *    An id people need goes in a field, a button or the Web UI.
+ *    An id people need goes in a button or the Web UI, not in the footer.
+ *    An embed field is no place for one either: no field `name` literal
+ *    contains the word "ID" (#1532). Members pick a thing from a list
+ *    (autocomplete, a select menu) instead of copying its id.
  * 2. Times in Discord text go through `discordTimestamp()` (or `setTimestamp()`),
  *    never `toLocaleString()` and friends, which print one fixed timezone and
  *    format for every reader.
@@ -53,10 +56,7 @@ const COMMAND_DATE_HELPERS = /\b(formatTimeAgo|formatDateTimeInZone)\(/;
  * Files that still print option syntax in a command, each with the reason and
  * the issue that removes the entry. Never add one to silence the guard.
  */
-const OPTION_SYNTAX_ALLOWED: Record<string, string> = {
-  "commands/remind.ts":
-    "`/remind cancel id:…` until the ids issue (#1532) lands; remove this entry there",
-};
+const OPTION_SYNTAX_ALLOWED: Record<string, string> = {};
 
 /** `/name word:` (also after a subcommand) or `/name @user`, `<user>`, `[x]` inside backticks. */
 const OPTION_SYNTAX = /`\/[\w-]+(?: [\w-]+)*? (?:[\w-]+:|[@<[])/;
@@ -256,6 +256,49 @@ function footerProblems(source: string, file = "source.ts"): string[] {
   });
 }
 
+/** An embed field label that names an id: "Quote ID", "ID", "Reminder ID". */
+const ID_FIELD_NAME = /\bIDs?\b/;
+
+/**
+ * Embed fields (`{ name: "...", value: ... }` object literals) whose `name`
+ * literal contains "ID". Only string and template literals are checked; a
+ * computed name yields nothing.
+ */
+function idFieldProblems(source: string, file = "source.ts"): string[] {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const hits: string[] = [];
+  const visit = (n: ts.Node): void => {
+    if (ts.isObjectLiteralExpression(n)) {
+      const prop = (key: string): ts.PropertyAssignment | undefined =>
+        n.properties.find(
+          (p): p is ts.PropertyAssignment =>
+            ts.isPropertyAssignment(p) &&
+            ts.isIdentifier(p.name) &&
+            p.name.text === key,
+        );
+      const name = prop("name");
+      const hasValue =
+        prop("value") !== undefined ||
+        n.properties.some(
+          (p) => ts.isShorthandPropertyAssignment(p) && p.name.text === "value",
+        );
+      if (
+        name &&
+        hasValue &&
+        ts.isStringLiteralLike(name.initializer) &&
+        ID_FIELD_NAME.test(name.initializer.text)
+      ) {
+        hits.push(
+          `${sf.getLineAndCharacterOfPosition(name.getStart(sf)).line + 1}: field named "${name.initializer.text}"`,
+        );
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return hits;
+}
+
 function rel(file: string, root: string): string {
   return path.relative(root, file).split(path.sep).join("/");
 }
@@ -306,6 +349,33 @@ describe("discord footer guard", () => {
       ),
     );
     expect(hits).toEqual([]);
+  });
+
+  it("has no embed field named after an id (#1532)", () => {
+    const hits = walk(SRC).flatMap((file) =>
+      idFieldProblems(fs.readFileSync(file, "utf8"), rel(file, SRC)).map(
+        (p) => `${rel(file, SRC)}:${p}`,
+      ),
+    );
+    expect(hits).toEqual([]);
+  });
+
+  it("catches an embed field named ID and leaves other fields alone (self-test)", () => {
+    for (const bad of [
+      'e.addFields({ name: "Quote ID", value: `${id}`, inline: true });',
+      'const f = [{ name: "ID", value: "x" }];',
+      "const f = { name: `Reminder ID`, value };",
+    ]) {
+      expect(idFieldProblems(bad)).toHaveLength(1);
+    }
+    for (const fine of [
+      'e.addFields({ name: "Author", value: "x" });',
+      'const o = { name: "Idle time", value: "x" };',
+      'const o = { name: "Quote ID" };',
+      'const o = { name: "Valid", value: "x" };',
+    ]) {
+      expect(idFieldProblems(fine)).toEqual([]);
+    }
   });
 
   it("scans the footers it is meant to scan (self-test)", () => {

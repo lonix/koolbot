@@ -1,5 +1,6 @@
 import {
   SlashCommandBuilder,
+  AutocompleteInteraction,
   ChatInputCommandInteraction,
   EmbedBuilder,
   MessageFlags,
@@ -13,7 +14,11 @@ import {
 import { discordTimestamp } from "../utils/discord-time.js";
 import { UserNotificationPrefsService } from "../services/user-notification-prefs-service.js";
 import { parseDuration } from "../utils/time.js";
-import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";
+import {
+  formatInZone,
+  parseZonedDateTime,
+  resolveTimezone,
+} from "../utils/timezone.js";
 import {
   clampToLimit,
   DISCORD_EMBED_DESCRIPTION_LIMIT,
@@ -41,6 +46,15 @@ import { embedColor } from "../utils/embed-style.js";
 
 /** Message cap. Comfortably inside Discord's limits once decorated. */
 const MAX_MESSAGE_LENGTH = 500;
+
+/** Discord shows at most 25 autocomplete choices; a choice name holds 100 characters. */
+const MAX_AUTOCOMPLETE_CHOICES = 25;
+const MAX_CHOICE_NAME_LENGTH = 100;
+
+/** Closes the `/remind list` embed: how to cancel, without an id. */
+const CANCEL_HINT = "\n\nCancel one with `/remind cancel`.";
+
+const REMINDERS_FOOTER = "KoolBot · Reminders";
 
 /** How much of a reminder's text `/remind list` shows per row. */
 const MAX_LIST_MESSAGE_LENGTH = 120;
@@ -85,10 +99,47 @@ export const data = new SlashCommandBuilder()
       .addStringOption((o) =>
         o
           .setName("id")
-          .setDescription("Reminder ID (from /remind list)")
-          .setRequired(true),
+          .setDescription("The reminder to cancel")
+          .setRequired(true)
+          .setAutocomplete(true),
       ),
   );
+
+/**
+ * Autocomplete for `/remind cancel`'s `id` option: the caller's own pending
+ * reminders as "Fri 29 Oct 18:00 · Call mum", soonest first, filtered by what
+ * they type. The value is the reminder's id, which the member never sees.
+ * Scoped to the caller and this guild, exactly like the cancel itself.
+ */
+export async function autocomplete(
+  interaction: AutocompleteInteraction,
+): Promise<void> {
+  if (!interaction.guildId) {
+    await interaction.respond([]);
+    return;
+  }
+  const focused = interaction.options.getFocused().trim().toLowerCase();
+  const stored = await UserNotificationPrefsService.getInstance().getTimezone(
+    interaction.user.id,
+    interaction.guildId,
+  );
+  const zone = resolveTimezone(stored);
+  const pending = await ReminderService.getInstance(
+    interaction.client,
+  ).listPending(interaction.user.id, interaction.guildId);
+
+  const choices = pending
+    .map((reminder) => ({
+      name: truncateText(
+        `${formatInZone(reminder.remindAt, zone, "EEE d MMM HH:mm")} · ${reminder.message.replace(/\s+/g, " ")}`,
+        MAX_CHOICE_NAME_LENGTH,
+      ),
+      value: String(reminder._id),
+    }))
+    .filter((choice) => choice.name.toLowerCase().includes(focused))
+    .slice(0, MAX_AUTOCOMPLETE_CHOICES);
+  await interaction.respond(choices);
+}
 
 export async function execute(
   interaction: ChatInputCommandInteraction,
@@ -279,7 +330,7 @@ async function handleSet(
         [
           `⏰ Reminder set for ${discordTimestamp(when.remindAt)} — ${discordTimestamp(when.remindAt, "R")}${zoneNote}.`,
           "I'll DM you. If your DMs are closed I'll try to post here instead.",
-          `Cancel it with \`/remind cancel id:${result.reminder._id}\`.`,
+          "Cancel it with `/remind cancel`.",
         ].join("\n"),
       );
     },
@@ -307,7 +358,6 @@ async function handleList(
     return [
       `${discordTimestamp(reminder.remindAt)} — ${discordTimestamp(reminder.remindAt, "R")}`,
       `> ${text}`,
-      `\`${reminder._id}\``,
     ].join("\n");
   });
 
@@ -315,12 +365,12 @@ async function handleList(
     .setColor(embedColor("warn"))
     .setTitle("⏰ Your pending reminders")
     .setDescription(
-      clampToLimit(rows, DISCORD_EMBED_DESCRIPTION_LIMIT, {
+      clampToLimit(rows, DISCORD_EMBED_DESCRIPTION_LIMIT - CANCEL_HINT.length, {
         separator: "\n\n",
         overflowLabel: (dropped) => `…and ${dropped} more`,
-      }),
+      }) + CANCEL_HINT,
     )
-    .setFooter({ text: "Cancel one with /remind cancel id:<id>" });
+    .setFooter({ text: REMINDERS_FOOTER });
 
   await interaction.editReply({ embeds: [embed] });
 }
@@ -334,8 +384,8 @@ async function handleCancel(
   // which would surface as the generic error reply instead of a useful one.
   if (!isValidObjectId(id)) {
     await replyWithError(interaction, {
-      title: "That isn't a reminder ID",
-      next: "Copy one from `/remind list`, then try again.",
+      title: "Couldn't find that reminder",
+      next: "That reminder is gone or isn't yours. Pick one from the list.",
     });
     return;
   }
@@ -350,7 +400,7 @@ async function handleCancel(
   if (!cancelled) {
     await replyWithError(interaction, {
       title: "Couldn't find that reminder",
-      next: "No pending reminder of yours has that ID. Check `/remind list`.",
+      next: "That reminder is gone or isn't yours. Pick one from the list.",
     });
     return;
   }

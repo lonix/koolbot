@@ -116,3 +116,36 @@ describe("QuoteService.updateQuoteMessageId", () => {
     });
   });
 });
+
+describe("QuoteService.listQuotesAddedByUser", () => {
+  it("lists only the member's own quotes, newest first, in every stored id form", async () => {
+    const service = new QuoteService();
+    const limit = jest.fn(async () => [{ content: "a" }]);
+    const sort = jest.fn(() => ({ limit }));
+    const find = jest.fn(() => ({ sort }));
+    (service as never as { model: unknown }).model = { find };
+
+    await service.listQuotesAddedByUser("123", " a.b ", 7);
+
+    expect(find).toHaveBeenCalledWith({
+      addedById: { $in: expect.arrayContaining(["123", "<@123>"]) },
+      content: { $regex: "a\\.b", $options: "i" },
+    });
+    expect(sort).toHaveBeenCalledWith({ createdAt: -1 });
+    expect(limit).toHaveBeenCalledWith(7);
+  });
+
+  it("adds no text filter for an empty search", async () => {
+    const service = new QuoteService();
+    const find = jest.fn(() => ({ sort: () => ({ limit: async () => [] }) }));
+    (service as never as { model: unknown }).model = { find };
+
+    await service.listQuotesAddedByUser("123");
+
+    const filter = (find.mock.calls[0] as unknown[])[0] as Record<
+      string,
+      unknown
+    >;
+    expect(filter).not.toHaveProperty("content");
+  });
+});

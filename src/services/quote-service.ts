@@ -1114,6 +1114,26 @@ export class QuoteService {
   }
 
   /**
+   * The quotes a member added, newest first, for `/quote edit`'s picker.
+   * `search` is a literal, case-insensitive substring of the quote text.
+   * Handles legacy ID formats like {@link getQuotesAddedByUser}.
+   */
+  async listQuotesAddedByUser(
+    userId: string,
+    search: string = "",
+    limit: number = 25,
+  ): Promise<IQuote[]> {
+    const text = search.trim();
+    const filter: Record<string, unknown> = {
+      addedById: { $in: userIdMatchForms(userId) },
+    };
+    if (text) {
+      filter.content = { $regex: escapeRegex(text), $options: "i" };
+    }
+    return this.model.find(filter).sort({ createdAt: -1 }).limit(limit);
+  }
+
+  /**
    * Get the count of quotes added by a specific user
    * Handles legacy quote data with various ID formats (<@123>, <@!123>, @123, 123)
    */
