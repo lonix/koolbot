@@ -39,6 +39,11 @@ export interface ControlAttrs {
   invalid?: boolean;
   /** `data-describedby-base` for the AJAX save script (see `ControlA11y`). */
   describedByBase?: string;
+  /**
+   * What a switch posts while checked; `"true"` when absent. A form whose parser
+   * reads `"1"` (the live-edit rows of the host panel) asks for it.
+   */
+  onValue?: string;
 }
 
 function attr(name: string, value: string | undefined): string {
@@ -66,7 +71,7 @@ export function renderSwitch(
 ): string {
   return (
     `<label class="kb-switch">` +
-    `<input type="checkbox" role="switch"${attr("id", a.id)} name="${escapeHtml(name)}" value="true"` +
+    `<input type="checkbox" role="switch"${attr("id", a.id)} name="${escapeHtml(name)}" value="${escapeHtml(a.onValue ?? "true")}"` +
     `${checked ? " checked" : ""}${attr("aria-labelledby", a.labelledBy)}` +
     `${attr("aria-describedby", a.describedBy)}${invalidAttrs(a)}${a.disabled ? " disabled data-dep-locked" : ""}${extra}>` +
     `<span class="kb-switch__track" aria-hidden="true"></span>` +

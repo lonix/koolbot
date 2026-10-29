@@ -187,6 +187,7 @@ import {
   CONFIRM_PAGE_VALUE,
 } from "../confirm-fetch.js";
 import { leadersTagsViewOf } from "../host-settings-leaders-tags-view.js";
+import { prepareSettingsBody } from "../host-settings-rows.js";
 import {
   buildGroupsSwitchView,
   prepareGroupsSwitchBody,
@@ -1376,7 +1377,7 @@ function registerSettingsActions(router: Router, client: Client): void {
           errorMessage: "invalid",
         };
       }
-      const parsed = parseSubmission(switched.body);
+      const parsed = parseSubmission(prepareSettingsBody(switched.body));
       if (parsed.errors.length > 0) {
         return {
           ok: false,

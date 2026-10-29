@@ -901,7 +901,9 @@ describe("case page and Review", () => {
     const page = await html("/cases/case-1");
     expect(page).toContain('data-confirm-tone="neutral"');
     expect(page).toContain("data-confirm-list=");
-    expect(page).not.toContain("has-savebar");
+    // The member stylesheet carries the `#main.has-savebar` rule on every page (#1514);
+    // what must be absent is the class on the page's own `main`.
+    expect(page).not.toMatch(/<main[^>]*has-savebar/);
   });
 
   it("labels every time on the case page as UTC", async () => {

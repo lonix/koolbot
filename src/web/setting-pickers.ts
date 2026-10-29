@@ -590,7 +590,15 @@ export interface DurationPresetOptions extends ControlAttrs {
   unit: string;
   /** What `0` is called, when it is not a number ("Off"). */
   zeroLabel?: string;
+  /**
+   * A first choice for "no value" (an empty box, e.g. "Server default"). It posts
+   * `emptyValue` as the preset and is ticked while `current` is empty.
+   */
+  emptyLabel?: string;
 }
+
+/** The preset a ticked "no value" choice posts (see `DurationPresetOptions.emptyLabel`). */
+export const DURATION_EMPTY_PRESET = "default";
 
 const PRESET_VALUE = /^\d+$/;
 
@@ -673,6 +681,9 @@ export function renderDurationPresets(
   const text = String(current);
   const isPreset = PRESET_VALUE.test(text) && presets.includes(Number(text));
   const options = [
+    ...(o.emptyLabel
+      ? [{ value: DURATION_EMPTY_PRESET, label: o.emptyLabel }]
+      : []),
     ...presets.map((n) => ({
       value: String(n),
       label:
@@ -683,7 +694,11 @@ export function renderDurationPresets(
   const group = renderSegmented(
     presetName,
     options,
-    isPreset ? String(Number(text)) : "custom",
+    o.emptyLabel && text === ""
+      ? DURATION_EMPTY_PRESET
+      : isPreset
+        ? String(Number(text))
+        : "custom",
     o,
   );
   const lock = o.disabled ? LOCK : "";
@@ -749,7 +764,8 @@ export const DURATION_PRESETS_SCRIPT =
   "for(i=0;i<radios.length;i++)if(radios[i].checked)cur=radios[i];" +
   "var input=box.querySelector('[data-duration-input]'),wrap=box.querySelector('[data-duration-custom]');" +
   "var custom=!cur||cur.value==='custom';" +
-  "if(input&&user&&cur&&!custom)input.value=cur.value;" +
+  // A choice that is not a number ("Server default") empties the box.
+  "if(input&&user&&cur&&!custom)input.value=/^[0-9]+$/.test(cur.value)?cur.value:'';" +
   "if(input&&!custom)input.setCustomValidity('');" +
   // Only Custom… needs a number in the box: required then, so the browser
   // flags an empty box, and not otherwise, so a preset never depends on it.

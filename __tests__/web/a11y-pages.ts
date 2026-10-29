@@ -5427,7 +5427,7 @@ export function userPages(): A11yPage[] {
       html: shell(
         "Host panel: Quiz night",
         "/me/",
-        renderGroupChanges(settingsData()),
+        renderGroupChanges(settingsData({ seriesTick: true })),
       ),
     },
     {
@@ -5457,9 +5457,45 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
-      // The "Event settings" fold: lead time, group leaders and clan tags
-      // (children nested), the leader label and what leaders changed.
+      // The "Event settings" fold (#1514): SettingRows with switches, the lead
+      // time presets, the leader label field, one save bar and what leaders changed.
       name: "/me host panel (event settings, leaders and tags on)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderEventSettings(
+          settingsData({ leadReadOnly: null, seriesTick: true }),
+        ),
+      ),
+    },
+    {
+      // No lead time stored (the server default is ticked), leaders off and a lobby
+      // that still exists: the lobby switch stays enabled so it can be turned off.
+      name: "/me host panel (event settings, server default lead time, leaders off)",
+      html: shell(
+        "Host panel: Quiz night",
+        "/me/",
+        renderEventSettings(
+          settingsData({
+            leadReadOnly: null,
+            leadMinutes: null,
+            leaderExtras: undefined,
+            leadersTags: {
+              leaders: false,
+              customisation: false,
+              leaderLabel: "Leader",
+              tags: false,
+              tagsSuffix: true,
+              lobby: true,
+              teams: [{ key: "g_00000001", name: "Red", marker: "", tag: "" }],
+            },
+          }),
+        ),
+      ),
+    },
+    {
+      // The channels exist: the lead time is text with the reason.
+      name: "/me host panel (event settings, channels exist)",
       html: shell(
         "Host panel: Quiz night",
         "/me/",

@@ -218,10 +218,9 @@ const tokenOf = (html: string): string => {
   return m[1];
 };
 
-const ENABLED_SELECT =
-  '<select id="host-settings-lobby" name="s_captainsLobby">';
-const DISABLED_SELECT =
-  '<select id="host-settings-lobby" name="s_captainsLobby" disabled>';
+/** The lobby's switch input as rendered, or "" when it is missing. */
+const lobbySwitch = (html: string): string =>
+  /<input[^>]*name="s_captainsLobby"[^>]*>/.exec(html)?.[0] ?? "";
 
 const lobbyForm = (to: "0" | "1", base: "0" | "1"): Json => ({
   s_captainsLobby: to,
@@ -355,24 +354,22 @@ afterEach(() => {
 });
 
 describe("the switch on the page", () => {
-  it("is a select of its own, default off, posting its value with the value it showed", async () => {
+  it("is a switch of its own, default off, posting its value with the value it showed", async () => {
     const r = await call(panel());
     expect(r.status).toBe(200);
     expect(r.text).toContain('name="s_captainsLobby"');
     expect(r.text).toContain('name="b_captainsLobby" value="0"');
-    expect(r.text).toContain(
-      '<option value="0" selected>Off: leaders talk in the main channel</option>',
-    );
-    expect(r.text).toContain(ENABLED_SELECT);
-    expect(r.text).not.toContain(DISABLED_SELECT);
+    expect(lobbySwitch(r.text)).toContain('role="switch"');
+    expect(lobbySwitch(r.text)).toContain('value="1"');
+    expect(lobbySwitch(r.text)).not.toContain("checked");
+    expect(lobbySwitch(r.text)).not.toContain("disabled");
   });
 
   it("is usable while leaders are off and there is no lobby: both can be turned on in one save", async () => {
     store.get(EVENT_ID)!.captainsEnabled = false;
     const r = await call(panel());
-    expect(r.text).toContain(ENABLED_SELECT);
-    expect(r.text).not.toContain(DISABLED_SELECT);
-    expect(r.text).toContain("in this same save is fine");
+    expect(lobbySwitch(r.text)).not.toContain("disabled");
+    expect(r.text).toContain("switching both on in this save is fine");
     const saved = await post("settings", {
       s_captainsEnabled: "1",
       b_captainsEnabled: "0",
@@ -388,8 +385,7 @@ describe("the switch on the page", () => {
     store.get(EVENT_ID)!.captainsEnabled = false;
     store.get(EVENT_ID)!.groups = [team(A, "Heli"), lobbyGroup()];
     const r = await call(panel());
-    expect(r.text).toContain(ENABLED_SELECT);
-    expect(r.text).not.toContain(DISABLED_SELECT);
+    expect(lobbySwitch(r.text)).not.toContain("disabled");
     expect(r.text).toContain('name="b_captainsLobby" value="1"');
     expect(r.text).toContain("Leaders are off, so only you can join");
   });

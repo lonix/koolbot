@@ -11,6 +11,15 @@
  */
 
 import { escapeHtml, scriptTag } from "./html.js";
+import { renderDurationPresets } from "./setting-pickers.js";
+import { renderSaveBar } from "./savebar.js";
+import {
+  LEAD_PRESETS,
+  LEAD_PRESET_FIELD,
+  LEAD_ROW_ID,
+  hidden,
+  renderSettingRow,
+} from "./host-settings-rows.js";
 import { CONFIRM_FETCH_SCRIPT, CONFIRM_PAGE_MARKER } from "./confirm-fetch.js";
 import { renderSeriesTick } from "./host-settings-series.js";
 import { groupRowsScript } from "./event-group-form.js";
@@ -81,25 +90,49 @@ export interface SettingsViewData {
   seriesTick?: boolean;
 }
 
-function hidden(name: string, value: string): string {
-  return `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`;
-}
-
 function leadText(minutes: number | null): string {
   return minutes === null
     ? "the server default"
     : `${minutes} minutes before the start`;
 }
 
+/**
+ * The channel creation time as a SettingRow: duration presets, a server-default
+ * choice and a bounded box under Custom (#1514). Read-only once the channels
+ * exist, with the reason.
+ */
 function renderLead(d: SettingsViewData): string {
   if (d.leadReadOnly !== null) {
-    return `<div class="field"><p><strong>Channel creation time:</strong> ${escapeHtml(leadText(d.leadMinutes))}</p><p class="muted">${escapeHtml(d.leadReadOnly)}</p></div>`;
+    return renderSettingRow({
+      id: "host-settings-lead",
+      name: "Channel creation time",
+      line: d.leadReadOnly,
+      control: `<span>${escapeHtml(leadText(d.leadMinutes))}</span>`,
+    });
   }
   const base = d.leadMinutes === null ? "" : String(d.leadMinutes);
-  return `<div class="field"><label for="host-settings-lead">Channel creation time (minutes before the start)</label>
-<input id="host-settings-lead" type="number" inputmode="numeric" min="${CHANNEL_LEAD_MIN}" max="${CHANNEL_LEAD_MAX}" step="1" name="${escapeHtml(valueField("channelLeadMinutes"))}" value="${escapeHtml(base)}" placeholder="server default">
-${hidden(baseField("channelLeadMinutes"), base)}
-<p class="muted">Leave empty to use the server default. It can only change before the event's channels exist.</p></div>`;
+  return renderSettingRow({
+    id: "host-settings-lead",
+    name: "Channel creation time",
+    line: "How long before the start the event's channels are made. It can only change before they exist.",
+    fields: hidden(baseField(LEAD_ROW_ID), base),
+    control: renderDurationPresets(
+      LEAD_PRESET_FIELD,
+      valueField(LEAD_ROW_ID),
+      base,
+      LEAD_PRESETS,
+      { min: CHANNEL_LEAD_MIN, max: CHANNEL_LEAD_MAX },
+      {
+        id: "host-settings-lead-input",
+        labelledBy: "host-settings-lead-name",
+        describedBy: "host-settings-lead-desc",
+        label: "channel creation time",
+        unit: "minutes",
+        zeroLabel: "At the start",
+        emptyLabel: "Server default",
+      },
+    ),
+  });
 }
 
 function renderGroups(d: SettingsViewData): string {
@@ -115,15 +148,14 @@ function renderGroups(d: SettingsViewData): string {
   return `<table class="prefs-table"><thead><tr><th scope="col">${escapeHtml(d.groupLabel)}</th><th scope="col">Size</th><th scope="col">People</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
+/**
+ * What leaders changed from Discord. The leader label is renamed in the settings
+ * form, so there is one place for it (#1514); this is only the log.
+ */
 function renderLeaderExtras(d: SettingsViewData): string {
   const x = d.leaderExtras;
   if (!x) return "";
   const lead = x.leaderLabel.toLowerCase();
-  const rename = `<form method="POST" action="${escapeHtml(d.actionPath("leader-label"))}" class="kb-stack" id="host-leaders-label">${hidden("_csrf", d.csrfToken)}
-<div class="kb-field"><label class="kb-label" for="leader-label-input">Rename what a leader is called now (for example Captain or Squad Lead)</label>
-<input class="kb-input" id="leader-label-input" type="text" name="label" maxlength="20" value="${escapeHtml(x.leaderLabel)}"></div>
-<div class="kb-row"><button class="kb-btn" type="submit">Rename</button></div>
-</form>`;
   const edits =
     x.edits.length === 0
       ? `<p class="kb-help">No ${escapeHtml(lead)} has changed a team yet.</p>`
@@ -134,9 +166,7 @@ function renderLeaderExtras(d: SettingsViewData): string {
           )
           .join("")}</tbody></table>`;
   return `<div class="kb-stack" id="host-leaders-extras">
-<h3 class="kb-label">Leaders</h3>
-${rename}
-<h4 class="kb-label">Recent changes by ${escapeHtml(lead)}s</h4>
+<h3 class="kb-label">Recent changes by ${escapeHtml(lead)}s</h3>
 ${edits}
 </div>`;
 }
@@ -151,12 +181,16 @@ export function renderEventSettings(d: SettingsViewData): string {
   if (d.blocker !== null) {
     return `<div class="notice warn" role="status"><p>${escapeHtml(d.blocker)}</p></div>`;
   }
-  return `<p class="muted">Change a setting and save once. Only the fields you change are saved, from the event's current state; saving again with nothing changed does nothing.</p>
-<form method="POST" action="${escapeHtml(d.actionPath("settings"))}">${hidden("_csrf", d.csrfToken)}
+  const lead = `<div class="kb-settings__group"><p class="kb-overline">Channels</p>
 ${renderLead(d)}
+</div>`;
+  return `<form method="POST" action="${escapeHtml(d.actionPath("settings"))}" class="kb-stack" id="host-settings-form">${hidden("_csrf", d.csrfToken)}
+<div class="kb-settings">
+${lead}
 ${renderLeadersTagsFields(d.leadersTags ?? null)}
+</div>
 ${renderSeriesTick(d.seriesTick)}
-<button type="submit">Save settings</button>
+${renderSaveBar("Save settings", "Event settings")}
 </form>
 ${renderLeaderExtras(d)}`;
 }
@@ -175,7 +209,7 @@ export function renderGroupChanges(d: SettingsViewData): string {
     ? `<form method="POST" action="${escapeHtml(d.actionPath("settings"))}">${hidden("_csrf", d.csrfToken)}
 ${renderGroupEditor(d.groupEdit)}
 ${renderSeriesTick(d.seriesTick)}
-<button type="submit">Save groups</button>
+<button type="submit" class="kb-btn">Save groups</button>
 </form>`
     : "";
   return `${names}
@@ -242,9 +276,9 @@ export function renderConfirmBody(d: ConfirmViewData): string {
 <p>If you confirm, exactly these changes are made:</p>
 <ul data-confirm-changes>${changes}</ul>
 <form method="POST" action="${escapeHtml(d.actionPath)}" data-confirm-form>${hidden("_csrf", d.csrfToken)}${hidden("token", d.token)}
-<button type="submit">Confirm and save</button>
-<a href="${escapeHtml(d.panelPath)}">Cancel</a>
+<div class="kb-row"><button type="submit" class="kb-btn kb-btn--primary">Confirm and save</button>
+<a class="kb-btn kb-btn--ghost" href="${escapeHtml(d.panelPath)}">Cancel</a></div>
 </form>
-<p class="muted">This page is valid for ten minutes. If the event changes before you confirm, nothing is applied and you are asked to review again.</p>
+<p class="kb-help">This page is valid for ten minutes. If the event changes before you confirm, nothing is applied and you are asked to review again.</p>
 </section>`;
 }

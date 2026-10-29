@@ -443,18 +443,21 @@ describe("host panel start line (#1538)", () => {
 });
 
 describe("leaders on the board", () => {
-  it("shows the leader's badge, a Make leader button, the pull form and the label rename, with CSRF, the event's label, escaped names and keys, never channel ids", async () => {
+  it("shows the leader's badge, a Make leader button, the pull form and the label field of the settings form, with CSRF, the event's label, escaped names and keys, never channel ids", async () => {
     const r = await call(PANEL);
     expect(r.status).toBe(200);
     expect(r.text).toContain('id="host-board"');
-    for (const action of ["set-leader", "leader-label", "pull-leaders"]) {
+    for (const action of ["set-leader", "pull-leaders"]) {
       expect(r.text).toContain(`action="${PANEL}/${action}"`);
     }
     const forms = r.text.match(/<form[\s\S]*?<\/form>/g) ?? [];
     const leaderForms = forms.filter((f) =>
-      /\/(set-leader|leader-label|pull-leaders)"/.test(f),
+      /\/(set-leader|pull-leaders)"/.test(f),
     );
-    expect(leaderForms.length).toBeGreaterThanOrEqual(3);
+    expect(leaderForms.length).toBeGreaterThanOrEqual(2);
+    // The label is renamed in the settings form (#1514), not by a form of its own.
+    expect(r.text).not.toContain(`action="${PANEL}/leader-label"`);
+    expect(r.text).toContain('name="s_leaderLabel"');
     for (const f of leaderForms) expect(f).toContain('name="_csrf"');
     // The event's own label is used; names are escaped.
     expect(r.text).toContain("Pull captains only");
