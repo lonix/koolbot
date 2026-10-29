@@ -31,14 +31,14 @@ function render(overrides: Partial<Parameters<typeof renderUserPage>[0]> = {}) {
 describe("renderUserPage accessibility (#855)", () => {
   it("ships a focus ring, a skip link and aria-current on the active nav pill", () => {
     const html = render({ active: "/me/timezone" });
-    expect(html).toContain(
-      "a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}",
-    );
+    // The focus ring comes from kb.css (linked ahead of this sheet), not a copy here.
+    expect(html).toContain("/me/_assets/kb.css");
+    expect(html).not.toContain("a:focus-visible,button:focus-visible");
     expect(html).not.toContain("page-nav");
     expect(html).toMatch(
       /<body><a class="skip-link" href="#main">Skip to content<\/a>/,
     );
-    expect(html).toContain('<main id="main" tabindex="-1">');
+    expect(html).toContain('<main id="main" class="kb-member" tabindex="-1">');
     // Tabs component (components.md): nav.kb-tabs, still told apart from the
     // Rewind year picker by its label.
     expect(html).toContain(
@@ -89,10 +89,19 @@ describe("renderUserPage accessibility (#855)", () => {
     );
   });
 
-  it("tightens gutters on narrow viewports and scrolls wide content inside main", () => {
+  it("leaves the column's gutters and reflow to kb.css and keeps only the Rewind hero rule", () => {
     const html = render();
-    expect(html).toContain("@media (max-width:760px){main{padding:1rem}");
-    expect(html).toContain("max-width:64rem;min-width:0;overflow-x:auto}");
+    expect(html).toContain(
+      "@media (max-width:760px){.rw-hero{padding:1rem}.rw-hero .total{font-size:1.8rem}}",
+    );
+    expect(html).not.toContain("main{padding");
+    // The reflow guarantee of #855 stays: wide content scrolls inside the column.
+    expect(html).toContain("#main{min-width:0;overflow-x:auto}");
+    // The old cap sat on the padded (border-box) `main`: content was 64rem minus its two
+    // `space-8` gutters. The cap on the unpadded inner div keeps that content width exactly.
+    expect(html).toContain(
+      ".kb-main__inner{max-width:calc(var(--member-content-max) - 2 * var(--space-8))}",
+    );
   });
 });
 
@@ -473,5 +482,62 @@ describe("overview (#1508)", () => {
   it("spells the product KoolBot", () => {
     expect(overview()).not.toContain("Koolbot");
     expect(overview()).toContain("KoolBot");
+  });
+});
+
+describe("renderUserPage layout and shared rules on the design tokens (#1541)", () => {
+  const sheet = (html: string): string =>
+    /<style>([\s\S]*?)<\/style>/.exec(html)?.[1] ?? "";
+  // Tab-only rules go with the tab that moves to the kb- components (#1508, #1524, #1543).
+  const TAB_ONLY =
+    /\.page-nav|\.feature-list|\.prefs-table|\.tz-|\.preset-|\.form-actions|\.rw-/;
+  const sharedRules = (css: string): string[] =>
+    css
+      .split("}")
+      .map((r) => r.trim())
+      .filter((r) => r.length > 0 && !TAB_ONLY.test(r));
+
+  it("lays the member-only page out in kb-member", () => {
+    const alone = renderUserPage({
+      title: "Overview",
+      active: "/me/",
+      body: "<h1>Hi</h1>",
+      csrfToken: "csrf",
+      remainingMs: 60_000,
+      isAdmin: false,
+    });
+    expect(alone).toContain('<main id="main" class="kb-member" tabindex="-1">');
+    expect(alone).not.toContain('class="shell"');
+  });
+
+  it("repeats nothing kb.css already defines", () => {
+    const css = sheet(render());
+    expect(css).not.toMatch(/box-sizing/);
+    expect(css).not.toMatch(/(^|\})a(:hover)?\{/);
+    expect(css).not.toMatch(/a:focus-visible,button:focus-visible/);
+    expect(css).not.toMatch(/\.visually-hidden\{/);
+    expect(css).not.toMatch(/(^|\})(main|\.shell)\{/);
+    expect(css).not.toContain("#1314");
+  });
+
+  it("has no font stack and no literal font size or radius in the shared rules", () => {
+    const rules = sharedRules(sheet(render()));
+    expect(rules.length).toBeGreaterThan(10);
+    for (const rule of rules) {
+      expect(rule).not.toMatch(/font-family\s*:(?!\s*var\()/);
+      expect(rule).not.toMatch(/font-size\s*:\s*[\d.]+(?:rem|px|em)/);
+      expect(rule).not.toMatch(/border-radius\s*:[^;]*[\d.]+(?:rem|px|em)/);
+      expect(rule).not.toMatch(
+        /(?:padding|margin)\s*:[^;]*[\d.]*[1-9][\d.]*(?:rem|px)/,
+      );
+    }
+  });
+
+  it("takes the body font and the mono face from the tokens", () => {
+    const css = sheet(render());
+    expect(css).toContain(
+      ".mono{font-family:var(--font-mono);font-size:var(--type-mono-size)}",
+    );
+    expect(css).not.toMatch(/body\{[^}]*font-family/);
   });
 });
