@@ -830,7 +830,7 @@ export function renderCronPicker(
     ` on <select class="cron-dow" aria-label="Day of week"${part("dow")}${lockAttr}>${dowOptions}</select>` +
     `</span>` +
     `<span class="cron-dom-wrap"${hide(state.mode !== "monthly")}>` +
-    ` on day <input type="number" class="cron-dom" aria-label="Day of month" min="1" max="31" value="${state.dayOfMonth}" style="width:5rem"${part("dom")}${lockAttr}>` +
+    ` on day <input type="number" class="cron-dom" aria-label="Day of month"${namedParts ? "" : ' min="1" max="31"'} value="${state.dayOfMonth}" style="width:5rem"${part("dom")}${lockAttr}>` +
     `</span>` +
     `<span class="cron-custom-wrap"${hide(state.mode !== "custom")}>` +
     `<input type="text" class="cron-custom" aria-label="Cron expression" value="${escapeHtml(state.raw)}" placeholder="0 16 * * 5" style="width:12rem"${part("custom")}${lockAttr}>` +
@@ -923,7 +923,7 @@ function renderPollAnswerRows(f: FormView, stored: readonly string[]): string {
   const valueOf = (i: number): string =>
     f.value(pollAnswerField(i), stored[i] ?? "");
   const row = (i: number): string =>
-    `<input type="text" class="kb-input" id="${escapeHtml(f.id(pollAnswerField(i)))}" name="answers" maxlength="${POLL_ANSWER_TEXT_MAX}" aria-label="Answer ${i + 1}" value="${escapeHtml(valueOf(i))}"${i < POLL_ANSWER_VISIBLE ? " required" : ""}${invalid}>`;
+    `<input type="text" class="kb-input" id="${escapeHtml(f.id(pollAnswerField(i)))}" name="answers" maxlength="${POLL_ANSWER_TEXT_MAX}" aria-label="Answer ${i + 1}" value="${escapeHtml(valueOf(i))}"${invalid}>`;
   const rows = (from: number, to: number): string =>
     Array.from({ length: to - from }, (_unused, i) => row(from + i)).join("");
   const foldedUsed = Array.from(
@@ -934,7 +934,7 @@ function renderPollAnswerRows(f: FormView, stored: readonly string[]): string {
       <legend class="kb-label">Answers</legend>
       <div class="kb-stack">${rows(0, POLL_ANSWER_VISIBLE)}
       <details${foldedUsed ? " open" : ""}><summary>More answers (up to ${POLL_ANSWER_MAX})</summary><div class="kb-stack">${rows(POLL_ANSWER_VISIBLE, POLL_ANSWER_MAX)}</div></details></div>
-      <p class="kb-help" id="${escapeHtml(helpId)}">${POLL_ANSWER_VISIBLE} to ${POLL_ANSWER_MAX} answers, up to ${POLL_ANSWER_TEXT_MAX} characters each.</p>${f.error("answers")}
+      <p class="kb-help" id="${escapeHtml(helpId)}">At least ${POLL_ANSWER_VISIBLE} answers, up to ${POLL_ANSWER_MAX}, ${POLL_ANSWER_TEXT_MAX} characters each. Leave a box empty to skip it.</p>${f.error("answers")}
     </fieldset>`;
 }
 

@@ -875,6 +875,28 @@ describe("the polls forms as rendered, posted without a script", () => {
     });
   });
 
+  it("lets an answer in the middle be cleared: the form is valid in the browser and the route accepts it", async () => {
+    mockListPollItems.mockResolvedValue([{ _id: "item-1" }]);
+    let valid = false;
+    const body = renderedFormBody(
+      await page(),
+      "/polls/items/item-1/edit",
+      (f) => {
+        setField(f, "answers", "A", 0);
+        setField(f, "answers", "", 1);
+        setField(f, "answers", "C", 2);
+        valid = f.checkValidity();
+      },
+    );
+    expect(valid).toBe(true);
+    await harness.post("/polls/items/item-1/edit", body);
+    expect(mockUpdatePollItem).toHaveBeenCalledWith(
+      "item-1",
+      expect.objectContaining({ answers: ["A", "C"] }),
+      session.guildId,
+    );
+  });
+
   it("saves an untouched question edit form with its stored answers", async () => {
     mockListPollItems.mockResolvedValue([{ _id: "item-1" }]);
     const body = renderedFormBody(await page(), "/polls/items/item-1/edit");

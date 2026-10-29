@@ -109,6 +109,12 @@ describe("the schedule picker on the feature forms", () => {
     ]);
   });
 
+  it("puts no range on the day box: a part the mode does not use must not block the save", () => {
+    const dom = create.querySelector(".cron-dom");
+    expect(dom?.hasAttribute("min")).toBe(false);
+    expect(dom?.hasAttribute("max")).toBe(false);
+  });
+
   it("shows every part until the script hides the unused ones", () => {
     expect(create.querySelectorAll(".cron-picker [hidden]")).toHaveLength(0);
   });
@@ -224,11 +230,9 @@ describe("the poll answers", () => {
     );
     expect(boxes).toHaveLength(POLL_ANSWER_MAX);
     expect(boxes.every((b) => b.getAttribute("maxlength") === "55")).toBe(true);
-    expect(boxes.map((b) => b.hasAttribute("required"))).toEqual([
-      true,
-      true,
-      ...Array<boolean>(POLL_ANSWER_MAX - 2).fill(false),
-    ]);
+    // No box is required by position: the route counts the filled ones, so an answer
+    // in the middle can be cleared without moving the rest up.
+    expect(boxes.some((b) => b.hasAttribute("required"))).toBe(false);
     const folded = create.querySelector("details") as HTMLDetailsElement;
     expect(folded.querySelectorAll("[name=answers]")).toHaveLength(
       POLL_ANSWER_MAX - 2,
