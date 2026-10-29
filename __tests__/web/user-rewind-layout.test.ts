@@ -6,6 +6,7 @@
  * regex-stripped.
  */
 
+/* global Document, Element, HTMLElement */
 import { describe, it, expect } from "@jest/globals";
 import { JSDOM } from "jsdom";
 import {
