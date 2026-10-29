@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 import { CommandManager } from "../../src/services/command-manager.js";
+import { MessageFlags } from "discord.js";
+import { errorEmbedPayload } from "../test-utils.js";
 import { PermissionsService } from "../../src/services/permissions-service.js";
 import { resetMemberCooldowns } from "../../src/utils/member-cooldown.js";
 
@@ -73,10 +75,13 @@ describe("CommandManager.componentRateLimitWait (#1147)", () => {
   });
 
   describe("refuseIfComponentRateLimited", () => {
-    const interactionFor = (id: string, reply: jest.Mock) => ({
-      ...member(id),
-      reply,
-    });
+    const interactionFor = (id: string, reply: jest.Mock) =>
+      ({
+        ...member(id),
+        replied: false,
+        deferred: false,
+        reply,
+      }) as never;
 
     it("lets an in-limit interaction through without replying", async () => {
       const reply = jest.fn(async () => undefined);
@@ -97,9 +102,15 @@ describe("CommandManager.componentRateLimitWait (#1147)", () => {
         await m.refuseIfComponentRateLimited(interactionFor("u1", reply)),
       ).toBe(true);
       expect(reply).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: expect.stringContaining("too quickly"),
+        errorEmbedPayload({
+          title: "You're clicking too quickly",
+          description: expect.stringMatching(
+            /^Wait [1-9]\d* seconds?, then try again\.$/,
+          ),
         }),
+      );
+      expect(reply).toHaveBeenCalledWith(
+        expect.objectContaining({ flags: MessageFlags.Ephemeral }),
       );
     });
 

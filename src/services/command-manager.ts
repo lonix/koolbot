@@ -7,7 +7,7 @@ import {
   ChatInputCommandInteraction,
   DiscordAPIError,
   HTTPError,
-  MessageFlags,
+  type RepliableInteraction,
 } from "discord.js";
 import logger, { isDebugMode } from "../utils/logger.js";
 import { getErrorMessage } from "../utils/error-guards.js";
@@ -102,12 +102,8 @@ export class CommandManager {
    * cannot be delivered; only a failure of the limiter itself fails open.
    */
   public async refuseIfComponentRateLimited(
-    interaction: Parameters<CommandManager["componentRateLimitWait"]>[0] & {
-      reply(options: {
-        content: string;
-        flags: MessageFlags.Ephemeral;
-      }): Promise<unknown>;
-    },
+    interaction: Parameters<CommandManager["componentRateLimitWait"]>[0] &
+      RepliableInteraction,
   ): Promise<boolean> {
     let wait: number;
     try {
@@ -117,14 +113,12 @@ export class CommandManager {
       return false;
     }
     if (wait <= 0) return false;
-    try {
-      await interaction.reply({
-        content: `⏱️ You're clicking too quickly! Please wait ${wait} second${wait !== 1 ? "s" : ""} before trying again.`,
-        flags: MessageFlags.Ephemeral,
-      });
-    } catch (error) {
-      logger.warn("Could not deliver the component rate-limit notice:", error);
-    }
+    // replyWithError never throws; it logs and returns false when the notice
+    // cannot be delivered, and the interaction is refused either way.
+    await replyWithError(interaction, {
+      title: "You're clicking too quickly",
+      next: `Wait ${wait} second${wait !== 1 ? "s" : ""}, then try again.`,
+    });
     return true;
   }
 

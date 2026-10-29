@@ -51,7 +51,9 @@ function interaction(
   mode: string,
   opts: { perms?: boolean | bigint[]; guild?: boolean } = {},
 ) {
-  return {
+  const i = {
+    replied: false,
+    deferred: false,
     guildId: opts.guild === false ? null : "guild-1",
     guild: opts.guild === false ? null : { id: "guild-1" },
     client: {},
@@ -64,10 +66,15 @@ function interaction(
       },
     },
     options: { getString: () => mode },
-    deferReply: jest.fn(async () => undefined),
+    // Like discord.js: deferring marks the interaction deferred, so a later
+    // error reply edits it instead of calling `reply` a second time.
+    deferReply: jest.fn(async () => {
+      i.deferred = true;
+    }),
     reply: jest.fn(async () => undefined),
     editReply: jest.fn(async () => undefined),
   };
+  return i;
 }
 
 const status = {
@@ -153,6 +160,23 @@ describe("/raidmode", () => {
     expect(i.editReply).toHaveBeenCalledWith({ content: "done" });
   });
 
+  it("answers a no-op or refusal from the service as an error embed, after deferring", async () => {
+    mockSetLockdown.mockResolvedValue({
+      changed: false,
+      message: "Lockdown is already on.",
+    });
+    const i = interaction("on");
+    await execute(i as never);
+    expect(i.deferReply).toHaveBeenCalled();
+    expect(i.reply).not.toHaveBeenCalled();
+    expect(i.editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Raid mode wasn't changed",
+        description: "Lockdown is already on.",
+      }),
+    );
+  });
+
   it("shows status without changing anything", async () => {
     mockGetStatus.mockResolvedValue(status);
     const i = interaction("status");
@@ -207,9 +231,12 @@ describe("/raidmode", () => {
         if (flag === MOD) {
           expect(without.editReply).toHaveBeenCalledWith({ content: "done" });
         } else {
-          expect(without.editReply).toHaveBeenCalledWith({
-            content: expect.stringContaining(label),
-          });
+          expect(without.editReply).toHaveBeenCalledWith(
+            errorEmbedPayload({
+              title: "Raid mode wasn't changed",
+              description: expect.stringContaining(label),
+            }),
+          );
         }
 
         const withIt = interaction("on", { perms: [MOD, flag] });
@@ -230,9 +257,12 @@ describe("/raidmode", () => {
         perms: [PermissionFlagsBits.ModerateMembers],
       });
       await execute(i as never);
-      expect(i.editReply).toHaveBeenCalledWith({
-        content: expect.stringContaining("Kick Members"),
-      });
+      expect(i.editReply).toHaveBeenCalledWith(
+        errorEmbedPayload({
+          title: "Raid mode wasn't changed",
+          description: expect.stringContaining("Kick Members"),
+        }),
+      );
     });
 
     it.each(["off", "status"])(
