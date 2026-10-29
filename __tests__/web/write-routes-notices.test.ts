@@ -35,6 +35,9 @@ const mockNoticeSave = jest.fn<() => Promise<unknown>>();
 const mockNoticeFindById = jest.fn<() => Promise<unknown>>();
 const mockNoticeFindByIdAndDelete = jest.fn<() => Promise<unknown>>();
 const mockNoticeCountDocuments = jest.fn<() => Promise<number>>();
+const mockNoticeFindOne = jest.fn<() => Promise<unknown>>();
+const mockNoticeFind = jest.fn<(q: unknown) => Promise<unknown[]>>();
+const mockNoticeBulkWrite = jest.fn<(ops: unknown[]) => Promise<unknown>>();
 
 /** Documents the router creates via `new Notice({...})`. */
 const created: Array<Record<string, unknown>> = [];
@@ -55,6 +58,14 @@ class MockNotice {
   static findById = mockNoticeFindById;
   static findByIdAndDelete = mockNoticeFindByIdAndDelete;
   static countDocuments = mockNoticeCountDocuments;
+  static bulkWrite = mockNoticeBulkWrite;
+  // `.sort(...).lean()` chains, as the routes call them.
+  static findOne = (): unknown => ({
+    sort: () => ({ lean: () => mockNoticeFindOne() }),
+  });
+  static find = (q: unknown): unknown => ({
+    sort: () => ({ lean: () => mockNoticeFind(q) }),
+  });
 }
 
 jest.unstable_mockModule("../../src/web/audit.js", () => ({
@@ -172,6 +183,11 @@ beforeEach(async () => {
   mockSyncNotices.mockResolvedValue(undefined);
   mockNoticeSave.mockResolvedValue(undefined);
   mockNoticeCountDocuments.mockResolvedValue(3);
+  mockNoticeFindOne.mockResolvedValue(null);
+  mockNoticeFind.mockResolvedValue([]);
+  mockNoticeBulkWrite.mockImplementation(async (ops) => ({
+    matchedCount: ops.length,
+  }));
   harness = await startAdminHarness([
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
@@ -212,22 +228,16 @@ describe("POST /notices/create", () => {
       title: "",
       content: "Read me",
       category: "gossip",
-      order: "x",
     });
     const r = await refusal(res);
     expect(r.invalidIds).toEqual([
       "notice-create-title",
       "notice-create-category",
-      "notice-create-order",
     ]);
     expect(r.errorLines["notice-create-category-error"]).toBe(
       "Choose one of the listed categories.",
     );
-    expect(r.errorLines["notice-create-order-error"]).toBe(
-      "Use a whole number from -1000 to 10000.",
-    );
     expect(r.html).toContain("\nRead me</textarea>");
-    expect(r.html).toContain('value="x"');
   });
 
   it("rejects a title past the Discord embed-title cap and keeps it", async () => {
@@ -272,11 +282,11 @@ describe("POST /notices/create", () => {
   it("keeps the chosen category when another field is refused", async () => {
     const res = await harness.post("/notices/create", {
       ...VALID,
+      title: "",
       category: "rules",
-      order: "99999",
     });
     const r = await refusal(res);
-    expect(r.invalidIds).toEqual(["notice-create-order"]);
+    expect(r.invalidIds).toEqual(["notice-create-title"]);
     expect(r.html).toContain('<option value="rules" selected>');
     expect(created).toHaveLength(0);
   });
@@ -285,13 +295,11 @@ describe("POST /notices/create", () => {
     registerFormPage("/admin/notices", async () => {
       throw new Error("page down");
     });
-    const res = await harness.post("/notices/create", { ...VALID, order: "x" });
+    const res = await harness.post("/notices/create", { ...VALID, title: "" });
     expect(res.status).toBe(303);
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.path).toBe("/admin/notices");
-    expect(flash.msg).toBe(
-      "Not saved. Use a whole number from -1000 to 10000.",
-    );
+    expect(flash.msg).toBe("Not saved. Enter a title.");
   });
 
   it("saves without posting while the feature is disabled", async () => {
@@ -310,6 +318,12 @@ describe("POST /notices/create", () => {
       result: "success",
       details: { posted: false, featureEnabled: false },
     });
+  });
+
+  it("puts a new notice last in its category and ignores a posted order", async () => {
+    mockNoticeFindOne.mockResolvedValue({ order: 4 });
+    await harness.post("/notices/create", { ...VALID, order: "-1000" });
+    expect(created[0]).toMatchObject({ category: "general", order: 5 });
   });
 
   it("posts to the channel when the feature is enabled", async () => {
@@ -366,10 +380,7 @@ describe("POST /notices/:id/update", () => {
 
   it("reports a notice that does not exist", async () => {
     mockNoticeFindById.mockResolvedValue(null);
-    const res = await harness.post("/notices/notice-1/update", {
-      ...VALID,
-      order: "1",
-    });
+    const res = await harness.post("/notices/notice-1/update", VALID);
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.type).toBe("err");
     expect(flash.msg).toBe("Notice notice-1 not found.");
@@ -379,15 +390,28 @@ describe("POST /notices/:id/update", () => {
     });
   });
 
-  it("requires an order on update (unlike create, which defaults to 0)", async () => {
-    mockNoticeFindById.mockResolvedValue(storedNotice());
-    const res = await harness.post("/notices/notice-1/update", VALID);
-    const r = await refusal(res);
-    expect(r.invalidIds).toEqual(["notice-edit-notice-1-order"]);
-    expect(r.errorLines["notice-edit-notice-1-order-error"]).toBe(
-      "Use a whole number from -1000 to 10000.",
-    );
-    expect(mockNoticeSave).not.toHaveBeenCalled();
+  it("keeps a notice's place when its category stays", async () => {
+    const notice = storedNotice({ order: 7 });
+    mockNoticeFindById.mockResolvedValue(notice);
+    await harness.post("/notices/notice-1/update", {
+      ...VALID,
+      order: "-1000",
+    });
+    expect(notice.order).toBe(7);
+    expect(mockNoticeFindOne).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({ details: { order: 7 } });
+  });
+
+  it("puts a notice last in the new category when its category changes", async () => {
+    const notice = storedNotice({ order: 0 });
+    mockNoticeFindById.mockResolvedValue(notice);
+    mockNoticeFindOne.mockResolvedValue({ order: 2 });
+    await harness.post("/notices/notice-1/update", {
+      ...VALID,
+      category: "rules",
+    });
+    expect(notice.order).toBe(3);
+    expect(notice.category).toBe("rules");
   });
 
   it("reopens only the refused notice's form and keeps what was typed there", async () => {
@@ -396,7 +420,6 @@ describe("POST /notices/:id/update", () => {
       title: "",
       content: "New text",
       category: "rules",
-      order: "7",
     });
     const r = await refusal(res);
     expect(r.invalidIds).toEqual(["notice-edit-notice-1-title"]);
@@ -413,7 +436,6 @@ describe("POST /notices/:id/update", () => {
     );
     expect(r.html).toContain("\nNew text</textarea>");
     expect(r.html).toContain('<option value="rules" selected>');
-    expect(r.html).toContain('value="7"');
     expect(r.html).toContain('value="Other title"');
     expect(mockNoticeSave).not.toHaveBeenCalled();
   });
@@ -422,7 +444,7 @@ describe("POST /notices/:id/update", () => {
     mockNoticeFindById.mockResolvedValue(null);
     const res = await harness.post("/notices/notice-1/update", {
       ...VALID,
-      order: "x",
+      title: "",
     });
     expect(res.status).toBe(303);
     const flash = parseFlashRedirect(res.headers.get("location"));
@@ -434,21 +456,21 @@ describe("POST /notices/:id/update", () => {
     mockNoticeFindById.mockRejectedValue(new Error("db down"));
     const res = await harness.post("/notices/notice-1/update", {
       ...VALID,
-      order: "x",
+      title: "",
     });
     const r = await refusal(res);
-    expect(r.invalidIds).toEqual(["notice-edit-notice-1-order"]);
+    expect(r.invalidIds).toEqual(["notice-edit-notice-1-title"]);
   });
 
   it("falls back to a flash when the lookup fails and the page does not hold the form", async () => {
     mockNoticeFindById.mockRejectedValue(new Error("db down"));
     const res = await harness.post("/notices/other/update", {
       ...VALID,
-      order: "x",
+      title: "",
     });
     expect(res.status).toBe(303);
     expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
-      "Not saved. Use a whole number from -1000 to 10000.",
+      "Not saved. Enter a title.",
     );
   });
 
@@ -456,7 +478,6 @@ describe("POST /notices/:id/update", () => {
     mockNoticeFindById.mockResolvedValue(storedNotice());
     const res = await harness.post("/notices/notice-1/update", {
       ...VALID,
-      order: "5",
     });
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.type).toBe("ok");
@@ -472,7 +493,6 @@ describe("POST /notices/:id/update", () => {
     mockNoticeFindById.mockResolvedValue(notice);
     const res = await harness.post("/notices/notice-1/update", {
       ...VALID,
-      order: "5",
     });
     expect(mockDeleteNoticeMessage).toHaveBeenCalledWith("message-old");
     expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
@@ -488,7 +508,6 @@ describe("POST /notices/:id/update", () => {
     mockNoticeFindById.mockResolvedValue(notice);
     const res = await harness.post("/notices/notice-1/update", {
       ...VALID,
-      order: "5",
     });
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.type).toBe("warn");
@@ -502,32 +521,226 @@ describe("POST /notices/:id/update", () => {
   });
 });
 
-describe("POST /notices/:id/order, /delete and /sync", () => {
-  it("records the before/after order on a reorder", async () => {
+const ID_A = "a".repeat(24);
+const ID_B = "b".repeat(24);
+const ID_C = "c".repeat(24);
+const ID_D = "d".repeat(24);
+
+describe("POST /notices/:id/move", () => {
+  /** A category stored as `[A, B, C, D]` with the given order numbers. */
+  function stored(orders: number[] = [0, 1, 2, 3]): void {
+    const ids = [ID_A, ID_B, ID_C, ID_D];
+    mockNoticeFind.mockResolvedValue(
+      ids.map((id, i) => ({ _id: id, order: orders[i] })),
+    );
     mockNoticeFindById.mockResolvedValue({
-      _id: "notice-1",
-      order: 2,
+      _id: ID_B,
+      title: "Second",
       category: "general",
-      save: mockNoticeSave,
     });
-    const res = await harness.post("/notices/notice-1/order", { order: "7" });
-    const flash = parseFlashRedirect(res.headers.get("location"));
+  }
+  const move = (
+    id: string,
+    from: number,
+    to: number,
+    count = 4,
+    scope = "general",
+  ): Promise<Awaited<ReturnType<AdminHarness["post"]>>> =>
+    harness.post(`/notices/${id}/move`, {
+      from: String(from),
+      to: String(to),
+      count: String(count),
+      scope,
+    });
+  const written = (): Array<{ id: unknown; order: number }> =>
+    (
+      mockNoticeBulkWrite.mock.calls[0][0] as Array<{
+        updateOne: {
+          filter: { _id: unknown };
+          update: { $set: { order: number } };
+        };
+      }>
+    ).map((op) => ({
+      id: op.updateOne.filter._id,
+      order: op.updateOne.update.$set.order,
+    }));
+
+  it("moves a notice up one place and writes only the rows that changed", async () => {
+    stored();
+    const res = await move(ID_B, 1, 0);
+    expect(res.status).toBe(303);
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain(`#notice-${ID_B}`);
+    const flash = parseFlashRedirect(location.split("#")[0]);
     expect(flash.type).toBe("ok");
-    expect(flash.msg).toContain("2 → 7");
+    expect(flash.msg).toContain("position 1 of 4 in General");
+    expect(flash.msg).toContain("Resync notices to channel");
+    expect(written()).toEqual([
+      { id: ID_B, order: 0 },
+      { id: ID_A, order: 1 },
+    ]);
     expect(lastAudit()).toMatchObject({
       action: "notice.reorder",
-      details: { from: 2, to: 7 },
+      targetId: ID_B,
+      result: "success",
+      details: { from: 1, to: 0, renumbered: 2 },
     });
   });
 
-  it("rejects a non-numeric order without a DB lookup", async () => {
-    const res = await harness.post("/notices/notice-1/order", {
-      order: "first",
+  it("moves a notice down one place", async () => {
+    stored();
+    await move(ID_B, 1, 2);
+    expect(written()).toEqual([
+      { id: ID_C, order: 1 },
+      { id: ID_B, order: 2 },
+    ]);
+  });
+
+  it("moves to the last place and to a place several steps away", async () => {
+    stored();
+    await move(ID_B, 1, 3);
+    expect(written()).toEqual([
+      { id: ID_C, order: 1 },
+      { id: ID_D, order: 2 },
+      { id: ID_B, order: 3 },
+    ]);
+  });
+
+  it("ends ties: every row gets its own place", async () => {
+    stored([5, 5, 5, 9]);
+    await move(ID_B, 1, 0);
+    expect(written()).toEqual([
+      { id: ID_B, order: 0 },
+      { id: ID_A, order: 1 },
+      { id: ID_C, order: 2 },
+      { id: ID_D, order: 3 },
+    ]);
+  });
+
+  it("refuses a move from a page whose list has changed, and writes nothing", async () => {
+    stored();
+    // The page showed three notices; there are four now.
+    const res = await move(ID_B, 1, 0, 3);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("warn");
+    expect(flash.msg).toContain("nothing was moved");
+    expect(mockNoticeBulkWrite).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      action: "notice.reorder",
+      result: "failure",
+      errorMessage: "stale",
     });
+  });
+
+  it("refuses a move when another notice now holds the place the page showed", async () => {
+    stored();
+    await move(ID_B, 2, 1);
+    expect(mockNoticeBulkWrite).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({ errorMessage: "stale" });
+  });
+
+  it("refuses a move from a form of another category (the notice was moved in another tab)", async () => {
+    stored();
+    // The notice is stored in General; the old page's form says Rules.
+    const res = await move(ID_B, 1, 0, 4, "rules");
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("warn");
+    expect(mockNoticeBulkWrite).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({ errorMessage: "stale" });
+  });
+
+  it("only writes a row that still has the order the move read, in its own category", async () => {
+    stored();
+    await move(ID_B, 1, 0);
+    const ops = mockNoticeBulkWrite.mock.calls[0][0] as Array<{
+      updateOne: { filter: Record<string, unknown> };
+    }>;
+    expect(ops.map((o) => o.updateOne.filter)).toEqual([
+      { _id: ID_B, category: "general", order: 1 },
+      { _id: ID_A, category: "general", order: 0 },
+    ]);
+  });
+
+  it("reports a move that raced another one as stale when a row no longer matched", async () => {
+    stored();
+    // The second admin's write got in first: only one of the two rows matched.
+    mockNoticeBulkWrite.mockResolvedValue({ matchedCount: 1 });
+    const res = await move(ID_B, 1, 0);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("warn");
+    expect(flash.msg).toContain("changed");
+    expect(lastAudit()).toMatchObject({
+      result: "failure",
+      errorMessage: "partial",
+      details: { matched: 1, planned: 2 },
+    });
+  });
+
+  it("does not report a move that matched no row as done", async () => {
+    stored();
+    mockNoticeBulkWrite.mockResolvedValue({ matchedCount: 0 });
+    const res = await move(ID_B, 1, 0);
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("warn");
+  });
+
+  it("refuses a place past the end of the list", async () => {
+    stored();
+    const res = await move(ID_B, 1, 4);
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("warn");
+    expect(mockNoticeBulkWrite).not.toHaveBeenCalled();
+  });
+
+  it("changes nothing when the notice is already at that place", async () => {
+    stored();
+    const res = await move(ID_B, 1, 1);
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockNoticeBulkWrite).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["no fields", {}],
+    [
+      "a word for the place",
+      { from: "1", to: "up", count: "4", scope: "general" },
+    ],
+    ["a negative place", { from: "1", to: "-1", count: "4", scope: "general" }],
+    ["an empty list", { from: "0", to: "0", count: "0", scope: "general" }],
+    ["no category", { from: "1", to: "0", count: "4" }],
+  ])("rejects %s without a DB lookup", async (_name, body) => {
+    const res = await harness.post(`/notices/${ID_B}/move`, body);
     expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
     expect(mockNoticeFindById).not.toHaveBeenCalled();
   });
 
+  it("rejects an id that is not an object id without a DB lookup", async () => {
+    const res = await move("notice-1", 1, 0);
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+    expect(mockNoticeFindById).not.toHaveBeenCalled();
+  });
+
+  it("says so when the notice is gone", async () => {
+    mockNoticeFindById.mockResolvedValue(null);
+    const res = await move(ID_B, 1, 0);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toBe(`Notice ${ID_B} not found.`);
+    expect(lastAudit()).toMatchObject({ errorMessage: "not found" });
+  });
+
+  it("turns a write error into a flash and a failure audit", async () => {
+    stored();
+    mockNoticeBulkWrite.mockRejectedValue(new Error("db down"));
+    const res = await move(ID_B, 1, 0);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("db down");
+    expect(lastAudit()).toMatchObject({
+      action: "notice.reorder",
+      result: "failure",
+    });
+  });
+});
+
+describe("POST /notices/:id/delete and /sync", () => {
   it("removes the channel message before deleting the row", async () => {
     mockNoticeFindById.mockResolvedValue({
       _id: "notice-1",

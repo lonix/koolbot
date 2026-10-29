@@ -17,9 +17,9 @@ import { recordAudit } from "../../audit.js";
 import { finishRepost } from "./repost-response.js";
 import {
   flashRedirect,
+  flashRedirectQuery,
   getString,
   getRawString,
-  parseIntInRange,
   requireSessionContext,
   asyncHandler,
   refuseForm,
@@ -33,10 +33,17 @@ import {
   type FormValues,
 } from "../../form-errors.js";
 import { NOTICE_CREATE_FORM, noticeEditForm } from "../../admin-views.js";
+import {
+  allMatched,
+  casOps,
+  orderChanges,
+  parseMoveRequest,
+  planMove,
+  positionText,
+} from "./reorder.js";
 
 const PAGE = "/admin/notices";
-const ORDER_MIN = -1000;
-const ORDER_MAX = 10000;
+const OBJECT_ID = /^[0-9a-f]{24}$/;
 
 export function createNoticesRouter(client: Client): Router {
   const router = Router();
@@ -49,28 +56,21 @@ export function createNoticesRouter(client: Client): Router {
 
   /**
    * What the create and edit forms submit, checked field by field (#1520).
-   * The create form's blank order means 0; the edit form's is required.
+   * Order is not a field (#1540): a new notice goes last in its category and
+   * the Move up / Move down buttons change the rest.
    */
   const checkNoticeForm = (
     req: Parameters<typeof getString>[0],
-    blankOrder: string,
   ): {
     errors: FormErrors;
     values: FormValues;
     title: string;
     content: string;
     category: string;
-    /** 0 when refused: only used once `errors` is empty. */
-    order: number;
   } => {
     const title = getString(req, "title");
     const content = getString(req, "content");
     const category = getString(req, "category");
-    const parsedOrder = parseIntInRange(
-      getString(req, "order") || blankOrder,
-      ORDER_MIN,
-      ORDER_MAX,
-    );
     const errors: FormErrors = {};
     // The length caps mirror what `notice.save()` would otherwise reject as a
     // Mongoose ValidationError (#508).
@@ -97,33 +97,32 @@ export function createNoticesRouter(client: Client): Router {
     } else if (!NOTICE_CATEGORY_KEYS.has(category)) {
       addFieldError(errors, "category", "Choose one of the listed categories.");
     }
-    if (parsedOrder === null) {
-      addFieldError(
-        errors,
-        "order",
-        `Use a whole number from ${ORDER_MIN} to ${ORDER_MAX}.`,
-      );
-    }
     return {
       errors,
       values: {
         title: getRawString(req, "title"),
         content: getRawString(req, "content"),
         category,
-        order: getRawString(req, "order"),
       },
       title,
       content,
       category,
-      order: parsedOrder ?? 0,
     };
+  };
+
+  /** The place after the last notice of `category`: where a new or re-categorised notice goes. */
+  const nextOrder = async (category: string): Promise<number> => {
+    const last = await Notice.findOne({ category })
+      .sort({ order: -1, _id: -1 })
+      .lean();
+    return last ? last.order + 1 : 0;
   };
 
   router.post(
     "/notices/create",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
-      const form = checkNoticeForm(req, "0");
+      const form = checkNoticeForm(req);
       if (
         await refuseForm(req, res, {
           page: PAGE,
@@ -134,13 +133,14 @@ export function createNoticesRouter(client: Client): Router {
       ) {
         return;
       }
-      const { title, content, category, order } = form;
+      const { title, content, category } = form;
 
       try {
         const enabled = await ConfigService.getInstance().getBoolean(
           "notices.enabled",
           false,
         );
+        const order = await nextOrder(category);
         const notice = await new Notice({
           title,
           content,
@@ -190,7 +190,7 @@ export function createNoticesRouter(client: Client): Router {
         logger.error("Create notice failed", err);
         await recordAudit(session, {
           action: "notice.create",
-          details: { title, category, order },
+          details: { title, category },
           result: "failure",
           errorMessage: text,
         });
@@ -207,7 +207,7 @@ export function createNoticesRouter(client: Client): Router {
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const id = String(req.params.id);
-      const form = checkNoticeForm(req, "");
+      const form = checkNoticeForm(req);
       // A refused edit is drawn in the row's own form; a notice deleted in
       // another tab has none, so say so instead.
       if (Object.keys(form.errors).length > 0) {
@@ -233,7 +233,7 @@ export function createNoticesRouter(client: Client): Router {
       ) {
         return;
       }
-      const { title, content, category, order } = form;
+      const { title, content, category } = form;
 
       try {
         const notice = await Notice.findById(id);
@@ -251,6 +251,12 @@ export function createNoticesRouter(client: Client): Router {
           return;
         }
 
+        // Another category means the end of that category's list; the same
+        // category keeps its place.
+        const order =
+          category === notice.category
+            ? notice.order
+            : await nextOrder(category);
         notice.title = title;
         notice.content = content;
         notice.category = category;
@@ -324,17 +330,19 @@ export function createNoticesRouter(client: Client): Router {
     }),
   );
 
+  // Move one notice within its category (#1540). The server renumbers the
+  // whole category 0..n-1, so no two notices share a place afterwards. A move
+  // from a page that no longer matches the list changes nothing.
   router.post(
-    "/notices/:id/order",
+    "/notices/:id/move",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const id = String(req.params.id);
-      const orderRaw = getString(req, "order");
-      const order = parseIntInRange(orderRaw, -1000, 10000);
-      if (order === null) {
-        flashRedirect(res, "/admin/notices", {
+      const move = parseMoveRequest(req);
+      if (!OBJECT_ID.test(id) || move === null) {
+        flashRedirect(res, PAGE, {
           type: "err",
-          text: "Order must be an integer between -1000 and 10000.",
+          text: "That move could not be read. Reload the page and try again.",
         });
         return;
       }
@@ -347,37 +355,115 @@ export function createNoticesRouter(client: Client): Router {
             result: "failure",
             errorMessage: "not found",
           });
-          flashRedirect(res, "/admin/notices", {
+          flashRedirect(res, PAGE, {
             type: "err",
             text: `Notice ${id} not found.`,
           });
           return;
         }
-        const previous = notice.order;
-        notice.order = order;
-        await notice.save();
+        const rows = (
+          await Notice.find({ category: notice.category })
+            .sort({ order: 1, _id: 1 })
+            .lean()
+        ).map((n) => ({ id: String(n._id), order: n.order }));
+        const plan = planMove(
+          rows.map((r) => r.id),
+          id,
+          move,
+        );
+        const where = NOTICE_CATEGORY_KEYS.has(notice.category)
+          ? NOTICE_CATEGORIES[notice.category as keyof typeof NOTICE_CATEGORIES]
+              .label
+          : notice.category;
+        // The form was drawn for another category: the notice was moved there
+        // from another tab, so its place in this list means nothing now.
+        if (
+          move.scope !== notice.category ||
+          plan.kind === "stale" ||
+          plan.kind === "out-of-range"
+        ) {
+          await recordAudit(session, {
+            action: "notice.reorder",
+            targetId: id,
+            details: {
+              category: notice.category,
+              from: move.from,
+              to: move.to,
+            },
+            result: "failure",
+            errorMessage: plan.kind === "moved" ? "stale" : plan.kind,
+          });
+          flashRedirect(res, PAGE, {
+            type: "warn",
+            text: `The ${where} list changed since this page was drawn, so nothing was moved. The page now shows the current order.`,
+          });
+          return;
+        }
+        if (plan.kind === "unchanged") {
+          flashRedirect(res, PAGE, {
+            type: "ok",
+            text: `"${notice.title}" is already at that place in ${where}.`,
+          });
+          return;
+        }
+        const changes = orderChanges(rows, plan.ids);
+        if (changes.length > 0) {
+          // Compare-and-set: a row another move changed since the read does
+          // not match, and is not overwritten.
+          const result = await Notice.bulkWrite(
+            casOps(changes, rows, { category: notice.category }),
+          );
+          const done = allMatched(result, changes.length);
+          if (!done.ok) {
+            await recordAudit(session, {
+              action: "notice.reorder",
+              targetId: id,
+              details: {
+                category: notice.category,
+                from: move.from,
+                to: move.to,
+                matched: done.matched,
+                planned: changes.length,
+              },
+              result: "failure",
+              errorMessage: "partial",
+            });
+            flashRedirect(res, PAGE, {
+              type: "warn",
+              text: `The ${where} list was changed by someone else while this move was made, so it may not have been applied in full. The page now shows the current order.`,
+            });
+            return;
+          }
+        }
         await recordAudit(session, {
           action: "notice.reorder",
           targetId: id,
-          details: { from: previous, to: order, category: notice.category },
+          details: {
+            category: notice.category,
+            from: move.from,
+            to: move.to,
+            renumbered: changes.length,
+          },
           result: "success",
         });
-        flashRedirect(res, "/admin/notices", {
+        // The hash puts the page back on the moved row.
+        const query = flashRedirectQuery({
           type: "ok",
-          text: `Reordered notice ${id}: ${previous} → ${order}. Resync to refresh channel order.`,
+          text: `Moved "${notice.title}" to ${positionText(move.to, rows.length)} in ${where}. Use Resync notices to channel to show the new order in the channel.`,
         });
+        res.redirect(303, `${PAGE}?${query}#notice-${id}`);
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
-        logger.error("Reorder notice failed", err);
+        logger.error("Move notice failed", err);
         await recordAudit(session, {
           action: "notice.reorder",
           targetId: id,
           result: "failure",
           errorMessage: text,
         });
-        flashRedirect(res, "/admin/notices", {
+        flashRedirect(res, PAGE, {
           type: "err",
-          text: `Failed to reorder notice ${id}: ${text}`,
+          text: `Failed to move notice ${id}: ${text}`,
         });
       }
     }),

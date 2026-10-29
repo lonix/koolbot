@@ -26,6 +26,13 @@ import {
   REVIEW_JOB_NOTE,
 } from "../utils/moderation-labels.js";
 import { icon } from "./icons.js";
+import {
+  REORDER_SCRIPT,
+  REORDER_STATUS_HTML,
+  renderReorderCell,
+  reorderListAttrs,
+  reorderRowAttrs,
+} from "./reorder-view.js";
 import { formView, type FormView, type RefusedForm } from "./form-errors.js";
 import { renderSaveBar } from "./savebar.js";
 import {
@@ -4413,10 +4420,10 @@ export function renderNoticesPage(props: NoticesProps): string {
       : props.groups
           .map((g) => {
             const rows = g.rows
-              .map((n) => {
+              .map((n, index) => {
                 const f = formView(props.refusedForm, noticeEditForm(n.id));
-                return `<tr>
-<td><form method="POST" action="/admin/notices/${escapeHtml(n.id)}/order" class="inline-order">${csrfInput}<input type="number" name="order" aria-label="Display order for ${escapeHtml(n.title)}" value="${n.order}" min="-1000" max="10000" required><button type="submit" class="btn" aria-label="Save display order for ${escapeHtml(n.title)}">Save</button></form></td>
+                return `<tr${reorderRowAttrs(`notice-${n.id}`, n.title)}>
+<td>${renderReorderCell({ action: `/admin/notices/${n.id}/move`, scope: n.category, csrfInput, index, count: g.rows.length, label: n.title })}</td>
 <td>${escapeHtml(n.title)}<div class="muted mono">id: ${escapeHtml(n.id)}</div></td>
 <td class="muted">${escapeHtml(n.preview)}</td>
 <td class="mono muted">${escapeHtml(n.messageId)}</td>
@@ -4427,7 +4434,6 @@ export function renderNoticesPage(props: NoticesProps): string {
       <label>Title<input type="text" name="title" maxlength="256" value="${escapeHtml(f.value("title", n.title))}" required${f.attrs("title")}></label>${f.error("title")}
       <label>Content<textarea name="content" rows="6" maxlength="4000" required${f.attrs("content")}>${f.textareaContent("content", n.content)}</textarea></label>${f.error("content")}
       <label>Category<select name="category"${f.attrs("category")}>${noticeCategoryOptionsHtml(props.categoryOptions, f.selected("category", n.category))}</select></label>${f.error("category")}
-      <label>Order<input type="number" name="order" min="-1000" max="10000" value="${escapeHtml(f.value("order", String(n.order)))}" required${f.attrs("order")}></label>${f.error("order")}
       <button type="submit" class="btn btn-primary">Save changes</button>
     </form>
   </details>
@@ -4438,14 +4444,14 @@ export function renderNoticesPage(props: NoticesProps): string {
               .join("");
             return `<div class="card">
   <h2>${escapeHtml(g.category)} <span class="muted">(${g.rows.length})</span></h2>
-  <table><thead><tr><th scope="col">Order</th><th scope="col">Title</th><th scope="col">Content</th><th scope="col">Message ID</th><th scope="col">Updated</th><th scope="col">Actions</th></tr></thead><tbody>${rows}</tbody></table>
+  <table><thead><tr><th scope="col">Order</th><th scope="col">Title</th><th scope="col">Content</th><th scope="col">Message ID</th><th scope="col">Updated</th><th scope="col">Actions</th></tr></thead><tbody${reorderListAttrs(g.category)}>${rows}</tbody></table>
 </div>`;
           })
           .join("");
 
   const body = `
 <h1>Notices</h1>
-<p class="subtitle">Notice posts grouped by category. Edit the inline <em>Order</em> field to reorder within a category (lower numbers post first).</p>
+<p class="subtitle">Notice posts grouped by category. Within a category, notices post in the order listed here. Use <em>Move up</em> and <em>Move down</em> on a row to change its place, or drag a row by its handle.</p>
 ${renderPageFlash(props.flash)}
 ${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Notices", featureKey: "notices.enabled", returnTo: "/admin/notices", csrfToken: props.csrfToken })}
 
@@ -4473,11 +4479,13 @@ ${renderStatusLine({
     <label>Title<input type="text" name="title" maxlength="256" required${create.valueAttr("title")}${create.attrs("title")}></label>${create.error("title")}
     <label>Content<textarea name="content" rows="5" maxlength="4000" required${create.attrs("content")}>${create.refused ? create.textareaContent("content") : ""}</textarea></label>${create.error("content")}
     <label>Category<select name="category" required${create.attrs("category")}>${noticeCategoryOptionsHtml(props.categoryOptions, create.selected("category") || undefined)}</select></label>${create.error("category")}
-    <label>Order (lower posts first)<input type="number" name="order" min="-1000" max="10000" value="${escapeHtml(create.value("order", "0"))}" required${create.attrs("order")}></label>${create.error("order")}
     <button type="submit" class="btn btn-primary">Create notice</button>
   </form>
 </div>
+<p class="muted" id="notices-order-note">A new order shows in the Discord channel after <em>Resync notices to channel</em>. Moving a notice does not touch the channel on its own. A new notice goes last in its category.</p>
+${REORDER_STATUS_HTML}
 ${groupSections}
+${scriptTag(REORDER_SCRIPT)}
 ${renderRepostCard({
   id: "repost-header",
   heading: "Header post",
@@ -5192,10 +5200,10 @@ export function renderStringArrayEditor(
     opts.items.length === 0
       ? `<tr><td colspan="3"><span class="muted">No entries stored.</span></td></tr>`
       : opts.items
-          .map((item) => {
+          .map((item, index) => {
             const f = formView(opts.refusedForm, botStatusEditForm(item.id));
-            return `<tr>
-<td><form method="POST" action="${entryPath(item.id)}/order" class="inline-order">${csrfInput}<input type="number" name="order" aria-label="Display order for ${escapeHtml(item.text)}" value="${item.order}" min="-1000" max="10000" required><button type="submit" class="btn" aria-label="Save display order for ${escapeHtml(item.text)}">Save</button></form></td>
+            return `<tr${reorderRowAttrs(`entry-${item.id}`, item.text)}>
+<td>${renderReorderCell({ action: `${entryPath(item.id)}/move`, scope: opts.collectionId, csrfInput, index, count: opts.items.length, label: item.text })}</td>
 <td>
   <details class="helper edit-details"${f.open()}><summary>${escapeHtml(item.text)}</summary>
     <form method="POST" action="${entryPath(item.id)}/update" class="stack">${csrfInput}
@@ -5224,12 +5232,11 @@ export function renderStringArrayEditor(
   <h2>${escapeHtml(opts.title)} <span class="muted">(${opts.items.length})</span></h2>
   ${opts.description ? `<p class="subtitle">${escapeHtml(opts.description)}</p>` : ""}
   ${defaultsBanner}
-  <table><thead><tr><th scope="col">Order</th><th scope="col">Text</th><th scope="col">Actions</th></tr></thead><tbody>${rows}</tbody></table>
+  <table><thead><tr><th scope="col">Order</th><th scope="col">Text</th><th scope="col">Actions</th></tr></thead><tbody${reorderListAttrs(opts.title)}>${rows}</tbody></table>
   <form method="POST" action="${poolPath}/add" class="stack">
     ${csrfInput}
     <label>Add entry<input type="text" name="text" maxlength="${opts.maxLength}" required${add.valueAttr("text")}${add.attrs("text")}></label>${add.error("text")}
     ${hint}
-    <label>Order<input type="number" name="order" min="-1000" max="10000" value="${escapeHtml(add.value("order", "0"))}" required${add.attrs("order")}></label>${add.error("order")}
     <button type="submit" class="btn btn-primary">Add</button>
   </form>
   <details class="helper"${imp.open()}>
@@ -5292,8 +5299,11 @@ export function renderBotStatusPage(props: BotStatusProps): string {
   const body = `
 <h1>Presence</h1>
 <p class="subtitle">The "Watching …" presence messages the bot rotates through, picked by how many users are in voice. Edit, import, or export each pool below — changes take effect without a redeploy. Empty pools fall back to the built-in defaults.</p>
+<p class="muted">The bot picks one message at random, so the order only decides how a pool reads here and in its export. Use <em>Move up</em> and <em>Move down</em> on a row to change its place, or drag a row by its handle. A new entry goes last.</p>
 ${renderFlash(props.flash)}
+${REORDER_STATUS_HTML}
 ${editors}
+${scriptTag(REORDER_SCRIPT)}
 `;
   return renderAdminPage({
     title: "Presence",

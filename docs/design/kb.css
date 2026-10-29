@@ -659,3 +659,12 @@ fieldset[data-groups-section] { border: 0; margin: 0; padding: 0; min-width: 0; 
   .kb-cols--even { grid-template-columns: minmax(0, 1fr); gap: var(--space-6); }
   .kb-toolbar__end { margin-left: 0; }
 }
+
+/* ---------- Reorder list (Notices, Presence) ---------- */
+/* The first cell of an ordered row: drag handle, place and the Move up / Move down form. Dragging is an enhancement; the buttons always work. */
+.kb-reorder { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.kb-reorder__handle { display: inline-flex; color: var(--muted); cursor: grab; }
+.kb-reorder__place { min-width: 1.5rem; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+.kb-reorder__form { display: flex; gap: var(--space-1); margin: 0; flex-wrap: wrap; }
+tr[data-reorder-row].is-dragging { opacity: 0.5; }
+tr[data-reorder-row].is-over > td { background: var(--chrome); box-shadow: inset 0 2px 0 var(--primary); }

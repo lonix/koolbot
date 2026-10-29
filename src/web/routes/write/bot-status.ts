@@ -27,13 +27,21 @@ import {
   flashRedirect,
   getString,
   getRawString,
-  parseIntInRange,
+  flashRedirectQuery,
   requireSessionContext,
   asyncHandler,
   parseStringListImport,
   refuseForm,
 } from "./helpers.js";
 import { addFieldError, type FormErrors } from "../../form-errors.js";
+import {
+  allMatched,
+  casOps,
+  orderChanges,
+  parseMoveRequest,
+  planMove,
+  positionText,
+} from "./reorder.js";
 import {
   botStatusAddForm,
   botStatusEditForm,
@@ -104,34 +112,28 @@ export function createBotStatusRouter(client: Client): Router {
         return;
       }
       const text = getString(req, "text");
-      const orderRaw = getString(req, "order");
       const errors: FormErrors = {};
       const problem = statusTextProblem(pool, text);
       if (problem) addFieldError(errors, "text", problem);
-      const parsedOrder = parseIntInRange(orderRaw || "0", -1000, 10000);
-      if (parsedOrder === null) {
-        addFieldError(
-          errors,
-          "order",
-          "Use a whole number from -1000 to 10000.",
-        );
-      }
       if (
         await refuseForm(req, res, {
           page: PAGE,
           formId: botStatusAddForm(pool),
           errors,
-          values: {
-            text: getRawString(req, "text"),
-            order: getRawString(req, "order"),
-          },
+          values: { text: getRawString(req, "text") },
         })
       ) {
         return;
       }
-      // A bad order was refused above, so 0 is never stored.
-      const order = parsedOrder ?? 0;
       try {
+        // A new entry goes last in its pool (#1540).
+        const last = await BotStatusMessage.findOne({
+          guildId: session.guildId,
+          pool,
+        })
+          .sort({ order: -1, _id: -1 })
+          .lean();
+        const order = last ? last.order + 1 : 0;
         const entry = await new BotStatusMessage({
           guildId: session.guildId,
           pool,
@@ -220,52 +222,127 @@ export function createBotStatusRouter(client: Client): Router {
     }),
   );
 
+  // Move one entry within its pool (#1540). The pool is renumbered 0..n-1 so
+  // no two entries share a place; a move from a page that no longer matches the
+  // pool changes nothing.
   router.post(
-    "/bot-status/entry/:id/order",
+    "/bot-status/entry/:id/move",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const id = String(req.params.id);
-      const order = parseIntInRange(
-        getString(req, "order") || "0",
-        -1000,
-        10000,
-      );
-      if (order === null) {
-        flashRedirect(res, "/admin/bot-status", {
+      const move = parseMoveRequest(req);
+      if (move === null) {
+        flashRedirect(res, PAGE, {
           type: "err",
-          text: "Order must be an integer between -1000 and 10000.",
+          text: "That move could not be read. Reload the page and try again.",
         });
         return;
       }
       const entry = await findOwnedEntry(res, session.guildId, id);
       if (!entry) return;
       try {
-        const previous = entry.order;
-        entry.order = order;
-        await entry.save();
+        const rows = (
+          await BotStatusMessage.find({
+            guildId: session.guildId,
+            pool: entry.pool,
+          })
+            .sort({ order: 1, _id: 1 })
+            .lean()
+        ).map((e) => ({ id: String(e._id), order: e.order }));
+        const plan = planMove(
+          rows.map((r) => r.id),
+          id,
+          move,
+        );
+        // The form was drawn for another pool: the entry is stored elsewhere now.
+        if (
+          move.scope !== entry.pool ||
+          plan.kind === "stale" ||
+          plan.kind === "out-of-range"
+        ) {
+          await recordAudit(session, {
+            action: "bot-status.reorder",
+            targetId: id,
+            details: { pool: entry.pool, from: move.from, to: move.to },
+            result: "failure",
+            errorMessage: plan.kind === "moved" ? "stale" : plan.kind,
+          });
+          flashRedirect(res, PAGE, {
+            type: "warn",
+            text: "The list changed since this page was drawn, so nothing was moved. The page now shows the current order.",
+          });
+          return;
+        }
+        if (plan.kind === "unchanged") {
+          flashRedirect(res, PAGE, {
+            type: "ok",
+            text: "That entry is already at that place.",
+          });
+          return;
+        }
+        const changes = orderChanges(rows, plan.ids);
+        if (changes.length > 0) {
+          // Compare-and-set: an entry another move changed since the read does
+          // not match, and is not overwritten.
+          const result = await BotStatusMessage.bulkWrite(
+            casOps(changes, rows, {
+              guildId: session.guildId,
+              pool: entry.pool,
+            }),
+          );
+          const done = allMatched(result, changes.length);
+          if (!done.ok) {
+            // Part of the move may have been written.
+            await reloadBotStatusPools();
+            await recordAudit(session, {
+              action: "bot-status.reorder",
+              targetId: id,
+              details: {
+                pool: entry.pool,
+                from: move.from,
+                to: move.to,
+                matched: done.matched,
+                planned: changes.length,
+              },
+              result: "failure",
+              errorMessage: "partial",
+            });
+            flashRedirect(res, PAGE, {
+              type: "warn",
+              text: "The list was changed by someone else while this move was made, so it may not have been applied in full. The page now shows the current order.",
+            });
+            return;
+          }
+        }
         await reloadBotStatusPools();
         await recordAudit(session, {
           action: "bot-status.reorder",
           targetId: id,
-          details: { pool: entry.pool, from: previous, to: order },
+          details: {
+            pool: entry.pool,
+            from: move.from,
+            to: move.to,
+            renumbered: changes.length,
+          },
           result: "success",
         });
-        flashRedirect(res, "/admin/bot-status", {
+        const query = flashRedirectQuery({
           type: "ok",
-          text: `Reordered status entry ${id}: ${previous} → ${order}.`,
+          text: `Moved the entry to ${positionText(move.to, rows.length)}. The bot still picks a message at random, so this changes the list and its export only.`,
         });
+        res.redirect(303, `${PAGE}?${query}#entry-${encodeURIComponent(id)}`);
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
-        logger.error("Reorder bot status failed", err);
+        logger.error("Move bot status failed", err);
         await recordAudit(session, {
           action: "bot-status.reorder",
           targetId: id,
           result: "failure",
           errorMessage: text,
         });
-        flashRedirect(res, "/admin/bot-status", {
+        flashRedirect(res, PAGE, {
           type: "err",
-          text: `Failed to reorder status: ${text}`,
+          text: `Failed to move status: ${text}`,
         });
       }
     }),

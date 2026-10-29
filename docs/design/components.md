@@ -505,6 +505,23 @@ failed, `is-none` before the first check. `kb-uptime--lg` draws a taller bar for
 - The figure is always next to the bar, and the `aria-label` names each outage ("Down 20 minutes, 03:12 to 03:32 UTC"): never colour alone.
 - Maintenance does not count as down in the figure; the help line under a large strip says so.
 
+### ReorderList
+
+The first cell of each row of a list whose order matters (notices in a category, presence messages in a pool): a drag handle, the place, and
+_Move up_ / _Move down_.
+
+**Markup.** `div.kb-reorder` holds `span.kb-reorder__handle` (the `grip-vertical` icon, decorative), `span.kb-reorder__place` (the place, with a hidden
+" of N" for a screen reader) and `form.kb-reorder__form` with two `button.kb-btn.kb-btn--sm[name=to]`. The rows are `tr[data-reorder-row]` in a
+`tbody[data-reorder-list]`; one `p#reorder-status[role=status]` per page is the live region. `src/web/reorder-view.ts` renders all of it.
+
+- The buttons are the way to move a row. They post a form (`from`, `count`, `to`), so the list works without JavaScript, with a keyboard and with a
+  screen reader. Each button's name starts with its visible text and then names the row ("Move up: Welcome").
+- The first row's _Move up_ and the last row's _Move down_ are `disabled`; the place next to them ("1 of 4") says why.
+- Dragging is an enhancement: the handle starts a drag, a drop on another row of the same list fills in `to` and submits the row's own form, and a
+  drop elsewhere is read out through the live region. Touch keeps the buttons.
+- The server renumbers the whole list on every move and refuses a move from a page that no longer matches the list.
+- A move that changes something in Discord is a separate, explicit action: say next to the list when the new order reaches Discord.
+
 ## Disclosure and overlays
 
 ### Disclosure

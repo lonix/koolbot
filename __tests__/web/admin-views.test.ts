@@ -3027,7 +3027,7 @@ describe("renderNoticesPage", () => {
     expect(html).toContain("&lt;3 everyone");
     expect(html).toContain("/admin/notices/n1/update");
     expect(html).toContain("/admin/notices/n1/delete");
-    expect(html).toContain("/admin/notices/n1/order");
+    expect(html).toContain("/admin/notices/n1/move");
     expect(html).toContain("/admin/notices/sync");
   });
 

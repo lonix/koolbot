@@ -920,7 +920,11 @@ export class NoticesChannelManager {
       }
 
       // Get all notices from database, sorted by category and order
-      const notices = await Notice.find().sort({ category: 1, order: 1 });
+      const notices = await Notice.find().sort({
+        category: 1,
+        order: 1,
+        _id: 1,
+      });
 
       let postedCount = 0;
       for (const notice of notices) {
