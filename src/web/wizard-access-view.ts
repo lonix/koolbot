@@ -308,7 +308,7 @@ export function renderAccessReview(
   const rows = changes
     .map(
       (c) =>
-        `<tr><td>${roleMention(c.roleName)}</td><td>${escapeHtml(scopeNames(c.scopesBefore))}</td><td>${escapeHtml(scopeNames(c.scopesAfter))}</td><td class="muted">${
+        `<tr><th scope="row">${roleMention(c.roleName)}</th><td>${escapeHtml(scopeNames(c.scopesBefore))}</td><td>${escapeHtml(scopeNames(c.scopesAfter))}</td><td class="muted">${
           c.kind === "create"
             ? `Creates the role group "${escapeHtml(c.groupName)}"`
             : `Updates the role group "${escapeHtml(c.groupName)}"`

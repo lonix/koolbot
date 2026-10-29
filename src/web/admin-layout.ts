@@ -489,6 +489,8 @@ const STYLE = [
   // Row headers (`<th scope="row">`, e.g. the Permissions matrix) read as
   // body cells visually; the semantics are for assistive tech (#855).
   "tbody th[scope=row]{background:transparent;color:inherit;font-weight:500}",
+  // A row header that was a muted cell (a time, an id) keeps its muted colour.
+  "tbody th[scope=row].muted{color:var(--muted)}",
   "tr:hover td,tr:hover th[scope=row]{background:var(--surface-alt)}",
   // Settings page: keep editable controls inside their cell and let long
   // current/default values wrap instead of pushing the table wide (issue #489).

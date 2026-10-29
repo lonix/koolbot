@@ -54,7 +54,7 @@ function renderRow(op: PlanOperation): string {
       ? `<div class="muted">${op.memberCount} member(s); sample: <span class="mono">${escapeHtml(op.sample.join(", "))}</span></div>`
       : "";
   return `<tr class="${destructive ? "adoption-destructive" : ""}">
-  <td class="mono">${escapeHtml(op.id)}</td>
+  <th scope="row" class="mono">${escapeHtml(op.id)}</th>
   <td><span class="tag ${destructive ? "tag-off" : "tag-on"}">${destructive ? "destructive" : "additive"}</span></td>
   <td>${escapeHtml(op.summary)}${members}${approval}</td>
   <td>${renderSide(op.before)}</td>
@@ -65,7 +65,7 @@ function renderRow(op: PlanOperation): string {
 function renderTable(ops: PlanOperation[], caption: string): string {
   return `<table class="adoption-diff">
   <caption class="visually-hidden">${escapeHtml(caption)}</caption>
-  <thead><tr><th>#</th><th>Kind</th><th>Change</th><th>Before</th><th>After</th></tr></thead>
+  <thead><tr><th scope="col">#</th><th scope="col">Kind</th><th scope="col">Change</th><th scope="col">Before</th><th scope="col">After</th></tr></thead>
   <tbody>${ops.map(renderRow).join("")}</tbody>
 </table>`;
 }

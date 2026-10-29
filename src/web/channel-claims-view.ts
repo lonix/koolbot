@@ -195,7 +195,7 @@ ${forumLock}
 ${voiceBind}
 </div></details>`;
   return `<tr id="claim-${id}">
-<td>${c.kind === "category" ? `<strong>${namedChannelMention(c.name, c.typeName)}</strong>` : `<span aria-hidden="true">&nbsp;&nbsp;</span>${namedChannelMention(c.name, c.typeName)}`}<div class="muted">${escapeHtml(c.typeName)}</div>${notes(c, feeds, pairing)}</td>
+<th scope="row">${c.kind === "category" ? `<strong>${namedChannelMention(c.name, c.typeName)}</strong>` : `<span aria-hidden="true">&nbsp;&nbsp;</span>${namedChannelMention(c.name, c.typeName)}`}<div class="muted">${escapeHtml(c.typeName)}</div>${notes(c, feeds, pairing)}</th>
 <td>${actionSelect}${bulkSelect}</td>
 <td>${featureOptions(c, claim?.bindKey ?? "")}</td>
 <td>${options}</td>
@@ -218,7 +218,7 @@ function renderSuggestions(
         p.state === "proposed"
           ? `<label class="check"><input type="checkbox" name="pair_${cid}" value="1"${checked(claim?.registerPairing)}> Register <span class="visually-hidden">${escapeHtml(p.roleName)} for ${escapeHtml(p.categoryName)}</span></label> <label>Emoji <input type="text" name="pairemoji_${cid}" value="${escapeHtml(claim?.pairEmoji ?? DEFAULT_PAIR_EMOJI)}" size="6" maxlength="64"><span class="visually-hidden"> for ${escapeHtml(p.categoryName)}</span></label>`
           : `<span class="tag ${p.state === "refused" ? "tag-off" : "tag-on"}">${p.state === "refused" ? "refused" : "already a reaction role"}</span> ${escapeHtml(p.reason ?? "")}`;
-      return `<tr><td>${channelMention({ name: p.categoryName, type: ChannelType.GuildCategory })}</td><td>${roleMention(p.roleName)}</td><td>${action}</td></tr>`;
+      return `<tr><th scope="row">${channelMention({ name: p.categoryName, type: ChannelType.GuildCategory })}</th><td>${roleMention(p.roleName)}</td><td>${action}</td></tr>`;
     })
     .join("");
   const pairing = pairings.length

@@ -75,7 +75,7 @@ function row(s: SnapshotSummary): string {
     ? `<a class="btn" href="${HISTORY_PATH}/${escapeHtml(s.id)}/restore"${confirmLinkAttr("snapshot-restore")}>Restore…</a>`
     : `<span class="muted">${s.status === "rolled_back" ? "Already restored" : "In progress"}</span>`;
   return `<tr>
-  <td>${when(s.createdAt)}</td>
+  <th scope="row">${when(s.createdAt)}</th>
   <td>${statusTag(s.status)}</td>
   <td>${escapeHtml(outcome)}${extras.length ? `<div class="muted">${extras.join(" · ")}</div>` : ""}</td>
   <td class="mono">${escapeHtml(s.appliedBy)}</td>
@@ -102,7 +102,7 @@ export function renderAdoptionHistoryPage(
         : props.snapshots.length === 0
           ? `<p class="muted">Nothing has been applied yet. Snapshots appear here after you apply a plan from Role Groups, Rules or Channel Claims.</p>`
           : `<table class="adoption-diff">
-  <thead><tr><th>When</th><th>Status</th><th>Changes</th><th>Applied by</th><th><span class="visually-hidden">Action</span></th></tr></thead>
+  <thead><tr><th scope="col">When</th><th scope="col">Status</th><th scope="col">Changes</th><th scope="col">Applied by</th><th scope="col"><span class="visually-hidden">Action</span></th></tr></thead>
   <tbody>${props.snapshots.map(row).join("")}</tbody>
 </table>${paging}`;
   const body = `

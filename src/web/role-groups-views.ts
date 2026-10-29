@@ -370,7 +370,7 @@ function renderGroups(props: RoleGroupsPageProps, csrf: string): string {
         : `<span class="muted">none (gating only)</span>`;
       return `<tr>
 <td>${i + 1}</td>
-<td><strong>${escapeHtml(g.name)}</strong></td>
+<th scope="row"><strong>${escapeHtml(g.name)}</strong></th>
 <td>${roleCell(g)}${driftCell(g)}${g.unlinked || g.roleMissing ? relinkForm(g, csrf, props.roleOptions) : ""}</td>
 <td>${g.memberCount === null ? `<span class="muted">?</span>` : g.memberCount}</td>
 <td>${caps}</td>

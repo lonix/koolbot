@@ -217,7 +217,7 @@ function channelRow(
 ): string {
   const label = c.kind === "other" ? c.typeLabel : KIND_LABEL[c.kind];
   return `<tr>
-<td>${labelHtml(c)}${describe(c)}${protectionNote(c, p)}</td>
+<th scope="row">${labelHtml(c)}${describe(c)}${protectionNote(c, p)}</th>
 <td>${escapeHtml(label)}</td>
 <td>${actions(c, p, tree)}</td>
 </tr>`;
@@ -282,7 +282,7 @@ function recentChangesCard(changes: RecentChange[] | null | undefined): string {
   const rows = changes
     .map(
       (c) => `<tr>
-<td class="muted mono">${escapeHtml(c.at)}</td>
+<th scope="row" class="muted mono">${escapeHtml(c.at)}</th>
 <td>${escapeHtml(c.action.replace(/^channels\./, ""))}</td>
 <td>${escapeHtml(c.channelName ?? c.targetId ?? "")}</td>
 <td><span class="tag ${c.result === "success" ? "tag-on" : "tag-off"}">${c.result === "success" ? "done" : "refused or failed"}</span>${c.message ? ` <span class="muted">${escapeHtml(c.message.length > 200 ? `${c.message.slice(0, 200)}…` : c.message)}</span>` : ""}</td>

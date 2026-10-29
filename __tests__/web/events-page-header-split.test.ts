@@ -27,7 +27,7 @@ function doc(rows: unknown[]) {
 }
 
 const titles = (d: ReturnType<typeof doc>, sel: string): string[] =>
-  Array.from(d.querySelectorAll(`${sel} tbody tr td:first-child`)).map((c) =>
+  Array.from(d.querySelectorAll(`${sel} tbody tr th[scope=row]`)).map((c) =>
     (c.textContent ?? "").trim(),
   );
 

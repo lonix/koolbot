@@ -273,7 +273,7 @@ export function renderBootstrapPage(props: BootstrapProps): string {
             r.present && !r.isSecret
               ? `<span class="mono">${escapeHtml(r.display ?? "")}</span>`
               : "";
-          return `<tr><td class="mono">${escapeHtml(r.key)}</td><td>${status}</td><td>${value}</td></tr>`;
+          return `<tr><th scope="row" class="mono">${escapeHtml(r.key)}</th><td>${status}</td><td>${value}</td></tr>`;
         })
         .join("");
       return `
@@ -1868,7 +1868,7 @@ export function renderImportDiffPage(props: ImportDiffProps): string {
     .map((r) => {
       if (r.status === "rejected") {
         return `<tr>
-<td class="mono">${escapeHtml(r.key)}</td>
+<th scope="row" class="mono">${escapeHtml(r.key)}</th>
 <td><span class="tag tag-diff-reject">rejected</span></td>
 <td class="muted">${escapeHtml(r.reason ?? "")}</td>
 <td></td>
@@ -1886,7 +1886,7 @@ export function renderImportDiffPage(props: ImportDiffProps): string {
         ? `<span class="tag tag-info">no change</span>`
         : `<span class="tag tag-diff-change">changed</span>`;
       return `<tr>
-<td class="mono">${escapeHtml(r.key)}</td>
+<th scope="row" class="mono">${escapeHtml(r.key)}</th>
 <td>${tag}</td>
 <td>${beforeStr}</td>
 <td>${afterStr}</td>
@@ -2504,7 +2504,7 @@ export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
           .map(
             ([k, v]) =>
               `<tr>
-<td class="mono">${escapeHtml(k)}</td>
+<th scope="row" class="mono">${escapeHtml(k)}</th>
 <td class="mono">${escapeHtml(v)}</td>
 <td class="muted">${escapeHtml(props.metadata[k]?.description ?? "")}</td>
 </tr>`,
@@ -2806,7 +2806,7 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
   const tableRows = props.rows
     .map(
       (a) => `<tr>
-<td class="mono">${escapeHtml(a.id)}</td>
+<th scope="row" class="mono">${escapeHtml(a.id)}</th>
 <td>${channelMention({ name: a.channelName, type: a.channelType })}</td>
 <td class="mono">${escapeHtml(a.cron)}</td>
 <td>${tagOnOff(a.enabled)}</td>
@@ -3575,7 +3575,7 @@ export function renderEventsPage(props: EventsProps): string {
         })
       : '<span class="muted">—</span>';
     return `<tr>
-<td>${escapeHtml(e.title)}${
+<th scope="row">${escapeHtml(e.title)}${
       e.recurrence
         ? ` <span class="tag" title="Part of a recurring series"><span aria-hidden="true">🔁</span> ${escapeHtml(e.recurrence)}${e.occurrence ? ` · #${e.occurrence}` : ""}</span>`
         : ""
@@ -3583,7 +3583,7 @@ export function renderEventsPage(props: EventsProps): string {
       e.groupCount
         ? ` <span class="tag" title="Groups set up for this event">${e.groupCount} ${e.groupCount === 1 ? "group" : "groups"}</span> <a href="/admin/events/presets?fromEvent=${encodeURIComponent(e.id)}">Save as server preset</a>`
         : ""
-    }</td>
+    }</th>
 <td class="mono">${escapeHtml(e.when)}</td>
 <td>${renderEventStateBadge(e.state, e.running === true)}</td>
 ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>${channelCell}</td>\n` : ""}${cols.cover ? `<td>${renderCoverCell(e, csrfInput, props.csrfToken)}</td>\n` : ""}<td class="actions">${actions}</td>
@@ -3850,7 +3850,7 @@ export function renderPollsPage(props: PollsProps): string {
     .map((s) => {
       const f = formView(props.refusedForm, pollScheduleEditForm(s.id));
       return `<tr>
-<td class="mono">${escapeHtml(s.id)}</td>
+<th scope="row" class="mono">${escapeHtml(s.id)}</th>
 <td>${channelMention({ name: s.channelName, type: s.channelType })}</td>
 <td class="mono">${escapeHtml(s.cron)}</td>
 <td>${s.durationHours}h</td>
@@ -3879,7 +3879,7 @@ export function renderPollsPage(props: PollsProps): string {
     .map((it) => {
       const f = formView(props.refusedForm, pollItemEditForm(it.id));
       return `<tr>
-<td>${escapeHtml(it.question)}<div class="muted mono">${escapeHtml(it.answers.join(" • "))}</div></td>
+<th scope="row">${escapeHtml(it.question)}<div class="muted mono">${escapeHtml(it.answers.join(" • "))}</div></th>
 <td>${it.tags.length === 0 ? '<span class="muted">—</span>' : it.tags.map((t) => `<span class="tag tag-info">${escapeHtml(t)}</span>`).join(" ")}</td>
 <td>${it.usageCount}</td>
 <td class="muted">${escapeHtml(it.lastUsed)}</td>
@@ -4128,7 +4128,7 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
 
   return `<tr>
 <td class="mono">${escapedEmoji}</td>
-<td>${escapedName} <span class="muted mono">${escapeHtml(rr.roleId)}</span></td>
+<th scope="row">${escapedName} <span class="muted mono">${escapeHtml(rr.roleId)}</span></th>
 <td>${typeTag}</td>
 <td>${categoryCell}</td>
 <td>${channelCell}</td>
@@ -4426,7 +4426,7 @@ export function renderNoticesPage(props: NoticesProps): string {
                 const f = formView(props.refusedForm, noticeEditForm(n.id));
                 return `<tr${reorderRowAttrs(`notice-${n.id}`, n.title)}>
 <td>${renderReorderCell({ action: `/admin/notices/${n.id}/move`, scope: n.category, csrfInput, index, count: g.rows.length, label: n.title })}</td>
-<td>${escapeHtml(n.title)}<div class="muted mono">id: ${escapeHtml(n.id)}</div></td>
+<th scope="row">${escapeHtml(n.title)}<div class="muted mono">id: ${escapeHtml(n.id)}</div></th>
 <td class="muted">${escapeHtml(n.preview)}</td>
 <td class="mono muted">${escapeHtml(n.messageId)}</td>
 <td class="muted">${escapeHtml(n.updatedAt)}</td>
@@ -4616,7 +4616,7 @@ export function renderQuotesPage(props: QuotesProps): string {
         q.content.length > 160 ? `${q.content.slice(0, 160)}…` : q.content;
       const f = formView(props.refusedForm, quoteEditForm(q.id));
       return `<tr>
-<td>${escapeHtml(preview)}<div class="muted mono">id: ${escapeHtml(q.id)}</div></td>
+<th scope="row">${escapeHtml(preview)}<div class="muted mono">id: ${escapeHtml(q.id)}</div></th>
 <td title="${escapeHtml(q.authorId)}">${escapeHtml(q.authorLabel)}</td>
 <td>${escapeHtml(q.addedByLabel)}</td>
 <td class="muted">${escapeHtml(q.addedAt)}</td>
@@ -4866,7 +4866,7 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
         ? `<label class="checkbox"><input type="checkbox" name="clear_year" value="1"${f.checked("clear_year") ? " checked" : ""}> Remove the birth year (the post stops showing an age)</label>`
         : "";
       return `<tr>
-<td title="${id}">${escapeHtml(b.userLabel)}<div class="muted mono">${id}</div></td>
+<th scope="row" title="${id}">${escapeHtml(b.userLabel)}<div class="muted mono">${id}</div></th>
 <td>${escapeHtml(formatMonthDay(b.month, b.day))}</td>
 <td>${escapeHtml(b.nextDate)} <span class="muted">(${nextBirthdayLabel(b)})</span></td>
 <td>${b.hasYear ? "on file" : '<span class="muted">none</span>'}</td>
@@ -5056,7 +5056,7 @@ export function renderDatabasePage(props: DatabaseProps): string {
   const collectionsHtml =
     props.collections.length === 0
       ? `<div class="empty">No collection statistics available.</div>`
-      : `<table><thead><tr><th scope="col">Collection</th><th scope="col">Documents (est.)</th></tr></thead><tbody>${props.collections.map((c) => `<tr><td class="mono">${escapeHtml(c.name)}</td><td>${c.count}</td></tr>`).join("")}</tbody></table>`;
+      : `<table><thead><tr><th scope="col">Collection</th><th scope="col">Documents (est.)</th></tr></thead><tbody>${props.collections.map((c) => `<tr><th scope="row" class="mono">${escapeHtml(c.name)}</th><td>${c.count}</td></tr>`).join("")}</tbody></table>`;
 
   const historyHtml =
     props.trunkHistory.length === 0
@@ -5064,7 +5064,7 @@ export function renderDatabasePage(props: DatabaseProps): string {
       : `<table><thead><tr><th scope="col">When</th><th scope="col">Result</th><th scope="col">Sessions removed</th><th scope="col">Users processed</th><th scope="col">Time</th><th scope="col">Errors</th></tr></thead><tbody>${props.trunkHistory
           .map(
             (h) => `<tr>
-<td class="muted">${escapeHtml(h.ranAt)}</td>
+<th scope="row" class="muted">${escapeHtml(h.ranAt)}</th>
 <td>${h.result === "success" ? '<span class="tag tag-on">ok</span>' : '<span class="tag tag-off">failed</span>'}</td>
 <td>${h.sessionsRemoved}</td>
 <td>${h.dataAggregated}</td>
@@ -5206,7 +5206,7 @@ export function renderStringArrayEditor(
             const f = formView(opts.refusedForm, botStatusEditForm(item.id));
             return `<tr${reorderRowAttrs(`entry-${item.id}`, item.text)}>
 <td>${renderReorderCell({ action: `${entryPath(item.id)}/move`, scope: opts.collectionId, csrfInput, index, count: opts.items.length, label: item.text })}</td>
-<td>
+<th scope="row">
   <details class="helper edit-details"${f.open()}><summary>${escapeHtml(item.text)}</summary>
     <form method="POST" action="${entryPath(item.id)}/update" class="stack">${csrfInput}
       <label>Text<input type="text" name="text" maxlength="${opts.maxLength}" value="${escapeHtml(f.value("text", item.text))}" required${f.attrs("text")}></label>${f.error("text")}
@@ -5214,7 +5214,7 @@ export function renderStringArrayEditor(
     </form>
   </details>
   <div class="muted mono">id: ${escapeHtml(item.id)}</div>
-</td>
+</th>
 <td class="actions"><form method="POST" action="${entryPath(item.id)}/delete" data-confirm="Delete this entry?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form></td>
 </tr>`;
           })
@@ -5580,7 +5580,7 @@ export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
         : `<span class="tag tag-warn">dynamic</span>`;
       const live = ch.isLive ? ' <span class="tag tag-warn">LIVE</span>' : "";
       return `<tr>
-<td>${channelMention({ name: ch.name, type: ChannelType.GuildVoice })}${live}</td>
+<th scope="row">${channelMention({ name: ch.name, type: ChannelType.GuildVoice })}${live}</th>
 <td>${tag}</td>
 <td>${ch.memberCount}</td>
 <td class="muted">${escapeHtml(ch.customName ?? "")}</td>
@@ -5967,7 +5967,7 @@ function renderTierEditorRow(
   const topN = refused ? refused.topN : tier ? String(tier.topN) : "";
   const roleId = refused ? refused.roleId : tier?.roleId;
   return `<tr>
-<td><input type="number" name="topN" min="1" max="${Math.max(MAX_TIER_TOP_N, tier?.topN ?? 0)}" step="1" inputmode="numeric" aria-label="Top N" value="${escapeHtml(topN)}" style="width:6rem"${view?.attrs(topNKey) ?? ""}>${view?.error(topNKey) ?? ""}</td>
+<th scope="row"><input type="number" name="topN" min="1" max="${Math.max(MAX_TIER_TOP_N, tier?.topN ?? 0)}" step="1" inputmode="numeric" aria-label="Top N" value="${escapeHtml(topN)}" style="width:6rem"${view?.attrs(topNKey) ?? ""}>${view?.error(topNKey) ?? ""}</th>
 <td><select name="roleId" aria-label="Role"${view?.attrs(roleKey) ?? ""}>${roleOptionsHtml(roles, roleId)}</select>${view?.error(roleKey) ?? ""}</td>
 <td><button type="button" class="btn lb-tier-remove" hidden>Remove</button></td>
 </tr>`;
@@ -6021,7 +6021,7 @@ export function renderLeaderboardRolesPage(
           ? `<span class="mono">${escapeHtml(t.roleId)}</span> <span class="tag tag-warn">role not found</span>`
           : `${roleMention(t.roleName)}${renderTierRoleIssue(t)}`;
       return `<tr>
-<td>Top ${t.topN}</td>
+<th scope="row">Top ${t.topN}</th>
 <td>${roleCell}</td>
 <td>${renderTierHolders(t)}</td>
 <td class="muted">${escapeHtml(t.lastUpdated ?? "never")}</td>
@@ -6249,7 +6249,7 @@ export function renderCommandAuditPage(props: CommandAuditProps): string {
               ? `${lead}${escapeHtml(r.commandName)} ${escapeHtml(r.subcommand)}`
               : `${lead}${escapeHtml(r.commandName)}`;
             return `<tr>
-<td class="muted mono">${escapeHtml(r.createdAt)}</td>
+<th scope="row" class="muted mono">${escapeHtml(r.createdAt)}</th>
 <td title="${escapeHtml(r.discordUserId)}">${escapeHtml(r.userLabel)}</td>
 <td class="mono">${cmd}</td>
 <td class="muted">${r.channelId ? channelMention({ name: r.channelLabel ?? r.channelId, type: r.channelType, storedName: r.channelStoredName }) : "—"}</td>
@@ -6637,7 +6637,7 @@ export function renderModerationPage(props: ModerationProps): string {
                 )}</span>`
               : '<span class="muted">Unknown</span>';
             return `<tr>
-<td class="muted mono">${escapeHtml(r.createdAt)}</td>
+<th scope="row" class="muted mono">${escapeHtml(r.createdAt)}</th>
 <td title="${escapeHtml(r.userId)}">${escapeHtml(r.userLabel)}</td>
 <td>${moderationActionTag(r.action)}</td>
 <td>${moderator}</td>
@@ -6830,7 +6830,7 @@ export function renderTicketsPage(props: TicketsProps): string {
             return `<tr>
 <td class="muted mono">${escapeHtml(t.createdAt)}</td>
 <td title="${escapeHtml(t.authorId)}">${escapeHtml(t.authorLabel)}</td>
-<td>${escapeHtml(t.subject)}<div class="muted mono">id: ${escapeHtml(t.id)} · channel: ${escapeHtml(t.channelId)}</div></td>
+<th scope="row">${escapeHtml(t.subject)}<div class="muted mono">id: ${escapeHtml(t.id)} · channel: ${escapeHtml(t.channelId)}</div></th>
 <td>${ticketStatusTag(t.status)}</td>
 <td class="muted">${handled || "—"}</td>
 <td class="actions">${actions}</td>
@@ -7013,7 +7013,7 @@ export function renderCommandMetricsPage(props: CommandMetricsProps): string {
 <tbody>${props.rows
           .map(
             (r) => `<tr>
-<td class="mono">/${escapeHtml(r.command)}</td>
+<th scope="row" class="mono">/${escapeHtml(r.command)}</th>
 <td>${r.usageCount}</td>
 <td>${errorRateTag(r.errorRate)} <span class="muted">(${r.errorCount})</span></td>
 <td class="muted">${formatMs(r.avgResponseMs)}</td>
@@ -7033,7 +7033,7 @@ export function renderCommandMetricsPage(props: CommandMetricsProps): string {
 <tbody>${spotlight
           .map(
             (r) => `<tr>
-<td class="mono">/${escapeHtml(r.command)}</td>
+<th scope="row" class="mono">/${escapeHtml(r.command)}</th>
 <td>${errorRateTag(r.errorRate)}</td>
 <td>${r.errorCount}</td>
 <td class="muted">${r.usageCount}</td>
@@ -7053,7 +7053,7 @@ export function renderCommandMetricsPage(props: CommandMetricsProps): string {
 <tbody>${slowest
           .map(
             (r) => `<tr>
-<td class="mono">/${escapeHtml(r.command)}</td>
+<th scope="row" class="mono">/${escapeHtml(r.command)}</th>
 <td>${formatMs(r.avgResponseMs)}</td>
 <td class="muted">${r.usageCount}</td>
 </tr>`,
