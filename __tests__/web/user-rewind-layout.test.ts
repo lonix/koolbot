@@ -264,6 +264,38 @@ describe("Rewind bar lists and panels (#1524)", () => {
   });
 });
 
+describe("Rewind sections are spaced by a kb-stack (#1524)", () => {
+  const kids = (d: Document): Element[] => {
+    const stack = d.body.firstElementChild;
+    expect(stack?.classList.contains("kb-stack")).toBe(true);
+    expect(d.body.children).toHaveLength(1);
+    return [...(stack?.children ?? [])];
+  };
+
+  it("makes the hero, the tiles and every panel direct children of one kb-stack", () => {
+    const children = kids(dom());
+    expect(children.some((c) => c.classList.contains("kb-hero--lore"))).toBe(
+      true,
+    );
+    expect(
+      children.filter((c) => c.classList.contains("kb-tiles")).length,
+    ).toBeGreaterThan(0);
+    const panels = [...dom().querySelectorAll("section.kb-panel")];
+    expect(panels.length).toBeGreaterThan(0);
+    expect(
+      children.filter((c) => c.classList.contains("kb-panel")),
+    ).toHaveLength(panels.length);
+  });
+
+  it("does the same for a year with no data, so the picker stays apart from the panel", () => {
+    const children = kids(dom({ hasData: false }));
+    expect(children.map((c) => c.tagName + "." + c.className)).toContain(
+      "NAV.kb-years",
+    );
+    expect(children.some((c) => c.classList.contains("kb-panel"))).toBe(true);
+  });
+});
+
 describe("Rewind in the member sheet (#1524)", () => {
   it("ships no .rw- rule and no gradient", () => {
     const html = renderUserPage({

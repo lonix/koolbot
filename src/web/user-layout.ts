@@ -969,6 +969,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
 
   if (!opts.hasData) {
     return [
+      '<div class="kb-stack">',
       `<h1>Rewind ${opts.year}</h1>`,
       '<p class="subtitle">Your personal year-in-review.</p>',
       picker,
@@ -978,6 +979,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
         `We didn't find any voice or text activity or badges for you in ${opts.year}. Hop into a tracked voice channel or send a few messages and your stats will start filling in.`,
       ),
       "</div></div>",
+      "</div>",
     ].join("");
   }
 
@@ -1076,6 +1078,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
         );
 
   return [
+    '<div class="kb-stack">',
     `<h1>Rewind ${opts.year}</h1>`,
     '<p class="subtitle">Your personal year-in-review.</p>',
     picker,
@@ -1101,6 +1104,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
       renderBadges([...opts.accolades, ...opts.achievements]),
       { flush: opts.accolades.length + opts.achievements.length > 0 },
     ),
+    "</div>",
   ].join("");
 }
 
