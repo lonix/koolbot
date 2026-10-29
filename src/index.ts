@@ -11,14 +11,12 @@ import {
   TextChannel,
   Partials,
   AuditLogEvent,
-  MessageFlags,
 } from "discord.js";
 import { env, getMissingRequiredEnv } from "./config/env.js";
 import logger, { isDebugMode } from "./utils/logger.js";
 import { sanitizeForLog } from "./utils/log-sanitize.js";
 import { getSharedRest } from "./utils/discord-rest.js";
 import { markMongoDisconnectIntentional } from "./utils/mongo.js";
-import { safeReply } from "./utils/safe-reply.js";
 import {
   replyWithError,
   replyWithUnexpectedError,
@@ -968,9 +966,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // buttons and menus on messages the bot left behind could still arrive.
   if (shouldIgnoreGuild(interaction.guildId, env.guildId)) {
     if (interaction.isRepliable() && !interaction.isAutocomplete()) {
-      await safeReply(interaction, {
-        content: "This bot is not set up for this server.",
-        flags: MessageFlags.Ephemeral,
+      await replyWithError(interaction, {
+        title: "This bot isn't set up for this server",
+        next: "Use it in the server it was set up for, or ask an admin.",
       });
     }
     return;

@@ -56,6 +56,12 @@ export const data = new SlashCommandBuilder()
       .setMaxLength(MAX_NOTE_LENGTH),
   );
 
+/** The disabled reply: same wording as the LFG buttons (lfg-button-handler). */
+const LFG_OFF = {
+  title: "LFG is switched off on this server",
+  next: "Ask an admin to switch it on in the Web UI.",
+};
+
 export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
@@ -66,11 +72,14 @@ export async function execute(
   try {
     const config = ConfigService.getInstance();
     if (!(await config.getBoolean("lfg.enabled", false))) {
-      await interaction.editReply("The LFG feature is currently disabled.");
+      await replyWithError(interaction, LFG_OFF);
       return;
     }
     if (!interaction.guildId || !interaction.channelId) {
-      await interaction.editReply("This command must be run inside a guild.");
+      await replyWithError(interaction, {
+        title: "Can't use this here",
+        next: "Run this command in a server.",
+      });
       return;
     }
 

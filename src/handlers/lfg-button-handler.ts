@@ -180,9 +180,10 @@ async function handleAction(
         return;
       }
       if (result.status === "host") {
-        await replyQuietly(
+        await refuse(
           interaction,
-          "You're the host — use **Close** to end the post instead.",
+          "The host can't leave the party",
+          "Use **Close** to end the post instead.",
         );
         return;
       }

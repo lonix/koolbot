@@ -160,8 +160,13 @@ describe("/lfg", () => {
     mockConfigGetBoolean.mockResolvedValue(false);
     const it_ = interaction({ strings: { game: "Valorant" } });
     await execute(it_);
+    expect(it_.deferReply).toHaveBeenCalled();
+    expect(it_.reply).not.toHaveBeenCalled();
     expect(it_.editReply).toHaveBeenCalledWith(
-      "The LFG feature is currently disabled.",
+      errorEmbedPayload({
+        title: "LFG is switched off on this server",
+        description: "Ask an admin to switch it on in the Web UI.",
+      }),
     );
     expect(mockCreatePost).not.toHaveBeenCalled();
   });
@@ -172,8 +177,12 @@ describe("/lfg", () => {
       { guildId: null },
     );
     await execute(it_);
+    expect(it_.deferReply).toHaveBeenCalled();
     expect(it_.editReply).toHaveBeenCalledWith(
-      "This command must be run inside a guild.",
+      errorEmbedPayload({
+        title: "Can't use this here",
+        description: "Run this command in a server.",
+      }),
     );
   });
 
@@ -452,9 +461,12 @@ describe("LFG buttons", () => {
     await handleLfgButton(btn);
 
     expect(btn.editReply).not.toHaveBeenCalled();
-    expect(
-      (btn.followUp.mock.calls[0][0] as { content: string }).content,
-    ).toContain("Close");
+    expect(btn.followUp).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "The host can't leave the party",
+        description: "Use **Close** to end the post instead.",
+      }),
+    );
   });
 
   it("refreshes the post when someone leaves", async () => {

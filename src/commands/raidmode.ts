@@ -149,6 +149,15 @@ export async function execute(
           ? null
           : `Under the current settings a lockdown can **${needed.action}** members who join (the lockdown action, or the stronger new-account action), which needs the **${needed.label}** permission. Ask someone who has it, or an administrator.`,
     );
+    if (!result.changed) {
+      // A refusal or a no-op ("already on"): the service's sentence is the
+      // next step. A change that happened stays a plain confirmation.
+      await replyWithError(interaction, {
+        title: "Raid mode wasn't changed",
+        next: result.message,
+      });
+      return;
+    }
     await interaction.editReply({ content: result.message });
   } catch (error) {
     logger.error("Error in raidmode command:", error);
