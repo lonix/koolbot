@@ -1,7 +1,9 @@
 /**
  * Guard (#1331, epic #1314): the text rules of `docs/design/discord.md`.
  *
- * 1. A footer reads `KoolBot · <Feature>`: it never contains the word
+ * 1. A footer reads `KoolBot · <Feature>` (#1522): every footer text the guard
+ *    can resolve starts with `KoolBot · `, so an instruction or a status goes in
+ *    the description or a field. It never contains the word
  *    "System" and never a database id (`ID: ...`, `${quote._id}`, `${noticeId}`).
  *    An id people need goes in a field, a button or the Web UI.
  * 2. Times in Discord text go through `discordTimestamp()` (or `setTimestamp()`),
@@ -83,6 +85,22 @@ function walk(dir: string): string[] {
  */
 const FOOTER_UNRESOLVED_ALLOWED: Record<string, string> = {};
 
+/**
+ * Footers that do not start with `KoolBot · ` yet, keyed `file:text`, each with
+ * the open issue that removes the entry. Never add one to silence the guard.
+ */
+const FOOTER_PREFIX_ALLOWED: Record<string, string> = {
+  "services/voice-channel-manager.ts:Only the channel owner can use these controls":
+    "voice controls footer; #1519 removes this entry",
+  "handlers/vc-preset-handler.ts:⭐ default preset auto-applies when you spawn a new channel":
+    "voice presets footer; #1519 removes this entry",
+  "commands/remind.ts:Cancel one with /remind cancel id:<id>":
+    "`/remind list` footer; #1532 removes this entry",
+  "services/digest-service.ts:${footer}":
+    "digest footer; #1526 removes this entry",
+};
+
+const FOOTER_PREFIX = "KoolBot · ";
 const SYSTEM_WORD = /\bSystem\b/;
 const ID_LABEL = /\bID:/;
 /** `${x._id}`, `${quoteId}`, `${noticeId}`, `${x.id}` inside a footer. */
@@ -243,6 +261,14 @@ function footerProblems(source: string, file = "source.ts"): string[] {
       );
     }
     for (const text of texts) {
+      if (
+        !text.startsWith(FOOTER_PREFIX) &&
+        !(`${file}:${text.split("\n")[0]}` in FOOTER_PREFIX_ALLOWED)
+      ) {
+        problems.push(
+          `${line}: footer "${text}" does not start with "${FOOTER_PREFIX}"; name the feature, or list "${file}:${text.split("\n")[0]}" in FOOTER_PREFIX_ALLOWED with the issue that removes it`,
+        );
+      }
       if (SYSTEM_WORD.test(text)) problems.push(`${line}: contains "System"`);
       if (ID_LABEL.test(text)) problems.push(`${line}: contains "ID:"`);
       if (ID_INTERPOLATION.test(text)) {
@@ -315,6 +341,11 @@ describe("discord footer guard", () => {
       "e.setFooter({ text: `${label} • ID: ${notice._id}` })",
       "e.setFooter({ text: `KoolBot · Quotes · ${quote.id}` })",
       'log({ footer: "KoolBot Logger System" });',
+      // an instruction or a status is not a footer (#1522)
+      'e.setFooter({ text: "Use /modlog to view history" })',
+      'log({ footer: "Use /modlog for the full history" });',
+      "e.setFooter({ text: `Page ${page}/${n} · ${total} total entries` });",
+      'const F = "Remove your reaction to lose access";\ne.setFooter({ text: F });',
       "log({ footer: { text: `x ${row._id}` } });",
     ]) {
       expect(footerProblems(bad)).not.toEqual([]);
@@ -322,7 +353,8 @@ describe("discord footer guard", () => {
     for (const fine of [
       'e.setFooter({ text: "KoolBot · Notices" })',
       "e.setFooter({ text: `KoolBot · Notices · ${categoryInfo.label}` })",
-      'e.setFooter({ text: "Use /modlog to view history" })',
+      'e.setFooter({ text: "KoolBot · Moderation" })',
+      "e.setFooter({ text: `KoolBot · Moderation · Page ${page} of ${n}` });",
       'log({ footer: "KoolBot · Logs · Startup" });',
       "// e.setFooter({ text: 'ID: 1' })",
       "const footer: string = '';",
@@ -356,7 +388,7 @@ describe("discord footer guard", () => {
     for (const fine of [
       'const F = "KoolBot · Quotes";\ne.setFooter({ text: F });',
       "const t = `KoolBot · Notices · ${label}`;\ne.setFooter({ text: t });",
-      'let f = "Remove your reaction to lose access";\nif (x) f = "Removing keeps the role";\ne.setFooter({ text: f });',
+      'let f = "KoolBot · Reaction roles";\nif (x) f = "KoolBot · Reaction roles · Group";\ne.setFooter({ text: f });',
       // dynamic reads and calls are checked where their literals are written
       "e.setFooter({ text: message.footer });",
       "e.setFooter({ text: closedSummary(reason) });",
@@ -387,6 +419,15 @@ describe("discord footer guard", () => {
       expect(problems.join("\n")).toContain(
         "not a same-file const/let literal",
       );
+    }
+  });
+
+  it("names the issue that removes every footer-prefix allow-list entry, and the entry is still needed", () => {
+    for (const [key, reason] of Object.entries(FOOTER_PREFIX_ALLOWED)) {
+      expect(reason).toMatch(/#\d+/);
+      const [file, ...rest] = key.split(":");
+      const source = fs.readFileSync(path.join(SRC, file), "utf8");
+      expect(source).toContain(rest.join(":"));
     }
   });
 

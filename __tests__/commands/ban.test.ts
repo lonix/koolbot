@@ -198,9 +198,14 @@ describe("Ban Command", () => {
       });
       expect(interaction.reply).not.toHaveBeenCalled();
       const payload = interaction.editReply.mock.calls[0][0] as {
-        embeds: unknown[];
+        embeds: Array<{
+          data: { description: string; footer: { text: string } };
+        }>;
       };
       expect(payload.embeds).toHaveLength(1);
+      // The footer names the feature; the instruction is in the description (#1522).
+      expect(payload.embeds[0].data.footer.text).toBe("KoolBot · Moderation");
+      expect(payload.embeds[0].data.description).toContain("`/modlog`");
       expect(payload).not.toHaveProperty("flags");
     });
 

@@ -216,10 +216,10 @@ export async function execute(
           durationMs,
         )}** (expires <t:${expiresAt}:R>).\nThey now have **${total}** entr${
           total === 1 ? "y" : "ies"
-        } in the moderation log.`,
+        } in the moderation log. Use \`/modlog\` to view their history.`,
       )
       .addFields({ name: "Reason", value: reason })
-      .setFooter({ text: `Use /modlog to view history` })
+      .setFooter({ text: "KoolBot · Moderation" })
       .setTimestamp();
 
     // Ephemeral (set at the deferral above) so the moderator gets a clear

@@ -414,6 +414,7 @@ describe("VersionCheckService (#1029)", () => {
       expect(type).toBe("updates");
       expect(String(msg.description)).toContain("major");
       expect(String(msg.description)).toContain("breaking changes");
+      expect(msg.footer).toBe("KoolBot · Logs · Updates");
 
       jest.setSystemTime(Date.now() + MIN_CHECK_GAP_MS + 1);
       await svc.checkNow();

@@ -173,6 +173,20 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     expect(r.reusedRoles).toEqual(["old1"]);
     expect(s.channel.send).toHaveBeenCalledTimes(1);
     expect(s.message.react).toHaveBeenCalledTimes(2);
+    // #1522: the footer names the feature; what reacting does is in the description.
+    const sent = (
+      s.channel.send.mock.calls[0] as unknown as [
+        {
+          embeds: Array<{
+            toJSON: () => { description: string; footer: { text: string } };
+          }>;
+        },
+      ]
+    )[0].embeds[0].toJSON();
+    expect(sent.footer.text).toBe("KoolBot · Reaction roles");
+    expect(sent.description).toContain(
+      "Pick one: reacting swaps you to that role.",
+    );
     const docs = (
       model.insertMany.mock.calls[0] as unknown as [
         Array<Record<string, unknown>>,

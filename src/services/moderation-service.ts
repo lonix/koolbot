@@ -411,7 +411,7 @@ export class ModerationService {
 
       await discordLogger.logToChannel("moderation", {
         title: actionLabel(context.action),
-        description: `<@${context.userId}> · by ${moderator}`,
+        description: `<@${context.userId}> · by ${moderator}\nUse \`/modlog\` for their full history.`,
         color: actionColor(context.action),
         fields: [
           {
@@ -428,7 +428,7 @@ export class ModerationService {
             ),
           },
         ],
-        footer: "Use /modlog for the full history",
+        footer: "KoolBot · Moderation",
       });
     } catch (error) {
       logger.error("Moderation: failed to post action context notice:", error);

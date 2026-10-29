@@ -159,6 +159,11 @@ describe("ModerationCaseReviewService", () => {
     expect(message.title).toContain("2 moderation cases");
     expect(message.description).toContain("Case #1");
     expect(message.description).toContain("<@user-2>");
+    // Why to open the Web UI is in the description; the footer names the feature (#1522).
+    expect(message.description).toMatch(
+      /^Decide each case on the Moderation page of the Web UI\./,
+    );
+    expect(message.footer).toBe("KoolBot · Moderation");
   });
 
   it("words the notice the way the Web UI words the state (#1353)", async () => {

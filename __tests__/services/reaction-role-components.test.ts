@@ -574,5 +574,29 @@ describe("ReactionRoleService component interactions", () => {
       expect(payload.components).toBeUndefined();
       expect(payload.embeds).toHaveLength(1);
     });
+
+    // #1522: every picker names the feature in the footer and gives its
+    // instruction in the description, never in the footer.
+    it.each([
+      ["button", "toggle", "Click it again to remove the role."],
+      ["select", "toggle", "Deselect it to remove the role."],
+      ["reaction", "toggle", "Remove your reaction to lose access."],
+      ["reaction", "sticky", "Removing your reaction keeps the role."],
+      ["reaction", "unique", "clears the other roles"],
+    ])(
+      "a %s picker in %s mode: feature footer, instruction in the description",
+      (style, mode, sentence) => {
+        const payload = (service as any).buildRoleMessagePayload({
+          emoji: "🎮",
+          roleName: "Gamer",
+          roleId: "role1",
+          style,
+          mode,
+        });
+        const embed = payload.embeds[0].toJSON();
+        expect(embed.footer.text).toBe("KoolBot · Reaction roles");
+        expect(embed.description).toContain(sentence);
+      },
+    );
   });
 });

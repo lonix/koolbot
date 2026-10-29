@@ -233,7 +233,7 @@ export function spotsLeft(post: {
   return Math.max(0, post.partySize - post.memberIds.length);
 }
 
-/** The line under the title of a closed post. */
+/** The Status field of a closed post. */
 export function closedSummary(reason: LfgCloseReason | null): string {
   switch (reason) {
     case "full":
@@ -850,7 +850,11 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
       });
     }
     if (closed) {
-      embed.setFooter({ text: closedSummary(post.closeReason) });
+      embed.addFields({
+        name: "Status",
+        value: closedSummary(post.closeReason),
+        inline: false,
+      });
     } else {
       // A Discord relative timestamp keeps counting down without an edit,
       // so the post stays honest between sweeps.
@@ -860,6 +864,8 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
         inline: false,
       });
     }
+
+    embed.setFooter({ text: "KoolBot · LFG" });
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()

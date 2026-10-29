@@ -216,6 +216,24 @@ describe("TicketChannelManager.openTicket", () => {
         allowedMentions: { users: ["u1"], roles: ["staff-role"] },
       }),
     );
+    // The footer names the feature, the instruction is in the description and
+    // the subject is a field (#1522).
+    const welcome = (
+      send.mock.calls[0] as unknown as [
+        {
+          embeds: Array<{
+            toJSON: () => {
+              description: string;
+              footer: { text: string };
+              fields: Array<{ name: string; value: string }>;
+            };
+          }>;
+        },
+      ]
+    )[0].embeds[0].toJSON();
+    expect(welcome.footer.text).toBe("KoolBot · Tickets");
+    expect(welcome.description).toContain("`/ticket close`");
+    expect(welcome.fields).toEqual([{ name: "Subject", value: "help" }]);
   });
 
   it("deletes the channel again when the record cannot be saved", async () => {

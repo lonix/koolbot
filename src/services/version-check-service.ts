@@ -382,6 +382,7 @@ export class VersionCheckService {
             : ""),
         color: embedColor("brand"),
         fields: [{ name: "Release notes", value: latest.url }],
+        footer: "KoolBot · Logs · Updates",
       });
       // Only a posted note counts: a missing channel or failed send leaves
       // the version unannounced so the next check retries it.
