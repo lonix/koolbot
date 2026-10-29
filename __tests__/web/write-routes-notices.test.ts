@@ -185,7 +185,9 @@ beforeEach(async () => {
   mockNoticeCountDocuments.mockResolvedValue(3);
   mockNoticeFindOne.mockResolvedValue(null);
   mockNoticeFind.mockResolvedValue([]);
-  mockNoticeBulkWrite.mockResolvedValue({});
+  mockNoticeBulkWrite.mockImplementation(async (ops) => ({
+    matchedCount: ops.length,
+  }));
   harness = await startAdminHarness([
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
@@ -542,11 +544,13 @@ describe("POST /notices/:id/move", () => {
     from: number,
     to: number,
     count = 4,
+    scope = "general",
   ): Promise<Awaited<ReturnType<AdminHarness["post"]>>> =>
     harness.post(`/notices/${id}/move`, {
       from: String(from),
       to: String(to),
       count: String(count),
+      scope,
     });
   const written = (): Array<{ id: unknown; order: number }> =>
     (
@@ -635,6 +639,49 @@ describe("POST /notices/:id/move", () => {
     expect(lastAudit()).toMatchObject({ errorMessage: "stale" });
   });
 
+  it("refuses a move from a form of another category (the notice was moved in another tab)", async () => {
+    stored();
+    // The notice is stored in General; the old page's form says Rules.
+    const res = await move(ID_B, 1, 0, 4, "rules");
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("warn");
+    expect(mockNoticeBulkWrite).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({ errorMessage: "stale" });
+  });
+
+  it("only writes a row that still has the order the move read, in its own category", async () => {
+    stored();
+    await move(ID_B, 1, 0);
+    const ops = mockNoticeBulkWrite.mock.calls[0][0] as Array<{
+      updateOne: { filter: Record<string, unknown> };
+    }>;
+    expect(ops.map((o) => o.updateOne.filter)).toEqual([
+      { _id: ID_B, category: "general", order: 1 },
+      { _id: ID_A, category: "general", order: 0 },
+    ]);
+  });
+
+  it("reports a move that raced another one as stale when a row no longer matched", async () => {
+    stored();
+    // The second admin's write got in first: only one of the two rows matched.
+    mockNoticeBulkWrite.mockResolvedValue({ matchedCount: 1 });
+    const res = await move(ID_B, 1, 0);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("warn");
+    expect(flash.msg).toContain("changed");
+    expect(lastAudit()).toMatchObject({
+      result: "failure",
+      errorMessage: "partial",
+      details: { matched: 1, planned: 2 },
+    });
+  });
+
+  it("does not report a move that matched no row as done", async () => {
+    stored();
+    mockNoticeBulkWrite.mockResolvedValue({ matchedCount: 0 });
+    const res = await move(ID_B, 1, 0);
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("warn");
+  });
+
   it("refuses a place past the end of the list", async () => {
     stored();
     const res = await move(ID_B, 1, 4);
@@ -651,9 +698,13 @@ describe("POST /notices/:id/move", () => {
 
   it.each([
     ["no fields", {}],
-    ["a word for the place", { from: "1", to: "up", count: "4" }],
-    ["a negative place", { from: "1", to: "-1", count: "4" }],
-    ["an empty list", { from: "0", to: "0", count: "0" }],
+    [
+      "a word for the place",
+      { from: "1", to: "up", count: "4", scope: "general" },
+    ],
+    ["a negative place", { from: "1", to: "-1", count: "4", scope: "general" }],
+    ["an empty list", { from: "0", to: "0", count: "0", scope: "general" }],
+    ["no category", { from: "1", to: "0", count: "4" }],
   ])("rejects %s without a DB lookup", async (_name, body) => {
     const res = await harness.post(`/notices/${ID_B}/move`, body);
     expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");

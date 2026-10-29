@@ -4396,7 +4396,7 @@ export function renderNoticesPage(props: NoticesProps): string {
               .map((n, index) => {
                 const f = formView(props.refusedForm, noticeEditForm(n.id));
                 return `<tr${reorderRowAttrs(`notice-${n.id}`, n.title)}>
-<td>${renderReorderCell({ action: `/admin/notices/${n.id}/move`, csrfInput, index, count: g.rows.length, label: n.title })}</td>
+<td>${renderReorderCell({ action: `/admin/notices/${n.id}/move`, scope: n.category, csrfInput, index, count: g.rows.length, label: n.title })}</td>
 <td>${escapeHtml(n.title)}<div class="muted mono">id: ${escapeHtml(n.id)}</div></td>
 <td class="muted">${escapeHtml(n.preview)}</td>
 <td class="mono muted">${escapeHtml(n.messageId)}</td>
@@ -5176,7 +5176,7 @@ export function renderStringArrayEditor(
           .map((item, index) => {
             const f = formView(opts.refusedForm, botStatusEditForm(item.id));
             return `<tr${reorderRowAttrs(`entry-${item.id}`, item.text)}>
-<td>${renderReorderCell({ action: `${entryPath(item.id)}/move`, csrfInput, index, count: opts.items.length, label: item.text })}</td>
+<td>${renderReorderCell({ action: `${entryPath(item.id)}/move`, scope: opts.collectionId, csrfInput, index, count: opts.items.length, label: item.text })}</td>
 <td>
   <details class="helper edit-details"${f.open()}><summary>${escapeHtml(item.text)}</summary>
     <form method="POST" action="${entryPath(item.id)}/update" class="stack">${csrfInput}

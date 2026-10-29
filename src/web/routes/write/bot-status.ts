@@ -35,6 +35,8 @@ import {
 } from "./helpers.js";
 import { addFieldError, type FormErrors } from "../../form-errors.js";
 import {
+  allMatched,
+  casOps,
   orderChanges,
   parseMoveRequest,
   planMove,
@@ -252,13 +254,18 @@ export function createBotStatusRouter(client: Client): Router {
           id,
           move,
         );
-        if (plan.kind === "stale" || plan.kind === "out-of-range") {
+        // The form was drawn for another pool: the entry is stored elsewhere now.
+        if (
+          move.scope !== entry.pool ||
+          plan.kind === "stale" ||
+          plan.kind === "out-of-range"
+        ) {
           await recordAudit(session, {
             action: "bot-status.reorder",
             targetId: id,
             details: { pool: entry.pool, from: move.from, to: move.to },
             result: "failure",
-            errorMessage: plan.kind,
+            errorMessage: plan.kind === "moved" ? "stale" : plan.kind,
           });
           flashRedirect(res, PAGE, {
             type: "warn",
@@ -275,14 +282,37 @@ export function createBotStatusRouter(client: Client): Router {
         }
         const changes = orderChanges(rows, plan.ids);
         if (changes.length > 0) {
-          await BotStatusMessage.bulkWrite(
-            changes.map((c) => ({
-              updateOne: {
-                filter: { _id: c.id },
-                update: { $set: { order: c.order } },
-              },
-            })),
+          // Compare-and-set: an entry another move changed since the read does
+          // not match, and is not overwritten.
+          const result = await BotStatusMessage.bulkWrite(
+            casOps(changes, rows, {
+              guildId: session.guildId,
+              pool: entry.pool,
+            }),
           );
+          const done = allMatched(result, changes.length);
+          if (!done.ok) {
+            // Part of the move may have been written.
+            await reloadBotStatusPools();
+            await recordAudit(session, {
+              action: "bot-status.reorder",
+              targetId: id,
+              details: {
+                pool: entry.pool,
+                from: move.from,
+                to: move.to,
+                matched: done.matched,
+                planned: changes.length,
+              },
+              result: "failure",
+              errorMessage: "partial",
+            });
+            flashRedirect(res, PAGE, {
+              type: "warn",
+              text: "The list was changed by someone else while this move was made, so it may not have been applied in full. The page now shows the current order.",
+            });
+            return;
+          }
         }
         await reloadBotStatusPools();
         await recordAudit(session, {

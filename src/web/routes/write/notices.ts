@@ -34,6 +34,8 @@ import {
 } from "../../form-errors.js";
 import { NOTICE_CREATE_FORM, noticeEditForm } from "../../admin-views.js";
 import {
+  allMatched,
+  casOps,
   orderChanges,
   parseMoveRequest,
   planMove,
@@ -373,7 +375,13 @@ export function createNoticesRouter(client: Client): Router {
           ? NOTICE_CATEGORIES[notice.category as keyof typeof NOTICE_CATEGORIES]
               .label
           : notice.category;
-        if (plan.kind === "stale" || plan.kind === "out-of-range") {
+        // The form was drawn for another category: the notice was moved there
+        // from another tab, so its place in this list means nothing now.
+        if (
+          move.scope !== notice.category ||
+          plan.kind === "stale" ||
+          plan.kind === "out-of-range"
+        ) {
           await recordAudit(session, {
             action: "notice.reorder",
             targetId: id,
@@ -383,7 +391,7 @@ export function createNoticesRouter(client: Client): Router {
               to: move.to,
             },
             result: "failure",
-            errorMessage: plan.kind,
+            errorMessage: plan.kind === "moved" ? "stale" : plan.kind,
           });
           flashRedirect(res, PAGE, {
             type: "warn",
@@ -400,14 +408,32 @@ export function createNoticesRouter(client: Client): Router {
         }
         const changes = orderChanges(rows, plan.ids);
         if (changes.length > 0) {
-          await Notice.bulkWrite(
-            changes.map((c) => ({
-              updateOne: {
-                filter: { _id: c.id },
-                update: { $set: { order: c.order } },
-              },
-            })),
+          // Compare-and-set: a row another move changed since the read does
+          // not match, and is not overwritten.
+          const result = await Notice.bulkWrite(
+            casOps(changes, rows, { category: notice.category }),
           );
+          const done = allMatched(result, changes.length);
+          if (!done.ok) {
+            await recordAudit(session, {
+              action: "notice.reorder",
+              targetId: id,
+              details: {
+                category: notice.category,
+                from: move.from,
+                to: move.to,
+                matched: done.matched,
+                planned: changes.length,
+              },
+              result: "failure",
+              errorMessage: "partial",
+            });
+            flashRedirect(res, PAGE, {
+              type: "warn",
+              text: `The ${where} list was changed by someone else while this move was made, so it may not have been applied in full. The page now shows the current order.`,
+            });
+            return;
+          }
         }
         await recordAudit(session, {
           action: "notice.reorder",

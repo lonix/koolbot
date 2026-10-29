@@ -95,6 +95,7 @@ describe("renderReorderCell", () => {
     parse(
       renderReorderCell({
         action: "/x/<id>/move",
+        scope: "gen<eral>",
         csrfInput: '<input type="hidden" name="_csrf" value="t">',
         index,
         count,
@@ -111,6 +112,9 @@ describe("renderReorderCell", () => {
     );
     expect(form.querySelector<HTMLInputElement>("[name=from]")?.value).toBe(
       "1",
+    );
+    expect(form.querySelector<HTMLInputElement>("[name=scope]")?.value).toBe(
+      "gen<eral>",
     );
     expect(form.querySelector<HTMLInputElement>("[name=count]")?.value).toBe(
       "4",
@@ -236,12 +240,12 @@ describe("the page script (progressive enhancement)", () => {
 ${["a", "b", "c"]
   .map(
     (id, i) =>
-      `<tr${reorderRowAttrs(`n-${id}`, `Notice ${id}`)}><td>${renderReorderCell({ action: `/m/${id}`, csrfInput: "", index: i, count: 3, label: id })}</td></tr>`,
+      `<tr${reorderRowAttrs(`n-${id}`, `Notice ${id}`)}><td>${renderReorderCell({ action: `/m/${id}`, scope: "g", csrfInput: "", index: i, count: 3, label: id })}</td></tr>`,
   )
   .join("")}
 </tbody></table>
 <table><tbody${reorderListAttrs("Rules")}>
-<tr${reorderRowAttrs("n-r", "Notice r")}><td>${renderReorderCell({ action: "/m/r", csrfInput: "", index: 0, count: 1, label: "r" })}</td></tr>
+<tr${reorderRowAttrs("n-r", "Notice r")}><td>${renderReorderCell({ action: "/m/r", scope: "r", csrfInput: "", index: 0, count: 1, label: "r" })}</td></tr>
 </tbody></table>`;
     for (const f of Array.from(document.querySelectorAll("form"))) {
       (f as unknown as Record<string, unknown>).requestSubmit = jest.fn();
@@ -271,6 +275,28 @@ ${["a", "b", "c"]
     row("a").dispatchEvent(start);
     expect(start.defaultPrevented).toBe(true);
     expect(row("a").classList.contains("is-dragging")).toBe(false);
+  });
+
+  it("does not leave a row draggable after a plain click on the handle", () => {
+    const handle = row("a").querySelector("[data-reorder-handle]")!;
+    handle.dispatchEvent(ev("mousedown"));
+    handle.dispatchEvent(ev("mouseup"));
+    const start = ev("dragstart");
+    row("a").dispatchEvent(start);
+    expect(start.defaultPrevented).toBe(true);
+    expect(row("a").classList.contains("is-dragging")).toBe(false);
+  });
+
+  it("does not start a drag from the title cell, even after the handle was pressed", () => {
+    row("a")
+      .querySelector("[data-reorder-handle]")!
+      .dispatchEvent(ev("mousedown"));
+    // The pointer is now pressed elsewhere on the row (selecting text).
+    row("a").querySelector("form")!.dispatchEvent(ev("mousedown"));
+    const start = ev("dragstart");
+    row("a").dispatchEvent(start);
+    expect(start.defaultPrevented).toBe(true);
+    expect(row("a").getAttribute("draggable")).toBeNull();
   });
 
   it("puts the dropped row's new place into its own form and submits it", () => {
@@ -311,7 +337,7 @@ ${["a", "b", "c"]
     const saved = proto.requestSubmit;
     proto.requestSubmit = undefined;
     try {
-      document.body.innerHTML = `<table><tbody>${renderReorderCell({ action: "/m", csrfInput: "", index: 0, count: 2, label: "x" })}</tbody></table>`;
+      document.body.innerHTML = `<table><tbody>${renderReorderCell({ action: "/m", scope: "g", csrfInput: "", index: 0, count: 2, label: "x" })}</tbody></table>`;
       expect(() => new Function(REORDER_SCRIPT)()).not.toThrow();
     } finally {
       proto.requestSubmit = saved;

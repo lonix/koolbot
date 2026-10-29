@@ -1033,7 +1033,10 @@ them in the new channel. The status line keeps the total notice count.
 Each row has **Move up** and **Move down** buttons, which work without JavaScript, and a drag handle that
 upgrades mouse use: dropping a row on another row of the same category submits the same form. The server
 renumbers the whole category on every move, so no two notices share a place, and it refuses a move made
-from a page that no longer matches the list (the page then shows the current order). A new notice goes last
+from a page that no longer matches the list, including a notice that was moved to another category in the
+meantime (the page then shows the current order). Each write only applies to a row that still has the place
+the move read, so two admins moving at once cannot overwrite each other; if one of the writes no longer
+matches, the page says the list was changed by someone else. A new notice goes last
 in its category, and so does a notice moved to another category. A move does not touch the channel: the new
 order shows there after **Resync notices to channel**.
 

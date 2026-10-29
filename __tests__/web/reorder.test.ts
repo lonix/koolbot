@@ -4,6 +4,8 @@
 
 import { describe, it, expect } from "@jest/globals";
 import {
+  allMatched,
+  casOps,
   orderChanges,
   parseMoveRequest,
   planMove,
@@ -21,7 +23,7 @@ describe("planMove", () => {
     ["the last row to the first place", "d", 3, 0, ["d", "a", "b", "c"]],
     ["several places down", "a", 0, 2, ["b", "c", "a", "d"]],
   ])("moves %s", (_name, id, from, to, expected) => {
-    expect(planMove(IDS, id, { from, to, count: 4 })).toEqual({
+    expect(planMove(IDS, id, { from, to, count: 4, scope: "g" })).toEqual({
       kind: "moved",
       ids: expected,
     });
@@ -29,32 +31,40 @@ describe("planMove", () => {
 
   it("does not change the list it was given", () => {
     const ids = [...IDS];
-    planMove(ids, "a", { from: 0, to: 3, count: 4 });
+    planMove(ids, "a", { from: 0, to: 3, count: 4, scope: "g" });
     expect(ids).toEqual(IDS);
   });
 
   it("reports a row that is already there", () => {
-    expect(planMove(IDS, "b", { from: 1, to: 1, count: 4 })).toEqual({
+    expect(
+      planMove(IDS, "b", { from: 1, to: 1, count: 4, scope: "g" }),
+    ).toEqual({
       kind: "unchanged",
     });
   });
 
   it.each([
-    ["the list has grown", "b", { from: 1, to: 0, count: 3 }],
-    ["the list has shrunk", "b", { from: 1, to: 0, count: 5 }],
-    ["another row holds the place", "b", { from: 2, to: 0, count: 4 }],
-    ["the row is gone", "x", { from: 1, to: 0, count: 4 }],
+    ["the list has grown", "b", { from: 1, to: 0, count: 3, scope: "g" }],
+    ["the list has shrunk", "b", { from: 1, to: 0, count: 5, scope: "g" }],
+    [
+      "another row holds the place",
+      "b",
+      { from: 2, to: 0, count: 4, scope: "g" },
+    ],
+    ["the row is gone", "x", { from: 1, to: 0, count: 4, scope: "g" }],
     [
       "the place the page showed is past the end",
       "b",
-      { from: 9, to: 0, count: 4 },
+      { from: 9, to: 0, count: 4, scope: "g" },
     ],
   ])("is stale when %s", (_name, id, req) => {
     expect(planMove(IDS, id, req)).toEqual({ kind: "stale" });
   });
 
   it("refuses a place past the end of the list", () => {
-    expect(planMove(IDS, "b", { from: 1, to: 4, count: 4 })).toEqual({
+    expect(
+      planMove(IDS, "b", { from: 1, to: 4, count: 4, scope: "g" }),
+    ).toEqual({
       kind: "out-of-range",
     });
   });
@@ -96,21 +106,26 @@ describe("parseMoveRequest", () => {
   const req = (body: Record<string, unknown>): AuthenticatedRequest =>
     ({ body }) as unknown as AuthenticatedRequest;
 
-  it("reads the three fields", () => {
-    expect(parseMoveRequest(req({ from: "1", to: "0", count: "4" }))).toEqual({
-      from: 1,
-      to: 0,
-      count: 4,
-    });
+  it("reads the four fields", () => {
+    expect(
+      parseMoveRequest(
+        req({ from: "1", to: "0", count: "4", scope: " rules " }),
+      ),
+    ).toEqual({ from: 1, to: 0, count: 4, scope: "rules" });
   });
 
   it.each([
     ["nothing", {}],
-    ["a word", { from: "1", to: "up", count: "4" }],
-    ["a negative place", { from: "1", to: "-1", count: "4" }],
-    ["no list", { from: "0", to: "0", count: "0" }],
-    ["a place far past any list", { from: "1", to: "99999999", count: "4" }],
-    ["non-string values", { from: 1, to: 0, count: 4 }],
+    ["no scope", { from: "1", to: "0", count: "4" }],
+    ["an empty scope", { from: "1", to: "0", count: "4", scope: " " }],
+    ["a word", { from: "1", to: "up", count: "4", scope: "g" }],
+    ["a negative place", { from: "1", to: "-1", count: "4", scope: "g" }],
+    ["no list", { from: "0", to: "0", count: "0", scope: "g" }],
+    [
+      "a place far past any list",
+      { from: "1", to: "99999999", count: "4", scope: "g" },
+    ],
+    ["non-string values", { from: 1, to: 0, count: 4, scope: "g" }],
   ])("refuses %s", (_name, body) => {
     expect(parseMoveRequest(req(body))).toBeNull();
   });
@@ -120,5 +135,48 @@ describe("positionText", () => {
   it("counts from one", () => {
     expect(positionText(0, 5)).toBe("position 1 of 5");
     expect(positionText(4, 5)).toBe("position 5 of 5");
+  });
+});
+
+describe("casOps and allMatched", () => {
+  const rows = [
+    { id: "a", order: 4 },
+    { id: "b", order: 4 },
+  ];
+
+  it("filters each write on the order the move read, inside the scope", () => {
+    expect(
+      casOps(
+        [
+          { id: "b", order: 0 },
+          { id: "a", order: 1 },
+        ],
+        rows,
+        { category: "general" },
+      ),
+    ).toEqual([
+      {
+        updateOne: {
+          filter: { _id: "b", category: "general", order: 4 },
+          update: { $set: { order: 0 } },
+        },
+      },
+      {
+        updateOne: {
+          filter: { _id: "a", category: "general", order: 4 },
+          update: { $set: { order: 1 } },
+        },
+      },
+    ]);
+  });
+
+  it.each([
+    [{ matchedCount: 2 }, 2, true, 2],
+    [{ matchedCount: 1 }, 2, false, 1],
+    [{ matchedCount: 0 }, 2, false, 0],
+    [{}, 2, false, 0],
+    [null, 2, false, 0],
+  ])("reads %j for 2 planned writes", (result, planned, ok, matched) => {
+    expect(allMatched(result, planned)).toEqual({ ok, matched });
   });
 });

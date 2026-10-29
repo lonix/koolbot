@@ -14,6 +14,8 @@ import { icon } from "./icons.js";
 export interface ReorderCellOptions {
   /** Where the move form posts, for example `/admin/notices/<id>/move`. */
   action: string;
+  /** The category or pool the row sits in; the server refuses the move when the row is stored elsewhere now. */
+  scope: string;
   /** The hidden `_csrf` input. */
   csrfInput: string;
   /** 0-based place of the row now. */
@@ -42,7 +44,7 @@ export function renderReorderCell(o: ReorderCellOptions): string {
   return `<div class="kb-reorder">
 <span class="kb-reorder__handle" data-reorder-handle>${icon("grip-vertical")}</span>
 <span class="kb-reorder__place">${o.index + 1}<span class="kb-visually-hidden"> of ${o.count}</span></span>
-<form method="POST" action="${escapeHtml(o.action)}" class="kb-reorder__form" data-reorder-form>${o.csrfInput}<input type="hidden" name="from" value="${o.index}"><input type="hidden" name="count" value="${o.count}">${move("Move up", o.index - 1, o.index === 0)}${move("Move down", o.index + 1, o.index >= o.count - 1)}</form>
+<form method="POST" action="${escapeHtml(o.action)}" class="kb-reorder__form" data-reorder-form>${o.csrfInput}<input type="hidden" name="from" value="${o.index}"><input type="hidden" name="count" value="${o.count}"><input type="hidden" name="scope" value="${escapeHtml(o.scope)}">${move("Move up", o.index - 1, o.index === 0)}${move("Move down", o.index + 1, o.index >= o.count - 1)}</form>
 </div>`;
 }
 
@@ -64,7 +66,8 @@ export const REORDER_SCRIPT = [
   "function listOf(tr){return tr.closest('[data-reorder-list]')}",
   "Array.prototype.forEach.call(rows,function(tr){",
   "var h=tr.querySelector('[data-reorder-handle]');if(!h)return;",
-  "h.addEventListener('mousedown',function(){tr.setAttribute('draggable','true')});",
+  "tr.addEventListener('mousedown',function(e){if(e.target&&e.target.closest&&e.target.closest('[data-reorder-handle]'))tr.setAttribute('draggable','true');else tr.removeAttribute('draggable')});",
+  "tr.addEventListener('mouseup',function(){tr.removeAttribute('draggable')});",
   "tr.addEventListener('dragstart',function(e){if(tr.getAttribute('draggable')!=='true'){e.preventDefault();return}",
   "dragged=tr;tr.classList.add('is-dragging');",
   "if(e.dataTransfer){e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',tr.getAttribute('data-reorder-label')||'')}catch(x){}}});",

@@ -153,7 +153,9 @@ beforeEach(async () => {
   mockCountDocuments.mockResolvedValue(0);
   mockLean.mockResolvedValue(null);
   mockFind.mockResolvedValue([]);
-  mockBulkWrite.mockResolvedValue({});
+  mockBulkWrite.mockImplementation(async (ops) => ({
+    matchedCount: ops.length,
+  }));
   harness = await startAdminHarness([
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
@@ -499,11 +501,13 @@ describe("POST /bot-status/entry/:id/move", () => {
     from: number,
     to: number,
     count = 3,
+    scope = "single",
   ): Promise<Awaited<ReturnType<AdminHarness["post"]>>> =>
     harness.post(`/bot-status/entry/${id}/move`, {
       from: String(from),
       to: String(to),
       count: String(count),
+      scope,
     });
   const written = (): Array<{ id: unknown; order: number }> =>
     (
@@ -583,6 +587,39 @@ describe("POST /bot-status/entry/:id/move", () => {
     });
   });
 
+  it("refuses a move from a form of another pool (the entry is stored in single)", async () => {
+    stored();
+    const res = await move("e-b", 1, 0, 3, "lonely");
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("warn");
+    expect(mockBulkWrite).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({ errorMessage: "stale" });
+  });
+
+  it("only writes an entry that still has the order the move read, in its own guild and pool", async () => {
+    stored();
+    await move("e-b", 1, 0);
+    const ops = mockBulkWrite.mock.calls[0][0] as Array<{
+      updateOne: { filter: Record<string, unknown> };
+    }>;
+    expect(ops.map((o) => o.updateOne.filter)).toEqual([
+      { _id: "e-b", guildId: session.guildId, pool: "single", order: 1 },
+      { _id: "e-a", guildId: session.guildId, pool: "single", order: 0 },
+    ]);
+  });
+
+  it("reports a move that raced another one as stale when an entry no longer matched", async () => {
+    stored();
+    mockBulkWrite.mockResolvedValue({ matchedCount: 1 });
+    const res = await move("e-b", 1, 0);
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("warn");
+    expect(lastAudit()).toMatchObject({
+      result: "failure",
+      errorMessage: "partial",
+    });
+    // The live pools are refreshed: part of the move may have been written.
+    expect(mockRefreshStatusPools).toHaveBeenCalled();
+  });
+
   it("refuses a place past the end of the pool", async () => {
     stored();
     await move("e-b", 1, 3);
@@ -601,6 +638,7 @@ describe("POST /bot-status/entry/:id/move", () => {
       from: "1",
       to: "up",
       count: "3",
+      scope: "single",
     });
     expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
     expect(mockFindById).not.toHaveBeenCalled();

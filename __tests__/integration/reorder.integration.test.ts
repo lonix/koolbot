@@ -2,7 +2,12 @@ import { it, expect, beforeEach } from "@jest/globals";
 import Notice from "../../src/models/notice.js";
 import { BotStatusMessage } from "../../src/models/bot-status-message.js";
 import { describeWithMongo, useRealMongo } from "./mongo-harness.js";
-import { orderChanges, planMove } from "../../src/web/routes/write/reorder.js";
+import {
+  allMatched,
+  casOps,
+  orderChanges,
+  planMove,
+} from "../../src/web/routes/write/reorder.js";
 
 /**
  * Moving a notice or a presence entry (#1540) reads its list sorted by
@@ -55,19 +60,18 @@ describeWithMongo("reordering against a real MongoDB (#1540)", () => {
     const plan = planMove(
       rows.map((r) => r.id),
       c,
-      { from: 2, to: 0, count: 3 },
+      { from: 2, to: 0, count: 3, scope: "general" },
     );
     if (plan.kind !== "moved") throw new Error("expected a move");
     const changes = orderChanges(rows, plan.ids);
     expect(changes).toHaveLength(3);
-    await Notice.bulkWrite(
-      changes.map((ch) => ({
-        updateOne: {
-          filter: { _id: ch.id },
-          update: { $set: { order: ch.order } },
-        },
-      })),
+    const result = await Notice.bulkWrite(
+      casOps(changes, rows, { category: "general" }),
     );
+    expect(allMatched(result, changes.length)).toEqual({
+      ok: true,
+      matched: 3,
+    });
     expect(await readNotices()).toEqual([
       { id: c, order: 0, title: "c" },
       { id: a, order: 1, title: "a" },
@@ -85,6 +89,56 @@ describeWithMongo("reordering against a real MongoDB (#1540)", () => {
       { id: b, order: 1 },
       { id: a, order: 2 },
     ]);
+  });
+
+  it("does not overwrite a row another move changed since the read (compare-and-set)", async () => {
+    const a = await notice("a", 0);
+    const b = await notice("b", 1);
+    const c = await notice("c", 2);
+    // Two admins read [a, b, c] and both pass the stale check.
+    const read = await readNotices();
+    const ids = read.map((r) => r.id);
+    const first = planMove(ids, b, {
+      from: 1,
+      to: 0,
+      count: 3,
+      scope: "general",
+    });
+    const second = planMove(ids, c, {
+      from: 2,
+      to: 1,
+      count: 3,
+      scope: "general",
+    });
+    if (first.kind !== "moved" || second.kind !== "moved") {
+      throw new Error("expected moves");
+    }
+    const run = (plan: string[]): Promise<unknown> => {
+      const changes = orderChanges(read, plan);
+      return Notice.bulkWrite(
+        casOps(changes, read, { category: "general" }),
+      ).then((r) => ({ r, planned: changes.length }));
+    };
+    const one = (await run(first.ids)) as { r: unknown; planned: number };
+    expect(allMatched(one.r, one.planned).ok).toBe(true);
+    // The second move's filter for b (order 1) no longer matches: b is at 0 now.
+    const two = (await run(second.ids)) as { r: unknown; planned: number };
+    expect(allMatched(two.r, two.planned)).toEqual({ ok: false, matched: 1 });
+    const after = await readNotices();
+    // b kept the place the first move gave it; nothing was overwritten.
+    expect(after.find((n) => n.id === b)?.order).toBe(0);
+    expect(after.find((n) => n.id === a)?.order).toBe(1);
+  });
+
+  it("does not match a notice that is stored in another category now", async () => {
+    const a = await notice("a", 0);
+    await Notice.updateOne({ _id: a }, { $set: { category: "rules" } });
+    const result = await Notice.bulkWrite(
+      casOps([{ id: a, order: 3 }], [{ id: a, order: 0 }], {
+        category: "general",
+      }),
+    );
+    expect(allMatched(result, 1)).toEqual({ ok: false, matched: 0 });
   });
 
   it("finds the last notice of a category for a new notice's place", async () => {
@@ -132,16 +186,14 @@ describeWithMongo("reordering against a real MongoDB (#1540)", () => {
     const plan = planMove(
       rows.map((r) => r.id),
       b,
-      { from: 1, to: 0, count: 2 },
+      { from: 1, to: 0, count: 2, scope: "single" },
     );
     if (plan.kind !== "moved") throw new Error("expected a move");
     await BotStatusMessage.bulkWrite(
-      orderChanges(rows, plan.ids).map((ch) => ({
-        updateOne: {
-          filter: { _id: ch.id },
-          update: { $set: { order: ch.order } },
-        },
-      })),
+      casOps(orderChanges(rows, plan.ids), rows, {
+        guildId: "g1",
+        pool: "single",
+      }),
     );
     const order = async (id: string): Promise<number | undefined> =>
       (await BotStatusMessage.findById(id).lean())?.order;
