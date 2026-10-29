@@ -470,3 +470,70 @@ describe("a list cut at the cap still reaches older messages (#1530)", () => {
     expect(form.querySelector("input[name=messageId]")).toBeNull();
   });
 });
+
+describe("a refused bind keeps its destination when the list changes state (#1530)", () => {
+  const X = "100000000000000002";
+  const OLD = "100000000000000999";
+  const refusedWith = (
+    messages: (typeof MESSAGES & { truncated?: boolean }) | null,
+    values: Record<string, string>,
+  ): Element =>
+    bindForm(
+      page({
+        messages,
+        refusedForm: {
+          formId: "reaction-role-bind",
+          errors: { emoji: "x" },
+          values: { roleId: "", emoji: "", ...values },
+        },
+      }),
+    );
+  const select = (f: Element): HTMLSelectElement =>
+    f.querySelector("select[name=messageId]") as HTMLSelectElement;
+  const box = (f: Element): HTMLInputElement =>
+    f.querySelector("input[name=messageId]") as HTMLInputElement;
+
+  it("a picked message from a cut list stays selected when the list is now complete", () => {
+    const f = refusedWith(MESSAGES, { messageIdListed: X, messageId: "" });
+    expect(select(f).value).toBe(X);
+    expect(box(f)).toBeNull();
+    expect(f.querySelector("[name=messageIdListed]")).toBeNull();
+  });
+
+  it("a picked message the complete list does not hold stays as a retained option", () => {
+    const f = refusedWith(MESSAGES, { messageIdListed: OLD, messageId: "" });
+    expect(select(f).value).toBe(OLD);
+    expect(select(f).selectedOptions[0].text).toContain("not found");
+  });
+
+  it("a picked message from a cut list shows in the text box when the list is now unreadable", () => {
+    const f = refusedWith(null, { messageIdListed: X, messageId: "" });
+    expect(box(f).value).toBe(X);
+    expect(select(f)).toBeNull();
+  });
+
+  it("a cut list again echoes both fields as typed", () => {
+    const f = refusedWith(
+      { ...MESSAGES, truncated: true },
+      { messageIdListed: X, messageId: "" },
+    );
+    expect(
+      (f.querySelector("select[name=messageIdListed]") as HTMLSelectElement)
+        .value,
+    ).toBe(X);
+    expect(box(f).value).toBe("");
+  });
+
+  it("the typed id still wins when the control that held it is gone", () => {
+    const complete = refusedWith(MESSAGES, {
+      messageIdListed: X,
+      messageId: OLD,
+    });
+    expect(select(complete).value).toBe(OLD);
+    const unreadable = refusedWith(null, {
+      messageIdListed: X,
+      messageId: " 9<9> ",
+    });
+    expect(box(unreadable).value).toBe(" 9<9> ");
+  });
+});

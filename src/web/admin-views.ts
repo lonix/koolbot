@@ -4234,10 +4234,15 @@ export function renderReactionRolesPage(props: ReactionRolesProps): string {
   const bind = formView(props.refusedForm, REACTION_ROLE_BIND_FORM);
   const bindRole = bind.control("roleId");
   // A refused form keeps the message it was given selected, whatever the list holds.
-  const bindKeeps =
-    bind.value(props.messages?.truncated ? "messageIdListed" : "messageId") !==
-    "";
   const bindCut = props.messages?.truncated === true;
+  // The destination a refused form was given: the typed id, else the picked one.
+  // Whichever control is drawn now echoes it, so a list that changed state since
+  // the form was posted does not lose it.
+  const bindDest =
+    bind.value("messageId") !== ""
+      ? bind.value("messageId")
+      : bind.value("messageIdListed");
+  const bindKeeps = bindDest !== "";
   const groupCreate = formView(
     props.refusedForm,
     REACTION_ROLE_GROUP_CREATE_FORM,
@@ -4353,7 +4358,7 @@ ${
       <span class="kb-label">Message <span class="muted">(optional — add to an existing picker message)</span></span>
       ${renderReactionRoleMessageSelect(
         bindCut ? "messageIdListed" : "messageId",
-        bind.value(bindCut ? "messageIdListed" : "messageId"),
+        bindCut ? bind.value("messageIdListed") : bindDest,
         {
           ...bind.control(bindCut ? "messageIdListed" : "messageId"),
           messages: props.messages,
@@ -4372,7 +4377,7 @@ ${
       ? `    <div class="kb-field">
       <label class="kb-field">
         <span class="kb-label">Message ID (optional)</span>
-        <input type="text" class="kb-input" name="messageId" maxlength="30"${bind.valueAttr("messageId")}${bind.attrs("messageId")}>
+        <input type="text" class="kb-input" name="messageId" maxlength="30"${bindCut ? bind.valueAttr("messageId") : bindDest ? ` value="${escapeHtml(bindDest)}"` : ""}${bind.attrs("messageId")}>
         <span class="kb-help">${bindCut ? "Not in the list? Enter the id of an older reaction-role message. It wins over the choice above." : "Leave empty to post a new message. The id of an existing reaction-role message adds this mapping to it."}</span>
       </label>
     </div>`
