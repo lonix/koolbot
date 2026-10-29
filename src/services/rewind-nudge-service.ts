@@ -9,6 +9,7 @@ import { isRewindNudgeEnabled } from "./rewind-nudge-config.js";
 import logger from "../utils/logger.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { embedColor } from "../utils/embed-style.js";
+import { getGuildName } from "../utils/guild-name.js";
 
 /**
  * End-of-year DM nudge for the Rewind WebUI page (#484).
@@ -183,7 +184,11 @@ export class RewindNudgeService extends ScheduledService<RewindNudgeRunSummary |
           summary.skippedOptOut += 1;
           continue;
         }
-        const embed = this.buildEmbed(user.username, year);
+        const embed = this.buildEmbed(
+          user.username,
+          year,
+          getGuildName(this.client, guildId),
+        );
         const delivered = await this.sendNudgeDM(user.userId, embed);
         if (!delivered) {
           summary.skippedDmsClosed += 1;
@@ -288,15 +293,20 @@ export class RewindNudgeService extends ScheduledService<RewindNudgeRunSummary |
     }
   }
 
-  private buildEmbed(username: string, year: number): EmbedBuilder {
+  private buildEmbed(
+    username: string,
+    year: number,
+    serverName: string,
+  ): EmbedBuilder {
     return new EmbedBuilder()
-      .setTitle(`✨ Your Koolbot Rewind for ${year} is ready`)
+      .setTitle(`✨ Your ${year} Rewind from ${serverName} is ready`)
       .setColor(embedColor("lore"))
       .setDescription(
-        `Hey ${escapeDisplayText(username)}, your year-in-review is waiting for you.\n\n` +
-          `Open the user portal with **\`/me\`** and follow the magic link to **/me/rewind** to see your top voice and text channels, peak day, longest streak, and the badges you earned this year.\n\n` +
-          `_Don't want these? Run \`/me\` → Notifications to manage your preferences._`,
+        `Hey ${escapeDisplayText(username)}, your year in voice and text is ready: top channels, peak day, longest streak and the badges you earned. Run \`/me\` and open Rewind to see it.`,
       )
+      .setFooter({
+        text: "KoolBot · Rewind · Turn this off in /me → Notifications",
+      })
       .setTimestamp(new Date());
   }
 

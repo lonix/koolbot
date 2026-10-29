@@ -840,7 +840,25 @@ describe("LeaderboardRoleService", () => {
       const [payload] = mockSend.mock.calls[0] as unknown as [
         { embeds: Array<{ toJSON(): { fields?: unknown[] } }> },
       ];
-      expect(payload.embeds[0].toJSON().fields).toEqual([
+      const json = payload.embeds[0].toJSON() as {
+        title?: string;
+        description?: string;
+        footer?: { text: string };
+        fields?: Array<{ name: string; value: string; inline?: boolean }>;
+      };
+      // Facts are fields (#1526): Period and Recalculated lead, inline.
+      expect(json.title).toBe("🏆 Leaderboard roles updated");
+      expect(json.description).toBeUndefined();
+      expect(json.footer?.text).toBe("KoolBot · Leaderboard roles");
+      expect(json.fields?.slice(0, 2)).toEqual([
+        { name: "Period", value: "alltime", inline: true },
+        {
+          name: "Recalculated",
+          value: expect.stringMatching(/^<t:\d+:R>$/),
+          inline: true,
+        },
+      ]);
+      expect(json.fields?.slice(2)).toEqual([
         {
           name: "Removed tier — Old tier",
           value: "Removed: <@u1>",

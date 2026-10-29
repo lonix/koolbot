@@ -87,7 +87,7 @@ export async function execute(
 
     const embed = new EmbedBuilder()
       .setColor(embedColor("lore"))
-      .setTitle(`🏆 ${targetUser.username}'s Achievements`)
+      .setTitle(`🏆 ${targetUser.username}'s achievements`)
       .setThumbnail(targetUser.displayAvatarURL())
       .setTimestamp();
 
@@ -145,7 +145,7 @@ export async function execute(
         }
 
         accoladesChunks.forEach((chunk, index) => {
-          const fieldName = index === 0 ? "🎖️ Accolades (Permanent)" : "\u200B";
+          const fieldName = index === 0 ? "Accolades" : "\u200B";
           embed.addFields({
             name: fieldName,
             value: chunk,
@@ -178,7 +178,7 @@ export async function execute(
         // Ten three-line entries can exceed the 1024-char field limit; keep
         // the most recent ones that fit and summarise the rest (#840).
         embed.addFields({
-          name: "🏅 Recent Achievements (Time-Based)",
+          name: "Recent achievements",
           value: clampToLimit(
             achievementsList,
             DISCORD_EMBED_FIELD_VALUE_LIMIT,
@@ -204,7 +204,7 @@ export async function execute(
       }
 
       embed.addFields({
-        name: "🎯 Almost There (Progress)",
+        name: "Almost there",
         value,
         inline: false,
       });
@@ -214,11 +214,20 @@ export async function execute(
     const totalAccolades = userAchievements?.statistics.totalAccolades ?? 0;
     const totalAchievements =
       userAchievements?.statistics.totalAchievements ?? 0;
-    embed.addFields({
-      name: "📊 Summary",
-      value: `Total Accolades: ${totalAccolades}\nTotal Achievements: ${totalAchievements}`,
-      inline: false,
-    });
+    embed
+      .addFields(
+        {
+          name: "Total accolades",
+          value: String(totalAccolades),
+          inline: true,
+        },
+        {
+          name: "Total achievements",
+          value: String(totalAchievements),
+          inline: true,
+        },
+      )
+      .setFooter({ text: "KoolBot · Achievements" });
 
     await interaction.editReply({ embeds: [embed] });
   } catch (error) {

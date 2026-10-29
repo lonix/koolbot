@@ -773,11 +773,17 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
       }
 
       const embed = new EmbedBuilder()
-        .setTitle("🏆 Voice Leaderboard Roles Updated")
-        .setDescription(
-          `Period: **${summary.period}** · Recalculated ${discordTimestamp(summary.ranAt, "R")}`,
+        .setTitle("🏆 Leaderboard roles updated")
+        .setColor(embedColor("lore"))
+        .addFields(
+          { name: "Period", value: summary.period, inline: true },
+          {
+            name: "Recalculated",
+            value: discordTimestamp(summary.ranAt, "R"),
+            inline: true,
+          },
         )
-        .setColor(embedColor("lore"));
+        .setFooter({ text: "KoolBot · Leaderboard roles" });
 
       const fields: Array<{ name: string; value: string }> = [];
       for (const tier of summary.tiers) {
@@ -811,14 +817,23 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
 
       // Stay inside the embed's field-count and total-text limits; fields
       // that don't fit are summarised rather than failing the whole send.
+      // The Period and Recalculated fields and the footer already use slots
+      // and characters.
+      const headerFields = embed.data.fields?.length ?? 0;
       let total =
-        (embed.data.title?.length ?? 0) + (embed.data.description?.length ?? 0);
+        (embed.data.title?.length ?? 0) +
+        (embed.data.footer?.text.length ?? 0) +
+        (embed.data.fields ?? []).reduce(
+          (n, f) => n + f.name.length + f.value.length,
+          0,
+        );
       let added = 0;
       for (const field of fields) {
         const size = field.name.length + field.value.length;
         const remaining = fields.length - added;
         // Keep the last slot and ~100 characters for the summary field.
-        const outOfSlots = remaining > 1 && added >= EMBED_FIELDS_MAX - 1;
+        const outOfSlots =
+          remaining > 1 && headerFields + added >= EMBED_FIELDS_MAX - 1;
         if (outOfSlots || total + size > EMBED_TOTAL_MAX - 100) {
           embed.addFields({
             name: "More changes",

@@ -12,6 +12,8 @@ import { formatInZone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 import { escapeDisplayText } from "../utils/allowed-mentions.js";
 import { embedColor } from "../utils/embed-style.js";
+import { discordTimestamp } from "../utils/discord-time.js";
+import { getGuildName } from "../utils/guild-name.js";
 
 interface QualifyingUser {
   userId: string;
@@ -36,7 +38,7 @@ export interface DigestPreviewEntry {
   rank: number;
   totalTime: number; // seconds
   streakWeeks: number;
-  /** Embed title, e.g. "📊 Your weekly voice digest". */
+  /** Embed title, e.g. "📊 Your weekly digest from Koolbot Dev". */
   title: string;
   /** Embed description (week range + greeting), rendered in the user's zone. */
   description: string;
@@ -219,15 +221,10 @@ export class DigestService extends ScheduledService<DigestRunSummary | null> {
       failed: 0,
     };
 
+    const serverName = getGuildName(this.client, guildId);
     for (const user of qualifying) {
       try {
-        // One read for both the opt-in flag and the display timezone
-        // (used for the week range), so the cron loop stays at a single
-        // prefs query per user even for large guilds (#524).
-        const { prefs, timezone } = await prefsService.getPrefsWithTimezone(
-          user.userId,
-          guildId,
-        );
+        const prefs = await prefsService.getPrefs(user.userId, guildId);
         if (!prefs.digest) {
           summary.skippedOptOut += 1;
           continue;
@@ -265,7 +262,7 @@ export class DigestService extends ScheduledService<DigestRunSummary | null> {
           includeAchievements,
           weeklyAchievements,
           ranAt: summary.ranAt,
-          timezone,
+          serverName,
         });
 
         const delivered = await this.sendDigestDM(user.userId, embed);
@@ -399,11 +396,9 @@ export class DigestService extends ScheduledService<DigestRunSummary | null> {
     let skippedOptOut = 0;
     const entries: DigestPreviewEntry[] = [];
 
+    const serverName = getGuildName(this.client, guildId);
     for (const user of qualifying) {
-      const { prefs, timezone } = await prefsService.getPrefsWithTimezone(
-        user.userId,
-        guildId,
-      );
+      const prefs = await prefsService.getPrefs(user.userId, guildId);
       if (!prefs.digest) {
         skippedOptOut += 1;
         continue;
@@ -444,7 +439,7 @@ export class DigestService extends ScheduledService<DigestRunSummary | null> {
         includeAchievements,
         weeklyAchievements,
         ranAt: generatedAt,
-        timezone,
+        serverName,
       });
       const data = embed.data;
 
@@ -561,7 +556,7 @@ export class DigestService extends ScheduledService<DigestRunSummary | null> {
       description: string;
     }>;
     ranAt: Date;
-    timezone: string | null;
+    serverName: string;
   }): EmbedBuilder {
     const {
       user,
@@ -570,7 +565,7 @@ export class DigestService extends ScheduledService<DigestRunSummary | null> {
       includeAchievements,
       weeklyAchievements,
       ranAt,
-      timezone,
+      serverName,
     } = args;
     const previousTime = previousState?.lastWeekTotalTime ?? 0;
     const previousRank = previousState?.lastWeekRank ?? null;
@@ -619,22 +614,25 @@ export class DigestService extends ScheduledService<DigestRunSummary | null> {
       });
     }
 
-    const footer = pickMotivationalFooter(user.userId.length + user.totalTime);
+    const motivation = pickMotivationalFooter(
+      user.userId.length + user.totalTime,
+    );
 
-    // "Week of <start> – <end>" in the user's timezone (server tz when
-    // unset) so the 7-day window reads in their local time (#524).
+    // Discord timestamps: each reader sees the window in their own timezone
+    // and format (docs/design/discord.md, Time). The window is the exact 7
+    // days before the run, so no stored-timezone text is needed (#524).
     const weekStart = new Date(ranAt.getTime() - SECONDS_PER_WEEK * 1000);
-    const weekRange = `${formatInZone(weekStart, timezone, "MMM d")} – ${formatInZone(ranAt, timezone, "MMM d")}`;
+    const weekRange = `${discordTimestamp(weekStart, "D")} – ${discordTimestamp(ranAt, "D")}`;
 
     return new EmbedBuilder()
-      .setTitle("📊 Your weekly voice digest")
+      .setTitle(`📊 Your weekly digest from ${serverName}`)
       .setColor(embedColor("lore"))
       .setDescription(
-        `Here's a snapshot of your last 7 days in voice (${weekRange}), ${escapeDisplayText(user.username)}.`,
+        `Here's a snapshot of your last 7 days in voice (${weekRange}), ${escapeDisplayText(user.username)}.\n${motivation}`,
       )
       .addFields(fields)
       .setFooter({
-        text: `${footer}\nYou opted in to these. Run /me → Notifications to manage your preferences.`,
+        text: "KoolBot · Digest · Turn this off in /me → Notifications",
       })
       .setTimestamp(new Date());
   }
