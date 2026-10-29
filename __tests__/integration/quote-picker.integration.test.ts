@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "@jest/globals";
+import { it, expect, beforeEach } from "@jest/globals";
 import mongoose from "mongoose";
 import { describeWithMongo, useRealMongo } from "./mongo-harness.js";
 import { QuoteService } from "../../src/services/quote-service.js";
