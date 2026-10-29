@@ -79,7 +79,7 @@ jest.unstable_mockModule("../../src/services/event-service.js", () => ({
   },
 }));
 
-const { createEventsRouter } =
+const { createEventsRouter, eventFormValues } =
   await import("../../src/web/routes/write/events.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
 const { registerFormPage } = await import("../../src/web/form-pages.js");
@@ -389,6 +389,28 @@ describe("a refused New event form (#1523, #1527)", () => {
     expect(r.html).toMatch(/name="groups_enabled" value="1" checked/);
     expect(r.html).toMatch(/name="group_0_name"[^>]*value="Red"/);
     expect(mockCreateEvent).not.toHaveBeenCalled();
+  });
+
+  it("reads only the form's own field names, so a hostile one has no effect", async () => {
+    const { date, time } = futureDateTime();
+    const body = Object.fromEntries([
+      ["title", ""],
+      ["date", date],
+      ["time", time],
+      ["__proto__", "x"],
+      ["constructor", "y"],
+      ["polluted", "z"],
+      ["group_0_name", "Red"],
+    ]) as Record<string, string>;
+    const r = await refusal(body);
+    expect(r.html).not.toContain("polluted");
+    expect(r.html).toMatch(/name="group_0_name"[^>]*value="Red"/);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    const values = eventFormValues(body);
+    expect(Object.getPrototypeOf(values)).toBe(Object.prototype);
+    expect(Object.keys(values).sort()).toEqual(
+      ["date", "group_0_name", "time", "title"].sort(),
+    );
   });
 
   it("marks an invalid timezone, which only a hand-made post can send", async () => {

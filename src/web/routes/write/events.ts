@@ -8,6 +8,11 @@
 
 import { Router } from "express";
 import { Client } from "discord.js";
+import {
+  GROUP_FORM_FIELDS,
+  GROUP_FORM_MAX_ROWS,
+  groupRowField,
+} from "../../../services/event-groups.js";
 import { EventService, isRecurring } from "../../../services/event-service.js";
 import {
   createdFlash,
@@ -38,16 +43,47 @@ import {
   ADMIN_NEW_EVENT_PATH,
 } from "../../admin-new-event-page.js";
 
+/** The New event form's text fields, by their fixed names. */
+const EVENT_TEXT_FIELDS = [
+  "title",
+  "description",
+  "when",
+  "date",
+  "time",
+  "duration",
+  "timezone",
+  "recurrence",
+] as const;
+
+const GROUP_ROW_FIELDS = ["name", "kind", "size", "tag", "marker"] as const;
+
+/**
+ * Every field name the New event form can post: the text fields, the Groups
+ * section's own fields and each Groups row at a bounded numeric index. Built
+ * once from fixed names, never from the request.
+ */
+const EVENT_FORM_FIELD_NAMES: readonly string[] = [
+  ...EVENT_TEXT_FIELDS,
+  ...Object.values(GROUP_FORM_FIELDS),
+  ...Array.from({ length: GROUP_FORM_MAX_ROWS }, (_, i) =>
+    GROUP_ROW_FIELDS.map((f) => groupRowField(i, f)),
+  ).flat(),
+];
+
 /**
  * What the New event form posted, as a refused form shows it: every text field
- * as typed, the Groups rows included (#1523, #1527). The page reads them back
- * with the same functions the host's form uses.
+ * as typed, the Groups rows included (#1523, #1527). Only the fixed names above
+ * are read and written, never a name taken from the request, so a hostile field
+ * name (`__proto__`, `constructor`) has no effect.
  */
 export function eventFormValues(body: unknown): Record<string, string> {
+  const source = (body ?? {}) as Record<string, unknown>;
   const values: Record<string, string> = {};
-  if (!body || typeof body !== "object") return values;
-  for (const [name, raw] of Object.entries(body as Record<string, unknown>)) {
-    if (name !== "_csrf" && typeof raw === "string") values[name] = raw;
+  for (const name of EVENT_FORM_FIELD_NAMES) {
+    const value = Object.prototype.hasOwnProperty.call(source, name)
+      ? source[name]
+      : undefined;
+    if (typeof value === "string") values[name] = value;
   }
   return values;
 }
