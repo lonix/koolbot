@@ -4,6 +4,7 @@
  * itself is in `permission-notice.test.ts`.
  */
 
+import { renderAdminNewEvent } from "./new-event-page-helper.js";
 import { describe, it, expect } from "@jest/globals";
 import { ChannelType } from "discord.js";
 import { nativeSyncPaused } from "../../src/services/event-native-rules.js";
@@ -374,8 +375,8 @@ describe("admin Events page", () => {
     );
   });
 
-  it("puts the group channel finding next to the Groups switch instead (#1478)", () => {
-    const html = renderEventsPage({ ...props, permissionNotice: noticeFor() });
+  it("puts the group channel finding next to the Groups switch on the New event page instead (#1478, #1527)", () => {
+    const html = renderAdminNewEvent({ permissionNotice: noticeFor() });
     expect(html).not.toContain("data-permission-notice");
     expect(html).toContain('data-permission-inline="event-channels"');
     expect(html).toContain("In the category “Events”.");

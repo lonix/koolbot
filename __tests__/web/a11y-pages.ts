@@ -119,6 +119,35 @@ import {
 } from "../../src/web/event-edit-view.js";
 import { renderNewEventBody } from "../../src/web/event-new-view.js";
 import {
+  refusedNewEventForm,
+  renderAdminNewEventPage,
+} from "../../src/web/admin-new-event-page.js";
+import type { RefusedForm } from "../../src/web/form-errors.js";
+
+/** The props a refused New event form adds, built the way the page's route builds them. */
+function refusedNewEvent(refused: RefusedForm): {
+  refusal: ReturnType<typeof refusedNewEventForm>["refusal"];
+  values: ReturnType<typeof refusedNewEventForm>["values"];
+  initialWhen: ReturnType<typeof refusedNewEventForm>["initialWhen"];
+  groupRemembered: {
+    prefill: ReturnType<typeof refusedNewEventForm>["groups"]["prefill"];
+    resetHref: null;
+    enabled: boolean;
+  };
+} {
+  const v = refusedNewEventForm(refused, "Europe/Stockholm", 120);
+  return {
+    refusal: v.refusal,
+    values: v.values,
+    initialWhen: v.initialWhen,
+    groupRemembered: {
+      prefill: v.groups.prefill,
+      resetHref: null,
+      enabled: v.groups.enabled,
+    },
+  };
+}
+import {
   renderHostBoard,
   type HostBoardData,
 } from "../../src/web/host-board-view.js";
@@ -2586,7 +2615,6 @@ export function adminPages(): A11yPage[] {
             channelType: null,
           },
         ],
-        groupLimits: { defaultCount: 3, maxCount: 8 },
         flash: FLASH,
       }),
     },
@@ -2668,7 +2696,6 @@ export function adminPages(): A11yPage[] {
             channelId: "c2",
           },
         ],
-        groupLimits: { defaultCount: 2, maxCount: 8 },
       }),
     },
     {
@@ -2685,16 +2712,19 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
-      name: "Events (missing bot permissions, next to their fields)",
-      html: renderEventsPage({
+      name: "Events (new event, missing bot permissions next to their fields)",
+      html: renderAdminNewEventPage({
         ...COMMON,
         enabled: true,
-        categoryConfigured: true,
-        announcementConfigured: true,
-        timezone: "UTC",
-        settingRows: [],
-        rows: [],
-        permissionNotice: EVENT_FORM_PERMISSION_NOTICE,
+        form: {
+          csrfToken: COMMON.csrfToken,
+          timezone: "UTC",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 15 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+          permissionNotice: EVENT_FORM_PERMISSION_NOTICE,
+        },
       }),
     },
     {
@@ -2711,66 +2741,67 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
-      name: "Events (library presets, unreadable notice)",
-      html: renderEventsPage({
+      name: "Events (new event, library presets, unreadable notice)",
+      html: renderAdminNewEventPage({
         ...COMMON,
         enabled: true,
-        categoryConfigured: true,
-        announcementConfigured: true,
-        timezone: "UTC",
-        settingRows: [],
-        rows: [],
-        groupLimits: { defaultCount: 2, maxCount: 8 },
-        groupPresets: [
-          EVENT_GROUP_PRESETS[0],
-          {
-            id: "lib:0123456789abcdef01234567",
-            label: "Clan match",
-            description: "Five roles",
-            groupLabel: "Squad",
-            leaderLabel: "Lead",
-            channelLeadMinutes: 30,
-            groups: [
-              { name: "Assault", kind: "team", size: 8, tag: "", marker: "" },
-            ],
-          },
-        ],
-        groupPresetsNotice:
-          "The server's own presets could not be read, so only the built-in presets that are switched on are offered.",
+        form: {
+          csrfToken: COMMON.csrfToken,
+          timezone: "UTC",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 8 },
+          groupPresets: [
+            EVENT_GROUP_PRESETS[0],
+            {
+              id: "lib:0123456789abcdef01234567",
+              label: "Clan match",
+              description: "Five roles",
+              groupLabel: "Squad",
+              leaderLabel: "Lead",
+              channelLeadMinutes: 30,
+              groups: [
+                { name: "Assault", kind: "team", size: 8, tag: "", marker: "" },
+              ],
+            },
+          ],
+          groupPresetsNotice:
+            "The server's own presets could not be read, so only the built-in presets that are switched on are offered.",
+        },
       }),
     },
     {
       // The group setup form (#1299): choice cards with some over the cap
       // (disabled), the nested options, the compact rows and the Advanced section.
-      name: "Events (group setup cards, one over the cap)",
-      html: renderEventsPage({
+      name: "Events (new event, group setup cards, one over the cap)",
+      html: renderAdminNewEventPage({
         ...COMMON,
         enabled: true,
-        categoryConfigured: true,
-        announcementConfigured: true,
-        timezone: "UTC",
-        settingRows: [],
-        rows: [],
-        groupLimits: { defaultCount: 3, maxCount: 3 },
-        groupPresets: [
-          ...EVENT_GROUP_PRESETS,
-          {
-            id: "my:0123456789abcdef01234567",
-            label: "Clan match",
-            description: "Five roles",
-            groupLabel: "Squad",
-            groups: [
-              {
-                name: "Assault",
-                kind: "team",
-                size: 8,
-                tag: "AS",
-                marker: "🟢",
-              },
-              { name: "Logi", kind: "open", size: null, tag: "", marker: "" },
-            ],
-          },
-        ],
+        form: {
+          csrfToken: COMMON.csrfToken,
+          timezone: "UTC",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 3, maxCount: 3 },
+          groupPresets: [
+            ...EVENT_GROUP_PRESETS,
+            {
+              id: "my:0123456789abcdef01234567",
+              label: "Clan match",
+              description: "Five roles",
+              groupLabel: "Squad",
+              groups: [
+                {
+                  name: "Assault",
+                  kind: "team",
+                  size: 8,
+                  tag: "AS",
+                  marker: "🟢",
+                },
+                { name: "Logi", kind: "open", size: null, tag: "", marker: "" },
+              ],
+            },
+          ],
+          groupPresetsNotice: null,
+        },
       }),
     },
     {
@@ -3071,32 +3102,93 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
-      name: "Events (schedule form refused)",
-      html: renderEventsPage({
+      name: "Events (new event refused)",
+      html: renderAdminNewEventPage({
         ...COMMON,
         enabled: true,
-        categoryConfigured: true,
-        announcementConfigured: true,
-        timezone: "Europe/Stockholm",
-        settingRows: [],
-        rows: [],
-        refusedForm: {
-          formId: "event-create",
-          errors: {
-            title: "Enter a title.",
-            date: "The start time must be in the future.",
-            duration: "Use 1 to 1440 minutes.",
-          },
-          values: {
-            title: "",
-            description: "Bring <snacks>",
-            when: "pick",
-            date: "2000-01-01",
-            time: "18:00",
-            duration: "5000",
-            timezone: "",
-            recurrence: "weekly",
-          },
+        form: {
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Stockholm",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 8 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+          ...refusedNewEvent({
+            formId: "new-event",
+            errors: { title: "Enter a title." },
+            values: {
+              title: "",
+              description: "Bring <snacks>",
+              when: "pick",
+              date: "2000-01-01",
+              time: "18:00",
+              duration: "5000",
+              timezone: "",
+              recurrence: "weekly",
+            },
+          }),
+        },
+      }),
+    },
+    {
+      name: "Events (new event, Groups refused)",
+      html: renderAdminNewEventPage({
+        ...COMMON,
+        enabled: true,
+        form: {
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Stockholm",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 8 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+          ...refusedNewEvent({
+            formId: "new-event",
+            errors: { groups: "Groups: Give each group a name." },
+            values: {
+              title: "Raid",
+              when: "pick",
+              date: "2999-01-01",
+              time: "18:00",
+              groups_enabled: "1",
+              group_0_name: "Red",
+              group_0_size: "5",
+              group_1_size: "5",
+            },
+          }),
+        },
+      }),
+    },
+    {
+      name: "Events (new event, setup missing, from the Start now link)",
+      html: renderAdminNewEventPage({
+        ...COMMON,
+        enabled: true,
+        form: {
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Stockholm",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 8 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+          setupNotice:
+            "No channel category is set, so event channels cannot be created yet.",
+          initialWhen: "now",
+        },
+      }),
+    },
+    {
+      name: "Events (new event)",
+      html: renderAdminNewEventPage({
+        ...COMMON,
+        enabled: true,
+        form: {
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Stockholm",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 8 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
         },
       }),
     },

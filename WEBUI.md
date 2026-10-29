@@ -1237,7 +1237,8 @@ number.
 - `events.timezone` is a searchable select of IANA zones. Its first option is _Default (the server's zone)_ and posts
   nothing, because blank means "the server zone". UTC is in the list once (the runtime's own list omits it). With
   JavaScript a search box filters the zones (`new york` finds `America/New_York`, Enter picks the first match). The
-  event forms (the admin form, `/me/events/new` and the edit page) use the same select.
+  event forms (`/admin/events/new`, `/me/events/new` and the edit page) use the same select. The admin form's first option posts nothing too;
+  the host's form has the server zone selected, which posts the same zone.
 - `reactionroles.group_role_colour` is a colour input with a _Use default_ checkbox. A colour input cannot hold an empty
   value and `""` is how the key says "Discord's default", so the checkbox posts `use_default_<key>=true`. A stored value
   that is not `#RRGGBB` gets a second, ticked checkbox, _Keep the stored value_ (`keep_<key>=true`). The save paths turn
@@ -1941,7 +1942,7 @@ feature, the `events.category_id` channel category, and the
 category or announcement channel is missing, since event channels and
 announcements won't be created without them) plus the resolved event timezone. A notice under the status line names any permission the bot lacks for the
 event features (Create Events or Manage Events, Manage Channels, host access, moves, clan tags, the announcement channel) and links to Bot Permissions.
-A **Schedule event** button at the top jumps to the form. The
+A **Schedule event** button at the top opens the New event page (`/admin/events/new`, below). The
 events table lists each event's title, start time, lifecycle state
 (_scheduled_ / _active_ / _ended_ / _cancelled_), and, when at least one event has something in it, an **Expected to show up** column, channel
 and cover image; empty columns are left out and the raw event id is not shown. Ended and cancelled events are folded under
@@ -1957,8 +1958,18 @@ lifecycle controls — **Start now** (spin the event up immediately) and
 **Cancel** (a confirm-guarded stop) — and a running (`active`) event also gets
 **End now** (#1193, below), while finished events show no lifecycle
 actions. Every row has a **Host panel** link (see below). A
-**Schedule a new event** form (native date and time inputs) creates events without leaving the page. The page
-is gated by `events.enabled` (the #610 disabled-feature pattern).
+**Schedule event** button opens the New event page, where an admin creates events. The page is gated by `events.enabled` (the #610
+disabled-feature pattern).
+
+**Admins schedule with the same New event form** (#1527). `/admin/events/new` is a page of its own, inside the admin layout (Events stays
+highlighted in the menu), and renders the host's New event form: the **When** choice first, then **Details**, **Groups** and **Create event**.
+It adds what an admin has and a host does not: **Repeat** (does not repeat, weekly, every 2 weeks, monthly), a first timezone option
+that means "the server's zone", the form posting to `POST /admin/events/create`, a link to the Events page for a missing channel category or
+announcement channel, and the link to Bot Permissions next to the Groups fields. The duration is chosen from the same preset lengths as the
+host's form (30 minutes to 4 hours, with the server default selected). `/admin/events/new?when=now` opens with **Now** selected, and
+`?defaults=1` shows the normal Groups defaults instead of the admin's remembered setup. It is a page of its own because the form brings its
+own page header and a refused post is drawn on it again with what was typed; on the Events page it would stack a second page header over
+the events list.
 
 **When** (#1305). The form opens with a **When** choice: **Now**, **In 15 min**, **In 30 min**, **In 1 hour** or **Pick date & time**
 (the default, so a planned event is created exactly as before; the date and time fields hide for the other choices). The minute options
@@ -1981,9 +1992,10 @@ from the form), the scope is checked on every request, and the host reaches only
 (status 422, no redirect): the title, date, time, timezone, duration and Groups rows come back as posted, the field the refusal is about gets
 `aria-invalid="true"` and an error line linked by `aria-describedby` that says what to change, a short error callout sits at the top, and
 focus moves to the marked field. A Groups error shows above the Groups block. A refusal that is not about one field (the open-event limit,
-a Discord failure) shows its reason in the callout only. The edit form comes back with the version, mode and CSRF token it was posted with,
+a Discord failure) shows its reason in the callout only. The admin New event form (`/admin/events/new`) answers the same way, a refused Groups
+section included. The edit form comes back with the version, mode and CSRF token it was posted with,
 so a stale form is still refused on the next save. Other refusals on the edit page (a conflict, an event that has started) still return to a
-fresh page with a message. The admin Events form is not changed yet.
+fresh page with a message.
 
 **Limit on open events** (#1408). `events.max_active_per_host` (Settings, Events) is the most events a host who is not an administrator may
 have open at once; `0`, the default, means no limit. Open means scheduled or running, the same events **Your events** lists under Live now
@@ -2168,7 +2180,7 @@ are also offered where the host panel turns groups on for an event (**Groups**, 
 settings), so a host who is not an admin can start an event's groups from their own preset.
 
 **The last setup is remembered per host** (#1406). When an event with groups is created from
-either form (`/admin/events` or `/me/events/new`), the setup the server accepted is stored for
+either form (`/admin/events/new` or `/me/events/new`), the setup the server accepted is stored for
 that host: the preset id (or Custom), the rows (name, kind, size, tag, marker), the group and
 leader wording, the channel lead time and the switches (leaders and what hangs off it, captains
 lobby, clan tags and their position). It is written only after the event exists, replaces the host's
@@ -3981,7 +3993,7 @@ another tab, or a page that cannot be drawn again. Routes use `refuseForm` and
 pages use `formView` (`src/web/form-errors.ts`).
 
 The forms on Birthdays (Edit), Leaderboard roles (Tiers), Moderation (Open case and the case decision), Role groups (Add
-group and Edit), Group presets (the editor), Channel manager (Create and Edit) and Events (Schedule a new event) answer a
+group and Edit), Group presets (the editor), Channel manager (Create and Edit) and Events (New event, at `/admin/events/new`) answer a
 refusal the same way. A few details differ from a plain form:
 
 - **Leaderboard roles** draws the Tiers rows from what was submitted, so a row that was added and never saved keeps its
@@ -3995,8 +4007,9 @@ refusal the same way. A few details differ from a plain form:
 - **Channel manager** marks every refused field of one save together (name, topic, user limit, bitrate, category). The
   edit form's hidden baselines come back as they were posted, so a change made elsewhere in the meantime is still caught
   as a conflict.
-- **Events** marks the refused one of the title, description, date, time, duration and repeat fields (one at a time). A refused Groups section is still
-  a flash, and its rows come back from the browser's draft as before; the refused page carries an error notice at the top for that.
+- **Events** (New event, `/admin/events/new`) marks the refused one of the When choice, date, time, timezone, title, description, duration, Repeat or
+  Groups (one at a time), as the host's New event form does, and the Groups rows come back as posted. A refusal that is not about one field (the
+  per-host limit, a Discord failure) is the page's callout, with what was typed kept.
 
 A refusal that is not about one field stays a flash on the page: Discord unreachable, a stale token or a conflict, a
 missing bot permission, the per-host event limit, a group or channel that no longer exists, or a failed read. A refused

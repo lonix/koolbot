@@ -2,7 +2,7 @@
  * @jest-environment <rootDir>/__tests__/jsdom-node-env.cjs
  */
 
-/* global document, window, Event, DOMParser, HTMLDetailsElement, HTMLElement, HTMLInputElement, HTMLSelectElement, Storage, localStorage, Document */
+/* global document, window, Event, DOMParser, HTMLDetailsElement, HTMLElement, Storage, localStorage, Document */
 /**
  * Feature pages show the usable part first and fold their settings (#1301):
  * the status line, the folded settings card (when it opens, what its summary
@@ -642,42 +642,19 @@ const headers = (doc: Document, scope: string): string[] =>
   );
 
 describe("the Events page", () => {
-  it("offers Schedule event at the top, as a link to the form", () => {
+  it("offers Schedule event at the top, as a link to the New event page", () => {
     const doc = eventsPage([eventRow()]);
-    const link = doc.querySelector<HTMLElement>('a[href="#schedule-event"]');
+    const link = doc.querySelector<HTMLElement>('a[href="/admin/events/new"]');
     expect(link?.textContent).toBe("Schedule event");
-    // Not primary: the form's own submit is the view's one primary button.
     expect(link?.className).toBe("kb-btn");
-    const form = doc.getElementById("schedule-event");
-    expect(form?.querySelector("form[data-event-form]")).not.toBeNull();
-    // The link sits before the list, the form after it.
-    const order = [link, doc.querySelector("table"), form];
-    for (let i = 1; i < order.length; i++) {
-      expect(
-        order[i - 1]!.compareDocumentPosition(order[i]!) &
-          4 /* DOCUMENT_POSITION_FOLLOWING */,
-      ).toBeTruthy();
-    }
-  });
-
-  it("uses date and time inputs, and keeps the field names the form script reads", () => {
-    const doc = eventsPage([]);
-    const date = doc.querySelector<HTMLInputElement>('input[name="date"]');
-    const time = doc.querySelector<HTMLInputElement>('input[name="time"]');
-    expect(date?.type).toBe("date");
-    expect(time?.type).toBe("time");
-    // A browser sends HH:MM unless a step under a minute is set.
-    expect(time?.hasAttribute("step")).toBe(false);
-    // The past date that used to be the placeholder is gone.
-    expect(doc.body.innerHTML).not.toContain("2026-07-04");
-    // The timezone is a select of zones with the default first (#1426); the
-    // number bounds stay as they were (#1304).
-    const zone = doc.querySelector<HTMLSelectElement>(
-      'select[name="timezone"]',
-    );
-    expect(zone?.options[0].value).toBe("");
-    expect(doc.querySelector('input[name="timezone"]')).toBeNull();
-    expect(doc.querySelector("[data-event-form]")).not.toBeNull();
+    // The form lives on its own page (#1527): none on the list.
+    expect(doc.getElementById("schedule-event")).toBeNull();
+    expect(doc.querySelector("form[data-event-form]")).toBeNull();
+    // The link sits before the list.
+    expect(
+      link!.compareDocumentPosition(doc.querySelector("table")!) &
+        4 /* DOCUMENT_POSITION_FOLLOWING */,
+    ).toBeTruthy();
   });
 
   it("folds ended and cancelled events under Past events (n)", () => {

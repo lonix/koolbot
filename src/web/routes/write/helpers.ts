@@ -198,6 +198,12 @@ export async function refuseForm(
      * the page's path: the Group presets editor goes back to `?edit=<id>`.
      */
     fallback?: (flash: Flash) => void;
+    /**
+     * The refusal is not about one field of the form (a limit, a Discord failure),
+     * so no error line carries the form id and the page says it in its own
+     * callout (#1527). Skips the check that the first field's line is on the page.
+     */
+    unmarked?: boolean;
   },
 ): Promise<boolean> {
   const messages = Object.values(opts.errors);
@@ -215,7 +221,7 @@ export async function refuseForm(
       // with no message, no marked field and no values would explain nothing.
       const first = Object.keys(opts.errors)[0];
       const marker = `id="${escapeHtml(`${opts.formId}-${first}-error`)}"`;
-      if (html.includes(marker)) {
+      if (opts.unmarked || html.includes(marker)) {
         res.status(422).type("text/html").send(html);
         return true;
       }

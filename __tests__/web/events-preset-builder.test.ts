@@ -13,7 +13,7 @@ import {
   renderPresetEditorForm,
 } from "../../src/web/event-presets-page.js";
 import { renderMyEventPresetsBody } from "../../src/web/me-event-presets-page.js";
-import { renderEventsPage } from "../../src/web/admin-views.js";
+import { renderAdminNewEvent } from "./new-event-page-helper.js";
 
 type Values = Record<string, string>;
 type Surface = "admin" | "me";
@@ -301,7 +301,7 @@ describe.each<Surface>(["admin", "me"])(
 
 describe("the shared builder (#1472)", () => {
   const section = (maxCount: number): string =>
-    renderEventsPage({
+    renderAdminNewEvent({
       csrfToken: "t",
       remainingMs: 1,
       categoryConfigured: true,
@@ -362,7 +362,7 @@ function bootAny(
   defaultCount: number,
 ): JSDOM {
   if (surface !== "event") return boot(surface, values, maxCount, defaultCount);
-  const page = renderEventsPage({
+  const page = renderAdminNewEvent({
     csrfToken: "t",
     remainingMs: 1,
     categoryConfigured: true,

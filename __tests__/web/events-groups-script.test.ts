@@ -1,12 +1,16 @@
 /* global HTMLInputElement, HTMLOptionElement, HTMLElement */
 /**
  * The Groups section's page script, run for real in jsdom (#1188). The markup
- * and script come from `renderEventsPage`, so what is tested is what ships.
+ * and script come from `renderAdminNewEventPage`, so what is tested is what ships.
  */
 import { describe, it, expect } from "@jest/globals";
 import { JSDOM } from "jsdom";
-import { renderEventsPage, renderGroupRow } from "../../src/web/admin-views.js";
+import { renderGroupRow } from "../../src/web/admin-views.js";
+import { renderAdminNewEvent } from "./new-event-page-helper.js";
 import { validateGroupSetup } from "../../src/services/event-groups.js";
+
+/** Where the page shows a flash, as the New event page draws it (#1527). */
+const BACK_LINK = '<p><a href="/admin/events">Back to Events</a></p>';
 
 const COMMON = {
   csrfToken: "csrf-tok",
@@ -20,7 +24,7 @@ const COMMON = {
 };
 
 function page(maxCount = 15, defaultCount = 2, presets?: unknown): string {
-  return renderEventsPage({
+  return renderAdminNewEvent({
     ...COMMON,
     groupLimits: { defaultCount, maxCount },
     ...(presets ? { groupPresets: presets } : {}),
@@ -38,8 +42,8 @@ function boot(
   if (restore) {
     // The page as it comes back after a refused submit.
     html = html.replace(
-      "<h1>Events</h1>",
-      '<h1>Events</h1><div class="notice err" data-flash>Groups: nope</div>',
+      BACK_LINK,
+      `${BACK_LINK}<div class="notice err" data-flash>Groups: nope</div>`,
     );
   }
   const dom = new JSDOM(html, {

@@ -138,7 +138,7 @@ afterEach(async () => {
 
 describe.each([
   [
-    "/events",
+    "/events/new",
     "event features",
     // The inline form names the permission, not the feature: the field says which.
     "Bot lacks Manage Channels",

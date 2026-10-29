@@ -33,37 +33,21 @@ import {
   respondSectionFlash,
   refuseForm,
 } from "./helpers.js";
-import { EVENT_CREATE_FORM } from "../../admin-views.js";
+import {
+  ADMIN_NEW_EVENT_FORM,
+  ADMIN_NEW_EVENT_PATH,
+} from "../../admin-new-event-page.js";
 
 /**
- * The refused fields the inline Schedule form draws an error line for. The
- * validator names one field at a time (#1531); When, Timezone and Groups have
- * no line on this form, so those refusals stay the flash.
+ * What the New event form posted, as a refused form shows it: every text field
+ * as typed, the Groups rows included (#1523, #1527). The page reads them back
+ * with the same functions the host's form uses.
  */
-const MARKED_FIELDS: readonly string[] = [
-  "title",
-  "description",
-  "date",
-  "time",
-  "duration",
-];
-
-/** What the Schedule form posted, as a refused form shows it: text as typed (#1523). */
 export function eventFormValues(body: unknown): Record<string, string> {
-  const source = (body ?? {}) as Record<string, unknown>;
   const values: Record<string, string> = {};
-  for (const name of [
-    "title",
-    "description",
-    "when",
-    "date",
-    "time",
-    "duration",
-    "timezone",
-    "recurrence",
-  ]) {
-    values[name] =
-      typeof source[name] === "string" ? (source[name] as string) : "";
+  if (!body || typeof body !== "object") return values;
+  for (const [name, raw] of Object.entries(body as Record<string, unknown>)) {
+    if (name !== "_csrf" && typeof raw === "string") values[name] = raw;
   }
   return values;
 }
@@ -86,36 +70,26 @@ export function createEventsRouter(client: Client): Router {
         via: "admin",
       });
       if (!result.ok) {
-        // A refusal about the form's own fields comes back as the page with
-        // each field marked and what was typed. The Groups section, the
-        // per-host cap and an unreadable setting are not about one field: they
-        // stay the flash (and the Groups rows come back from the draft the
-        // form's script keeps for exactly that).
-        const marked: Record<string, string> | undefined =
+        // Answered with the New event page itself, what was typed put back and
+        // the refused field marked (#1531, #1527), Groups included. A refusal
+        // that is not about one field (the open-event cap, a Discord failure)
+        // is the page's callout. If the page cannot be drawn: the flash.
+        const errors: Record<string, string> =
           result.fields ??
-          (result.field && MARKED_FIELDS.includes(result.field)
+          (result.field
             ? { [result.field]: result.error }
-            : undefined);
-        if (
-          marked &&
-          (await refuseForm(req, res, {
-            page: "/admin/events",
-            formId: EVENT_CREATE_FORM,
-            errors: marked,
-            values: eventFormValues(req.body),
-            // Without the page the refusal keeps its original sentence.
-            fallback: () =>
-              flashRedirect(res, "/admin/events", {
-                type: "err",
-                text: result.error,
-              }),
-          }))
-        ) {
-          return;
-        }
-        flashRedirect(res, "/admin/events", {
-          type: "err",
-          text: result.error,
+            : { form: result.error });
+        await refuseForm(req, res, {
+          page: ADMIN_NEW_EVENT_PATH,
+          formId: ADMIN_NEW_EVENT_FORM,
+          errors,
+          values: eventFormValues(req.body),
+          unmarked: !result.fields && !result.field,
+          fallback: () =>
+            flashRedirect(res, ADMIN_NEW_EVENT_PATH, {
+              type: "err",
+              text: result.error,
+            }),
         });
         return;
       }

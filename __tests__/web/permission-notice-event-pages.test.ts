@@ -12,6 +12,7 @@ import {
   type HostPanelEvent,
 } from "../../src/web/host-panel-view.js";
 import { renderEventsPage } from "../../src/web/admin-views.js";
+import { renderAdminNewEvent } from "./new-event-page-helper.js";
 import { renderNewEventBody } from "../../src/web/event-new-view.js";
 import {
   renderEventEditBody,
@@ -591,12 +592,38 @@ describe("admin Events page", () => {
     rows: [],
   };
 
-  it("puts a finding next to each field of the schedule form and the rest under the status line", () => {
+  it("keeps the findings that belong to no field under the status line, and none next to a field", () => {
     const html = renderEventsPage({ ...props, permissionNotice: everyField });
     const at = (marker: string): number => html.indexOf(marker);
     expect(html.match(/data-permission-notice/g)).toHaveLength(1);
     expect(at("kb-statusline")).toBeLessThan(at("data-permission-notice"));
-    expect(at("Schedule a new event")).toBeLessThan(
+    // The fields are on the New event page now (#1527).
+    expect(html).not.toContain("data-permission-inline");
+  });
+
+  it("says a check that could not run once", () => {
+    const html = renderEventsPage({
+      ...props,
+      permissionNotice: unavailable,
+    });
+    expect(html.match(/Bot permissions could not be checked/g)).toHaveLength(1);
+  });
+});
+
+describe("admin New event page", () => {
+  const props = { csrfToken: "t", remainingMs: 60_000, enabled: true };
+
+  it("puts a finding next to each field of the form and the rest above it", () => {
+    const html = renderAdminNewEvent({
+      ...props,
+      permissionNotice: everyField,
+    });
+    const at = (marker: string): number => html.indexOf(marker);
+    expect(html.match(/data-permission-notice/g)).toHaveLength(1);
+    expect(at("data-permission-notice")).toBeLessThan(
+      at('<form method="POST" action="/admin/events/create"'),
+    );
+    expect(at('id="new-event-groups-h"')).toBeLessThan(
       at('data-permission-inline="event-channels"'),
     );
     expect(at('data-permission-inline="event-channels"')).toBeLessThan(
@@ -606,17 +633,24 @@ describe("admin Events page", () => {
       at('data-permission-inline="event-tags"'),
     );
     expect(html).toContain("Bot lacks Manage Nicknames");
+    // An admin gets the link to Bot permissions.
+    expect(html).toContain('href="/admin/bot-permissions"');
   });
 
   it("says a check that could not run once, not at every field", () => {
-    const html = renderEventsPage({ ...props, permissionNotice: unavailable });
+    const html = renderAdminNewEvent({
+      ...props,
+      permissionNotice: unavailable,
+    });
     expect(html.match(/Bot permissions could not be checked/g)).toHaveLength(1);
     expect(html).not.toContain("data-permission-inline");
   });
 
   it("is byte-for-byte what it was when there is nothing to say", () => {
-    const plain = renderEventsPage(props);
-    expect(renderEventsPage({ ...props, permissionNotice: null })).toBe(plain);
+    const plain = renderAdminNewEvent(props);
+    expect(renderAdminNewEvent({ ...props, permissionNotice: null })).toBe(
+      plain,
+    );
     expect(plain).not.toContain("data-permission");
   });
 });

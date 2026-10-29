@@ -1,6 +1,6 @@
 /**
  * How a refused form is drawn on the Birthdays, Leaderboard roles, Moderation,
- * Role groups, Group presets, Channel manager and Events pages (#1523): a form
+ * Role groups, Group presets, Channel manager and New event pages (#1523, #1527): a form
  * that was not refused renders exactly as before, and the pieces that differ
  * from a plain form (the Moderation log's query, the Tiers rows) behave.
  */
@@ -8,10 +8,14 @@ import { describe, it, expect } from "@jest/globals";
 import { ChannelType } from "discord.js";
 import {
   renderBirthdaysPage,
-  renderEventsPage,
   renderLeaderboardRolesPage,
   renderModerationPage,
 } from "../../src/web/admin-views.js";
+import {
+  ADMIN_NEW_EVENT_FORM,
+  refusedNewEventForm,
+  renderAdminNewEventPage,
+} from "../../src/web/admin-new-event-page.js";
 import { renderEventPresetsPage } from "../../src/web/event-presets-page.js";
 import { renderRoleGroupsPage } from "../../src/web/role-groups-views.js";
 import { renderChannelManagerPage } from "../../src/web/channel-manager-view.js";
@@ -213,17 +217,32 @@ const channels = (refusedForm?: RefusedForm | null): string =>
     refusedForm,
   });
 
-const events = (refusedForm?: RefusedForm | null): string =>
-  renderEventsPage({
+// The New event page (#1527): drawn from the refused form the way its route draws it.
+const newEvent = (refusedForm?: RefusedForm | null): string => {
+  const view =
+    refusedForm?.formId === ADMIN_NEW_EVENT_FORM
+      ? refusedNewEventForm(refusedForm, "UTC", 120)
+      : null;
+  return renderAdminNewEventPage({
     ...COMMON,
     enabled: true,
-    categoryConfigured: true,
-    announcementConfigured: true,
-    timezone: "UTC",
-    rows: [],
-    settingRows: [],
-    refusedForm,
+    form: {
+      csrfToken: "csrf",
+      timezone: "UTC",
+      defaultDurationMinutes: 120,
+      groupLimits: { defaultCount: 2, maxCount: 8 },
+      groupPresets: [],
+      groupPresetsNotice: null,
+      ...(view
+        ? {
+            refusal: view.refusal,
+            values: view.values,
+            initialWhen: view.initialWhen,
+          }
+        : {}),
+    },
   });
+};
 
 const PAGES: Array<[string, (r?: RefusedForm | null) => string]> = [
   ["Birthdays", birthdays],
@@ -232,7 +251,7 @@ const PAGES: Array<[string, (r?: RefusedForm | null) => string]> = [
   ["Role groups", roleGroups],
   ["Group presets", presets],
   ["Channel manager", channels],
-  ["Events", events],
+  ["New event", newEvent],
 ];
 
 describe("a form that was not refused (#1523)", () => {

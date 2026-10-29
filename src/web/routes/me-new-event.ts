@@ -20,14 +20,8 @@ import {
   enabledPresets,
   loadPresetCatalog,
 } from "../../services/event-group-preset-service.js";
-import {
-  parseGroupForm,
-  resolveGroupCountLimits,
-} from "../../services/event-groups.js";
-import {
-  loadGroupPrefill,
-  type GroupFormPrefill,
-} from "../../services/event-last-setup-service.js";
+import { resolveGroupCountLimits } from "../../services/event-groups.js";
+import { loadGroupPrefill } from "../../services/event-last-setup-service.js";
 import { parseEventWhen } from "../event-when.js";
 import type { EventFormRefusal } from "../event-field-errors.js";
 import { resolveTimezone } from "../../utils/timezone.js";
@@ -36,7 +30,12 @@ import {
   createEventFromForm,
   redirectToHostPanel,
 } from "../event-create.js";
-import { renderNewEventBody, type NewEventValues } from "../event-new-view.js";
+import { renderNewEventBody } from "../event-new-view.js";
+import {
+  groupPrefillFromPost,
+  posted,
+  valuesFromPost,
+} from "../event-new-posted.js";
 import { inAreas, loadPermissionNotice } from "../permission-notice.js";
 import { boundAuditEntry, recordAudit, type AuditEntry } from "../audit.js";
 import { requireCsrf } from "../csrf.js";
@@ -63,70 +62,6 @@ function csrfOf(req: Request): string {
 interface RefusedForm {
   refusal: EventFormRefusal;
   body: Record<string, unknown>;
-}
-
-function posted(body: Record<string, unknown>, name: string): string {
-  const raw = body[name];
-  return typeof raw === "string" ? raw.trim() : "";
-}
-
-/** The text fields as posted. The zone and duration fall back to the page's own when absent or unusable. */
-function valuesFromPost(
-  body: Record<string, unknown>,
-  timezone: string,
-  defaultDuration: number,
-): NewEventValues {
-  const minutes = Number(posted(body, "duration"));
-  return {
-    date: posted(body, "date"),
-    time: posted(body, "time"),
-    title: posted(body, "title"),
-    description: posted(body, "description"),
-    durationMinutes:
-      Number.isInteger(minutes) && minutes > 0 ? minutes : defaultDuration,
-    timezone: posted(body, "timezone") || timezone,
-  };
-}
-
-/**
- * The group section as posted, in the shape the form prefills from. The values
- * are kept whether or not the Groups switch was on (`enabled` restores the
- * switch itself), and each row goes back at the position it was posted in:
- * `parseGroupForm` drops blank rows but keeps their position for messages, so
- * the gaps are refilled to make "Group 2" in a message the second row shown.
- */
-function groupPrefillFromPost(body: Record<string, unknown>): {
-  prefill: GroupFormPrefill;
-  enabled: boolean;
-} {
-  const input = parseGroupForm(body);
-  const blank = { name: "", kind: "team", size: "", tag: "", marker: "" };
-  const rows: GroupFormPrefill["rows"] = [];
-  for (const r of input.rows) {
-    while (rows.length < r.position - 1) rows.push({ ...blank });
-    rows.push({
-      name: r.name,
-      kind: r.kind,
-      size: r.size,
-      tag: r.tag,
-      marker: r.marker,
-    });
-  }
-  return {
-    enabled: input.enabled,
-    prefill: {
-      presetId: input.presetId === "custom" ? "" : input.presetId,
-      groupLabel: input.groupLabel,
-      leaderLabel: input.leaderLabel,
-      channelLeadMinutes: input.channelLeadMinutes,
-      rows,
-      captainsEnabled: input.captainsEnabled === true,
-      captainCustomisationEnabled: input.captainCustomisationEnabled === true,
-      captainsLobby: input.captainsLobby === true,
-      tagsEnabled: input.tagsEnabled === true,
-      tagsSuffix: input.tagsSuffix === true,
-    },
-  };
 }
 
 function notFound(res: Response): void {

@@ -1,13 +1,15 @@
 /**
  * Body of the "New event" page (#1305), rendered inside `renderUserPage` at
  * `/me/events/new`: an event host creates an event of their own. Same fields and
- * names as the admin form (`renderEventsPage`), so one pipeline
+ * names as the admin form (`/admin/events/new`), so one pipeline
  * (`event-create.ts`) reads both. Built from the shared `kb-` components
  * (docs/design/pages.md, NewEventPage); the Groups block is the shared one
  * (`renderGroupsSection`), which #1299 reworks in one place for every form.
  *
- * Nothing here decides who may create: the route's host scope does. The page
- * has no Repeat field, because a host's events do not repeat.
+ * Nothing here decides who may create: the route's scope does. The member
+ * page has no Repeat field, because a host's events do not repeat; the admin
+ * page (`/admin/events/new`, #1527) renders this same body with Repeat on, its
+ * own create route and an admin's wording (`NewEventViewProps`' last block).
  */
 
 import { escapeHtml, scriptTag } from "./html.js";
@@ -70,6 +72,20 @@ export interface NewEventViewProps {
   refusal?: EventFormRefusal | null;
   /** What was posted, put back in the fields of a refused form. */
   values?: NewEventValues;
+  /**
+   * What differs for the admin form (#1527). Every default is the host's page, so
+   * `/me/events/new` renders exactly as before.
+   */
+  /** Where the form posts. */
+  formAction?: string;
+  /** Where the Groups block sends "manage presets". */
+  presetsHref?: string;
+  /** Show Repeat (an admin's events may repeat; a host's do not). */
+  allowRecurrence?: boolean;
+  /** Offer a blank first timezone ("server zone"), as the admin form always did. */
+  timezoneBlank?: boolean;
+  /** What to tell the viewer to do about {@link setupNotice}; a link when `href` is set. */
+  setupHelp?: { text: string; href?: string };
 }
 
 /** The posted text fields of a refused form, as the host typed them. */
@@ -82,7 +98,17 @@ export interface NewEventValues {
   durationMinutes: number;
   /** The zone posted (the select keeps it, even one the runtime does not list). */
   timezone: string;
+  /** The Repeat choice posted (admin form only); anything else shows as "none". */
+  recurrence?: string;
 }
+
+/** The Repeat choices (value, label), as the pipeline's `EVENT_RECURRENCES` reads them. */
+const RECURRENCE_CHOICES = [
+  ["none", "Does not repeat"],
+  ["weekly", "Weekly"],
+  ["biweekly", "Every 2 weeks"],
+  ["monthly", "Monthly"],
+] as const;
 
 /** Preset lengths, in minutes (docs/design NumberField: durations are chosen). */
 const DURATION_PRESETS = [30, 45, 60, 90, 120, 180, 240] as const;
@@ -113,6 +139,7 @@ export function renderNewEventBody(props: NewEventViewProps): string {
   const mTitle = mark("title", "new-event-title");
   const mDesc = mark("description", "new-event-description");
   const mDuration = mark("duration", "new-event-duration");
+  const mRepeat = mark("recurrence", "new-event-recurrence");
   const mGroups = mark("groups", "new-event-groups");
   const when = renderSegmented(
     "when",
@@ -132,8 +159,14 @@ export function renderNewEventBody(props: NewEventViewProps): string {
   const refusedCallout = refusal
     ? `${renderRefusalCallout(refusal, "The event was not created")}\n`
     : "";
+  const help = props.setupHelp ?? {
+    text: "Ask an admin to finish setting up Events.",
+  };
+  const setupHelp = help.href
+    ? `<a href="${escapeHtml(help.href)}">${escapeHtml(help.text)}</a>`
+    : escapeHtml(help.text);
   const notice = props.setupNotice
-    ? `<div class="kb-callout kb-callout--warn" role="status"><div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(props.setupNotice)}</p><p class="kb-callout__text">Ask an admin to finish setting up Events.</p></div></div>`
+    ? `<div class="kb-callout kb-callout--warn" role="status"><div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(props.setupNotice)}</p><p class="kb-callout__text">${setupHelp}</p></div></div>`
     : "";
   // Findings that belong to a field sit next to it in the Groups section; the
   // rest is one block under the setup notice. Nothing is added to a page that
@@ -143,6 +176,13 @@ export function renderNewEventBody(props: NewEventViewProps): string {
       canLinkToPage: props.canLinkToPermissions === true,
     });
   const permissionLine = permissionBlock ? `${permissionBlock}\n` : "";
+  const repeat = props.allowRecurrence
+    ? `
+        <div class="kb-field">
+          <label class="kb-label" for="new-event-recurrence">Repeat</label>
+          <select class="kb-select" id="new-event-recurrence" name="recurrence"${mRepeat.attrs}>${RECURRENCE_CHOICES.map(([value, label]) => `<option value="${value}"${value === (v?.recurrence ?? "none") ? " selected" : ""}>${label}</option>`).join("")}</select>${mRepeat.after(10)}
+        </div>`
+    : "";
   return `<header class="kb-pagehead">
   <div class="kb-pagehead__text">
     <h1 class="kb-pagehead__title">New event</h1>
@@ -150,7 +190,7 @@ export function renderNewEventBody(props: NewEventViewProps): string {
   </div>
 </header>
 ${refusedCallout}${notice}
-${permissionLine}<form method="POST" action="/me/events/new" class="kb-stack" data-event-form>
+${permissionLine}<form method="POST" action="${escapeHtml(props.formAction ?? "/me/events/new")}" class="kb-stack" data-event-form>
   <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
   <section class="kb-panel" aria-labelledby="new-event-when-h">
     <header class="kb-panel__head"><h2 class="kb-panel__title" id="new-event-when-h">When</h2></header>
@@ -171,8 +211,8 @@ ${permissionLine}<form method="POST" action="/me/events/new" class="kb-stack" da
         </div>
         <div class="kb-field">
           <label class="kb-label" for="new-event-timezone">Timezone</label>
-          ${renderTimezoneSelect("timezone", v?.timezone ?? props.timezone, { id: "new-event-timezone", defaultZone: props.timezone, ...(mZone.errorId ? { invalid: true, describedBy: mZone.errorId } : {}) })}${mZone.after(10)}
-        </div>
+          ${renderTimezoneSelect("timezone", v?.timezone ?? (props.timezoneBlank ? "" : props.timezone), { id: "new-event-timezone", defaultZone: props.timezone, ...(props.timezoneBlank ? { blank: true } : {}), ...(mZone.errorId ? { invalid: true, describedBy: mZone.errorId } : {}) })}${mZone.after(10)}
+        </div>${repeat}
       </div>
     </div>
   </section>
@@ -196,7 +236,7 @@ ${permissionLine}<form method="POST" action="/me/events/new" class="kb-stack" da
   <section class="kb-panel" aria-labelledby="new-event-groups-h">
     <header class="kb-panel__head"><h2 class="kb-panel__title" id="new-event-groups-h">Groups</h2></header>
     <div class="kb-panel__body">
-      ${mGroups.line ? `${mGroups.line}\n      ` : ""}${renderGroupsSection(props.groupLimits, props.groupPresets, props.groupPresetsNotice, "/me/events/presets", props.groupRemembered ?? null, permissionInline, true)}
+      ${mGroups.line ? `${mGroups.line}\n      ` : ""}${renderGroupsSection(props.groupLimits, props.groupPresets, props.groupPresetsNotice, props.presetsHref ?? "/me/events/presets", props.groupRemembered ?? null, permissionInline, true)}
     </div>
   </section>
   <div class="kb-row"><button type="submit" class="kb-btn kb-btn--primary">Create event</button></div>
