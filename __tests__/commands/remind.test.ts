@@ -62,7 +62,8 @@ const ReminderMock = Reminder as unknown as {
 
 const { ReminderService } =
   await import("../../src/services/reminder-service.js");
-const { data, execute } = await import("../../src/commands/remind.js");
+const { data, execute, autocomplete } =
+  await import("../../src/commands/remind.js");
 
 /** A syntactically valid Mongo ObjectId, for the cancel path. */
 const VALID_ID = "507f1f77bcf86cd799439011";
@@ -252,7 +253,7 @@ describe("/remind set", () => {
     expect(deltaMs).toBeLessThanOrEqual(2 * 60 * 60 * 1000);
   });
 
-  it("confirms with a Discord timestamp and the cancel id", async () => {
+  it("confirms with a Discord timestamp and no database id", async () => {
     const interaction = makeInteraction("set", {
       message: "check the oven",
       in: "2h",
@@ -262,7 +263,9 @@ describe("/remind set", () => {
 
     const text = replyText(interaction);
     expect(text).toMatch(/<t:\d+:F>/);
-    expect(text).toContain(VALID_ID);
+    expect(text).toContain("`/remind cancel`");
+    expect(text).not.toContain(VALID_ID);
+    expect(text).not.toMatch(/id:/);
   });
 
   it("reads a wall-clock date and time in the member's own timezone", async () => {
@@ -434,7 +437,15 @@ describe("/remind list", () => {
     });
     const text = replyText(interaction);
     expect(text).toContain("check the oven");
-    expect(text).toContain(VALID_ID);
+    expect(text).not.toContain(VALID_ID);
+    expect(text).toContain("`/remind cancel`");
+    expect(text).not.toMatch(/id:/);
+    const embed = (
+      interaction.editReply.mock.calls[0][0] as {
+        embeds: { toJSON: () => { footer: { text: string } } }[];
+      }
+    ).embeds[0].toJSON();
+    expect(embed.footer.text).toBe("KoolBot · Reminders");
   });
 });
 
@@ -444,7 +455,10 @@ describe("/remind cancel", () => {
 
     await execute(interaction);
 
-    expect(replyText(interaction)).toContain("That isn't a reminder ID");
+    expect(replyText(interaction)).toContain(
+      "That reminder is gone or isn't yours. Pick one from the list.",
+    );
+    expect(replyText(interaction)).not.toMatch(/\bID\b/);
     expect(ReminderMock.deleteOne).not.toHaveBeenCalled();
   });
 
@@ -469,6 +483,134 @@ describe("/remind cancel", () => {
 
     await execute(interaction);
 
-    expect(replyText(interaction)).toContain("No pending reminder");
+    expect(replyText(interaction)).toContain(
+      "That reminder is gone or isn't yours. Pick one from the list.",
+    );
+    expect(replyText(interaction)).not.toMatch(/\bID\b/);
+  });
+
+  it("offers a picker on the unchanged id option", () => {
+    const json = data.toJSON();
+    const cancel = (json.options ?? []).find((o) => o.name === "cancel") as {
+      options: Array<{
+        name: string;
+        description: string;
+        autocomplete?: boolean;
+      }>;
+    };
+    expect(cancel.options).toHaveLength(1);
+    expect(cancel.options[0]).toMatchObject({
+      name: "id",
+      description: "The reminder to cancel",
+      autocomplete: true,
+    });
+  });
+});
+
+describe("/remind cancel autocomplete", () => {
+  function makeAutocomplete(
+    focused: string,
+    guildId: string | null = "guild-1",
+  ) {
+    return {
+      guildId,
+      user: { id: "user-1" },
+      client: CLIENT,
+      options: { getFocused: () => focused },
+      respond: jest.fn<(c: unknown) => Promise<void>>().mockResolvedValue(),
+    } as never as Parameters<typeof autocomplete>[0] & {
+      respond: jest.Mock;
+    };
+  }
+
+  const reminders = [
+    {
+      _id: "507f1f77bcf86cd799439011",
+      message: "Call mum",
+      remindAt: new Date("2099-01-02T18:00:00Z"),
+    },
+    {
+      _id: "507f1f77bcf86cd799439012",
+      message: "Renew the\nserver",
+      remindAt: new Date("2099-01-03T09:00:00Z"),
+    },
+  ];
+
+  it("lists the caller's own pending reminders by time and text, with the id as value", async () => {
+    mockGetTimezone.mockResolvedValue("UTC");
+    ReminderMock.find.mockReturnValue({ sort: async () => reminders });
+    const interaction = makeAutocomplete("");
+
+    await autocomplete(interaction);
+
+    expect(ReminderMock.find).toHaveBeenCalledWith({
+      userId: "user-1",
+      guildId: "guild-1",
+      delivered: false,
+    });
+    expect(interaction.respond).toHaveBeenCalledWith([
+      { name: "Fri 2 Jan 18:00 · Call mum", value: reminders[0]._id },
+      { name: "Sat 3 Jan 09:00 · Renew the server", value: reminders[1]._id },
+    ]);
+  });
+
+  it("filters by what the member typed", async () => {
+    mockGetTimezone.mockResolvedValue("UTC");
+    ReminderMock.find.mockReturnValue({ sort: async () => reminders });
+    const interaction = makeAutocomplete("SERVER");
+
+    await autocomplete(interaction);
+
+    expect(interaction.respond).toHaveBeenCalledWith([
+      { name: "Sat 3 Jan 09:00 · Renew the server", value: reminders[1]._id },
+    ]);
+  });
+
+  it("offers at most 25 choices with names of at most 100 characters", async () => {
+    mockGetTimezone.mockResolvedValue("UTC");
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      _id: `507f1f77bcf86cd7994390${String(i).padStart(2, "0")}`,
+      message: "x".repeat(300),
+      remindAt: new Date(Date.UTC(2099, 0, 1, 0, i)),
+    }));
+    ReminderMock.find.mockReturnValue({ sort: async () => many });
+    const interaction = makeAutocomplete("");
+
+    await autocomplete(interaction);
+
+    const choices = interaction.respond.mock.calls[0][0] as {
+      name: string;
+    }[];
+    expect(choices).toHaveLength(25);
+    expect(choices.every((c) => c.name.length <= 100)).toBe(true);
+  });
+
+  it("finds a word that sits past the 100-character cut-off of the label", async () => {
+    mockGetTimezone.mockResolvedValue("UTC");
+    const long = {
+      _id: "507f1f77bcf86cd799439021",
+      message: `${"a".repeat(80)} collect passport`,
+      remindAt: new Date("2099-01-02T18:00:00Z"),
+    };
+    ReminderMock.find.mockReturnValue({ sort: async () => [long] });
+    const interaction = makeAutocomplete("passport");
+
+    await autocomplete(interaction);
+
+    const choices = interaction.respond.mock.calls[0][0] as {
+      name: string;
+      value: string;
+    }[];
+    expect(choices.map((c) => c.value)).toEqual([long._id]);
+    expect(choices[0].name.length).toBeLessThanOrEqual(100);
+  });
+
+  it("offers nothing outside a server", async () => {
+    const interaction = makeAutocomplete("", null);
+
+    await autocomplete(interaction);
+
+    expect(interaction.respond).toHaveBeenCalledWith([]);
+    expect(ReminderMock.find).not.toHaveBeenCalled();
   });
 });

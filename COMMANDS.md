@@ -448,14 +448,16 @@ Edit an existing quote that you added.
 **Usage:**
 
 ```text
-/quote edit id:"697bdfe2808f7d245289392c" text:"Updated quote!"
-/quote edit id:"697bdfe2808f7d245289392c" author:@Bob
-/quote edit id:"697bdfe2808f7d245289392c" text:"New text" author:@Bob
+/quote edit id:<pick a quote> text:"Updated quote!"
+/quote edit id:<pick a quote> author:@Bob
+/quote edit id:<pick a quote> text:"New text" author:@Bob
 ```
 
 **Parameters:**
 
-- `id` (required) — Quote ID (shown in the "Quote ID" field of the quote)
+- `id` (required) — the quote to edit. Pick it from the list that appears as
+  you type: the quotes you added, newest first, each shown by its text.
+  Typing narrows the list
 - `text` (optional) — New quote text
 - `author` (optional) — New author
 
@@ -596,7 +598,7 @@ it back to you when it's due.
 /remind set message:"check the oven" in:2h
 /remind set message:"renew server sub" date:YYYY-MM-DD time:18:00
 /remind list
-/remind cancel id:697bdfe2808f7d245289392c
+/remind cancel id:<pick a reminder>
 ```
 
 #### `/remind set`
@@ -621,13 +623,14 @@ Reminders can be set up to a year ahead.
 
 #### `/remind list`
 
-Shows your pending reminders, soonest first, with the ID needed to cancel
-each one. You only ever see your own.
+Shows your pending reminders, soonest first. You only ever see your own.
+Cancel one with `/remind cancel`.
 
 #### `/remind cancel`
 
-Cancels one of your own pending reminders by ID. IDs come from
-`/remind list`.
+Cancels one of your own pending reminders. Pick it from the list that
+appears as you type `id`: your pending reminders, each shown by its due time
+and text. Typing narrows the list.
 
 **How it works:**
 
@@ -1273,11 +1276,11 @@ when its message, role, category, or channel is deleted.
 /seen user:@User                    # Last-seen lookup
 /aka user:@User                     # Previously known names
 /quote add text:"..." author:@User  # Add a quote
-/quote edit id:"..." [text:"..."] [author:@User]
+/quote edit id:<pick> [text:"..."] [author:@User]
 /lfg game:"..." [size:N] [note:"..."]  # Ad-hoc looking-for-group post
 /remind set message:"..." in:2h     # Set a personal reminder
 /remind list                        # Your pending reminders
-/remind cancel id:"..."             # Cancel one of your reminders
+/remind cancel id:<pick>            # Cancel one of your reminders
 /ticket open subject:"..."          # Open a private ticket with staff
 /ticket close                       # Close the ticket you are in
 /warn user:@User reason:"..."       # (mod) record a warning

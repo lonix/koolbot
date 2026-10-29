@@ -30,6 +30,14 @@ const mockUpdateQuoteMessageId = jest.fn<
   }>
 >();
 const mockGetQuoteById = jest.fn<() => Promise<unknown>>();
+const mockListQuotesAddedByUser =
+  jest.fn<
+    (
+      userId: string,
+      search: string,
+      limit: number,
+    ) => Promise<{ _id: string; content: string }[]>
+  >();
 const mockEditQuote = jest.fn<() => Promise<unknown>>();
 const mockExportQuotes = jest.fn<() => Promise<unknown>>();
 const mockImportQuotes = jest.fn<() => Promise<unknown>>();
@@ -47,6 +55,7 @@ jest.unstable_mockModule("../../src/services/quote-service.js", () => ({
     updateQuoteMessageId: mockUpdateQuoteMessageId,
     getQuoteById: mockGetQuoteById,
     editQuote: mockEditQuote,
+    listQuotesAddedByUser: mockListQuotesAddedByUser,
     exportQuotes: mockExportQuotes,
     importQuotes: mockImportQuotes,
   },
@@ -74,7 +83,8 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
 }));
 
-const { execute } = await import("../../src/commands/quote.js");
+const { execute, autocomplete, data } =
+  await import("../../src/commands/quote.js");
 const { UserFacingError } =
   await import("../../src/utils/user-facing-error.js");
 
@@ -372,7 +382,7 @@ describe("/quote edit", () => {
     expect(it_.editReply).toHaveBeenCalledWith(
       errorEmbedPayload({
         title: "Couldn't find that quote",
-        description: expect.stringContaining("quote ID"),
+        description: expect.stringContaining("Pick another one from the list"),
       }),
     );
     expect(mockEditQuote).not.toHaveBeenCalled();
@@ -651,5 +661,62 @@ describe("/quote import", () => {
     const edit = it_.editReply.mock.calls[0][0] as { content: string };
     expect(edit.content).toContain("channel rebuild failed");
     fetchMock.mockRestore();
+  });
+});
+
+describe("/quote edit picker", () => {
+  function makeAutocomplete(
+    focused: string,
+    subcommand: string | null = "edit",
+  ): Parameters<typeof autocomplete>[0] & { respond: jest.Mock } {
+    return {
+      user: { id: "user-1" },
+      options: {
+        getFocused: () => focused,
+        getSubcommand: () => subcommand,
+      },
+      respond: jest.fn<(c: unknown) => Promise<void>>().mockResolvedValue(),
+    } as never;
+  }
+
+  it("keeps the id option name and asks for a picker, not an id", () => {
+    const edit = (data.toJSON().options ?? []).find(
+      (o) => o.name === "edit",
+    ) as {
+      options: { name: string; description: string; autocomplete?: boolean }[];
+    };
+    expect(edit.options.find((o) => o.name === "id")).toMatchObject({
+      description: "The quote to edit",
+      autocomplete: true,
+    });
+  });
+
+  it("offers only the caller's quotes, an excerpt as the name and the id as value", async () => {
+    mockListQuotesAddedByUser.mockResolvedValue([
+      { _id: "q2", content: "Newest\nquote " + "x".repeat(200) },
+      { _id: "q1", content: "Older quote" },
+    ]);
+    const it_ = makeAutocomplete("quo");
+
+    await autocomplete(it_);
+
+    expect(mockListQuotesAddedByUser).toHaveBeenCalledWith("user-1", "quo", 25);
+    const choices = it_.respond.mock.calls[0][0] as {
+      name: string;
+      value: string;
+    }[];
+    expect(choices.map((c) => c.value)).toEqual(["q2", "q1"]);
+    expect(choices[0].name.length).toBeLessThanOrEqual(100);
+    expect(choices[0].name).toMatch(/^Newest quote x/);
+    expect(choices[1].name).toBe("Older quote");
+  });
+
+  it("offers nothing for another subcommand", async () => {
+    const it_ = makeAutocomplete("", null);
+
+    await autocomplete(it_);
+
+    expect(it_.respond).toHaveBeenCalledWith([]);
+    expect(mockListQuotesAddedByUser).not.toHaveBeenCalled();
   });
 });
