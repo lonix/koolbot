@@ -3842,12 +3842,16 @@ with no activity anywhere still sees the current year's empty state.
 year, including the empty state for a year with no data. A small year
 picker at the top of the page only offers years for which you have data
 (voice sessions, text-message activity, or badges), plus any year that has
-been snapshotted (see below), and highlights the year actually shown.
-Years with no data render a friendly empty state.
+been snapshotted (see below), and marks the year actually shown with
+`aria-current="page"`, bold type and an underline, not colour alone. Years with no data render an empty state that says how the page fills up.
+
+The page is built from the Web UI's own components: the year's total sits in a
+solid dark-indigo hero panel, the stats are tiles, and each list or chart is a
+panel (#1524).
 
 The **"when you're online"** block (#675) shows two duration-weighted
-distributions computed from your existing voice sessions — a 24-bar
-hour-of-day histogram and a 7-bar day-of-week breakdown — with your peak hour
+distributions computed from your existing voice sessions — a 24-row
+hour-of-day bar list and a 7-row day-of-week bar list — with your peak hour
 and day called out (e.g. _"Most active: Friday · 10 PM"_). Both are bucketed
 in **your** timezone (set it on the Timezone page), and each session is split
 across the local hour and midnight boundaries it crosses so long and overnight

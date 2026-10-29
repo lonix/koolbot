@@ -335,9 +335,24 @@ a.kb-feature__name:focus-visible::after { outline: 2px solid var(--focus); outli
 .kb-bars__row.is-peak { color: var(--lore-peak); font-weight: 600; }
 .kb-bars__val { text-align: right; font-variant-numeric: tabular-nums; }
 
+/* ---------- Rewind ---------- */
+/* The year's headline: a solid lore-deep panel with a lore edge, text in lore-text (10.7:1). The value is the stat-hero style. */
+.kb-hero--lore { padding: var(--space-6); background: var(--lore-deep); border: 1px solid var(--lore); border-radius: var(--radius-lg); color: var(--lore-text); text-align: center; }
+.kb-hero__value { margin: 0; font-size: var(--type-stat-hero-size); line-height: var(--type-stat-hero-line-height); font-weight: var(--type-stat-hero-weight); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.kb-hero__line { margin: var(--space-2) 0 0; font-size: var(--type-body-size); }
+.kb-hero__line--sub { font-size: var(--type-description-size); }
+/* Year chips: the shown year is told apart by weight and an underline as well as the lore ground (never colour alone). */
+.kb-years { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.kb-years a { padding: var(--space-1) var(--space-3); border-radius: var(--radius-pill); background: var(--surface); border: 1px solid var(--border); color: var(--text-secondary); font-size: var(--type-description-size); font-weight: 500; text-decoration: none; }
+.kb-years a:hover { background: var(--chrome); color: var(--text); text-decoration: none; }
+.kb-years a[aria-current="page"] { background: var(--lore); border-color: var(--lore-fill); color: var(--lore-text); font-weight: 700; text-decoration: underline; text-underline-offset: var(--space-1); }
+/* A list row with a second, muted line (a badge's description and date). */
+.kb-list__desc { font-size: var(--type-description-size); color: var(--muted); }
+
 /* ---------- Motion and reflow ---------- */
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
 @media (max-width: 760px) {
+  .kb-hero--lore { padding: var(--space-4); }
   .kb-shell { flex-direction: column; }
   .kb-sidenav { width: auto; border-right: 0; border-bottom: 1px solid var(--border); }
   .kb-main, .kb-member { padding: var(--space-4); }

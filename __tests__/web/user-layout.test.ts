@@ -89,11 +89,10 @@ describe("renderUserPage accessibility (#855)", () => {
     );
   });
 
-  it("leaves the column's gutters and reflow to kb.css and keeps only the Rewind hero rule", () => {
+  it("leaves the column's gutters and reflow, including the Rewind hero's, to kb.css", () => {
     const html = render();
-    expect(html).toContain(
-      "@media (max-width:760px){.rw-hero{padding:1rem}.rw-hero .total{font-size:1.8rem}}",
-    );
+    expect(html).not.toContain(".rw-hero");
+    expect(html).not.toContain("@media (max-width:760px)");
     expect(html).not.toContain("main{padding");
     // The reflow guarantee of #855 stays: wide content scrolls inside the column.
     expect(html).toContain("#main{min-width:0;overflow-x:auto}");
@@ -488,9 +487,9 @@ describe("overview (#1508)", () => {
 describe("renderUserPage layout and shared rules on the design tokens (#1541)", () => {
   const sheet = (html: string): string =>
     /<style>([\s\S]*?)<\/style>/.exec(html)?.[1] ?? "";
-  // Tab-only rules go with the tab that moves to the kb- components (#1508, #1524, #1543).
+  // Tab-only rules go with the tab that moves to the kb- components (#1508, #1543).
   const TAB_ONLY =
-    /\.page-nav|\.feature-list|\.prefs-table|\.tz-|\.preset-|\.form-actions|\.rw-/;
+    /\.page-nav|\.feature-list|\.prefs-table|\.tz-|\.preset-|\.form-actions/;
   const sharedRules = (css: string): string[] =>
     css
       .split("}")
