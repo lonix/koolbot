@@ -149,10 +149,11 @@ const STYLE = [
   // The column is `kb-member` (no sidebar) or `kb-main` > `kb-main__inner` (with one); both come
   // from kb.css with their own padding and 760px reflow. `min-width:0` + `overflow-x:auto` keep a
   // wide table scrolling inside the content column rather than the whole page (WCAG 1.4.10
-  // reflow, #855). A member page is capped at `member-content-max` (DESIGN.md > Layout), also with
-  // a sidebar, where kb-main__inner would otherwise use the admin's `content-max`.
+  // reflow, #855). The old cap of `member-content-max` sat on the padded `main`, so its content was that
+  // minus the two `space-8` gutters; the same cap on the unpadded kb-main__inner (the admin's
+  // `content-max` otherwise) keeps that content width. `kb-member` carries its gutters, so it is the same.
   "#main{min-width:0;overflow-x:auto}",
-  ".kb-main__inner{max-width:var(--member-content-max)}",
+  ".kb-main__inner{max-width:calc(var(--member-content-max) - 2 * var(--space-8))}",
   "#main:focus-visible{outline:none}",
   "h1{margin:0 0 var(--space-1);font-size:var(--type-page-title-size)}",
   "h2{margin:var(--space-6) 0 var(--space-2);font-size:var(--type-section-title-size);color:var(--text-secondary)}",
