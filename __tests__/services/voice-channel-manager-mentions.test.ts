@@ -16,7 +16,12 @@ import {
   beforeEach,
   afterEach,
 } from "@jest/globals";
-import type { Client, GuildMember, VoiceChannel } from "discord.js";
+import {
+  ButtonStyle,
+  type Client,
+  type GuildMember,
+  type VoiceChannel,
+} from "discord.js";
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
@@ -81,6 +86,17 @@ function textChannel(
   };
 }
 
+/**
+ * The controls post names the room only as a real mention (#1519), so the
+ * member-controlled room name never reaches the embed text at all.
+ */
+function expectRoomNotNamed(description: string): void {
+  expect(description).toContain("<#vc-1>");
+  expect(description).not.toContain("555");
+  expect(description).not.toContain("@everyone");
+  expect(description).not.toContain("evil.x");
+}
+
 describe("VoiceChannelManager mentions (#1146)", () => {
   let client: Client;
   let manager: Manager;
@@ -134,14 +150,19 @@ describe("VoiceChannelManager mentions (#1146)", () => {
     const payload = send.mock.calls[0][0] as {
       content: string;
       allowedMentions: unknown;
-      components: Array<{ components: Array<{ data: { label: string } }> }>;
+      components: Array<{
+        components: Array<{ data: { label: string; style: number } }>;
+      }>;
     };
     expect(payload.allowedMentions).toEqual({ users: ["owner-1"] });
     expect(payload.content.startsWith("<@owner-1> ⏳ **")).toBe(true);
     expectNeutral(payload.content);
     // The button label is plain text in Discord, so it is not escaped.
+    expect(payload.components[0].components[0].data.style).toBe(
+      ButtonStyle.Primary,
+    );
     expect(payload.components[0].components[0].data.label).toBe(
-      `Let In ${HOSTILE}`,
+      `Let ${HOSTILE} in`,
     );
   });
 
@@ -160,7 +181,7 @@ describe("VoiceChannelManager mentions (#1146)", () => {
     };
     expect(payload.content).toBe("<@owner-1>");
     expect(payload.allowedMentions).toEqual({ users: ["owner-1"] });
-    expectNeutral(payload.embeds[0].data.description);
+    expectRoomNotNamed(payload.embeds[0].data.description);
   });
 
   it("control panel refresh after a transfer pings only the new owner", async () => {
@@ -168,7 +189,7 @@ describe("VoiceChannelManager mentions (#1146)", () => {
     const message = {
       id: "panel",
       author: { id: "bot" },
-      embeds: [{ title: "🎮 Voice Channel Controls" }],
+      embeds: [{ title: "🔊 Room controls" }],
       edit,
     };
     const { channel } = textChannel("vc-1", HOSTILE, {
@@ -191,6 +212,6 @@ describe("VoiceChannelManager mentions (#1146)", () => {
     };
     expect(payload.content).toBe("<@new-owner>");
     expect(payload.allowedMentions).toEqual({ users: ["new-owner"] });
-    expectNeutral(payload.embeds[0].data.description);
+    expectRoomNotNamed(payload.embeds[0].data.description);
   });
 });

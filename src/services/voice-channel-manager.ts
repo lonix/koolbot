@@ -15,7 +15,6 @@ import {
   GuildMember,
   Guild,
   Client,
-  EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -45,7 +44,10 @@ import {
   pingUsers,
 } from "../utils/allowed-mentions.js";
 import { CooldownManager } from "./cooldown-manager.js";
-import { embedColor } from "../utils/embed-style.js";
+import {
+  buildControlPanel,
+  isControlPanelTitle,
+} from "../utils/voice-control-panel.js";
 
 const configService = ConfigService.getInstance();
 
@@ -2200,8 +2202,8 @@ export class VoiceChannelManager {
           .setCustomId(
             `vc_control_letin_${mainChannelId}_${waitingMember.id}_${ownerId}`,
           )
-          .setLabel(`Let In ${waitingMember.displayName}`)
-          .setStyle(ButtonStyle.Success)
+          .setLabel(`Let ${waitingMember.displayName} in`)
+          .setStyle(ButtonStyle.Primary)
           .setEmoji("🚪");
 
         const row = new ActionRowBuilder<ButtonBuilder>().addComponents(letin);
@@ -2424,74 +2426,18 @@ export class VoiceChannelManager {
         return;
       }
 
-      const isLive = this.liveChannels.has(channel.id);
-      const hasWaitingRoom = this.waitingRooms.has(channel.id);
-
-      // Create the control panel embed
-      const embed = new EmbedBuilder()
-        .setTitle("🎮 Voice Channel Controls")
-        .setDescription(
-          `Manage your voice channel: **${escapeDisplayText(channel.name)}**\n\n` +
-            `Privacy: 🌐 Public` +
-            (isLive ? "\n🔴 **LIVE**" : ""),
-        )
-        .setColor(isLive ? embedColor("danger") : embedColor("ok"))
-        .setFooter({ text: "Only the channel owner can use these controls" });
-
-      const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`vc_control_name_${channel.id}_${ownerId}`)
-          .setLabel("Rename")
-          .setStyle(ButtonStyle.Primary)
-          .setEmoji("✏️"),
-        new ButtonBuilder()
-          .setCustomId(`vc_control_privacy_${channel.id}_${ownerId}`)
-          .setLabel("Make Private")
-          .setStyle(ButtonStyle.Danger)
-          .setEmoji("🔒"),
-        new ButtonBuilder()
-          .setCustomId(`vc_control_invite_${channel.id}_${ownerId}`)
-          .setLabel("Invite")
-          .setStyle(ButtonStyle.Secondary)
-          .setEmoji("👥")
-          .setDisabled(true), // Disabled until channel is private
-        new ButtonBuilder()
-          .setCustomId(`vc_control_transfer_${channel.id}_${ownerId}`)
-          .setLabel("Transfer")
-          .setStyle(ButtonStyle.Secondary)
-          .setEmoji("👑"),
-      );
-
-      const row2Buttons = [
-        new ButtonBuilder()
-          .setCustomId(`vc_control_live_${channel.id}_${ownerId}`)
-          .setLabel(isLive ? "Go Offline" : "Go Live")
-          .setStyle(isLive ? ButtonStyle.Secondary : ButtonStyle.Danger)
-          .setEmoji(isLive ? "⬜" : "🔴"),
-        new ButtonBuilder()
-          .setCustomId(`vc_control_waitingroom_${channel.id}_${ownerId}`)
-          .setLabel(hasWaitingRoom ? "Remove Waiting Room" : "Waiting Room")
-          .setStyle(hasWaitingRoom ? ButtonStyle.Danger : ButtonStyle.Secondary)
-          .setEmoji(hasWaitingRoom ? "🗑️" : "⏳"),
-      ];
-
       const presetsEnabled = await configService.getBoolean(
         "voicechannels.presets.enabled",
         false,
       );
-      if (presetsEnabled) {
-        row2Buttons.push(
-          new ButtonBuilder()
-            .setCustomId(`vc_preset_open_${channel.id}_${ownerId}`)
-            .setLabel("Presets")
-            .setStyle(ButtonStyle.Secondary)
-            .setEmoji("🎛️"),
-        );
-      }
-
-      const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        ...row2Buttons,
-      );
+      const { embed, components } = buildControlPanel({
+        channelId: channel.id,
+        ownerId,
+        isPrivate: this.isRoomPrivate(channel),
+        isLive: this.liveChannels.has(channel.id),
+        hasWaitingRoom: this.waitingRooms.has(channel.id),
+        presetsEnabled,
+      });
 
       // In Discord, voice channels can have built-in text chat enabled
       // This feature is available in some servers but not all
@@ -2502,7 +2448,7 @@ export class VoiceChannelManager {
             content: `<@${ownerId}>`,
             allowedMentions: pingUsers(ownerId),
             embeds: [embed],
-            components: [row1, row2],
+            components,
           });
           if (sent?.id) {
             this.controlPanels.set(channel.id, {
@@ -3903,7 +3849,7 @@ export class VoiceChannelManager {
               (msg) =>
                 msg.author.id === this.client.user?.id &&
                 msg.embeds.length > 0 &&
-                msg.embeds[0].title === "🎮 Voice Channel Controls",
+                isControlPanelTitle(msg.embeds[0].title),
             );
           }
 
@@ -3951,6 +3897,17 @@ export class VoiceChannelManager {
     }
   }
 
+  /** True when @everyone is denied Connect on the room (the "invite only" state). */
+  private isRoomPrivate(channel: VoiceChannel): boolean {
+    const everyoneRole = channel.guild?.roles?.everyone;
+    if (!everyoneRole) return false;
+    return (
+      channel.permissionOverwrites?.cache
+        ?.get(everyoneRole.id)
+        ?.deny.has(PermissionFlagsBits.Connect) ?? false
+    );
+  }
+
   /**
    * Rebuild (edit) an existing control panel message with up-to-date state
    */
@@ -3959,89 +3916,24 @@ export class VoiceChannelManager {
     ownerId: string,
     message: Message,
   ): Promise<void> {
-    const guild = channel.guild;
-    const everyoneRole = guild.roles.everyone;
-    const permissions = channel.permissionOverwrites.cache.get(everyoneRole.id);
-    const isPrivate = permissions?.deny.has(PermissionFlagsBits.Connect);
-    const isLive = this.liveChannels.has(channel.id);
-    const hasWaitingRoom = this.waitingRooms.has(channel.id);
-
-    const embed = new EmbedBuilder()
-      .setTitle("🎮 Voice Channel Controls")
-      .setDescription(
-        `Manage your voice channel: **${escapeDisplayText(channel.name)}**\n\n` +
-          `Privacy: ${isPrivate ? "🔒 Invite-Only" : "🌐 Public"}` +
-          (isLive ? "\n🔴 **LIVE**" : ""),
-      )
-      .setColor(
-        isLive
-          ? embedColor("danger")
-          : isPrivate
-            ? embedColor("warn")
-            : embedColor("ok"),
-      )
-      .setFooter({ text: "Only the channel owner can use these controls" });
-
-    const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`vc_control_name_${channel.id}_${ownerId}`)
-        .setLabel("Rename")
-        .setStyle(ButtonStyle.Primary)
-        .setEmoji("✏️"),
-      new ButtonBuilder()
-        .setCustomId(`vc_control_privacy_${channel.id}_${ownerId}`)
-        .setLabel(isPrivate ? "Make Public" : "Make Private")
-        .setStyle(isPrivate ? ButtonStyle.Success : ButtonStyle.Danger)
-        .setEmoji(isPrivate ? "🌐" : "🔒"),
-      new ButtonBuilder()
-        .setCustomId(`vc_control_invite_${channel.id}_${ownerId}`)
-        .setLabel("Invite")
-        .setStyle(ButtonStyle.Secondary)
-        .setEmoji("👥")
-        .setDisabled(!isPrivate),
-      new ButtonBuilder()
-        .setCustomId(`vc_control_transfer_${channel.id}_${ownerId}`)
-        .setLabel("Transfer")
-        .setStyle(ButtonStyle.Secondary)
-        .setEmoji("👑"),
-    );
-
-    const row2Buttons = [
-      new ButtonBuilder()
-        .setCustomId(`vc_control_live_${channel.id}_${ownerId}`)
-        .setLabel(isLive ? "Go Offline" : "Go Live")
-        .setStyle(isLive ? ButtonStyle.Secondary : ButtonStyle.Danger)
-        .setEmoji(isLive ? "⬜" : "🔴"),
-      new ButtonBuilder()
-        .setCustomId(`vc_control_waitingroom_${channel.id}_${ownerId}`)
-        .setLabel(hasWaitingRoom ? "Remove Waiting Room" : "Waiting Room")
-        .setStyle(hasWaitingRoom ? ButtonStyle.Danger : ButtonStyle.Secondary)
-        .setEmoji(hasWaitingRoom ? "🗑️" : "⏳"),
-    ];
-
     const presetsEnabled = await configService.getBoolean(
       "voicechannels.presets.enabled",
       false,
     );
-    if (presetsEnabled) {
-      row2Buttons.push(
-        new ButtonBuilder()
-          .setCustomId(`vc_preset_open_${channel.id}_${ownerId}`)
-          .setLabel("Presets")
-          .setStyle(ButtonStyle.Secondary)
-          .setEmoji("🎛️"),
-      );
-    }
-
-    const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      ...row2Buttons,
-    );
+    const { embed, components } = buildControlPanel({
+      channelId: channel.id,
+      ownerId,
+      isPrivate: this.isRoomPrivate(channel),
+      isLive: this.liveChannels.has(channel.id),
+      hasWaitingRoom: this.waitingRooms.has(channel.id),
+      presetsEnabled,
+    });
 
     await message.edit({
       content: `<@${ownerId}>`,
       allowedMentions: pingUsers(ownerId),
       embeds: [embed],
-      components: [row1, row2],
+      components,
     });
   }
 
