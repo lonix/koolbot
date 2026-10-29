@@ -147,7 +147,7 @@ The Setup wizard's Access step: who can do what, before any channel is set up.
 
 *Your events*: the home of the Event host scope, for people who host but are not admins or moderators.
 
-- Header: why they can host ("You can host because you are in @Event hosts"), *Start now* and *New event*.
+- Header: why they can host, under the title ("You can host because you are in @Event hosts"), *Start now* and *New event*.
 - *Live now* (or one line saying how Start now works), *Upcoming* with Edit and Cancel, *Past events* folded.
 - Only events the person created; server-wide event settings stay with admins.
 
@@ -218,7 +218,7 @@ the problems, the board (`src/web/host-board-view.ts`), the folded *Group detail
 
 *Mod log*: the home of the Moderator scope, for people who moderate but are not admins.
 
-- Header: why they see it ("You see it because you are in @Moderator").
+- Header: why they see it, once, under the title ("You can moderate because you are in @Moderator"). The sidebar is the navigation: no Mod log / Command audit tabs.
 - Tiles: open cases (warn when any), actions in the last 7 days, timeouts running now.
 - *Open cases* with *Review*, then *Actions* (filter by kind) with mentions for channels and a link to each case.
 - Moderators read the log and review cases; moderation settings stay with admins. Tickets joins this section once the server switches it on.

@@ -39,10 +39,10 @@ import {
 import { inAreas, loadPermissionNotice } from "../permission-notice.js";
 import { boundAuditEntry, recordAudit, type AuditEntry } from "../audit.js";
 import { requireCsrf } from "../csrf.js";
+import { requireEventsOn } from "./events-off.js";
 import { getDisplayedRemainingMs } from "../admin-layout.js";
 import { readMeSurfaceFlags } from "../me-surfaces.js";
 import { renderUserPage } from "../user-layout.js";
-import { renderErrorPage } from "../views.js";
 import { readSignedFlash } from "../http-flash.js";
 import type { AuthenticatedRequest, WebSessionContext } from "../session.js";
 
@@ -64,35 +64,11 @@ interface RefusedForm {
   body: Record<string, unknown>;
 }
 
-function notFound(res: Response): void {
-  res
-    .status(404)
-    .type("text/html")
-    .send(
-      renderErrorPage({
-        title: "Not found",
-        heading: "Not found",
-        bodyHtml:
-          '<p>Events are switched off on this server. Visit <a href="/me/">/me</a> for your own preferences.</p>',
-        product: "KoolBot",
-      }),
-    );
-}
-
 export function createMeNewEventRouter(client: Client): Router {
   const router = Router();
   router.use(requireCsrf);
 
-  // A strict read: a failed read is a 500, not "Events are off".
-  router.use((req, res, next) => {
-    void ConfigService.getInstance()
-      .getBooleanStrict("events.enabled", false)
-      .then((on) => {
-        if (on) next();
-        else notFound(res);
-      })
-      .catch(next);
-  });
+  router.use(requireEventsOn);
 
   // The form, for a fresh page (GET) and for a refused post (#1531), which is
   // answered in the same response so what was typed is not lost.

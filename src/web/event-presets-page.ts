@@ -361,6 +361,11 @@ export interface PresetEditorFormProps {
   addLabel?: string;
   /** The editor, when the last save was refused (#1523); `values` then holds what was typed. */
   refusedForm?: RefusedForm | null;
+  /**
+   * Who is editing. An admin can change the limit, so the admin page names its
+   * setting; a host cannot, so they read the number and who to ask (#1528).
+   */
+  audience?: "admin" | "host";
 }
 
 /**
@@ -431,7 +436,7 @@ export function renderPresetEditorForm(props: PresetEditorFormProps): string {
     .join("");
   const oversize =
     total > props.maxCount
-      ? `<div class="notice warn" role="status">This setup has ${total} groups${lobbyOn ? " (counting the Captains lobby)" : ""} but the limit is ${props.maxCount} (<code>events.groups.max_count</code>). Remove groups, or raise the limit, before saving; nothing is dropped for you.</div>`
+      ? `<div class="notice warn" role="status">This setup has ${total} groups${lobbyOn ? " (counting the Captains lobby)" : ""} but the limit is ${props.maxCount}${props.audience === "host" ? ". Remove groups before saving, or ask an admin to raise the limit; nothing is dropped for you." : " (<code>events.groups.max_count</code>). Remove groups, or raise the limit, before saving; nothing is dropped for you."}</div>`
       : "";
   const editorHtml = props.editUnavailable
     ? '<div class="notice err" role="status">This preset cannot be loaded right now because the preset library could not be read. Nothing was changed. Reload the page in a moment to edit it.</div>'
@@ -465,7 +470,7 @@ export function renderPresetEditorForm(props: PresetEditorFormProps): string {
     </div>
     <template data-group-row-template>${renderGroupRow("__N__", "__P__")}</template>
     <button type="button" class="btn" data-add-group hidden>Add a group</button>
-    <p class="muted">Up to ${props.maxCount} groups (<code>events.groups.max_count</code>). The Captains lobby counts as one of them. Rows left completely empty are ignored.</p>
+    <p class="muted">Up to ${props.maxCount} groups${props.audience === "host" ? " (ask an admin to raise it)" : " (<code>events.groups.max_count</code>)"}. The Captains lobby counts as one of them. Rows left completely empty are ignored.</p>
     <button type="submit" class="btn btn-primary">${props.editing ? "Save changes" : (props.addLabel ?? "Add preset")}</button>
     ${props.editing ? `<a class="btn" href="${escapeHtml(props.cancelHref)}">Cancel</a>` : ""}
   </form>`;

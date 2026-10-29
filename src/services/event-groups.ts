@@ -558,7 +558,7 @@ export function validateGroupSetup(
   // under its own id.
   if (preset && preset.groups.length > maxCount) {
     errors.push(
-      `Preset "${preset.label}" needs ${preset.groups.length} groups but the limit is ${maxCount} (events.groups.max_count). Choose Custom or raise the limit.`,
+      `Preset "${preset.label}" needs ${preset.groups.length} groups but the limit is ${maxCount}. Choose Custom, or ask an admin to raise the limit.`,
     );
   }
 
@@ -635,7 +635,7 @@ export function validateGroupSetup(
   }
   if (rows.length > maxCount) {
     errors.push(
-      `An event can have at most ${maxCount} groups (events.groups.max_count); this has ${rows.length}${lobbyAdded ? ", counting the captains lobby" : ""}.`,
+      `An event can have at most ${maxCount} groups; this has ${rows.length}${lobbyAdded ? ", counting the captains lobby" : ""}.`,
     );
   }
 

@@ -262,7 +262,7 @@ export function groupBuilderScript(afterBuild: string): string {
     "var l=form.elements['groups_captains_lobby'];var room=max-(l&&l.checked&&!l.disabled?1:0);" +
     "var note=form.querySelector('[data-build-note]');" +
     "if(note){note.hidden=true;note.textContent=''}" +
-    "if(room<1){if(note){note.textContent='The Captains lobby takes the only place the limit allows ('+max+'). Untick Captains lobby to generate groups, or raise the limit.';note.hidden=false}return}" +
+    "if(room<1){if(note){note.textContent='The Captains lobby takes the only place the limit allows ('+max+'). Untick Captains lobby to generate groups.';note.hidden=false}return}" +
     "var n=Math.max(1,Math.min(parseInt(cnt.value,10)||1,room));cnt.value=n;" +
     "var s=parseInt(sz.value,10);var size=s>=MINSIZE&&s<=MAXSIZE?String(s):'';" +
     "var byColour=form.querySelector('input[name=groups_build_names]:checked').value==='colours'&&n<=COLOURS.length;" +

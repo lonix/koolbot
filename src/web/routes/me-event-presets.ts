@@ -38,6 +38,7 @@ import {
   type AuditEntry,
 } from "../audit.js";
 import { requireCsrf } from "../csrf.js";
+import { requireEventsOn } from "./events-off.js";
 import { getDisplayedRemainingMs } from "../admin-layout.js";
 import { readMeSurfaceFlags } from "../me-surfaces.js";
 import { renderUserPage } from "../user-layout.js";
@@ -107,6 +108,8 @@ async function readLimits(): Promise<{
 export function createMeEventPresetsRouter(client: Client): Router {
   const router = Router();
   router.use(requireCsrf);
+  // Hidden from the sidebar and a 404 while Events is off, like New event (#1528).
+  router.use(requireEventsOn);
 
   router.get("/", (req, res, next) => {
     const session = (req as AuthenticatedRequest).webSession;
@@ -164,7 +167,7 @@ export function createMeEventPresetsRouter(client: Client): Router {
       }
       res.type("text/html").send(
         renderUserPage({
-          title: "My event presets",
+          title: "Event presets",
           active: "/me/events/presets",
           body: renderMyEventPresetsBody({
             csrfToken: csrfOf(req),

@@ -206,7 +206,7 @@ describe("sidebar per scope (non-admin /me)", () => {
     expect(badges(doc)).toEqual(["Event host", "Moderator"]);
   });
 
-  it("offers New event to a host only while Events is on (#1305)", () => {
+  it("offers New event and Event presets to a host only while Events is on (#1305, #1528)", () => {
     const on = { ...host, features: { "events.enabled": true } as const };
     expect(links(userPage(on))).toEqual([
       "My preferences",
@@ -216,18 +216,29 @@ describe("sidebar per scope (non-admin /me)", () => {
     ]);
     const off = { ...host, features: { "events.enabled": false } as const };
     expect(links(userPage(off))).not.toContain("New event");
+    expect(links(userPage(off))).not.toContain("Event presets");
     // A moderator who does not host is never offered it.
     const mod = { ...moderator, features: { "events.enabled": true } as const };
     expect(links(userPage(mod))).not.toContain("New event");
+    expect(links(userPage(mod))).not.toContain("Event presets");
+  });
+
+  it("gives Event presets its own icon, not the one of Your events", () => {
+    const iconOf = (label: string): string => {
+      const on = { ...host, features: { "events.enabled": true } as const };
+      const link = Array.from(
+        userPage(on).querySelectorAll(".kb-sidenav a"),
+      ).find((a) => text(a).trim() === label);
+      return link?.querySelector("svg")?.innerHTML ?? "";
+    };
+    expect(iconOf("Event presets")).not.toBe("");
+    expect(iconOf("Event presets")).not.toBe(iconOf("Your events"));
   });
 
   it("uses the real registry: host, moderator, both and member", () => {
     expect(headings(userPage(host))).toEqual(["You", "Hosting"]);
-    expect(links(userPage(host))).toEqual([
-      "My preferences",
-      "Your events",
-      "Event presets",
-    ]);
+    // New event and Event presets need Events, which no status says is on here.
+    expect(links(userPage(host))).toEqual(["My preferences", "Your events"]);
     // A moderator now sees You and Moderation and a sidebar; Tickets has no
     // page yet, so it never renders.
     expect(headings(userPage(moderator))).toEqual(["You", "Moderation"]);
@@ -241,7 +252,6 @@ describe("sidebar per scope (non-admin /me)", () => {
     expect(links(userPage(both))).toEqual([
       "My preferences",
       "Your events",
-      "Event presets",
       "Mod log",
       "Command audit",
     ]);
@@ -456,7 +466,7 @@ describe("why you see this", () => {
       reasons: { host: ["Event hosts"], staff: [], elevated: false },
     };
     expect(whyText(viewer, "/me/events/presets")).toBe(
-      "Event hostYou can host because you are in @Event hosts.",
+      "Event host You can host because you are in @Event hosts.",
     );
   });
 

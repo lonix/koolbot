@@ -432,7 +432,7 @@ describe("the presets admin page (#1200)", () => {
           defaultCount: 2,
         }),
       ).window.document;
-      const text = doc.querySelector(".subtitle")?.textContent ?? "";
+      const text = doc.querySelector(".kb-pagehead__sub")?.textContent ?? "";
       expect(text).toContain("other hosts cannot see or use them");
       expect(text).toContain("Server admins can see them");
       expect(text).not.toContain("nobody else");

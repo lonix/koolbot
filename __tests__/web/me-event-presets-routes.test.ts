@@ -31,6 +31,7 @@ const mockRecordAudit = jest.fn<(...args: unknown[]) => Promise<undefined>>(
 );
 const mockGetEvent = jest.fn<(id: string) => Promise<unknown>>();
 let configuredMax = 4;
+let eventsEnabled = true;
 
 jest.unstable_mockModule(
   "../../src/models/event-group-personal-preset.js",
@@ -52,6 +53,8 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
         key === "events.groups.max_count" ? configuredMax : fallback,
       getString: async () => "",
       getBoolean: async () => false,
+      getBooleanStrict: async (key: string) =>
+        key === "events.enabled" ? eventsEnabled : false,
       registerReloadCallback: jest.fn(),
     }),
   },
@@ -103,6 +106,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   personal.state.reset();
   configuredMax = 4;
+  eventsEnabled = true;
   current = createTestSession({
     discordUserId: A,
     guildId: GUILD,
@@ -180,6 +184,8 @@ describe("saving", () => {
     for (let i = 0; i < 5; i++) body[`group_${i}_name`] = `G${i}`;
     const tooMany = await save(body);
     expect(tooMany.msg).toContain("at most 4 groups");
+    // A host cannot change the limit, so the refusal does not name its key (#1528).
+    expect(tooMany.msg).not.toContain("max_count");
     expect(personal.state.rows).toHaveLength(0);
     // A refused save is audited by neither: it never reached a write.
     expect(mockRecordAudit).not.toHaveBeenCalled();
@@ -315,6 +321,32 @@ describe("the page", () => {
     expect(list).toContain("could not be read");
     const edit = await page(`edit=my:${"a".repeat(24)}`);
     expect(edit).toContain("cannot be loaded right now");
+  });
+});
+
+describe("the page header and the Events switch (#1528)", () => {
+  it("titles the page like the sidebar entry and has no link back to My preferences", async () => {
+    const html = await page();
+    expect(html).toContain('<h1 class="kb-pagehead__title">Event presets</h1>');
+    expect(html).toContain("<title>Event presets — KoolBot</title>");
+    expect(html).not.toContain("My event presets");
+    expect(html).not.toContain("Back to overview");
+  });
+
+  it("is a 404 for a read and a save while Events is off, and stores nothing", async () => {
+    eventsEnabled = false;
+    const read = await harness.get("");
+    expect(read.status).toBe(404);
+    expect(await read.text()).toContain("Events are switched off");
+    const res = await harness.post("/save", good);
+    expect(res.status).toBe(404);
+    expect(personal.state.rows).toHaveLength(0);
+  });
+
+  it("tells a host the limit as a number and who can raise it, without the config key", async () => {
+    const html = await page();
+    expect(html).toContain("Up to 4 groups (ask an admin to raise it)");
+    expect(html).not.toContain("events.groups.max_count");
   });
 });
 

@@ -726,7 +726,7 @@ describe("the Captains lobby switch (#1251)", () => {
       2,
     );
     expect(errors).toEqual([
-      "An event can have at most 2 groups (events.groups.max_count); this has 3, counting the captains lobby.",
+      "An event can have at most 2 groups; this has 3, counting the captains lobby.",
     ]);
     expect(() =>
       setup(input({ captainsEnabled: true, captainsLobby: true }), 3),
@@ -998,7 +998,7 @@ describe("groupErrorFields (#1523)", () => {
       "Group 1 name: first.",
       "Group 1 name: second.",
       "Add at least one group, or switch groups off. Give each group a name.",
-      "An event can have at most 3 groups (events.groups.max_count); this has 4.",
+      "An event can have at most 3 groups; this has 4.",
     ]);
     expect(fields).toEqual({ group_0_name: "First." });
     expect(rest).toHaveLength(2);

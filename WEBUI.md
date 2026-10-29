@@ -106,17 +106,20 @@ the console links back to **My preferences**. The display name comes from the me
 (the client cache), so the bar adds no Discord call; if it is not cached the bar says "Signed in".
 
 On `/me` the sidebar has one section per scope, headed by the scope's icon and name: **You** (My preferences), **Hosting**
-(Your events, New event and Event presets) and **Moderation** (Mod log and Command audit; Tickets once
+(Your events, and New event and Event presets while Events is on) and **Moderation** (Mod log and Command audit; Tickets once
 it has a page and is on). A section appears when the person holds the scope and it has at least one page that exists. A
 person with one section has **no sidebar**: My preferences keeps its tabs in one centred column. So a Moderator sees You
 and Moderation with a sidebar, a host and moderator sees You, Hosting and Moderation, and a plain member sees no sidebar.
 The case page (`/me/moderation/cases/:id`) has no entry of its own: it is reached from the Mod log, which stays marked
 there. Below 760px the sidebar sits above the content and the top bar wraps (#855).
 
-Every page in the Hosting or Moderation area opens with a line saying why you can see it: "You can host because you are in
+Every page in the Hosting or Moderation area says why you can see it, once, in a line directly under the page title (never above
+it, and never repeated in the page header): "You can host because you are in
 @Event hosts" names the Discord roles that grant the scope (the same role-group snapshot as the scope check, read from the
 cache), "...because you are an Administrator" for admins and the server owner, and "...because you hold the Event host role"
-when no role name is available.
+when no role name is available. The line comes from the session's scope reasons alone; the Mod log, a case and the Command audit
+have no reason of their own and no Mod log and Command audit tabs, because the sidebar is the navigation. The Mod log's
+kind filter marks its current choice with `aria-current="true"`; `"page"` stays on the sidebar item.
 
 - A host reaches only events they created (`isEventHost`); an admin session reaches every event. A member who is not in a host group gets 403
   on `/me/events*`, even for an event they created earlier.
@@ -126,7 +129,7 @@ when no role name is available.
 - Fails closed, all or nothing: both capabilities come from one read of the role groups. If the groups or the member cannot be read
   (Discord or database error), the session is plain `member` for that request, never a partial set, and the
   event and moderation pages answer 403. The request is still served as `me` otherwise.
-- **Moderator scope (#1320).** `/me/moderation` is the Mod log for people who moderate but are not admins. The header says why they see it
+- **Moderator scope (#1320).** `/me/moderation` is the Mod log for people who moderate but are not admins. The scope line under the title says why they see it
   (the Moderator role groups they are in; an administrator session says so instead). It shows three tiles (open cases, actions in the last
   7 days, timeouts running now), the **Open cases** with a **Review** link, and the **Actions** list, filterable by kind (All, Warnings,
   Timeouts, Bans; a kick shows under All), 50 per page. Each row links to its case at `/me/moderation/cases/:id`, where the four decisions
@@ -2166,8 +2169,10 @@ that are on are, with a notice either way; Custom always works. A server that
 never opens the page has every built-in on. The server's presets hold no member data, so
 they are not part of the member data export (a host's personal presets are, see below).
 
-**My event presets** (`/me/events/presets`, #1216) are a host's own pool of presets, next to
-the server's. The host panel's **Live settings** section has **Save these groups as my
+**Event presets** (`/me/events/presets`, #1216; its page title matches the sidebar entry) are a host's own pool of presets, next to
+the server's. Like New event, the page is left out of the sidebar and answers 404 while Events is switched off. A host reads the
+group limit as a number ("Up to 15 groups") and is told to ask an admin to raise it; the admin page names `events.groups.max_count`.
+The host panel's **Live settings** section has **Save these groups as my
 preset**, which opens the editor prefilled with the event's groups (names, kinds, sizes, tags,
 markers, labels, lead time and the clan tags default; never members, leaders or channel ids).
 Only the event's host can prefill from an event (its creator, or an admin, the same check as

@@ -5465,7 +5465,7 @@ export function userPages(): A11yPage[] {
       name: "/me host panel settings (groups on: switch off and remove)",
       html: shell(
         "Host panel: Quiz night",
-        "/me/",
+        "/me/events",
         renderGroupChanges(settingsData({ seriesTick: true })),
       ),
     },
@@ -5545,7 +5545,7 @@ export function userPages(): A11yPage[] {
       name: "/me host panel (event settings, blocked)",
       html: shell(
         "Host panel: Quiz night",
-        "/me/",
+        "/me/events",
         renderEventSettings(
           settingsData({
             blocker: "Events are turned off, so settings cannot be changed.",
@@ -5571,7 +5571,7 @@ export function userPages(): A11yPage[] {
       name: "/me host panel settings confirmation",
       html: shell(
         "Confirm changes: Quiz night",
-        "/me/",
+        "/me/events",
         renderConfirmBody({
           csrfToken: COMMON.csrfToken,
           actionPath:
@@ -5595,7 +5595,7 @@ export function userPages(): A11yPage[] {
       name: "/me host panel (board, locked)",
       html: shell(
         "Host panel: Quiz night",
-        "/me/",
+        "/me/events",
         boardPage(boardData({ locked: true })),
       ),
     },
@@ -5649,7 +5649,7 @@ export function userPages(): A11yPage[] {
       name: "/me host panel (board, leaders on, with a leader and the pull form)",
       html: shell(
         "Host panel: Quiz night",
-        "/me/",
+        "/me/events",
         boardPage(
           boardData({
             teams: boardData().teams.map((t, i) =>
@@ -5681,7 +5681,7 @@ export function userPages(): A11yPage[] {
       name: "/me host panel (board, voice state unreadable, moves switched off)",
       html: shell(
         "Host panel: Quiz night",
-        "/me/",
+        "/me/events",
         boardPage(
           boardData({
             presenceOk: false,
@@ -5698,7 +5698,7 @@ export function userPages(): A11yPage[] {
       name: "/me host panel (board, channels missing, people waiting)",
       html: shell(
         "Host panel: Quiz night",
-        "/me/",
+        "/me/events",
         boardPage(
           boardData({
             sendableTeams: 0,
@@ -5739,7 +5739,7 @@ export function userPages(): A11yPage[] {
       name: "/me host panel (board, no team groups, people and Move people kept)",
       html: shell(
         "Host panel: Quiz night",
-        "/me/",
+        "/me/events",
         boardPage(boardData({ teams: [], sendableTeams: 0 })),
       ),
     },
@@ -5747,7 +5747,7 @@ export function userPages(): A11yPage[] {
       name: "/me host panel (end the event, running group event)",
       html: shell(
         "Host panel: Quiz night",
-        "/me/",
+        "/me/events",
         renderHostPanelBody({
           event: hostEvent({
             groupsEnabled: true,
@@ -5768,8 +5768,8 @@ export function userPages(): A11yPage[] {
     {
       name: "/me event presets (list and editor)",
       html: shell(
-        "My event presets",
-        "/me/",
+        "Event presets",
+        "/me/events/presets",
         renderMyEventPresetsBody({
           csrfToken: COMMON.csrfToken,
           presets: [
@@ -5798,8 +5798,8 @@ export function userPages(): A11yPage[] {
       // As for the admin editor: the builder is shown, scripts are not run (#1472).
       name: "/me event presets (Generate builder shown)",
       html: shell(
-        "My event presets",
-        "/me/",
+        "Event presets",
+        "/me/events/presets",
         renderMyEventPresetsBody({
           csrfToken: COMMON.csrfToken,
           presets: [],
@@ -5815,8 +5815,8 @@ export function userPages(): A11yPage[] {
     {
       name: "/me event presets (editing, read failed)",
       html: shell(
-        "My event presets",
-        "/me/",
+        "Event presets",
+        "/me/events/presets",
         renderMyEventPresetsBody({
           csrfToken: COMMON.csrfToken,
           presets: null,
@@ -5834,7 +5834,7 @@ export function userPages(): A11yPage[] {
       name: "/me host panel (end the event, running plain event)",
       html: shell(
         "Host panel: Quiz night",
-        "/me/",
+        "/me/events",
         renderHostPanelBody({
           event: hostEvent({ state: "active", running: true }),
           controls: {
@@ -5852,7 +5852,7 @@ export function userPages(): A11yPage[] {
       name: "/me host panel (scheduled, no groups)",
       html: shell(
         "Host panel: Quiz night",
-        "/me/",
+        "/me/events",
         renderHostPanelBody({ event: hostEvent({}) }),
       ),
     },
@@ -5860,7 +5860,7 @@ export function userPages(): A11yPage[] {
       name: "/me host panel (ended)",
       html: shell(
         "Host panel: Quiz night",
-        "/me/",
+        "/me/events",
         renderHostPanelBody({
           event: hostEvent({ groupsEnabled: true, state: "ended" }),
         }),
@@ -6022,7 +6022,7 @@ export function userPages(): A11yPage[] {
       name: "/me edit event (not started)",
       html: shell(
         "Edit event: Quiz night",
-        "/me/",
+        "/me/events",
         renderEventEditBody({
           event: editEventView({}),
           csrfToken: COMMON.csrfToken,
@@ -6033,7 +6033,7 @@ export function userPages(): A11yPage[] {
       name: "/me edit event (rejected duration)",
       html: shell(
         "Edit event: Quiz night",
-        "/me/",
+        "/me/events",
         renderEventEditBody({
           event: editEventView({}),
           csrfToken: COMMON.csrfToken,
@@ -6056,7 +6056,7 @@ export function userPages(): A11yPage[] {
       name: "/me edit event (missing bot permissions, admin)",
       html: shell(
         "Edit event: Quiz night",
-        "/me/",
+        "/me/events",
         renderEventEditBody({
           event: editEventView({}),
           csrfToken: COMMON.csrfToken,
@@ -6069,7 +6069,7 @@ export function userPages(): A11yPage[] {
       name: "/me edit event (bot permission check unavailable, host)",
       html: shell(
         "Edit event: Quiz night",
-        "/me/",
+        "/me/events",
         renderEventEditBody({
           event: editEventView({}),
           csrfToken: COMMON.csrfToken,
@@ -6081,7 +6081,7 @@ export function userPages(): A11yPage[] {
       name: "/me edit event (recurring: asks how far the change reaches)",
       html: shell(
         "Edit event: Quiz night",
-        "/me/",
+        "/me/events",
         renderEventEditBody({
           event: editEventView({ series: { cadence: "weekly" } }),
           csrfToken: COMMON.csrfToken,
@@ -6092,7 +6092,7 @@ export function userPages(): A11yPage[] {
       name: "/me edit event (start held by a running Discord event)",
       html: shell(
         "Edit event: Quiz night",
-        "/me/",
+        "/me/events",
         renderEventEditBody({
           event: editEventView({ startLocked: true }),
           csrfToken: COMMON.csrfToken,
@@ -6103,7 +6103,7 @@ export function userPages(): A11yPage[] {
       name: "/me edit event (started: description and duration only)",
       html: shell(
         "Edit event: Quiz night",
-        "/me/",
+        "/me/events",
         renderEventEditBody({
           event: editEventView({ mode: "limited" }),
           csrfToken: COMMON.csrfToken,
@@ -6114,7 +6114,7 @@ export function userPages(): A11yPage[] {
       name: "/me edit event (cover: none yet)",
       html: shell(
         "Edit event: Quiz night",
-        "/me/",
+        "/me/events",
         renderEventEditBody({
           event: editEventView({}),
           csrfToken: COMMON.csrfToken,
@@ -6126,7 +6126,7 @@ export function userPages(): A11yPage[] {
       name: "/me edit event (cover set on a series, admin link)",
       html: shell(
         "Edit event: Quiz night",
-        "/me/",
+        "/me/events",
         renderEventEditBody({
           event: editEventView({}),
           csrfToken: COMMON.csrfToken,
@@ -6139,7 +6139,7 @@ export function userPages(): A11yPage[] {
       name: "/me edit event (cover unavailable)",
       html: shell(
         "Edit event: Quiz night",
-        "/me/",
+        "/me/events",
         renderEventEditBody({
           event: editEventView({}),
           csrfToken: COMMON.csrfToken,
@@ -6488,7 +6488,7 @@ export function shellPages(): A11yPage[] {
     renderUserPage({
       title,
       active,
-      body: `<h1>${title}</h1><p>Page content.</p>`,
+      body: `<header class="kb-pagehead"><div class="kb-pagehead__text"><h1 class="kb-pagehead__title">${title}</h1></div></header><p>Page content.</p>`,
       csrfToken: COMMON.csrfToken,
       remainingMs: COMMON.remainingMs,
       isAdmin: v.role === "admin",
@@ -6550,10 +6550,7 @@ export function allPages(): A11yPage[] {
 
 // ---------- /me/moderation (#1320) ----------
 
-const MOD_REASON = { kind: "groups", names: ["Moderator"] } as const;
-
 const modLogProps = (over: Partial<ModLogBodyProps> = {}): ModLogBodyProps => ({
-  reason: MOD_REASON,
   enabled: true,
   casesEnabled: true,
   tiles: {
@@ -6672,7 +6669,6 @@ function moderatorPages(
     ),
   });
   const auditProps = {
-    reason: MOD_REASON,
     enabled: true,
     commandOptions: ["warn", "component:poll-vote"],
     userOptions: [{ id: "u-1", label: "Mod Mia" }],
@@ -6742,7 +6738,6 @@ function moderatorPages(
       "Mod log",
       renderModLogBody(
         modLogProps({
-          reason: { kind: "admin" },
           openCases: [],
           tiles: {
             openCases: 0,
@@ -6788,7 +6783,6 @@ function moderatorPages(
       "case (live, with the Review form)",
       "Case #4",
       renderModCaseBody({
-        reason: MOD_REASON,
         csrfToken: COMMON.csrfToken,
         case: modCase(),
         defaultReviewDays: 90,
@@ -6798,7 +6792,6 @@ function moderatorPages(
       "case (resolved)",
       "Case #4",
       renderModCaseBody({
-        reason: MOD_REASON,
         csrfToken: COMMON.csrfToken,
         case: modCase({
           live: false,
@@ -6809,11 +6802,7 @@ function moderatorPages(
         defaultReviewDays: 90,
       }),
     ),
-    page(
-      "case (not found)",
-      "Case not found",
-      renderModCaseMissingBody(MOD_REASON, true),
-    ),
+    page("case (not found)", "Case not found", renderModCaseMissingBody(true)),
     page(
       "command audit (read only)",
       "Command audit",
@@ -6833,7 +6822,6 @@ function moderatorPages(
       "case (history unavailable)",
       "Case #4",
       renderModCaseBody({
-        reason: MOD_REASON,
         csrfToken: COMMON.csrfToken,
         case: modCase({ historyUnavailable: true, history: [] }),
         defaultReviewDays: 90,

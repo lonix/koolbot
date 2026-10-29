@@ -21,7 +21,6 @@ import { env } from "../../config/env.js";
 import { ConfigService } from "../../services/config-service.js";
 import { ModerationService } from "../../services/moderation-service.js";
 import { ModerationCaseService } from "../../services/moderation-case-service.js";
-import { RoleGroupService } from "../../services/role-group-service.js";
 import {
   SYSTEM_ACTOR,
   type IModerationCase,
@@ -58,7 +57,6 @@ import {
   renderModCaseBody,
   renderModCaseMissingBody,
   renderModLogBody,
-  type ModeratorReason,
   type OpenCaseItem,
 } from "../me-moderation-page.js";
 import { flashRedirect } from "./write/helpers.js";
@@ -110,35 +108,6 @@ export async function countActiveTimeouts(
   } catch (err) {
     logger.debug("mod log: timeout count failed", err);
     return null;
-  }
-}
-
-/**
- * Why this person holds the Moderator scope: the names of the role groups
- * that carry the `staff` capability and whose role they have, for the page
- * header. Best effort: any failure just leaves the capability label.
- */
-async function moderatorReason(
-  client: Client,
-  session: NonNullable<AuthenticatedRequest["webSession"]>,
-): Promise<ModeratorReason> {
-  if (session.role === "admin") return { kind: "admin" };
-  try {
-    const guild = await client.guilds.fetch(session.guildId);
-    const member = guild.members.cache.get(session.discordUserId);
-    const groups = await RoleGroupService.getInstance().list(session.guildId);
-    const names = groups
-      .filter(
-        (g) =>
-          g.roleId !== null &&
-          g.capabilities.some((c) => c === "staff" || c === "admin") &&
-          member?.roles.cache.has(g.roleId),
-      )
-      .map((g) => g.name);
-    return { kind: "groups", names };
-  } catch (err) {
-    logger.debug("mod log: could not name the moderator groups", err);
-    return { kind: "groups", names: [] };
   }
 }
 
@@ -197,7 +166,6 @@ export function createMeModerationRouter(client: Client): Router {
     "/",
     guarded(async (req, res, session) => {
       const { guildId } = session;
-      const reason = await moderatorReason(client, session);
       const kind = parseModLogKind(req.query.kind);
       const requestedPage = pageOf(req);
       // Strict reads: a failed lookup goes to the error handler instead of
@@ -212,7 +180,6 @@ export function createMeModerationRouter(client: Client): Router {
           res,
           "Mod log",
           renderModLogBody({
-            reason,
             enabled: false,
             casesEnabled: false,
             tiles: {
@@ -339,7 +306,6 @@ export function createMeModerationRouter(client: Client): Router {
         res,
         "Mod log",
         renderModLogBody({
-          reason,
           enabled: true,
           casesEnabled,
           tiles: {
@@ -366,7 +332,6 @@ export function createMeModerationRouter(client: Client): Router {
     "/cases/:id",
     guarded(async (req, res, session) => {
       const { guildId } = session;
-      const reason = await moderatorReason(client, session);
       const cases = ModerationCaseService.getInstance(client);
       const casesEnabled = await cases.isEnabledStrict();
       // A failed lookup must not read as "no such case": it is left to throw.
@@ -378,7 +343,7 @@ export function createMeModerationRouter(client: Client): Router {
           req,
           res,
           "Case not found",
-          renderModCaseMissingBody(reason, casesEnabled),
+          renderModCaseMissingBody(casesEnabled),
           404,
         );
         return;
@@ -412,7 +377,6 @@ export function createMeModerationRouter(client: Client): Router {
         res,
         `Case #${found.caseNumber}`,
         renderModCaseBody({
-          reason,
           csrfToken: csrfOf(req),
           case: { ...view, historyUnavailable },
           defaultReviewDays: await cases.getDefaultReviewDays(),
@@ -453,7 +417,6 @@ export function createMeModerationRouter(client: Client): Router {
     "/audit",
     guarded(async (req, res, session) => {
       const { guildId } = session;
-      const reason = await moderatorReason(client, session);
       const config = ConfigService.getInstance();
       const requestedPage = pageOf(req);
       const filters = readCommandAuditFilters(
@@ -478,7 +441,6 @@ export function createMeModerationRouter(client: Client): Router {
         res,
         "Command audit",
         renderModAuditBody({
-          reason,
           enabled,
           commandOptions: [
             ...Array.from(client.commands?.keys() ?? []).sort(),
