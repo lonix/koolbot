@@ -1,3 +1,4 @@
+/* global HTMLInputElement */
 /**
  * Route-handler tests for the Role Groups admin writes (#1020), driven over
  * HTTP through the shared harness with the real middleware stack. The group
@@ -13,6 +14,7 @@ import {
   afterEach,
 } from "@jest/globals";
 import type { Client } from "discord.js";
+import { JSDOM } from "jsdom";
 import {
   startAdminHarness,
   stubRequireSession,
@@ -400,9 +402,22 @@ describe("a refused Role groups form (#1523)", () => {
     expect(lines(html)).toEqual({
       "role-group-create-colour-error": "Colour must look like #RRGGBB.",
     });
-    expect(html).toContain(
-      'name="colour" placeholder="#RRGGBB (optional)" maxlength="7" value=" red" id="role-group-create-colour" aria-invalid="true"',
+    // A colour box cannot show text that is not a colour, so the refused value
+    // comes back as the empty state, with the swatch marked and linked to its error.
+    const swatch = new JSDOM(html).window.document.getElementById(
+      "role-group-create-colour",
     );
+    expect(swatch?.getAttribute("type")).toBe("color");
+    expect(swatch?.getAttribute("name")).toBe("colour");
+    expect(swatch?.getAttribute("aria-invalid")).toBe("true");
+    expect(swatch?.getAttribute("aria-describedby")).toBe(
+      "role-group-create-colour-error",
+    );
+    expect(
+      new JSDOM(html).window.document
+        .querySelector<HTMLInputElement>("[name=use_default_colour]")
+        ?.hasAttribute("checked"),
+    ).toBe(true);
     expect(html).toContain('name="name" maxlength="100"');
     expect(html).toContain('value="  Helpers  "');
     expect(html).toContain('<option value="rOk" selected>');
@@ -410,6 +425,70 @@ describe("a refused Role groups form (#1523)", () => {
     expect(html).toMatch(/name="perm" value="ManageMessages" checked/);
     expect(html).toMatch(/name="editPermissions" value="1" checked/);
     expect(svc.create).not.toHaveBeenCalled();
+  });
+
+  // The swatch always posts a colour; the box ("No colour" on Add) wins over it.
+  it("creates the group without a colour when the No colour box is ticked", async () => {
+    await mount();
+    await harness.post("/role-groups/create", {
+      name: "x",
+      colour: "#99aab5",
+      use_default_colour: "true",
+    });
+    expect(svc.create).toHaveBeenCalledWith(
+      "guild-1",
+      expect.objectContaining({ colour: null }),
+    );
+  });
+
+  it("draws a refused colour as the swatch it was sent with, box unticked", async () => {
+    svc.create.mockResolvedValue({
+      ok: false,
+      error: "A group called x already exists.",
+      field: "name",
+    });
+    await mount();
+    const res = await harness.post("/role-groups/create", {
+      name: "x",
+      colour: "#aabbcc",
+    });
+    expect(res.status).toBe(422);
+    const doc = new JSDOM(await res.text()).window.document;
+    const swatch = doc.getElementById("role-group-create-colour");
+    expect(swatch?.getAttribute("value")).toBe("#aabbcc");
+    expect(
+      doc
+        .querySelector<HTMLInputElement>(
+          'form[action$="/role-groups/create"] [name=use_default_colour]',
+        )
+        ?.hasAttribute("checked"),
+    ).toBe(false);
+  });
+
+  it("draws the ticked Leave as it is box again on a refused Edit form", async () => {
+    svc.update.mockResolvedValue({
+      ok: false,
+      error: "That name is already in use.",
+      field: "name",
+    });
+    await mount();
+    const res = await harness.post("/role-groups/g1/edit", {
+      name: "Taken",
+      colour: "#aabbcc",
+      use_default_colour: "true",
+    });
+    expect(res.status).toBe(422);
+    const doc = new JSDOM(await res.text()).window.document;
+    const box = doc
+      .getElementById("role-group-edit-g1-colour")
+      ?.parentElement?.querySelector("[name=use_default_colour]");
+    expect(box?.hasAttribute("checked")).toBe(true);
+    expect(box?.parentElement?.textContent).toContain("Leave as it is");
+    expect(svc.update).toHaveBeenCalledWith(
+      "guild-1",
+      "g1",
+      expect.objectContaining({ colour: null }),
+    );
   });
 
   it.each([

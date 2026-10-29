@@ -347,6 +347,12 @@ export const CHANNEL_PICKER_SCRIPT =
  * - Keep ticked: the value is the stored one, whatever it is;
  * - neither: the value is the swatch.
  *
+ * `emptyLabel` words the empty-state box for a form where "default" is not the
+ * right word ("No colour", "Leave as it is"). A form outside the settings
+ * rows (an announcement's embed colour) names the box `use_default_<field>` so
+ * the Keep box, which exists only for a stored value that is not `#RRGGBB`,
+ * would be `keep_<field>`; those forms never render one.
+ *
  * Every piece of state is a form control the save bar already compares, commits
  * on a saved response and restores on Discard, so this control has no state of
  * its own to keep in step. The save handlers turn the boxes into the value
@@ -359,6 +365,7 @@ export function renderColourInput(
   defaultName: string,
   current: string,
   a: ControlAttrs = {},
+  emptyLabel = "Use default",
 ): string {
   const checked = validateSettingFormat("colour", current);
   const empty = current.trim() === "";
@@ -373,7 +380,7 @@ export function renderColourInput(
     `${attr("aria-describedby", a.describedBy)}${invalidAttrs(a)}` +
     ` name="${escapeHtml(name)}" value="${escapeHtml(shown)}"${lock}>` +
     `<label class="kb-colour__default"><input type="checkbox" data-colour-default ` +
-    `name="${escapeHtml(defaultName)}" value="true"${empty ? " checked" : ""}${lock}> Use default</label>` +
+    `name="${escapeHtml(defaultName)}" value="true"${empty ? " checked" : ""}${lock}> ${escapeHtml(emptyLabel)}</label>` +
     (legacy
       ? `<label class="kb-colour__default"><input type="checkbox" data-colour-keep ` +
         `name="${escapeHtml(keepName)}" value="true" checked${lock}> Keep the stored value</label>` +

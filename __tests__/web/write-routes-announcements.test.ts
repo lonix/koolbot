@@ -341,6 +341,175 @@ describe("POST /announcements/create", () => {
     expect(lastAudit()).toMatchObject({ details: { hasEmbed: true } });
   });
 
+  // The picker posts its parts as well as the string, and a browser without
+  // JavaScript posts only the parts: the server builds the string from them
+  // (a stale hidden `cron` never wins).
+  it.each([
+    ["daily", { cron_mode: "daily", cron_time: "07:05" }, "5 7 * * *"],
+    [
+      "weekly",
+      { cron_mode: "weekly", cron_time: "16:30", cron_dow: "5" },
+      "30 16 * * 5",
+    ],
+    [
+      "monthly",
+      { cron_mode: "monthly", cron_time: "00:00", cron_dom: "1" },
+      "0 0 1 * *",
+    ],
+    [
+      "custom",
+      { cron_mode: "custom", cron_custom: "*/30 * * * *" },
+      "*/30 * * * *",
+    ],
+  ])(
+    "builds a %s schedule from the picker's parts",
+    async (_mode, parts, expected) => {
+      await harness.post("/announcements/create", {
+        ...VALID,
+        cron: "0 9 * * 1",
+        cron_custom: "ignored",
+        ...parts,
+      });
+      expect(mockCreateAnnouncement.mock.calls[0][0]).toMatchObject({
+        cronSchedule: expected,
+      });
+    },
+  );
+
+  it.each([
+    ["no time", { cron_mode: "daily" }, "Pick a time of day."],
+    [
+      "a bad time",
+      { cron_mode: "daily", cron_time: "25:00" },
+      "Pick a time of day.",
+    ],
+    [
+      "a bad weekday",
+      { cron_mode: "weekly", cron_time: "09:00", cron_dow: "7" },
+      "Pick a day of the week.",
+    ],
+    [
+      "a bad day of the month",
+      { cron_mode: "monthly", cron_time: "09:00", cron_dom: "32" },
+      "Use a day of the month from 1 to 31.",
+    ],
+    ["an unknown mode", { cron_mode: "hourly" }, "Pick a schedule type."],
+  ])(
+    "refuses %s in the picker's parts on the schedule field",
+    async (_label, parts, message) => {
+      const res = await harness.post("/announcements/create", {
+        ...VALID,
+        cron: "0 9 * * 1",
+        ...parts,
+      });
+      const r = await refusal(res);
+      expect(r.invalidIds).toEqual(["announcement-create-cron"]);
+      expect(r.errorLines["announcement-create-cron-error"]).toBe(message);
+      expect(mockCreateAnnouncement).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps the built schedule when a refused form is drawn again", async () => {
+    const res = await harness.post("/announcements/create", {
+      ...VALID,
+      message: "",
+      cron_mode: "weekly",
+      cron_time: "16:30",
+      cron_dow: "5",
+    });
+    const r = await refusal(res);
+    const doc = new JSDOM(r.html).window.document;
+    const picker = doc.getElementById("announcement-create-cron");
+    expect(picker?.getAttribute("data-mode")).toBe("weekly");
+    expect(
+      (picker?.querySelector(".cron-time") as unknown as { value: string })
+        .value,
+    ).toBe("16:30");
+  });
+
+  // The swatch always posts a colour, so the "No colour" box has to win or
+  // every announcement would get an embed.
+  it("treats a ticked No colour box as no colour, whatever the swatch holds", async () => {
+    await harness.post("/announcements/create", {
+      ...VALID,
+      embedColor: "#99aab5",
+      use_default_embedColor: "true",
+    });
+    expect(mockCreateAnnouncement.mock.calls[0][0]).toMatchObject({
+      embedData: undefined,
+    });
+    expect(lastAudit()).toMatchObject({ details: { hasEmbed: false } });
+  });
+
+  it("keeps the title and drops the colour when the No colour box is ticked", async () => {
+    await harness.post("/announcements/create", {
+      ...VALID,
+      embedTitle: "Notice",
+      embedColor: "#ff8800",
+      use_default_embedColor: "true",
+    });
+    expect(mockCreateAnnouncement.mock.calls[0][0]).toMatchObject({
+      embedData: { title: "Notice", color: undefined },
+    });
+  });
+
+  it("uses the swatch once the No colour box is unticked", async () => {
+    await harness.post("/announcements/create", {
+      ...VALID,
+      embedColor: "#ff8800",
+    });
+    expect(mockCreateAnnouncement.mock.calls[0][0]).toMatchObject({
+      embedData: { color: 0xff8800 },
+    });
+  });
+
+  it("draws the ticked No colour box again on a refused form", async () => {
+    const res = await harness.post("/announcements/create", {
+      ...VALID,
+      message: "",
+      embedColor: "#ff8800",
+      use_default_embedColor: "true",
+    });
+    const r = await refusal(res);
+    const doc = new JSDOM(r.html).window.document;
+    const create = doc.querySelector('form[action$="/announcements/create"]');
+    expect(
+      create
+        ?.querySelector("[name=use_default_embedColor]")
+        ?.hasAttribute("checked"),
+    ).toBe(true);
+    // The one-off form on the same page keeps its own state.
+    const once = doc.querySelector('form[action$="/announcements/post-once"]');
+    expect(
+      once
+        ?.querySelector("[name=use_default_embedColor]")
+        ?.hasAttribute("checked"),
+    ).toBe(true);
+  });
+
+  it("draws a refused colour as the swatch it was sent with", async () => {
+    const res = await harness.post("/announcements/create", {
+      ...VALID,
+      message: "",
+      embedColor: "#ff8800",
+    });
+    const r = await refusal(res);
+    const doc = new JSDOM(r.html).window.document;
+    const create = doc.querySelector('form[action$="/announcements/create"]');
+    expect(
+      (
+        create?.querySelector("[name=embedColor]") as unknown as {
+          value: string;
+        }
+      ).value,
+    ).toBe("#ff8800");
+    expect(
+      create
+        ?.querySelector("[name=use_default_embedColor]")
+        ?.hasAttribute("checked"),
+    ).toBe(false);
+  });
+
   it("audits a service failure and flashes the reason", async () => {
     mockCreateAnnouncement.mockRejectedValue(new Error("cron collision"));
     const res = await harness.post("/announcements/create", VALID);

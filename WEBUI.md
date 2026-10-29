@@ -1021,6 +1021,16 @@ enable/disable and delete. **Post weekly VC stats now** triggers the weekly
 voice-stats announcement on demand, and **Compose & send once** posts a one-off
 announcement without storing a schedule. Every action is CSRF-protected and audited.
 
+**Feature forms use the setting controls (#1533).** A schedule on the **Announcements** and **Polls** forms is the
+same picker as in Settings (Daily, Weekly, Monthly or Custom for a cron expression), with one help line under it
+instead of a list of examples. An announcement's embed colour is a swatch with a **No colour** box, and a poll
+schedule's duration is a whole-number box from 1 to 768 hours. A poll question's answers are one box each (two shown,
+up to ten, the rest under **More answers**), so an answer can hold a comma. The picker also posts its parts
+(`cron_mode`, `cron_time`, `cron_dow`, `cron_dom`, `cron_custom`) next to the `cron` string it builds, so a browser
+without JavaScript, which shows every part, still posts a schedule the server can build; the server checks the result
+again. The colour box is posted as `use_default_<field>` and wins over the swatch, which always posts a colour.
+On the **Role Groups** forms the colour is the same swatch, with **No colour** on Add and **Leave as it is** on Edit.
+
 The **Announcements** page's card is a single `announcements.enabled` toggle, so
 scheduled announcements can be switched off as well as on without leaving the
 page.
