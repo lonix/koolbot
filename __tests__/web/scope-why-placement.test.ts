@@ -83,6 +83,14 @@ describe("the scope line on host and moderator pages (#1528)", () => {
     expect(placeScopeWhy("<p>x</p>", "")).toBe("<p>x</p>");
   });
 
+  it("finds a header that is the first child of a view-wide kb-stack", () => {
+    const wrapped =
+      '<div class="kb-stack">\n<header class="kb-pagehead">\n  <div class="kb-pagehead__text"><h1>T</h1></div>\n</header><p>b</p></div>';
+    expect(placeScopeWhy(wrapped, "<i></i>")).toBe(
+      '<div class="kb-stack">\n<header class="kb-pagehead">\n  <div class="kb-pagehead__text"><h1>T</h1><i></i></div>\n</header><p>b</p></div>',
+    );
+  });
+
   it("puts the line at the end of the header's text block, before its actions", () => {
     const plain =
       '<header class="kb-pagehead"><div class="kb-pagehead__text"><h1>T</h1></div></header><section><header class="kb-panel__head"></header></section>';

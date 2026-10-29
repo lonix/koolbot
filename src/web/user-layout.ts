@@ -326,8 +326,10 @@ const FLASH_FOCUS_SCRIPT =
  */
 export function placeScopeWhy(body: string, why: string): string {
   if (!why) return body;
-  const head = /^\s*<header class="kb-pagehead">[\s\S]*?<\/header>/.exec(
-    body,
+  // A view may wrap everything in one `kb-stack` (#1603): the header is then its first child.
+  const lead = /^\s*(?:<div class="kb-stack">\s*)?/.exec(body)?.[0] ?? "";
+  const head = /^<header class="kb-pagehead">[\s\S]*?<\/header>/.exec(
+    body.slice(lead.length),
   )?.[0];
   if (!head) return why + body;
   // The text block closes right before the header's actions (if any) or its end.
@@ -336,8 +338,8 @@ export function placeScopeWhy(body: string, why: string): string {
       head,
     );
   if (!close) return why + body;
-  const at = close.index;
-  return head.slice(0, at) + why + head.slice(at) + body.slice(head.length);
+  const at = lead.length + close.index;
+  return body.slice(0, at) + why + body.slice(at);
 }
 
 export function renderUserPage(opts: UserPageOptions): string {
