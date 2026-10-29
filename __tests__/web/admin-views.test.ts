@@ -1727,7 +1727,8 @@ describe("renderEventsPage", () => {
       rows: [{ ...row, awaitingSuccessor: true }],
     });
     expect(waiting).toContain('name="scope" value="series"');
-    expect(waiting).not.toContain("Start now");
+    // The row has no Start now (the header's link to the form is not a row action).
+    expect(waiting).not.toContain("/start-now");
     const done = renderEventsPage({
       ...EVENTS_COMMON,
       enabled: true,
@@ -1868,7 +1869,8 @@ describe("renderEventsPage", () => {
       ],
     });
     expect(html).not.toContain("/admin/events/e2/start-now");
-    expect(html).toContain("cancelled");
+    // The shared state word (#1518): Cancelled, in the folded Past events.
+    expect(html).toContain(">Cancelled<");
   });
 
   it("warns when the category or announcement channel is unset", () => {
