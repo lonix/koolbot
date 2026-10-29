@@ -88,11 +88,11 @@ describe("QuoteChannelManager.postQuote - reaction failure handling", () => {
     const embed = (channel.send.mock.calls[0][0] as any).embeds[0].toJSON();
     expect(embed.footer.text).toBe("KoolBot · Quotes");
     expect(embed.footer.text).not.toContain("6ab39e6de2a244dae7043400");
-    expect(embed.fields).toContainEqual({
-      name: "Quote ID",
-      value: "`6ab39e6de2a244dae7043400`",
-      inline: true,
-    });
+    expect(embed.fields.map((f: { name: string }) => f.name)).toEqual([
+      "Author",
+      "Added by",
+    ]);
+    expect(JSON.stringify(embed)).not.toContain("6ab39e6de2a244dae7043400");
   });
 
   it("still returns the message id when adding reactions fails", async () => {

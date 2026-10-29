@@ -146,13 +146,13 @@ async function handleCustomizeName(
 ): Promise<void> {
   const modal = new ModalBuilder()
     .setCustomId(`vc_modal_name_${channel.id}_${interaction.user.id}`)
-    .setTitle("Customize Channel Name");
+    .setTitle("Rename channel");
 
   const nameInput = new TextInputBuilder()
     .setCustomId("name")
-    .setLabel("Channel Name")
+    .setLabel("Channel name")
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder("Enter new channel name")
+    .setPlaceholder("New channel name")
     .setRequired(true)
     .setMaxLength(100)
     .setValue(channel.name);

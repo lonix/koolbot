@@ -136,37 +136,39 @@ export interface UserPageOptions {
 }
 
 const STYLE = [
-  // kb.css is linked ahead of this sheet but the legacy pages keep their own look until each
-  // moves to the kb- classes (#1314): undo its base line-height here. Never reset `color-scheme`:
-  // the UI is dark only, so native control parts stay dark (#1507).
-  "*,*::before,*::after{box-sizing:border-box}",
-  "body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text);line-height:normal}",
-  "a{color:var(--link);text-decoration:none}",
-  "a:hover{text-decoration:underline}",
+  // kb.css is linked ahead of this sheet and supplies the base (box-sizing, the body font, links,
+  // the focus ring, `.kb-visually-hidden`). What follows is the legacy classes the member and host
+  // pages still use, written on the design tokens (spacing steps, radii and the
+  // per-style type sizes): no font stack and no literal size, radius or spacing in the shared
+  // rules. Each tab-only rule below goes with the tab that moves to the kb- components. Never reset
+  // `color-scheme`: the UI is dark only, so native control parts stay dark (#1507).
+  "body{line-height:normal}",
   // The top bar and sidebar are the shared kb-topbar / kb-sidenav (app-shell.ts, #1317), reflowing
   // at 760px in kb.css; only the sign-out form needs a reset here.
   ".kb-topbar form{margin:0}",
-  // `.shell` is the member-only column: no sidebar, one centred column. With a sidebar the
-  // page uses `.kb-shell` instead.
-  ".shell{display:flex;min-height:calc(100vh - var(--topbar-height));justify-content:center}",
-  // `min-width:0` + `overflow-x:auto` keep a wide table scrolling inside the
-  // content column rather than the whole page (WCAG 1.4.10 reflow, #855).
-  "main{flex:1;padding:2rem 2rem;max-width:64rem;min-width:0;overflow-x:auto}",
+  // The column is `kb-member` (no sidebar) or `kb-main` > `kb-main__inner` (with one); both come
+  // from kb.css with their own padding and 760px reflow. `min-width:0` + `overflow-x:auto` keep a
+  // wide table scrolling inside the content column rather than the whole page (WCAG 1.4.10
+  // reflow, #855). The old cap of `member-content-max` sat on the padded `main`, so its content was that
+  // minus the two `space-8` gutters; the same cap on the unpadded kb-main__inner (the admin's
+  // `content-max` otherwise) keeps that content width. `kb-member` carries its gutters, so it is the same.
+  "#main{min-width:0;overflow-x:auto}",
+  ".kb-main__inner{max-width:calc(var(--member-content-max) - 2 * var(--space-8))}",
   "#main:focus-visible{outline:none}",
-  "h1{margin:0 0 .25rem;font-size:1.5rem}",
-  "h2{margin:1.5rem 0 .5rem;font-size:1.15rem;color:var(--text-secondary)}",
-  ".subtitle{color:var(--muted);margin:0 0 1rem}",
-  ".card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin:0 0 1rem;overflow-x:auto}",
+  "h1{margin:0 0 var(--space-1);font-size:var(--type-page-title-size)}",
+  "h2{margin:var(--space-6) 0 var(--space-2);font-size:var(--type-section-title-size);color:var(--text-secondary)}",
+  ".subtitle{color:var(--muted);margin:0 0 var(--space-4)}",
+  ".card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4) var(--space-5);margin:0 0 var(--space-4);overflow-x:auto}",
   ".card h2{margin-top:0}",
-  ".empty{padding:1rem;color:var(--muted);font-style:italic}",
+  ".empty{padding:var(--space-4);color:var(--muted);font-style:italic}",
   ".muted{color:var(--muted)}",
-  ".mono{font-family:ui-monospace,SFMono-Regular,SF Mono,Menlo,monospace;font-size:.85rem}",
-  ".pill{background:var(--fill);color:var(--pill-text);padding:.15rem .5rem;border-radius:999px;font-size:.75rem}",
-  ".tag{display:inline-block;padding:.1rem .45rem;border-radius:4px;font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em}",
+  ".mono{font-family:var(--font-mono);font-size:var(--type-mono-size)}",
+  ".pill{background:var(--fill);color:var(--pill-text);padding:0 var(--space-2);line-height:1.4;border-radius:var(--radius-pill);font-size:var(--type-help-size)}",
+  ".tag{display:inline-block;padding:0 var(--space-2);line-height:1.4;border-radius:var(--radius-sm);font-size:var(--type-badge-size);font-weight:600;text-transform:uppercase;letter-spacing:.04em}",
   ".tag-info{background:var(--info-bg);color:var(--info-text)}",
   // Disabled-feature "off" tag on the overview cards, mirroring the admin
   // Settings palette (#709).
-  ".notice{padding:.6rem .8rem;border-radius:6px;margin:0 0 1rem}",
+  ".notice{padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);margin:0 0 var(--space-4)}",
   ".notice.info{background:var(--selected);color:var(--info-text)}",
   ".notice.ok{background:var(--ok-bg);color:var(--ok-text)}",
   ".notice.warn{background:var(--warn-bg);color:var(--warn-text)}",
@@ -179,15 +181,16 @@ const STYLE = [
   `select.tz-select{width:100%;max-width:28rem;background:var(--bg);color:var(--text);border:1px solid var(--control);border-radius:4px;padding:.45rem .5rem;font-size:.9rem}`,
   ".tz-preview{margin-top:.75rem;font-size:.9rem;color:var(--text-secondary)}",
   ".tz-preview .now{font-weight:600;color:var(--text)}",
-  ".btn{background:var(--primary);color:var(--on-primary);border:0;padding:.45rem .9rem;border-radius:4px;cursor:pointer;font-weight:600;font-size:.9rem}",
+  ".btn,.btn-secondary,.btn-danger{border:0;padding:var(--space-2) var(--space-4);border-radius:var(--radius-md);cursor:pointer;font-weight:600;font-size:var(--type-ui-size)}",
+  ".btn{background:var(--primary);color:var(--on-primary)}",
   ".btn:hover{background:var(--primary-hover)}",
   // The Privacy page's download control is a link (a plain GET), not a form
   // button, so it needs the block/decoration bits a <button> gets for free.
   "a.btn{display:inline-block;text-decoration:none;color:var(--on-primary)}",
   "a.btn:hover{text-decoration:none;color:var(--on-primary)}",
-  ".btn-secondary{background:var(--fill);color:var(--text);border:0;padding:.45rem .9rem;border-radius:4px;cursor:pointer;font-weight:600;font-size:.9rem}",
+  ".btn-secondary{background:var(--fill);color:var(--text)}",
   ".btn-secondary:hover{background:var(--fill-hover)}",
-  ".btn-danger{background:var(--danger);color:var(--on-primary);border:0;padding:.45rem .9rem;border-radius:4px;cursor:pointer;font-weight:600;font-size:.9rem}",
+  ".btn-danger{background:var(--danger);color:var(--on-primary)}",
   ".btn-danger:hover{background:var(--danger-hover)}",
   ".preset-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.75rem;margin:.5rem 0}",
   ".preset-grid label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:var(--muted)}",
@@ -244,17 +247,15 @@ const STYLE = [
   ".rw-days .db .track .fill{height:100%;background:var(--lore-fill)}",
   ".rw-days .db.peak .track .fill{background:var(--lore-peak)}",
   `.rw-days .db .dv{width:5rem;text-align:right;font-size:.7rem;color:var(--muted);flex-shrink:0}`,
-  // Off-screen but still in the accessibility tree (#855) — same rule as the
-  // admin layout.
-  ".visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;" +
-    "overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}",
-  // Keyboard focus (WCAG 2.4.7, #855): a visible ring on every interactive
-  // element, with the nav / button hover surfaces mirrored for focus.
-  `a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}`,
-  `.skip-link{position:absolute;left:-999px;top:0;z-index:100;background:var(--primary);color:var(--on-primary);padding:.5rem .75rem;border-radius:0 0 4px 0;font-weight:600}`,
+  // The shared preset editor's form (`form.stack`, on the member presets page; the admin layout styles its own).
+  "form.stack label{display:block;margin:0 0 var(--space-3)}",
+  "form.stack input[type=text],form.stack input[type=number],form.stack select{display:block;max-width:100%}",
+  "form.stack fieldset{margin:0 0 var(--space-3)}",
+  "form.inline{display:inline}",
+  `.skip-link{position:absolute;left:-999px;top:0;z-index:100;background:var(--primary);color:var(--on-primary);padding:var(--space-2) var(--space-3);border-radius:0 0 var(--radius-sm) 0;font-weight:600}`,
   ".skip-link:focus{left:0;text-decoration:none}",
-  // Reflow (WCAG 1.4.10, #855): tighter gutters on narrow viewports.
-  "@media (max-width:760px){main{padding:1rem}.rw-hero{padding:1rem}.rw-hero .total{font-size:1.8rem}}",
+  // Reflow (WCAG 1.4.10, #855): the column's own gutters tighten in kb.css; the Rewind hero here.
+  "@media (max-width:760px){.rw-hero{padding:1rem}.rw-hero .total{font-size:1.8rem}}",
 ].join("");
 
 // Same DOM hooks (`#session-countdown`, `data-remaining-ms`,
@@ -320,14 +321,15 @@ export function renderUserPage(opts: UserPageOptions): string {
         })
       : "";
   // The tabs get the Stack's gap to what follows; a page without tabs (the
-  // sidebar scopes) keeps its markup as it was.
+  // sidebar scopes) is one block, so the legacy margins between its parts stay the only spacing
+  // inside the column's flex gap.
   const flash = renderFlash(opts.flash);
   const inner = tabs
     ? `${renderScopeWhy(viewer, opts.active)}<div class="kb-stack">${tabs}${flash}<div>${opts.body}</div></div>`
-    : `${renderScopeWhy(viewer, opts.active)}${flash}${opts.body}`;
+    : `<div>${renderScopeWhy(viewer, opts.active)}${flash}${opts.body}</div>`;
   const content = sideNav
-    ? `<div class="kb-shell">${sideNav}<main id="main" class="kb-main" tabindex="-1">${inner}</main></div>`
-    : `<div class="shell"><main id="main" tabindex="-1">${inner}</main></div>`;
+    ? `<div class="kb-shell">${sideNav}<main id="main" class="kb-main" tabindex="-1"><div class="kb-main__inner">${inner}</div></main></div>`
+    : `<main id="main" class="kb-member" tabindex="-1">${inner}</main>`;
   return [
     "<!doctype html>",
     '<html lang="en"><head>',
@@ -872,7 +874,7 @@ function renderActivityHeatmap(opts: RewindBodyOptions): string {
               // `title` is mouse-hover only; the visually-hidden text carries
               // the same value for assistive tech (WCAG 1.4.1, #855).
               `<div class="hb${cls}" title="${escapeHtml(formatHourLabel(h))}: ${escapeHtml(heatMinutesLabel(v))}">` +
-              `<span class="visually-hidden">${escapeHtml(formatHourLabel(h))}: ${escapeHtml(heatMinutesLabel(v))}</span>` +
+              `<span class="kb-visually-hidden">${escapeHtml(formatHourLabel(h))}: ${escapeHtml(heatMinutesLabel(v))}</span>` +
               `<div class="fill" style="height:${pct}%"></div></div>`
             );
           })

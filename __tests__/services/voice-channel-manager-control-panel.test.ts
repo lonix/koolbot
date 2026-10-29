@@ -73,7 +73,7 @@ describe("VoiceChannelManager - Control Panel Update", () => {
       } as any,
       embeds: [
         {
-          title: "🎮 Voice Channel Controls",
+          title: "🎮 Voice Channel Controls", // old title: still found (#1519)
         } as any,
       ],
       edit: jest.fn().mockResolvedValue(undefined),
@@ -292,11 +292,77 @@ describe("VoiceChannelManager - Control Panel Update", () => {
         .calls[0][0];
 
       // Verify privacy is reflected in description
-      expect(editCall.embeds[0].data.description).toContain("🔒 Invite-Only");
+      expect(editCall.embeds[0].data.fields).toContainEqual({
+        name: "Privacy",
+        value: "Invite only",
+        inline: true,
+      });
 
       // Verify privacy button label
       const privacyButton = editCall.components[0].components[1];
-      expect(privacyButton.data.label).toBe("Make Public");
+      expect(privacyButton.data.label).toBe("Make public");
+    });
+
+    it("finds and rebuilds a post that already has the new title (#1519)", async () => {
+      (mockControlPanelMessage as any).embeds = [{ title: "🔊 Room controls" }];
+
+      await (manager as any).updateChannelOwnership(
+        mockChannel as VoiceChannel,
+        mockNewOwner as GuildMember,
+      );
+
+      expect(mockControlPanelMessage.edit).toHaveBeenCalledTimes(1);
+      const editCall = (mockControlPanelMessage.edit as jest.Mock).mock
+        .calls[0][0];
+      expect(editCall.embeds[0].data.title).toBe("🔊 Room controls");
+      expect(editCall.embeds[0].data.footer.text).toBe(
+        "KoolBot · Voice channels",
+      );
+    });
+
+    it("sendControlPanel and rebuildControlPanel build the same post for the same state (#1519)", async () => {
+      const states = [
+        { priv: false, live: false, waiting: false },
+        { priv: true, live: false, waiting: true },
+        { priv: true, live: true, waiting: false },
+        { priv: false, live: true, waiting: true },
+      ];
+      for (const s of states) {
+        mockPermissionOverwrites.cache.clear();
+        if (s.priv) {
+          mockPermissionOverwrites.cache.set("everyone-role-id", {
+            deny: { has: (p: bigint) => p === PermissionFlagsBits.Connect },
+          });
+        }
+        (manager as any).liveChannels.clear();
+        (manager as any).waitingRooms.clear();
+        if (s.live) (manager as any).liveChannels.add("channel-id");
+        if (s.waiting) {
+          (manager as any).waitingRooms.set("channel-id", "wr");
+        }
+        (mockChannel.send as jest.Mock).mockClear();
+        (mockControlPanelMessage.edit as jest.Mock).mockClear();
+
+        await (manager as any).sendControlPanel(
+          mockChannel as VoiceChannel,
+          "new-owner-id",
+        );
+        await manager.rebuildControlPanel(
+          mockChannel as VoiceChannel,
+          "new-owner-id",
+          mockControlPanelMessage as Message,
+        );
+
+        const sent = (mockChannel.send as jest.Mock).mock.calls[0][0];
+        const edited = (mockControlPanelMessage.edit as jest.Mock).mock
+          .calls[0][0];
+        expect(JSON.parse(JSON.stringify(sent))).toEqual(
+          JSON.parse(JSON.stringify(edited)),
+        );
+        // The real privacy state, not an assumed "public"
+        const privacy = sent.components[0].components[1].data;
+        expect(privacy.label).toBe(s.priv ? "Make public" : "Make private");
+      }
     });
 
     it("should handle missing control panel gracefully", async () => {

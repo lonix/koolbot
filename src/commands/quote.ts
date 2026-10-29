@@ -5,9 +5,11 @@ import {
   PermissionFlagsBits,
   AttachmentBuilder,
   MessageFlags,
+  AutocompleteInteraction,
 } from "discord.js";
 import { quoteService } from "../services/quote-service.js";
 import { QuoteChannelManager } from "../services/quote-channel-manager.js";
+import { truncateText } from "../utils/discord-limits.js";
 import logger from "../utils/logger.js";
 import {
   afterWrite,
@@ -46,6 +48,39 @@ function normalizeUserId(input: string): string {
   return input;
 }
 
+/** Discord shows at most 25 autocomplete choices; a choice name holds 100 characters. */
+const MAX_AUTOCOMPLETE_CHOICES = 25;
+const MAX_CHOICE_NAME_LENGTH = 100;
+
+/**
+ * Autocomplete for `/quote edit`'s `id` option: the quotes the member added,
+ * newest first, each named by an excerpt of its text. The value is the quote's
+ * id, which the member never sees. Only the member who added a quote may edit
+ * it, so the list is scoped to the caller the same way.
+ */
+export async function autocomplete(
+  interaction: AutocompleteInteraction,
+): Promise<void> {
+  if (interaction.options.getSubcommand(false) !== "edit") {
+    await interaction.respond([]);
+    return;
+  }
+  const quotes = await quoteService.listQuotesAddedByUser(
+    interaction.user.id,
+    interaction.options.getFocused(),
+    MAX_AUTOCOMPLETE_CHOICES,
+  );
+  await interaction.respond(
+    quotes.map((quote) => ({
+      name: truncateText(
+        quote.content.replace(/\s+/g, " "),
+        MAX_CHOICE_NAME_LENGTH,
+      ),
+      value: String(quote._id),
+    })),
+  );
+}
+
 export const data = new SlashCommandBuilder()
   .setName("quote")
   .setDescription("Manage quotes in the quote channel")
@@ -73,8 +108,9 @@ export const data = new SlashCommandBuilder()
       .addStringOption((option) =>
         option
           .setName("id")
-          .setDescription("The quote ID to edit (shown on the quote)")
-          .setRequired(true),
+          .setDescription("The quote to edit")
+          .setRequired(true)
+          .setAutocomplete(true),
       )
       .addStringOption((option) =>
         option
@@ -325,7 +361,7 @@ async function handleEdit(
   if (!existingQuote) {
     await replyWithError(interaction, {
       title: "Couldn't find that quote",
-      next: "Check the quote ID and try again.",
+      next: "That quote is gone. Pick another one from the list.",
     });
     return;
   }
