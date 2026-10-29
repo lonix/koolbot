@@ -13,8 +13,11 @@ import { escapeHtml, getInactivityWindowMs } from "./admin-layout.js";
 import { channelMention } from "./discord-labels.js";
 import { designStylesheetLinks } from "./design-assets.js";
 import { CONFIRM_SCRIPT, confirmListAttr, scriptTag } from "./html.js";
+import { SAVEBAR_SCRIPT } from "./savebar.js";
+import { NUMBER_INPUT_SCRIPT } from "./number-input.js";
 import { waitText } from "../utils/member-cooldown.js";
 import {
+  DURATION_PRESETS_SCRIPT,
   TIMEZONE_SELECT_SCRIPT,
   renderTimezoneSelect,
 } from "./setting-pickers.js";
@@ -155,6 +158,12 @@ const STYLE = [
   // minus the two `space-8` gutters; the same cap on the unpadded kb-main__inner (the admin's
   // `content-max` otherwise) keeps that content width. `kb-member` carries its gutters, so it is the same.
   "#main{min-width:0;overflow-x:auto}",
+  // A scroll container is where `position:sticky` resolves, so on a page with a save bar `#main`
+  // must not be one, or the bar sticks inside it instead of the viewport (as `main.has-savebar` in the
+  // admin layout). `clip` still stops a wide child forcing a sideways page scroll.
+  "#main.has-savebar{overflow-x:clip}",
+  // The clip above would cut off the right-hand Save on a narrow screen or at zoom, so the bar wraps instead.
+  "#main.has-savebar .kb-savebar{flex-wrap:wrap}",
   ".kb-main__inner{max-width:calc(var(--member-content-max) - 2 * var(--space-8))}",
   "#main:focus-visible{outline:none}",
   "h1{margin:0 0 var(--space-1);font-size:var(--type-page-title-size)}",
@@ -329,9 +338,14 @@ export function renderUserPage(opts: UserPageOptions): string {
   const inner = tabs
     ? `${renderScopeWhy(viewer, opts.active)}<div class="kb-stack">${tabs}${flash}<div>${opts.body}</div></div>`
     : `<div>${renderScopeWhy(viewer, opts.active)}${flash}${opts.body}</div>`;
+  // A page with a save bar (#1514): `#main` must not be a scroll container, or the bar cannot stick.
+  // The literal only comes from `renderSaveBar` (user text in the body is escaped).
+  const hasSaveBar = opts.body.includes('class="kb-savebar"');
+  const mainClass = (base: string): string =>
+    `${base}${hasSaveBar ? " has-savebar" : ""}`;
   const content = sideNav
-    ? `<div class="kb-shell">${sideNav}<main id="main" class="kb-main" tabindex="-1"><div class="kb-main__inner">${inner}</div></main></div>`
-    : `<main id="main" class="kb-member" tabindex="-1">${inner}</main>`;
+    ? `<div class="kb-shell">${sideNav}<main id="main" class="${mainClass("kb-main")}" tabindex="-1"><div class="kb-main__inner">${inner}</div></main></div>`
+    : `<main id="main" class="${mainClass("kb-member")}" tabindex="-1">${inner}</main>`;
   return [
     "<!doctype html>",
     '<html lang="en"><head>',
@@ -361,6 +375,15 @@ export function renderUserPage(opts: UserPageOptions): string {
     `${scriptTag(SCRIPT)}`,
     `${scriptTag(CONFIRM_SCRIPT)}`,
     `${scriptTag(FLASH_FOCUS_SCRIPT)}`,
+    // Scripts of the controls of a page that has them (#1514): the save bar, the
+    // bounded number box and the duration presets. Each is only sent where its markup is.
+    ...(hasSaveBar ? [`${scriptTag(SAVEBAR_SCRIPT)}`] : []),
+    ...(opts.body.includes("data-number")
+      ? [`${scriptTag(NUMBER_INPUT_SCRIPT)}`]
+      : []),
+    ...(opts.body.includes("data-duration")
+      ? [`${scriptTag(DURATION_PRESETS_SCRIPT)}`]
+      : []),
     "</body></html>",
   ].join("");
 }

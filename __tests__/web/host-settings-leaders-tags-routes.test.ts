@@ -319,11 +319,39 @@ describe("the leaders and tags fields in the Live settings section", () => {
     await save({ s_captainsEnabled: "1", b_captainsEnabled: "0" });
     const on = (await call(panel())).text;
     expect(on).toContain('id="host-leaders-extras"');
-    expect(on).toContain(`${panel()}/leader-label`);
+    // One place to rename leaders (#1514): the field of the settings form, no
+    // second form posting to leader-label.
+    expect(on).not.toContain(`${panel()}/leader-label`);
+    expect(on.split('name="s_leaderLabel"')).toHaveLength(2);
     await save({ s_captainsEnabled: "0", b_captainsEnabled: "1" });
     expect((await call(panel())).text).not.toContain(
       'id="host-leaders-extras"',
     );
+  });
+});
+
+describe("a switched-off row saves as off (#1514)", () => {
+  it("posts the shown value without a value when the switch is unticked, and that saves as off", async () => {
+    lstore.set(EVENT_ID, makeEvent({ captainsEnabled: true }));
+    // What a browser sends for an unticked switch: the base only.
+    await save({ b_captainsEnabled: "1" });
+    expect(stored().captainsEnabled).toBe(false);
+  });
+
+  it("turns clan tags off the same way, and leaves a row alone whose base was not posted", async () => {
+    lstore.set(
+      EVENT_ID,
+      makeEvent({ captainsEnabled: true, tagsEnabled: true }),
+    );
+    await save({ b_tagsEnabled: "1" });
+    expect(stored().tagsEnabled).toBe(false);
+    // A group form posts to the same action without these rows.
+    expect(stored().captainsEnabled).toBe(true);
+  });
+
+  it("a ticked switch posts 1 and saves as on", async () => {
+    await save({ s_captainsEnabled: "1", b_captainsEnabled: "0" });
+    expect(stored().captainsEnabled).toBe(true);
   });
 });
 

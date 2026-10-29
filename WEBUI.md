@@ -2392,10 +2392,17 @@ rights can assign, randomise, move and send people from it, and gets a 403 on an
   path and the baseline. With JavaScript a person can also be dragged to another column: a drop fills in that person's own select and submits the same
   form, so a drop is exactly one `assign` or `unassign` and a refused drop (a full team) is announced in a live region. Moving a person between teams
   never moves them in voice; **Send to teams** is the explicit, separate action for that.
-- **Leaders** (only while leaders are on): **Make leader** or **Remove as leader** in a person's menu (`set-leader`). The leader label rename
-  (`leader-label`) and the last edits leaders made are under **Event settings**. A team a leader renamed shows **Reset name and tag**
+- **Leaders** (only while leaders are on): **Make leader** or **Remove as leader** in a person's menu (`set-leader`). The leader label is renamed
+  with the **What leaders are called** field of **Event settings**, and the last edits leaders made are listed there too (the `leader-label`
+  route stays, but no page posts to it any more). A team a leader renamed shows **Reset name and tag**
   (`reset-team`) in its column.
-- **Event settings** (fold) holds the channel lead time, **Group leaders** and **Clan tags** (children nested) and the leader label; **Change the
+- **Event settings** (fold, #1514) is a list of setting rows saved with one bar (**Save settings**, with **Discard**, counting the rows that
+  changed). **Channel creation time** is a choice of presets (**Server default**, **At the start**, 5 min up to 2 h) with **Custom…** for any whole
+  number of minutes from 0 to 1440; it is text with the reason once the channels exist. **Group leaders** holds **What leaders are called**,
+  **Leaders may rename their team and set its tag** and **Captains lobby** as its children, and **Clan tags** holds **Where the tag goes**
+  (**[RED] Alice** or **Alice [RED]**). Each row has one line; what happens without a confirmation sits behind **More**. The switches post on or off
+  explicitly, so a switch you turn off saves as off. **Captains lobby** stays enabled while leaders are off: it can be switched on in the same save
+  as leaders, and a lobby that exists can always be switched off. **Change the
   groups** (fold) holds the group rows (marker, name, size and, for a team, tag), **Switch preset**, add and remove groups, and switching groups
   on or off. They are separate forms that
   post to `settings`, so saving one never touches the other's rows. The lock row of the settings form moved to the toolbar.
@@ -2548,8 +2555,8 @@ also needs `events.enabled`: setting a leader and pulling leaders refuse while i
   was unassigned a moment earlier is refused ("a leader must be a member of the group").
   A member whose data reset is running is refused, like adding them to a group.
 - **What leaders are called:** the event's leader label (Leader by default, from the form or
-  a preset) is used on the page. **Rename** changes it for this event only (up to 20
-  characters, empty goes back to "Leader").
+  a preset) is used on the page. The **What leaders are called** field of **Event settings** changes it for this
+  event only (up to 20 characters, empty goes back to "Leader").
 - **Unassigning ends the role.** A leader stops being leader when they leave their group:
   the host unassigns them or moves them to another group, a randomise deals them elsewhere
   or nowhere, they join another group's channel, or they reset their data. This is a step

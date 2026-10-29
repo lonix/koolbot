@@ -404,7 +404,7 @@ describe("the switch on the page", () => {
     // Unused rows must not block the submit in the browser (the server checks
     // the rows it uses): only this form skips the browser's field checks.
     expect(r.text).toContain(
-      '<button type="submit" formnovalidate>Switch groups on</button>',
+      '<button type="submit" class="kb-btn" formnovalidate>Switch groups on</button>',
     );
     expect(r.text).toContain('name="groups_pick"');
     expect(r.text).toContain('name="custom_kind_1"');
@@ -880,7 +880,7 @@ describe("a preset with a Captains lobby switches groups on (#1263)", () => {
       '<option value="lib:red-blue-lobby">Red vs Blue with lobby (2 groups)</option>',
     );
     expect(r.text).toContain(
-      "so does a preset's Captains lobby (switch it on with the leaders)",
+      "so does a preset&#39;s Captains lobby (switch it on with the leaders)",
     );
   });
 

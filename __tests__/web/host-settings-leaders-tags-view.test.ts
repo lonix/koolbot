@@ -96,14 +96,41 @@ describe("renderLeadersTagsFields", () => {
     expect(html).not.toContain("groupTags");
   });
 
-  it("selects the stored option of each switch", () => {
+  it("renders each boolean as a switch that posts 1 while on, ticked as stored, and no Off/On select", () => {
     const html = renderLeadersTagsFields(view);
+    expect(html).not.toContain("<select");
+    expect(html).not.toContain("<option");
+    const input = (name: string): string =>
+      html.match(new RegExp(`<input[^>]*name="${name}"[^>]*>`))?.[0] ?? "";
+    // Leaders are on, customisation off, clan tags off, no lobby.
+    expect(input("s_captainsEnabled")).toContain('role="switch"');
+    expect(input("s_captainsEnabled")).toContain('value="1" checked');
+    expect(input("s_captainCustomisationEnabled")).toContain('value="1"');
+    expect(input("s_captainCustomisationEnabled")).not.toContain("checked");
+    expect(input("s_tagsEnabled")).not.toContain("checked");
+    expect(input("s_captainsLobby")).not.toContain("checked");
+    // Where the tag goes is a segmented control showing the result; suffix is stored.
+    expect(html).toContain('<div class="kb-segmented" role="radiogroup"');
     expect(html).toContain(
-      'name="s_captainsEnabled">\n<option value="1" selected>On: each team can have a leader</option>',
+      '<input type="radio" id="host-settings-tagsSuffix-input-0" name="s_tagsSuffix" value="0"><span>[RED] Alice</span>',
     );
     expect(html).toContain(
-      'name="s_captainCustomisationEnabled">\n<option value="1">On</option>\n<option value="0" selected>Off</option>',
+      'name="s_tagsSuffix" value="1" checked><span>Alice [RED]</span>',
     );
+  });
+
+  it("is built from SettingRows with one line each and the rest behind an inline More", () => {
+    const html = renderLeadersTagsFields(view);
+    expect(html).toContain('<p class="kb-overline">Group leaders</p>');
+    expect(html).toContain('<p class="kb-overline">Clan tags</p>');
+    expect(html.match(/class="kb-setting"/g)?.length).toBe(6);
+    expect(html).not.toContain('class="muted"');
+    expect(html).not.toContain('class="field"');
+    expect(html).toContain(
+      '<details class="kb-disclosure kb-disclosure--inline">',
+    );
+    // What happens without a confirmation stays on the page, behind More.
+    expect(html).toContain("Turning leaders off hides the Leaders section");
   });
 
   it("escapes the label; a team name never reaches the page as markup (the team tags are in the group rows now)", () => {
@@ -116,10 +143,10 @@ describe("renderLeadersTagsFields", () => {
   it("nests the leader label, customisation and lobby under Leaders, and the tag position under Clan tags, with a pointer to the team tags", () => {
     const html = renderLeadersTagsFields(view);
     const leaders = html.slice(
-      html.indexOf("<legend>Leaders</legend>"),
-      html.indexOf("<legend>Clan tags</legend>"),
+      html.indexOf("Group leaders</p>"),
+      html.indexOf("Clan tags</p>"),
     );
-    const tags = html.slice(html.indexOf("<legend>Clan tags</legend>"));
+    const tags = html.slice(html.indexOf("Clan tags</p>"));
     const nestedOf = (part: string): string => {
       const i = part.indexOf('<div class="kb-nested"');
       expect(i).toBeGreaterThan(0);
@@ -143,7 +170,7 @@ describe("renderLeadersTagsFields", () => {
     );
     const tc = nestedOf(tags);
     expect(tc).toContain('name="s_tagsSuffix"');
-    expect(tc).toContain('under "Change the groups"');
+    expect(tc).toContain("under &quot;Change the groups&quot;");
     expect(tc).not.toContain("s_groupTags_");
     expect(tc).not.toContain('name="s_tagsEnabled"');
     // Every field name is still posted by the one form.
@@ -172,31 +199,29 @@ describe("renderLeadersTagsFields", () => {
       expect(off).toContain(
         '<input type="hidden" name="b_captainsLobby" value="0">',
       );
-      expect(off).toContain(
-        '<option value="0" selected>Off: leaders talk in the main channel</option>',
-      );
+      expect(off).not.toMatch(/name="s_captainsLobby"[^>]*checked/);
       const on = renderLeadersTagsFields(viewWith({}, true));
       expect(on).toContain(
         '<input type="hidden" name="b_captainsLobby" value="1">',
       );
-      expect(on).toContain(
-        '<option value="1" selected>On: a leaders-only voice channel</option>',
-      );
+      expect(on).toMatch(/name="s_captainsLobby" value="1" checked/);
     });
 
     it("is usable while leaders are off, so both can be turned on in one save, and says so", () => {
       const html = renderLeadersTagsFields(
         viewWith({ captainsEnabled: false }, false),
       );
-      expect(html).not.toContain('name="s_captainsLobby" disabled');
-      expect(html).toContain("in this same save is fine");
+      // Enabled on purpose: a disabled switch posts nothing, and the server lets
+      // the lobby be switched on in the same save as leaders.
+      expect(html).not.toMatch(/name="s_captainsLobby"[^>]*disabled/);
+      expect(html).toContain("switching both on in this save is fine");
     });
 
     it("can still be turned off while leaders are off", () => {
       const html = renderLeadersTagsFields(
         viewWith({ captainsEnabled: false }, true),
       );
-      expect(html).not.toContain('name="s_captainsLobby" disabled');
+      expect(html).not.toMatch(/name="s_captainsLobby"[^>]*disabled/);
       expect(html).toContain("Leaders are off, so only you can join");
     });
 
@@ -220,10 +245,10 @@ describe("renderLeadersTagsFields", () => {
       groups: [groups[1]],
     });
     expect(renderLeadersTagsFields(noTeam)).not.toContain(
-      'under "Change the groups"',
+      "under &quot;Change the groups&quot;",
     );
     expect(renderLeadersTagsFields(view)).toContain(
-      'under "Change the groups"',
+      "under &quot;Change the groups&quot;",
     );
   });
 

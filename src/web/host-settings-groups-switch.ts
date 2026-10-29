@@ -16,6 +16,7 @@
  */
 
 import { escapeHtml } from "./html.js";
+import { hidden, renderMore } from "./host-settings-rows.js";
 import { CONFIRM_FETCH_ATTR, confirmFetchError } from "./confirm-fetch.js";
 import {
   type SwitchSetup,
@@ -78,10 +79,6 @@ export function showsCustomRows(v: GroupsSwitchView): boolean {
 /** How many starter groups the custom setup form has (blank names are skipped). */
 export const CUSTOM_GROUP_ROWS = 6;
 const customField = (part: string, i: number): string => `custom_${part}_${i}`;
-
-function hidden(name: string, value: string): string {
-  return `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`;
-}
 
 const ON = JSON.stringify({ on: true });
 const OFF = JSON.stringify({ on: false });
@@ -147,11 +144,13 @@ function form(
   tick = "",
   /** The server always confirms this form's action: it may be confirmed in a dialog (#1344). */
   alwaysConfirmed = false,
+  /** The button's kind: plain, or `danger` for the step that takes something away. */
+  danger = false,
 ): string {
   return `<form method="POST" action="${escapeHtml(actionPath)}"${alwaysConfirmed ? CONFIRM_FETCH_ATTR : ""}>${hidden("_csrf", csrfToken)}
 ${body}
 ${tick}
-<button type="submit"${noValidate ? " formnovalidate" : ""}>${escapeHtml(button)}</button>${alwaysConfirmed ? `\n${confirmFetchError()}` : ""}
+<button type="submit" class="kb-btn${danger ? " kb-btn--danger" : ""}"${noValidate ? " formnovalidate" : ""}>${escapeHtml(button)}</button>${alwaysConfirmed ? `\n${confirmFetchError()}` : ""}
 </form>`;
 }
 
@@ -170,47 +169,48 @@ export function renderGroupsSwitchForms(
     const off = form(
       actionPath,
       csrfToken,
-      `<div class="field"><p><strong>Groups are on</strong> (${escapeHtml(v.groupCount)} ${escapeHtml(label)}${v.groupCount === 1 ? "" : "s"}, ${escapeHtml(v.channelCount)} with a voice channel).</p>
-${hidden(id, OFF)}${hidden(base, ON)}
-<p class="muted">Switching groups off asks you to confirm first. Everybody in the group channels, you included, is moved to the main channel, then the channels are deleted and the clan tags come off the nicknames. The ${escapeHtml(label)}s and who was in them are kept, but nobody counts as in a ${escapeHtml(label)} while groups are off; switching groups on again brings them back with new channels. If somebody cannot be moved, nothing is deleted and groups stay on: the result says who, and you can save again to move the rest.</p></div>`,
+      `<div class="kb-field"><p><strong>Groups are on</strong> (${escapeHtml(v.groupCount)} ${escapeHtml(label)}${v.groupCount === 1 ? "" : "s"}, ${escapeHtml(v.channelCount)} with a voice channel).</p>
+${hidden(id, OFF)}${hidden(base, ON)}</div>`,
       "Switch groups off",
       false,
       tick,
+      true,
       true,
     );
     const owed = v.channelOwed
       ? form(
           actionPath,
           csrfToken,
-          `<div class="field"><p class="muted">A ${escapeHtml(label)} has no voice channel yet. KoolBot keeps trying every minute; this tries now.</p>${hidden(id, ON)}${hidden(base, ON)}</div>`,
+          `<div class="kb-field"><p class="kb-help">A ${escapeHtml(label)} has no voice channel yet. KoolBot keeps trying every minute; this tries now.</p>${hidden(id, ON)}${hidden(base, ON)}</div>`,
           "Create the missing channels",
         )
       : "";
     return `${off}\n${owed}`;
   }
   if (v.blocked !== null) {
-    return `<div class="field"><p class="muted">${escapeHtml(v.blocked)}</p></div>`;
+    return `<div class="kb-field"><p class="kb-help">${escapeHtml(v.blocked)}</p></div>`;
   }
   if (v.kept.length > 0) {
     const list = v.kept
       .map(
         (g) =>
-          `<li>${escapeHtml(g.name)} <span class="muted">(${g.people === 0 ? "nobody assigned" : `${escapeHtml(g.people)} assigned`})</span></li>`,
+          `<li>${escapeHtml(g.name)} <span class="kb-help">(${g.people === 0 ? "nobody assigned" : `${escapeHtml(g.people)} assigned`})</span></li>`,
       )
       .join("");
     return form(
       actionPath,
       csrfToken,
-      `<div class="field"><p><strong>Groups are off.</strong> These ${escapeHtml(label)}s were kept:</p><ul>${list}</ul>
+      `<div class="kb-field"><p><strong>Groups are off.</strong> These ${escapeHtml(label)}s were kept:</p><ul>${list}</ul>
 ${hidden(id, ON)}${hidden(base, OFF)}
-<p class="muted">Switching groups on brings them back as they were, with the people assigned to them (and their leaders), and creates their voice channels next to the main channel. Clan tags go back on the nicknames when tags are on and the event is running.</p></div>`,
+<p class="kb-help">Switching groups on brings them back as they were, with the people assigned to them (and their leaders), and creates their voice channels.</p>
+${renderMore("The voice channels are made next to the main channel. Clan tags go back on the nicknames when tags are on and the event is running.")}</div>`,
       "Switch groups on",
       false,
       tick,
     );
   }
   const notice = v.presetNotice
-    ? `<p class="muted">${escapeHtml(v.presetNotice)}</p>`
+    ? `<p class="kb-help">${escapeHtml(v.presetNotice)}</p>`
     : "";
   const options = v.presets
     .map(
@@ -220,9 +220,9 @@ ${hidden(id, ON)}${hidden(base, OFF)}
     .join("");
   const picker =
     v.presets.length === 0
-      ? `<p class="muted">No preset is available on this server right now, so set the groups up yourself below.</p>`
-      : `<label for="host-settings-groups-pick">Switch groups on with a preset</label>
-<select id="host-settings-groups-pick" name="${GROUPS_PICK_FIELD}">
+      ? `<p class="kb-help">No preset is available on this server right now, so set the groups up yourself below.</p>`
+      : `<label class="kb-label" for="host-settings-groups-pick">Switch groups on with a preset</label>
+<select class="kb-select" id="host-settings-groups-pick" name="${GROUPS_PICK_FIELD}">
 <option value="">No preset: use my own groups below</option>${options}
 </select>`;
   const rows = Array.from({ length: CUSTOM_GROUP_ROWS }, (_, k) =>
@@ -239,15 +239,16 @@ ${hidden(id, ON)}${hidden(base, OFF)}
   return form(
     actionPath,
     csrfToken,
-    `<div class="field"><p><strong>Groups are off.</strong> This event has no groups yet.</p>
+    `<div class="kb-field"><p><strong>Groups are off.</strong> This event has no groups yet.</p>
 ${picker}
-<p class="muted">Or your own groups (leave a name empty to skip a row)</p>
+<p class="kb-help">Or your own groups (leave a name empty to skip a row)</p>
 <div class="kb-grouprows" data-group-rows>
 ${GROUP_ROWS_HEAD}
 ${rows}
 </div>
 ${hidden(base, OFF)}
-<p class="muted">A chosen preset wins over the rows. The groups are created with their voice channels next to the main channel. Leaders, leader customisation and the lock stay off (switch them on afterwards), and so does a preset's Captains lobby (switch it on with the leaders), and clan tags follow the preset's default (off for your own groups). Nobody is assigned yet. Add, rename, resize or remove groups afterwards with the other forms; the same limits as when an event is made apply.</p>${notice}</div>`,
+<p class="kb-help">A chosen preset wins over the rows. The groups are created with their voice channels next to the main channel.</p>
+${renderMore("Leaders, leader customisation and the lock stay off (switch them on afterwards), and so does a preset's Captains lobby (switch it on with the leaders), and clan tags follow the preset's default (off for your own groups). Nobody is assigned yet. Add, rename, resize or remove groups afterwards with the other forms; the same limits as when an event is made apply.")}${notice}</div>`,
     "Switch groups on",
     // Six rows, most of them blank or ignored (a chosen preset wins, a blank
     // name skips its row): the browser must not refuse the submit over a size in

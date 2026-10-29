@@ -422,6 +422,29 @@ describe("saving the form: one result, one audit row", () => {
     });
   });
 
+  it("a lead time preset wins over the box, and the server default saves as no lead time (#1514)", async () => {
+    // What a browser without the preset script posts: the ticked preset and the old box.
+    await post("settings", {
+      preset_channelLeadMinutes: "15",
+      s_channelLeadMinutes: "30",
+      b_channelLeadMinutes: "30",
+    });
+    expect((store.get(EVENT_ID) as Json).channelLeadMinutes).toBe(15);
+    await post("settings", {
+      preset_channelLeadMinutes: "default",
+      s_channelLeadMinutes: "15",
+      b_channelLeadMinutes: "15",
+    });
+    expect((store.get(EVENT_ID) as Json).channelLeadMinutes).toBeNull();
+    // Custom means the box.
+    await post("settings", {
+      preset_channelLeadMinutes: "custom",
+      s_channelLeadMinutes: "45",
+      b_channelLeadMinutes: "",
+    });
+    expect((store.get(EVENT_ID) as Json).channelLeadMinutes).toBe(45);
+  });
+
   it("saving the same form again is 'nothing to change', still one audit row", async () => {
     await post("settings", form());
     auditRows = [];

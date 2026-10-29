@@ -20,6 +20,7 @@ import { escapeHtml } from "./html.js";
 import { CONFIRM_FETCH_ATTR, confirmFetchError } from "./confirm-fetch.js";
 import { GROUP_ROWS_HEAD, renderGroupRow } from "./admin-views.js";
 import { renderSeriesTick } from "./host-settings-series.js";
+import { hidden, renderMore } from "./host-settings-rows.js";
 import { newGroupKey } from "../services/event-groups.js";
 import {
   GROUP_ADD_FIELDS,
@@ -106,10 +107,6 @@ export interface GroupEditViewData {
   addKey: string;
 }
 
-function hidden(name: string, value: string): string {
-  return `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`;
-}
-
 /**
  * Marker, name, size and tag, one row per group; goes INSIDE the settings form.
  * The rows are the event form's (`renderGroupRow` and the group rows script), so
@@ -132,10 +129,10 @@ export function renderGroupEditor(d: GroupEditViewData): string {
       const notes: string[] = [];
       if (g.overSize) notes.push('<span class="tag tag-off">over size</span>');
       if (g.namePending) {
-        notes.push('<span class="muted">channel rename pending</span>');
+        notes.push('<span class="kb-help">channel rename pending</span>');
       }
       if (g.sizePending) {
-        notes.push('<span class="muted">channel limit pending</span>');
+        notes.push('<span class="kb-help">channel limit pending</span>');
       }
       const isTeam = g.kind === "team";
       // The shown values (`b_`) and the key each positional row was shown for
@@ -148,7 +145,7 @@ export function renderGroupEditor(d: GroupEditViewData): string {
         hidden(groupSizeKeyField(i), g.key) +
         hidden(groupMarkerBaseField(g.key), g.marker) +
         (isTeam ? hidden(groupTagBaseField(g.key), g.tag) : "") +
-        `<p class="muted"><span class="mono">${escapeHtml(g.memberCount)}</span> ${g.memberCount === 1 ? "person" : "people"} ${notes.join(" ")}</p>`;
+        `<p class="kb-help"><span class="kb-mono">${escapeHtml(g.memberCount)}</span> ${g.memberCount === 1 ? "person" : "people"} ${notes.join(" ")}</p>`;
       return renderGroupRow(
         String(i),
         String(n),
@@ -175,12 +172,13 @@ export function renderGroupEditor(d: GroupEditViewData): string {
     .join("\n");
   // Only the hidden lobby: nothing to edit here.
   if (shown === 0) return "";
-  const label = escapeHtml(d.groupLabel.toLowerCase());
-  return `<div class="field"><div class="kb-grouprows" data-group-rows>
+  const label = d.groupLabel.toLowerCase();
+  return `<div class="kb-field"><div class="kb-grouprows" data-group-rows>
 ${GROUP_ROWS_HEAD}
 ${rows}
 </div>
-<p class="muted">A name another ${label} has, or goes back to when a leader's rename is reset, is refused. A marker is the emoji in front of the channel's name, so changing it renames the channel like a name does (Discord allows about 2 renames per channel every 10 minutes: if it is used up, the change is saved and the channel follows by itself). A size is the most people a group takes and the channel's user limit; lowering it below the number of people moves nobody, the group is marked over size and takes nobody new until it is below its size again. Leave a size empty for no limit. An empty tag means that team carries no tag; a changed tag is put on the members' nicknames from their original nickname, never on top of the old tag. Only a team has a tag.</p></div>`;
+<p class="kb-help">A size is the most people a group takes and the channel's user limit; leave it empty for no limit. An empty tag means that team carries no tag.</p>
+${renderMore(`A name another ${label} has, or goes back to when a leader's rename is reset, is refused. A marker is the emoji in front of the channel's name, so changing it renames the channel like a name does (Discord allows about 2 renames per channel every 10 minutes: if it is used up, the change is saved and the channel follows by itself). Lowering a size below the number of people moves nobody: the group is marked over size and takes nobody new until it is below its size again. A changed tag is put on the members' nicknames from their original nickname, never on top of the old tag. Only a team has a tag.`)}</div>`;
 }
 
 /** The preset switch, its own form so it never shares a save with name edits. */
@@ -198,25 +196,26 @@ export function renderPresetForm(
     )
     .join("");
   const notice = d.presetNotice
-    ? `<p class="muted">${escapeHtml(d.presetNotice)}</p>`
+    ? `<p class="kb-help">${escapeHtml(d.presetNotice)}</p>`
     : "";
   const links = d.savePresetHref
-    ? `<p class="muted"><a href="${escapeHtml(d.savePresetHref)}">Save these groups as my preset</a> · <a href="/me/events/presets">My presets</a></p>`
+    ? `<p class="kb-help"><a href="${escapeHtml(d.savePresetHref)}">Save these groups as my preset</a> · <a href="/me/events/presets">My presets</a></p>`
     : "";
   if (d.presets.length === 0) {
     // The hidden captains lobby is not counted: the host sees no such group.
     const listed = d.groups.filter((g) => g.kind !== "leads").length;
-    return `<div class="field"><p class="muted">No preset on this server fits this event's ${escapeHtml(listed)} groups.</p>${notice}${links}</div>`;
+    return `<div class="kb-field"><p class="kb-help">No preset on this server fits this event's ${escapeHtml(listed)} groups.</p>${notice}${links}</div>`;
   }
   return `<form method="POST" action="${escapeHtml(actionPath)}">${hidden("_csrf", csrfToken)}
-<div class="field"><label for="host-settings-preset">Switch preset</label>
-<select id="host-settings-preset" name="${PRESET_PICK_FIELD}">
+<div class="kb-field"><label class="kb-label" for="host-settings-preset">Switch preset</label>
+<select class="kb-select" id="host-settings-preset" name="${PRESET_PICK_FIELD}">
 <option value="">Keep the current groups</option>${options}
 </select>
 ${hidden(baseField(GROUP_PRESET_ROW_ID), d.presetBase)}
-<p class="muted">The preset's names, sizes and tags are applied to the existing groups by position. Only presets with the same number of groups and the same kinds are offered: adding or removing groups and changing a kind are separate changes. The captains lobby is not counted and is never changed by a preset (use its own switch above). Every name that would change is shown for confirmation first, including names a leader chose.</p>${notice}${links}</div>
+<p class="kb-help">Applies the preset's names, sizes and tags to the existing groups by position.</p>
+${renderMore("Only presets with the same number of groups and the same kinds are offered: adding or removing groups and changing a kind are separate changes. The captains lobby is not counted and is never changed by a preset (use its own switch above). Every name that would change is shown for confirmation first, including names a leader chose.")}${notice}${links}</div>
 ${renderSeriesTick(seriesTick)}
-<button type="submit">Apply preset</button>
+<button type="submit" class="kb-btn">Apply preset</button>
 </form>`;
 }
 
@@ -245,19 +244,18 @@ export function renderGroupSetForms(
           : `${g.memberCount} ${g.memberCount === 1 ? "person" : "people"} assigned`,
         g.hasChannel ? "has a voice channel" : "no channel yet",
       ].join(", ");
-      return `<label class="check"><input type="checkbox" name="${escapeHtml(groupRemoveField(g.key))}" value="1"> ${g.marker ? `${escapeHtml(g.marker)} ` : ""}${escapeHtml(g.name)} <span class="muted">(${escapeHtml(facts)})</span></label>`;
+      return `<div class="kb-groupopt"><label class="kb-switch"><input type="checkbox" role="switch" name="${escapeHtml(groupRemoveField(g.key))}" value="1"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>${g.marker ? `${escapeHtml(g.marker)} ` : ""}${escapeHtml(g.name)}</label><p class="kb-help">${escapeHtml(facts)}</p></div>`;
     })
     .join("\n");
   const remove =
     listed.length <= 1
-      ? `<div class="field"><p class="muted">An event keeps at least one ${escapeHtml(label)}, so the last one cannot be removed.</p></div>`
+      ? `<div class="kb-field"><p class="kb-help">An event keeps at least one ${escapeHtml(label)}, so the last one cannot be removed.</p></div>`
       : `<form method="POST" action="${escapeHtml(actionPath)}"${CONFIRM_FETCH_ATTR}>${hidden("_csrf", csrfToken)}
-<fieldset class="field"><legend>Remove ${escapeHtml(label)}s</legend>
+<div class="kb-field" role="group" aria-labelledby="host-settings-remove-h"><p class="kb-label" id="host-settings-remove-h">Remove ${escapeHtml(label)}s</p>
 ${boxes}
-${hidden(GROUP_REMOVE_BASE_FIELD, "[]")}
-<p class="muted">Tick the ${escapeHtml(label)}s to remove. You are asked to confirm first. Everybody in a removed ${escapeHtml(label)}'s channel, you included, is moved to the main channel, its members are unassigned (their clan tags come off), and then the channel is deleted. If somebody cannot be moved, that ${escapeHtml(label)} is kept and the result says why: save again to move the rest.</p></fieldset>
+${hidden(GROUP_REMOVE_BASE_FIELD, "[]")}</div>
 ${tick}
-<button type="submit">Remove selected</button>
+<button type="submit" class="kb-btn kb-btn--danger">Remove selected</button>
 ${confirmFetchError()}
 </form>`;
   const row = renderGroupRow("add", "new", undefined, {
@@ -271,15 +269,16 @@ ${confirmFetchError()}
     requireName: true,
   });
   const add = `<form method="POST" action="${escapeHtml(actionPath)}">${hidden("_csrf", csrfToken)}
-<fieldset class="field"><legend>Add a ${escapeHtml(label)}</legend>
+<div class="kb-field" role="group" aria-labelledby="host-settings-add-h"><p class="kb-label" id="host-settings-add-h">Add a ${escapeHtml(label)}</p>
 <div class="kb-grouprows" data-group-rows>
 ${GROUP_ROWS_HEAD}
 ${row}
 </div>
 ${hidden(GROUP_ADD_FIELDS.key, d.addKey)}${hidden(GROUP_ADD_FIELDS.base, "[]")}
-<p class="muted">The new ${escapeHtml(label)} goes last and gets its voice channel next to the others. Everybody stays where they are. The same limits as when the event was made apply, and a name another ${escapeHtml(label)} has is refused.</p></fieldset>
+<p class="kb-help">The new ${escapeHtml(label)} goes last and gets its voice channel next to the others. Everybody stays where they are.</p>
+${renderMore(`The same limits as when the event was made apply, and a name another ${label} has is refused.`)}</div>
 ${tick}
-<button type="submit">Add ${escapeHtml(label)}</button>
+<button type="submit" class="kb-btn">Add ${escapeHtml(label)}</button>
 </form>`;
   return `${remove}\n${add}`;
 }

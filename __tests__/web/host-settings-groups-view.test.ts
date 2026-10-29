@@ -174,7 +174,7 @@ describe("renderGroupEditor", () => {
 
   it("says what lowering a size does", () => {
     expect(renderGroupEditor(view())).toContain(
-      "moves nobody, the group is marked over size",
+      "moves nobody: the group is marked over size",
     );
   });
 });
@@ -246,7 +246,7 @@ describe("Change the groups puts the editor in a form of its own, apart from Eve
     expect(renderGroupChanges(base)).not.toContain("koolGroupRows");
     const plain = renderGroupChanges(base);
     expect(plain).not.toContain("s_groupNameA");
-    expect(plain).toContain("prefs-table");
+    expect(plain).toContain("kb-table");
   });
 
   it("shows no editor while the section is blocked", () => {
@@ -461,7 +461,11 @@ describe("renderGroupSetForms (#1242)", () => {
     expect(out).toContain('name="b_groupRemove" value="[]"');
     expect(out).toContain("Heli &lt;b&gt;&quot;x&quot;&lt;/b&gt;");
     expect(out).not.toContain("<b>");
-    expect(out).toContain("you included");
+    // What removal does is listed by the confirmation, not repeated on the page (#1514).
+    expect(out).not.toContain("you included");
+    expect(out).toContain(
+      '<button type="submit" class="kb-btn kb-btn--danger">Remove selected</button>',
+    );
   });
 
   it("the add form carries the minted key and the empty base, and the two kinds (leads is the Captains lobby switch)", () => {
