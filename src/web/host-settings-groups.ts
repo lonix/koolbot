@@ -172,7 +172,7 @@ export function renderGroupEditor(d: GroupEditViewData): string {
     .join("\n");
   // Only the hidden lobby: nothing to edit here.
   if (shown === 0) return "";
-  const label = escapeHtml(d.groupLabel.toLowerCase());
+  const label = d.groupLabel.toLowerCase();
   return `<div class="kb-field"><div class="kb-grouprows" data-group-rows>
 ${GROUP_ROWS_HEAD}
 ${rows}

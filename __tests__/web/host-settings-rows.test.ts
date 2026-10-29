@@ -398,3 +398,93 @@ describe("every control and button of the folds and the confirmation uses the kb
     expect(text).not.toContain("Tick the");
   });
 });
+
+describe("a custom group label is escaped exactly once wherever the folds print it (#1514)", () => {
+  const NASTY = `R&D <img src=x onerror="1"> "q" 'a'`;
+  const group = (key: string, name: string): Record<string, unknown> => ({
+    key,
+    kind: "team",
+    hasChannel: false,
+    name,
+    marker: "",
+    tag: "",
+    size: null,
+    memberCount: 0,
+    overSize: false,
+    namePending: false,
+    sizePending: false,
+  });
+  const edit = {
+    groupLabel: NASTY,
+    addKey: "g_0000abcd",
+    groups: [group("g_00000001", "Red"), group("g_00000002", "Blue")],
+    presets: [{ id: "lib:a", label: "A" }],
+    presetNotice: null,
+    savePresetHref: null,
+    presetBase: "{}",
+  } as never;
+  const sw = (over: Record<string, unknown>): never =>
+    ({
+      on: false,
+      groupLabel: NASTY,
+      blocked: null,
+      groupCount: 2,
+      channelCount: 1,
+      channelOwed: true,
+      kept: [],
+      presets: [],
+      presetNotice: null,
+      ...over,
+    }) as never;
+  const cases: Array<[string, string]> = [
+    ["editor and set forms", renderGroupChanges(view({ groupEdit: edit }))],
+    [
+      "switch on, groups on and channel owed",
+      renderGroupChanges(view({ groupsSwitch: sw({ on: true }) })),
+    ],
+    [
+      "switch on, nothing kept",
+      renderGroupChanges(view({ groupsSwitch: sw({}) })),
+    ],
+    [
+      "switch on, groups kept",
+      renderGroupChanges(
+        view({
+          groupsSwitch: sw({ kept: [{ name: "Red", people: 1 }] }),
+        }),
+      ),
+    ],
+    [
+      "event settings",
+      renderEventSettings(
+        view({
+          groupLabel: NASTY,
+          leaderExtras: { leaderLabel: NASTY, edits: [] },
+        }),
+      ),
+    ],
+  ];
+
+  it.each(cases)("%s", (_name, html) => {
+    expect(html).not.toContain("&amp;amp;");
+    expect(html).not.toContain("&amp;lt;");
+    const doc = new JSDOM(`<!doctype html><body>${html}</body>`).window
+      .document;
+    // The label markup stays inert text.
+    expect(doc.querySelectorAll("img")).toHaveLength(0);
+    expect(html).not.toMatch(/<img/i);
+  });
+
+  it("shows the label once-escaped in the source and as plain text in the expanded help", () => {
+    const html = renderGroupChanges(view({ groupEdit: edit }));
+    expect(html).toContain("r&amp;d &lt;img");
+    const doc = new JSDOM(`<!doctype html><body>${html}</body>`).window
+      .document;
+    const more = Array.from(doc.querySelectorAll(".kb-disclosure__body")).map(
+      (n) => n.textContent ?? "",
+    );
+    expect(
+      more.some((t) => t.includes(`r&d <img src=x onerror="1"> "q" 'a'`)),
+    ).toBe(true);
+  });
+});
