@@ -147,8 +147,12 @@ const STYLE = [
   // at 760px in kb.css; only the sign-out form needs a reset here.
   ".kb-topbar form{margin:0}",
   // The column is `kb-member` (no sidebar) or `kb-main` > `kb-main__inner` (with one); both come
-  // from kb.css with their own padding and 760px reflow. A wide table scrolls inside its `.card`
-  // (`overflow-x:auto`) rather than the whole page (WCAG 1.4.10 reflow, #855).
+  // from kb.css with their own padding and 760px reflow. `min-width:0` + `overflow-x:auto` keep a
+  // wide table scrolling inside the content column rather than the whole page (WCAG 1.4.10
+  // reflow, #855). A member page is capped at `member-content-max` (DESIGN.md > Layout), also with
+  // a sidebar, where kb-main__inner would otherwise use the admin's `content-max`.
+  "#main{min-width:0;overflow-x:auto}",
+  ".kb-main__inner{max-width:var(--member-content-max)}",
   "#main:focus-visible{outline:none}",
   "h1{margin:0 0 var(--space-1);font-size:var(--type-page-title-size)}",
   "h2{margin:var(--space-6) 0 var(--space-2);font-size:var(--type-section-title-size);color:var(--text-secondary)}",

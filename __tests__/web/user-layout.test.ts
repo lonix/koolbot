@@ -95,6 +95,11 @@ describe("renderUserPage accessibility (#855)", () => {
       "@media (max-width:760px){.rw-hero{padding:1rem}.rw-hero .total{font-size:1.8rem}}",
     );
     expect(html).not.toContain("main{padding");
+    // The reflow guarantee of #855 stays: wide content scrolls inside the column.
+    expect(html).toContain("#main{min-width:0;overflow-x:auto}");
+    expect(html).toContain(
+      ".kb-main__inner{max-width:var(--member-content-max)}",
+    );
   });
 });
 
