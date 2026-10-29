@@ -558,11 +558,14 @@ describe("AchievementsService", () => {
       expect(mockUser.send).not.toHaveBeenCalled();
     });
 
-    it("sends DM and appends the /config footer when prefs leave achievements on (#482)", async () => {
+    it("sends an embed that names the server and the way to stop it when prefs leave achievements on (#482, #1526)", async () => {
       const { service, mockConfigService } =
         createAchievementsService(mockClient);
       mockConfigService.getBoolean.mockResolvedValue(true);
       mockConfigService.getString.mockResolvedValue("guild-1");
+      (mockClient as any).guilds = {
+        cache: new Map([["guild-1", { name: "Koolbot Dev" }]]),
+      };
 
       const mockUser = {
         username: "TestUser",
@@ -575,8 +578,42 @@ describe("AchievementsService", () => {
       ]);
 
       expect(mockUser.send).toHaveBeenCalledTimes(1);
-      const sent = (mockUser.send as jest.Mock).mock.calls[0][0] as string;
-      expect(sent).toContain("Manage notifications: run `/me`");
+      const payload = (mockUser.send as jest.Mock).mock.calls[0][0] as {
+        embeds: Array<{ toJSON(): any }>;
+      };
+      const json = payload.embeds[0].toJSON();
+      expect(json.title).toBe("🎖️ New accolades from Koolbot Dev");
+      expect(json.description).toMatch(/^- /);
+      expect(json.description).toContain("`/achievements`");
+      expect(json.description).not.toContain("Congratulations");
+      expect(json.footer.text).toBe(
+        "KoolBot · Achievements · Turn this off in /me → Notifications",
+      );
+    });
+
+    it("says 'your server' when the guild is not cached (#1526)", async () => {
+      const { service, mockConfigService } =
+        createAchievementsService(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.getString.mockResolvedValue("guild-1");
+      (mockClient as any).guilds = { cache: new Map() };
+
+      const mockUser = {
+        username: "TestUser",
+        send: jest.fn().mockResolvedValue(undefined),
+      };
+      (mockClient.users as any).fetch = jest.fn().mockResolvedValue(mockUser);
+
+      await service.notifyUserOfAccolades("user123", [
+        { type: "first_hour", earnedAt: new Date(), metadata: {} },
+      ]);
+
+      const payload = (mockUser.send as jest.Mock).mock.calls[0][0] as {
+        embeds: Array<{ toJSON(): any }>;
+      };
+      expect(payload.embeds[0].toJSON().title).toBe(
+        "🎖️ New accolades from your server",
+      );
     });
 
     it("fails closed and skips the DM when GUILD_ID is unset (#686)", async () => {

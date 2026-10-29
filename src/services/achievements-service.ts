@@ -1,4 +1,4 @@
-import { Client, TextChannel } from "discord.js";
+import { Client, EmbedBuilder, TextChannel } from "discord.js";
 import {
   UserAchievements,
   IAccolade,
@@ -44,6 +44,12 @@ import {
 } from "../content/achievements.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { getIsoWeekKey } from "../utils/time.js";
+import { embedColor } from "../utils/embed-style.js";
+import { getGuildName } from "../utils/guild-name.js";
+import {
+  DISCORD_EMBED_DESCRIPTION_LIMIT,
+  clampToLimit,
+} from "../utils/discord-limits.js";
 
 export type { AccoladeType, AchievementType };
 
@@ -1809,22 +1815,29 @@ export class AchievementsService {
           const metadataText = accolade.metadata?.description
             ? ` (${accolade.metadata.description})`
             : "";
-          return `${definition.emoji} **${definition.name}**${metadataText}\n${definition.description}`;
+          return `- ${definition.emoji} **${definition.name}**${metadataText}: ${definition.description}`;
         })
         .filter(Boolean);
 
       if (messages.length > 0) {
-        const message = [
-          "🎉 **Congratulations!** You've earned new accolades:",
-          "",
-          ...messages,
-          "",
-          "Use `/achievements` to see all your earned badges!",
-          "",
-          "Manage notifications: run `/me`.",
-        ].join("\n");
+        const lines = clampToLimit(
+          messages as string[],
+          DISCORD_EMBED_DESCRIPTION_LIMIT - 100,
+        );
+        const embed = new EmbedBuilder()
+          .setTitle(
+            `🎖️ New accolades from ${getGuildName(this.client, guildId)}`,
+          )
+          .setColor(embedColor("lore"))
+          .setDescription(
+            `${lines}\n\nSee all your badges with \`/achievements\`.`,
+          )
+          .setFooter({
+            text: "KoolBot · Achievements · Turn this off in /me → Notifications",
+          })
+          .setTimestamp(new Date());
 
-        await user.send(message);
+        await user.send({ embeds: [embed] });
         logger.info(
           `Sent accolade notification DM to ${user.username} (${userId})`,
         );

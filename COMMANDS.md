@@ -302,9 +302,9 @@ says nothing new was saved.
 **Example response:**
 
 ```text
-🏆 Alice's Achievements
+🏆 Alice's achievements
 
-🎖️ Accolades (Permanent)
+Accolades
 
 🎉 First Steps - 12 hrs
 Spent your first hour in voice chat
@@ -322,16 +322,16 @@ Earned: January 12, 2026
 Voiced with 10+ unique users
 Earned: January 14, 2026
 
-🎯 Almost There (Progress)
+Almost there
 🎖️ ▰▰▰▰▰▰▰▰▱▱ Voice Veteran — 90 / 100 hrs
 🦋 ▰▰▰▰▰▰▱▱▱▱ Social Butterfly — 6 / 10 users
 
-📊 Summary
-Total Accolades: 4
-Total Achievements: 0
+Total accolades: 4    Total achievements: 0
+
+KoolBot · Achievements
 ```
 
-The **Almost There (Progress)** section lists the nearest unearned
+The **Almost there** section lists the nearest unearned
 threshold accolades (sorted by completion, up to five) with a `current /
 target` bar — the "so close" nudge. It appears as soon as you've made any
 progress toward an accolade, even before you've earned your first badge.
@@ -375,7 +375,7 @@ while their capture key is enabled; they stay dark when capture is off.
 
 **Weekly achievements (time-based):**
 
-Re-evaluated each week and shown under **Recent Achievements**:
+Re-evaluated each week and shown under **Recent achievements**:
 
 - ⚡ **Active** — 10+ hours in voice chat this week
 - 👑 **Weekly Champion** — finished #1 on the weekly voice leaderboard

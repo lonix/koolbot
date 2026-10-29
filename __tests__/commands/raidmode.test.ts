@@ -178,7 +178,7 @@ describe("/raidmode", () => {
     const text = JSON.stringify(
       buildStatusEmbed({ ...status, dryRun: true } as never).toJSON(),
     );
-    expect(text).toContain("dry run");
+    expect(text).toContain("Dry run");
   });
 
   describe("starting a lockdown needs the permission of the configured action", () => {
@@ -265,17 +265,45 @@ describe("/raidmode", () => {
   });
 
   it("labels lockdown and gate counters separately and flags unwritten rows", () => {
-    const text = JSON.stringify(
-      buildStatusEmbed({
-        ...status,
-        lockdown: false,
-        unrecorded: 2,
-      } as never).toJSON(),
+    const json = buildStatusEmbed({
+      ...status,
+      lockdown: false,
+      unrecorded: 2,
+    } as never).toJSON();
+    const field = (name: string) => json.fields?.find((f) => f.name === name);
+    expect(field("This lockdown so far")?.value).toContain("2 acted on");
+    expect(field("New-account gate since the bot started")?.value).toContain(
+      "7 acted on",
     );
-    expect(text).toContain("This lockdown so far:** 2 acted on");
-    expect(text).toContain(
-      "New-account gate since the bot started:** 7 acted on",
+    expect(field("Warning")?.value).toContain(
+      "2 log rows could not be written",
     );
-    expect(text).toContain("2 log row(s) could not be written");
+  });
+
+  it("says '1 log row' in the singular", () => {
+    const json = buildStatusEmbed({
+      ...status,
+      unrecorded: 1,
+    } as never).toJSON();
+    expect(json.fields?.find((f) => f.name === "Warning")?.value).toContain(
+      "1 log row could not be written to the database yet and is being retried",
+    );
+  });
+
+  it("puts every fact in a field, none in the description, with a feature footer", () => {
+    const json = buildStatusEmbed(status as never).toJSON();
+    expect(json.description).toBeUndefined();
+    expect(json.footer?.text).toBe("KoolBot · Moderation · Raid mode");
+    const names = (json.fields ?? []).map((f) => f.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "Lockdown",
+        "Mode",
+        `Joins in the last ${status.windowSeconds} s`,
+        "Lockdown action",
+        "New-account gate",
+      ]),
+    );
+    expect(JSON.stringify(json)).not.toContain("**");
   });
 });

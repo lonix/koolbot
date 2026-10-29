@@ -345,6 +345,48 @@ describe("RewindNudgeService", () => {
       });
     });
 
+    it("names the server first and the way to stop it in the footer (#1526)", async () => {
+      mockTrackingAggregate.mockResolvedValueOnce([
+        { _id: "u1", username: "u1", totalTime: 60 * 60 * 5 },
+      ]);
+      const client = {
+        users: { fetch: mockUsersFetch },
+        guilds: { cache: new Map([["guild-1", { name: "Koolbot Dev" }]]) },
+      } as unknown as Client;
+
+      await RewindNudgeService.getInstance(client).runNow();
+
+      const payload = mockUserSend.mock.calls[0][0] as {
+        embeds: Array<{
+          data: {
+            title: string;
+            description: string;
+            footer: { text: string };
+          };
+        }>;
+      };
+      const { title, description, footer } = payload.embeds[0].data;
+      const year = new Date().getUTCFullYear();
+      expect(title).toBe(`✨ Your ${year} Rewind from Koolbot Dev is ready`);
+      expect(footer.text).toBe(
+        "KoolBot · Rewind · Turn this off in /me → Notifications",
+      );
+      expect(description).not.toContain("Don't want these");
+    });
+
+    it("says 'your server' when the guild is not cached (#1526)", async () => {
+      mockTrackingAggregate.mockResolvedValueOnce([
+        { _id: "u1", username: "u1", totalTime: 60 * 60 * 5 },
+      ]);
+
+      await RewindNudgeService.getInstance(makeClient()).runNow();
+
+      const payload = mockUserSend.mock.calls[0][0] as {
+        embeds: Array<{ data: { title: string } }>;
+      };
+      expect(payload.embeds[0].data.title).toContain("Rewind from your server");
+    });
+
     it("skips users who have already been nudged this year (one-shot guard)", async () => {
       mockTrackingAggregate.mockResolvedValueOnce([
         { _id: "u1", username: "u1", totalTime: 60 * 60 * 5 },
