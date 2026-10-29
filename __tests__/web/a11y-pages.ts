@@ -2433,11 +2433,11 @@ export function adminPages(): A11yPage[] {
         accessProblem: "A role you picked no longer exists in Discord.",
       }),
     },
-    {
-      name: "Announcements",
+    ...[true, false].map((enabled) => ({
+      name: enabled ? "Announcements" : "Announcements (feature off)",
       html: renderAnnouncementsPage({
         ...COMMON,
-        enabled: true,
+        enabled,
         textChannels: CHANNELS,
         settingRows: [
           {
@@ -2465,7 +2465,7 @@ export function adminPages(): A11yPage[] {
         ],
         flash: FLASH,
       }),
-    },
+    })),
     {
       name: "Announcements (create form refused)",
       html: renderAnnouncementsPage({
@@ -2513,11 +2513,11 @@ export function adminPages(): A11yPage[] {
         },
       }),
     },
-    {
-      name: "Events",
+    ...[true, false].map((enabled) => ({
+      name: enabled ? "Events" : "Events (feature off)",
       html: renderEventsPage({
         ...COMMON,
-        enabled: true,
+        enabled,
         categoryConfigured: true,
         announcementConfigured: false,
         timezone: "Europe/Stockholm",
@@ -2628,7 +2628,7 @@ export function adminPages(): A11yPage[] {
         ],
         flash: FLASH,
       }),
-    },
+    })),
     {
       name: "Events (past events folded, settings just saved)",
       html: renderEventsPage({
@@ -3447,10 +3447,18 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
-      name: "Reaction roles",
+      // A previewed plan the admin can apply: Apply plan is the view's one primary (#1512).
+      name: "Role groups (previewed plan)",
+      html: renderRoleGroupsPage({
+        ...ROLE_GROUPS_REFUSED_BASE,
+        plan: (CLAIMS_DESTRUCTIVE_PLAN as { plan: never }).plan,
+      }),
+    },
+    ...[true, false].map((enabled) => ({
+      name: enabled ? "Reaction roles" : "Reaction roles (feature off)",
       html: renderReactionRolesPage({
         ...COMMON,
-        enabled: true,
+        enabled,
         configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
         active: [
           {
@@ -3524,12 +3532,12 @@ export function adminPages(): A11yPage[] {
         textChannels: CHANNELS,
         flash: FLASH,
       }),
-    },
-    {
-      name: "Notices",
+    })),
+    ...[true, false].map((enabled) => ({
+      name: enabled ? "Notices" : "Notices (feature off)",
       html: renderNoticesPage({
         ...COMMON,
-        enabled: true,
+        enabled,
         channel: { name: "rules", id: "c1", type: ChannelType.GuildText },
         total: 3,
         headerMessageId: "900000000000000002",
@@ -3599,12 +3607,12 @@ export function adminPages(): A11yPage[] {
         categoryOptions: [{ value: "rules", label: "Rules" }],
         flash: FLASH,
       }),
-    },
-    {
-      name: "Quotes",
+    })),
+    ...[true, false].map((enabled) => ({
+      name: enabled ? "Quotes" : "Quotes (feature off)",
       html: renderQuotesPage({
         ...COMMON,
-        enabled: true,
+        enabled,
         channel: { name: "quotes", id: "c1", type: ChannelType.GuildText },
         headerMessageId: "900000000000000001",
         settingsPickers: {
@@ -3662,7 +3670,7 @@ export function adminPages(): A11yPage[] {
         search: "hydrated",
         flash: FLASH,
       }),
-    },
+    })),
     {
       name: "Birthdays (missing bot permission notice)",
       html: renderBirthdaysPage({
@@ -3713,11 +3721,11 @@ export function adminPages(): A11yPage[] {
         pageSize: 25,
       }),
     },
-    {
-      name: "Birthdays",
+    ...[true, false].map((enabled) => ({
+      name: enabled ? "Birthdays" : "Birthdays (feature off)",
       html: renderBirthdaysPage({
         ...COMMON,
-        enabled: true,
+        enabled,
         channel: { name: "general", id: "c1", type: ChannelType.GuildText },
         role: { name: "Birthday", id: "r1" },
         cron: "0 * * * *",
@@ -3782,7 +3790,7 @@ export function adminPages(): A11yPage[] {
         pageSize: 25,
         flash: FLASH,
       }),
-    },
+    })),
     {
       name: "Database",
       html: renderDatabasePage({
@@ -3971,11 +3979,11 @@ export function adminPages(): A11yPage[] {
         },
       }),
     },
-    {
-      name: "Voice channels",
+    ...[true, false].map((enabled) => ({
+      name: enabled ? "Voice channels" : "Voice channels (feature off)",
       html: renderVoiceChannelsPage({
         ...COMMON,
-        enabled: true,
+        enabled,
         controlPanelEnabled: true,
         categoryName: "Voice Channels",
         lobbyName: "Lobby",
@@ -4030,12 +4038,12 @@ export function adminPages(): A11yPage[] {
         categoryChannels: CATEGORIES,
         flash: FLASH,
       }),
-    },
-    {
-      name: "Digest",
+    })),
+    ...[true, false].map((enabled) => ({
+      name: enabled ? "Digest" : "Digest (feature off)",
       html: renderDigestPage({
         ...COMMON,
-        enabled: true,
+        enabled,
         settingRows: [
           {
             key: "digest.enabled",
@@ -4100,12 +4108,12 @@ export function adminPages(): A11yPage[] {
         },
         flash: FLASH,
       }),
-    },
-    {
-      name: "Leaderboard roles",
+    })),
+    ...[true, false].map((enabled) => ({
+      name: enabled ? "Leaderboard roles" : "Leaderboard roles (feature off)",
       html: renderLeaderboardRolesPage({
         ...COMMON,
-        enabled: true,
+        enabled,
         voiceTrackingEnabled: false,
         period: "week",
         cron: "0 0 * * 1",
@@ -4153,7 +4161,7 @@ export function adminPages(): A11yPage[] {
         pickers: { textChannels: CHANNELS },
         flash: FLASH,
       }),
-    },
+    })),
     {
       name: "Command audit",
       html: renderCommandAuditPage({
@@ -4244,11 +4252,11 @@ export function adminPages(): A11yPage[] {
         pageSize: 50,
       }),
     },
-    {
-      name: "Moderation",
+    ...[true, false].map((enabled) => ({
+      name: enabled ? "Moderation" : "Moderation (feature off)",
       html: renderModerationPage({
         ...COMMON,
-        enabled: true,
+        enabled,
         actionOptions: ["warn", "kick", "ban"],
         userOptions: [{ id: "u1", label: "alice" }],
         settingRows: [
@@ -4335,7 +4343,7 @@ export function adminPages(): A11yPage[] {
         page: 1,
         pageSize: 50,
       }),
-    },
+    })),
     {
       name: "Moderation (missing bot permission notice)",
       html: renderModerationPage({
@@ -4539,6 +4547,50 @@ export function adminPages(): A11yPage[] {
         roleNames: {},
         globalPolicy: "flag",
       }),
+    },
+    {
+      // A previewed plan the admin can apply: Apply plan is the view's one primary (#1512).
+      name: "Rules acceptance (previewed plan)",
+      html: renderRulesPage({
+        ...COMMON,
+        enabled: true,
+        channelId: "100000000000000010",
+        roleId: "100000000000000011",
+        messagePosted: false,
+        messageId: null,
+        accepted: 0,
+        native: { screening: false, community: false },
+        intentMissing: false,
+        plan: {
+          plan: (CLAIMS_DESTRUCTIVE_PLAN as { plan: never }).plan,
+          extraErrors: [],
+          preview: { totalMembers: 10, holders: 2, lockedOut: 1 },
+          roleId: "100000000000000011",
+          roleName: "Accepted",
+          channels: [],
+          options: {
+            createRole: false,
+            grantExisting: false,
+            gateChannelIds: [],
+          },
+          membersUnavailable: false,
+        },
+        channels: [
+          {
+            id: "100000000000000010",
+            name: "rules",
+            type: ChannelType.GuildText,
+          },
+        ],
+        roleName: "Accepted",
+        unavailable: null,
+        options: {
+          createRole: false,
+          grantExisting: false,
+          gateChannelIds: [],
+        },
+        jobId: null,
+      } as never),
     },
     {
       name: "Rules acceptance (missing bot permission notice)",
@@ -4821,12 +4873,12 @@ export function adminPages(): A11yPage[] {
         permissionNotice: notice as PermissionNotice,
       }),
     })),
-    {
-      name: "Support tickets",
+    ...[true, false].map((enabled) => ({
+      name: enabled ? "Support tickets" : "Support tickets (feature off)",
       html: renderTicketsPage({
         ...COMMON,
         guildId: "g1",
-        enabled: true,
+        enabled,
         statusFilter: "",
         statusOptions: ["open", "claimed", "closed"],
         total: 2,
@@ -4890,7 +4942,7 @@ export function adminPages(): A11yPage[] {
           },
         ],
       }),
-    },
+    })),
   ];
 }
 
