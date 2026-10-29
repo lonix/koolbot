@@ -667,4 +667,5 @@ fieldset[data-groups-section] { border: 0; margin: 0; padding: 0; min-width: 0; 
 .kb-reorder__place { min-width: 1.5rem; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
 .kb-reorder__form { display: flex; gap: var(--space-1); margin: 0; flex-wrap: wrap; }
 tr[data-reorder-row].is-dragging { opacity: 0.5; }
-tr[data-reorder-row].is-over > td { background: var(--chrome); box-shadow: inset 0 2px 0 var(--primary); }
+tr[data-reorder-row].is-over > td,
+tr[data-reorder-row].is-over > th[scope="row"] { background: var(--chrome); box-shadow: inset 0 2px 0 var(--primary); }
