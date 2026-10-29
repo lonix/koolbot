@@ -466,7 +466,7 @@ describe("why you see this", () => {
       reasons: { host: ["Event hosts"], staff: [], elevated: false },
     };
     expect(whyText(viewer, "/me/events/presets")).toBe(
-      "Event hostYou can host because you are in @Event hosts.",
+      "Event host You can host because you are in @Event hosts.",
     );
   });
 

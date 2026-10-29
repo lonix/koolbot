@@ -418,9 +418,9 @@ export function renderScopeWhy(viewer: ShellViewer, active: string): string {
     because = `you hold the ${escapeHtml(info.capability)} role`;
   }
   return (
-    `<p class="kb-pagehead__meta" role="note" data-why="${scope}">` +
+    `<p class="kb-pagehead__sub" role="note" data-why="${scope}">` +
     scopeBadge(info.badge, info.icon) +
-    `<span>You can ${info.can} because ${because}.</span></p>`
+    ` You can ${info.can} because ${because}.</p>`
   );
 }
 

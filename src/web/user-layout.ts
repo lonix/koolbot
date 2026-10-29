@@ -317,7 +317,7 @@ const FLASH_FOCUS_SCRIPT =
 
 /**
  * Puts the scope's "why you see this" line inside the page's own header, under
- * the title (`.kb-pagehead__meta`, the header's own line style), so a page says
+ * the title (`.kb-pagehead__sub`, normal text flow so several role mentions wrap), so a page says
  * why once and the line is part of the PageHeader (DESIGN.md Layout). The page
  * bodies are built by our own views, which open with `<header
  * class="kb-pagehead">` whose text block is its first `div`; the line goes at

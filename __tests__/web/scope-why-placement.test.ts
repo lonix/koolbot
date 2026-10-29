@@ -8,6 +8,7 @@
  * is rendered), parsed with jsdom.
  */
 /* global Document, DOMParser, Node */
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "@jest/globals";
 import { allPages } from "./a11y-pages.js";
 import { placeScopeWhy } from "../../src/web/user-layout.js";
@@ -48,10 +49,32 @@ describe("the scope line on host and moderator pages (#1528)", () => {
         expect(doc.body.textContent).not.toContain("You see it because");
         // It is part of the page header, in the header's own meta style.
         expect(why[0].closest("header.kb-pagehead")).not.toBeNull();
-        expect(why[0].classList.contains("kb-pagehead__meta")).toBe(true);
+        // Normal text flow: kb.css makes every span inside .kb-pagehead__meta an
+        // inline-flex box, which would keep several role mentions in one row that
+        // cannot wrap. The line is a sub line, with no meta ancestor and no span
+        // wrapping the sentence.
+        expect(why[0].classList.contains("kb-pagehead__sub")).toBe(true);
+        expect(why[0].closest(".kb-pagehead__meta")).toBeNull();
+        expect(why[0].querySelector(":scope > span:not(.kb-scope)")).toBeNull();
       }
     },
   );
+
+  it("keeps many role mentions in normal text flow (stylesheet rule check)", () => {
+    const css = readFileSync(
+      new URL("../../docs/design/kb.css", import.meta.url),
+      "utf8",
+    );
+    const flexSpan = css
+      .split("\n")
+      .find((l) => l.startsWith(".kb-pagehead__sub span"));
+    expect(flexSpan).toBeUndefined();
+    const sub = css
+      .split("\n")
+      .find((l) => l.startsWith(".kb-pagehead__sub {"));
+    expect(sub).not.toContain("display: flex");
+    expect(sub).not.toContain("display: inline-flex");
+  });
 
   it("keeps the line first for a body with no page header (a confirm step)", () => {
     expect(placeScopeWhy("<section>x</section>", "<div>why</div>")).toBe(
