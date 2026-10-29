@@ -585,6 +585,26 @@ describe("/remind cancel autocomplete", () => {
     expect(choices.every((c) => c.name.length <= 100)).toBe(true);
   });
 
+  it("finds a word that sits past the 100-character cut-off of the label", async () => {
+    mockGetTimezone.mockResolvedValue("UTC");
+    const long = {
+      _id: "507f1f77bcf86cd799439021",
+      message: `${"a".repeat(80)} collect passport`,
+      remindAt: new Date("2099-01-02T18:00:00Z"),
+    };
+    ReminderMock.find.mockReturnValue({ sort: async () => [long] });
+    const interaction = makeAutocomplete("passport");
+
+    await autocomplete(interaction);
+
+    const choices = interaction.respond.mock.calls[0][0] as {
+      name: string;
+      value: string;
+    }[];
+    expect(choices.map((c) => c.value)).toEqual([long._id]);
+    expect(choices[0].name.length).toBeLessThanOrEqual(100);
+  });
+
   it("offers nothing outside a server", async () => {
     const interaction = makeAutocomplete("", null);
 

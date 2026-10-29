@@ -128,16 +128,19 @@ export async function autocomplete(
     interaction.client,
   ).listPending(interaction.user.id, interaction.guildId);
 
+  // Filter on the full label, then cut only the name sent to Discord: a word
+  // near the end of a long reminder must still be found.
   const choices = pending
     .map((reminder) => ({
-      name: truncateText(
-        `${formatInZone(reminder.remindAt, zone, "EEE d MMM HH:mm")} · ${reminder.message.replace(/\s+/g, " ")}`,
-        MAX_CHOICE_NAME_LENGTH,
-      ),
+      label: `${formatInZone(reminder.remindAt, zone, "EEE d MMM HH:mm")} · ${reminder.message.replace(/\s+/g, " ")}`,
       value: String(reminder._id),
     }))
-    .filter((choice) => choice.name.toLowerCase().includes(focused))
-    .slice(0, MAX_AUTOCOMPLETE_CHOICES);
+    .filter((choice) => choice.label.toLowerCase().includes(focused))
+    .slice(0, MAX_AUTOCOMPLETE_CHOICES)
+    .map((choice) => ({
+      name: truncateText(choice.label, MAX_CHOICE_NAME_LENGTH),
+      value: choice.value,
+    }));
   await interaction.respond(choices);
 }
 
