@@ -3715,7 +3715,7 @@ ${liveHtml}
 ${upcomingHtml}
 ${pastHtml}
 </div>
-<p class="muted">A cover image is added to a scheduled event from its row in the lists above; it is shown on the Discord event.</p>
+<p class="kb-help">A cover image is added to a scheduled event from its row in the lists above; it is shown on the Discord event.</p>
 ${renderFeatureSettingsCard({
   intro:
     "Change event settings here without leaving the page. Saved through the shared settings route.",

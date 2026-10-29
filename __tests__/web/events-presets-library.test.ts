@@ -6,6 +6,7 @@
  */
 import { describe, it, expect } from "@jest/globals";
 import { JSDOM } from "jsdom";
+import { icon } from "../../src/web/icons.js";
 import { renderAdminNewEvent } from "./new-event-page-helper.js";
 import {
   EVENT_PRESETS_SCRIPT,
@@ -306,7 +307,7 @@ describe("the presets admin page (#1200)", () => {
   it("marks Event presets, not Events, as the current page in the sidebar (#1298)", () => {
     const html = adminPage();
     expect(html).toContain(
-      '<a href="/admin/events/presets" aria-current="page">Event presets</a>',
+      `<a href="/admin/events/presets" aria-current="page">${icon("calendar-cog")}Event presets</a>`,
     );
     expect(html).not.toMatch(/<a href="\/admin\/events"[^>]*aria-current/);
   });

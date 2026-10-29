@@ -929,7 +929,7 @@ Reaction roles, Rules, Tickets, Voice analytics, Voice channels, Weekly digest);
 **Access** (Command permissions, Role groups, Bot permissions); **Server setup**
 (Setup wizard, Server scan, Channel claims, Channel manager, Adoption history); **Bot**
 (Presence, Database, Environment, Command audit, Command metrics); and **All settings**
-pinned at the bottom. Features that are switched off are not listed with the others: they
+pinned at the bottom. Each link starts with the page's icon (#1542). Features that are switched off are not listed with the others: they
 fold into **N turned off** under Features, so each one stays one click from being enabled.
 The folded list opens on a switched-off feature's own page, and is otherwise remembered
 open or closed per browser. The routes did not change with the names (Command permissions
