@@ -1611,17 +1611,6 @@ export function adminPages(): A11yPage[] {
             category: "Discord",
             rows: [
               {
-                // Live now (#1525): active and started.
-                id: "e0",
-                title: "Open mic",
-                when: "2026-01-31 19:00",
-                state: "active",
-                running: true,
-                channelId: "c1",
-                channelName: "Open mic",
-                channelType: ChannelType.GuildVoice,
-              },
-              {
                 key: "DISCORD_TOKEN",
                 present: true,
                 isSecret: true,
@@ -2598,6 +2587,17 @@ export function adminPages(): A11yPage[] {
         },
         rows: [
           {
+            // Live now (#1525): active and the start has arrived.
+            id: "e0",
+            title: "Open mic",
+            when: "2026-01-31 19:00",
+            state: "active",
+            running: true,
+            channelId: "c1",
+            channelName: "Open mic",
+            channelType: ChannelType.GuildVoice,
+          },
+          {
             id: "e1",
             title: "Game night",
             when: "2026-02-01 20:00",
@@ -2695,6 +2695,7 @@ export function adminPages(): A11yPage[] {
             title: "Quiz night",
             when: "2026-02-01 20:00",
             state: "active",
+            running: true,
             channelId: "c1",
             groupCount: 2,
             hasGroupChannels: true,
@@ -2704,6 +2705,7 @@ export function adminPages(): A11yPage[] {
             title: "Game night",
             when: "2026-02-02 20:00",
             state: "active",
+            running: true,
             channelId: "c2",
           },
         ],
