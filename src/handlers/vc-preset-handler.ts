@@ -128,6 +128,8 @@ function presetSummary(p: IChannelPreset, markdown = false): string {
   return bits.length ? bits.join(" · ") : "(empty)";
 }
 
+const PRESETS_FOOTER = "KoolBot · Voice channels · Presets";
+
 function buildApplyPanel(
   presets: IChannelPreset[],
   channelId: string,
@@ -137,7 +139,7 @@ function buildApplyPanel(
   components: ActionRowBuilder<ButtonBuilder | StringSelectMenuBuilder>[];
 } {
   const embed = new EmbedBuilder()
-    .setTitle("🎛️ Voice Channel Presets")
+    .setTitle("🎛️ Presets")
     .setColor(embedColor("brand"))
     .setDescription(
       presets.length === 0
@@ -147,11 +149,10 @@ function buildApplyPanel(
               (p, i) =>
                 `**${i + 1}. ${escapeDisplayText(p.name)}** ${p.isDefault ? "⭐" : ""}\n  ${presetSummary(p, true)}`,
             )
-            .join("\n"),
+            .join("\n") +
+            "\n\n⭐ marks your default preset. It applies when you spawn a new channel.",
     )
-    .setFooter({
-      text: "⭐ default preset auto-applies when you spawn a new channel",
-    });
+    .setFooter({ text: PRESETS_FOOTER });
 
   const rows: ActionRowBuilder<ButtonBuilder | StringSelectMenuBuilder>[] = [];
 
@@ -175,13 +176,12 @@ function buildApplyPanel(
     new ButtonBuilder()
       .setCustomId(`vc_preset_save_${channelId}_${ownerId}`)
       .setLabel("Save current as preset")
-      .setStyle(ButtonStyle.Success)
+      .setStyle(ButtonStyle.Primary)
       .setEmoji("💾"),
     new ButtonBuilder()
       .setCustomId(`vc_preset_manage_${channelId}_${ownerId}`)
       .setLabel("Manage…")
       .setStyle(ButtonStyle.Secondary)
-      .setEmoji("🗑️")
       .setDisabled(presets.length === 0),
   );
   rows.push(actionRow);
@@ -204,13 +204,14 @@ function buildManagePanel(
       : null;
 
   const embed = new EmbedBuilder()
-    .setTitle("🎛️ Manage Presets")
-    .setColor(embedColor("danger"))
+    .setTitle("Manage presets")
+    .setColor(embedColor("neutral"))
     .setDescription(
       selected
         ? `Selected: **${escapeDisplayText(selected.name)}** ${selected.isDefault ? "⭐" : ""}\n${presetSummary(selected, true)}`
         : "Pick a preset below to rename, delete, or set as default.",
-    );
+    )
+    .setFooter({ text: PRESETS_FOOTER });
 
   const select = new StringSelectMenuBuilder()
     .setCustomId(`vc_preset_pick_${channelId}_${ownerId}`)
@@ -757,14 +758,15 @@ async function applyPreset(
     content: "",
     embeds: [
       new EmbedBuilder()
-        .setTitle("✅ Preset applied")
+        .setTitle("Preset applied")
         .setColor(embedColor("ok"))
         .setDescription(
           `**${escapeDisplayText(preset.name)}** applied to this channel.\n${presetSummary(applied as IChannelPreset, true)}` +
             (nameSkipped
               ? "\n⚠️ The preset's channel name is reserved, so the name was not changed."
               : ""),
-        ),
+        )
+        .setFooter({ text: PRESETS_FOOTER }),
     ],
     components: [],
   });

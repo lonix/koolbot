@@ -181,6 +181,22 @@ describe("VCControlButtonHandler", () => {
       expect(mockManagerInstance.toggleLive).not.toHaveBeenCalled();
     });
 
+    it("opens the rename form with sentence-case copy (#1519)", async () => {
+      mockInteraction.customId = "vc_control_name_channel-id_owner-id";
+      (mockInteraction as any).showModal = jest.fn();
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      const modal = (
+        mockInteraction as any
+      ).showModal.mock.calls[0][0].toJSON();
+      expect(modal.title).toBe("Rename channel");
+      expect(modal.components[0].components[0]).toMatchObject({
+        label: "Channel name",
+        placeholder: "New channel name",
+      });
+    });
+
     it("rejects a stale rename button before opening the modal", async () => {
       mockManagerInstance.getUserChannel.mockReturnValue({
         id: "some-other-channel",

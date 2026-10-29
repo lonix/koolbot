@@ -1,5 +1,6 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import {
+  ButtonStyle,
   ChannelType,
   type ButtonInteraction,
   type StringSelectMenuInteraction,
@@ -25,6 +26,7 @@ import {
 } from "../../src/services/user-voice-prefs-service.js";
 import { VoiceChannelManager } from "../../src/services/voice-channel-manager.js";
 import { errorEmbedPayload, unexpectedErrorPayload } from "../test-utils.js";
+import { embedColor } from "../../src/utils/embed-style.js";
 import {
   handleVCPresetSelect,
   handleVCPresetButton,
@@ -440,6 +442,40 @@ describe("VCPresetHandler - staleness guard on preset actions", () => {
       expect(mockInteraction.editReply).toHaveBeenCalledWith(
         expect.objectContaining({ embeds: expect.any(Array) }),
       );
+    });
+
+    it("words the presets panels in sentence case, with the default explained in the description (#1519)", async () => {
+      setPresets([{ name: "Squad Night", isDefault: true }]);
+      mockInteraction.customId = "vc_preset_open_chan1_user1";
+      await handleVCPresetButton(mockInteraction as ButtonInteraction);
+      const apply = (mockInteraction.editReply as jest.Mock).mock.calls.at(
+        -1,
+      )![0] as {
+        embeds: { data: Record<string, any> }[];
+        components: { components: { data: Record<string, any> }[] }[];
+      };
+      expect(apply.embeds[0].data.title).toBe("🎛️ Presets");
+      expect(apply.embeds[0].data.description).toContain(
+        "⭐ marks your default preset",
+      );
+      expect(apply.embeds[0].data.footer.text).toBe(
+        "KoolBot · Voice channels · Presets",
+      );
+      const buttons = apply.components.at(-1)!.components.map((c) => c.data);
+      expect(buttons[0]).toMatchObject({
+        label: "Save current as preset",
+        style: ButtonStyle.Primary,
+      });
+      expect(buttons[1].label).toBe("Manage…");
+      expect(buttons[1].emoji).toBeUndefined();
+
+      mockInteraction.customId = "vc_preset_manage_chan1_user1";
+      await handleVCPresetButton(mockInteraction as ButtonInteraction);
+      const manage = (mockInteraction.editReply as jest.Mock).mock.calls.at(
+        -1,
+      )![0] as { embeds: { data: Record<string, any> }[] };
+      expect(manage.embeds[0].data.title).toBe("Manage presets");
+      expect(manage.embeds[0].data.color).toBe(embedColor("neutral"));
     });
 
     it("sends the set-default and delete confirmations as follow-ups", async () => {
