@@ -250,9 +250,9 @@ export class VoiceChannelAnnouncer {
       };
 
       const message = [
-        "🎙️ **Weekly Voice Channel Activity Report** 🎙️",
+        "🎙️ **Voice activity this week**",
         "",
-        "**Top 10 Most Active Members This Week:**",
+        "**Most active members**",
         ...topUsers.map((user, index) => {
           const rank = index + 1;
           const medal =
@@ -267,8 +267,6 @@ export class VoiceChannelAnnouncer {
             rank <= 3 ? `<@${user.userId}>` : escapeDisplayText(user.username);
           return `${medal} ${mention}: ${formatTime(user.totalTime)}`;
         }),
-        "",
-        "Keep up the great conversations! 🎮",
       ].join("\n");
 
       // Only the podium is mentioned on purpose; everyone else is plain text.
@@ -329,7 +327,7 @@ export class VoiceChannelAnnouncer {
         await channel.send({
           content: [
             "",
-            "🏆 **New Accolades This Week** 🏆",
+            "🏆 **New accolades this week**",
             "",
             ...accoladeLines.map((line) => line.text),
           ].join("\n"),

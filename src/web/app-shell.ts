@@ -234,7 +234,7 @@ export const SHELL_NAV: readonly ShellNavItem[] = [
     scope: "host",
     label: "Event presets",
     href: "/me/events/presets",
-    icon: "users",
+    icon: "calendar-cog",
     featureKey: "events.enabled",
     available: true,
   },
@@ -453,6 +453,9 @@ export interface TopBarOptions {
   inactivityMs: number;
 }
 
+/** The line the TopBar prints after the name (#1542); kb.css hides it below 760px. */
+export const BRAND_MOTTO = "Keeper of our lore";
+
 /** `header.kb-topbar`: brand, then who you are, the session and the way out. */
 export function renderTopBar(opts: TopBarOptions): string {
   const admin = opts.surface === "admin";
@@ -468,7 +471,7 @@ export function renderTopBar(opts: TopBarOptions): string {
     : `<button type="submit" class="kb-btn kb-btn--sm">Sign out</button>`;
   return (
     `<header class="kb-topbar">` +
-    `<a class="kb-topbar__brand" href="${escapeHtml(opts.home)}">KoolBot</a>` +
+    `<a class="kb-topbar__brand" href="${escapeHtml(opts.home)}">KoolBot <span class="kb-topbar__motto">${BRAND_MOTTO}</span></a>` +
     (opts.brandExtraHtml ?? "") +
     `<div class="kb-topbar__end">` +
     renderWhoami(opts.viewer) +

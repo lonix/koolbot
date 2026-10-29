@@ -36,14 +36,15 @@ export function actionLabel(action: ModerationAction): string {
 }
 
 /**
- * Embed accent colour per action. Punitive actions are `danger`, the softer
- * ones (a warn, a timeout, a quarantine, a kick) are `warn`, a lift is `ok`.
+ * Embed accent colour per action. A ban, which removes a member, is `danger`.
+ * Actions that need attention (a warn, a timeout, a quarantine, a kick, a raid
+ * lockdown) are `warn`, a lift is `ok`.
  */
 export function actionColor(action: ModerationAction): number {
   switch (action) {
     case "ban":
-    case "raid_lockdown":
       return embedColor("danger");
+    case "raid_lockdown":
     case "warn":
     case "kick":
     case "timeout":

@@ -8,7 +8,7 @@
 import type { ConfigSchema } from "../services/config-schema.js";
 import { getPermissionIssueCount } from "../services/bot-permission-status.js";
 import { designStylesheetLinks } from "./design-assets.js";
-import { icon } from "./icons.js";
+import { icon, type IconName } from "./icons.js";
 import { SAVEBAR_SCRIPT } from "./savebar.js";
 import { NUMBER_INPUT_SCRIPT } from "./number-input.js";
 import {
@@ -99,6 +99,8 @@ interface NavItem {
   group: NavGroup;
   /** Whose sidebar this is (#1333): the admin console's only. */
   scope: NavScope;
+  /** The page's icon from DESIGN.md > Iconography, drawn before the label (#1542). */
+  icon: IconName;
   /**
    * Config key (a `<feature>.enabled` boolean) that gates this page. When
    * set and the feature resolves to `false`, the item is still reachable but
@@ -122,7 +124,13 @@ interface NavItem {
 // Labels are sentence case and say what the page does. The routes did not
 // change with the labels.
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/admin/", label: "Dashboard", group: "Top", scope: "admin" },
+  {
+    href: "/admin/",
+    label: "Dashboard",
+    group: "Top",
+    scope: "admin",
+    icon: "layout-dashboard",
+  },
   // Features - every feature-gated page, A to Z (the render sorts them again
   // by state, so a new entry here never has to be placed by hand).
   {
@@ -130,6 +138,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Announcements",
     group: "Features",
     scope: "admin",
+    icon: "megaphone",
     featureKey: "announcements.enabled",
   },
   {
@@ -137,6 +146,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Birthdays",
     group: "Features",
     scope: "admin",
+    icon: "cake",
     featureKey: "birthdays.enabled",
   },
   {
@@ -144,6 +154,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Events",
     group: "Features",
     scope: "admin",
+    icon: "calendar",
     featureKey: "events.enabled",
   },
   {
@@ -151,6 +162,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Event presets",
     group: "Features",
     scope: "admin",
+    icon: "calendar-cog",
     featureKey: "events.enabled",
     subpage: true,
   },
@@ -159,6 +171,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Leaderboard roles",
     group: "Features",
     scope: "admin",
+    icon: "trophy",
     featureKey: "leaderboard_roles.enabled",
   },
   {
@@ -166,6 +179,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Moderation",
     group: "Features",
     scope: "admin",
+    icon: "gavel",
     featureKey: "moderation.enabled",
   },
   {
@@ -173,6 +187,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Notices",
     group: "Features",
     scope: "admin",
+    icon: "sticky-note",
     featureKey: "notices.enabled",
   },
   {
@@ -180,6 +195,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Polls",
     group: "Features",
     scope: "admin",
+    icon: "vote",
     featureKey: "polls.enabled",
   },
   {
@@ -187,6 +203,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Quotes",
     group: "Features",
     scope: "admin",
+    icon: "quote",
     featureKey: "quotes.enabled",
   },
   {
@@ -194,6 +211,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Reaction roles",
     group: "Features",
     scope: "admin",
+    icon: "smile-plus",
     featureKey: "reactionroles.enabled",
   },
   {
@@ -201,6 +219,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Rules",
     group: "Features",
     scope: "admin",
+    icon: "book-open",
     featureKey: "rules.enabled",
   },
   {
@@ -208,6 +227,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Tickets",
     group: "Features",
     scope: "admin",
+    icon: "ticket",
     featureKey: "tickets.enabled",
   },
   {
@@ -215,6 +235,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Voice analytics",
     group: "Features",
     scope: "admin",
+    icon: "audio-lines",
     featureKey: "voicetracking.enabled",
   },
   {
@@ -222,6 +243,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Voice channels",
     group: "Features",
     scope: "admin",
+    icon: "mic",
     featureKey: "voicechannels.enabled",
   },
   {
@@ -229,6 +251,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Weekly digest",
     group: "Features",
     scope: "admin",
+    icon: "newspaper",
     featureKey: "digest.enabled",
   },
   // Access - the two permission pages read as a pair.
@@ -237,18 +260,21 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Command permissions",
     group: "Access",
     scope: "admin",
+    icon: "key-round",
   },
   {
     href: "/admin/role-groups",
     label: "Role groups",
     group: "Access",
     scope: "admin",
+    icon: "users",
   },
   {
     href: "/admin/bot-permissions",
     label: "Bot permissions",
     group: "Access",
     scope: "admin",
+    icon: "shield-check",
   },
   // Server setup.
   {
@@ -256,30 +282,35 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Setup wizard",
     group: "Server setup",
     scope: "admin",
+    icon: "wand-sparkles",
   },
   {
     href: "/admin/adopt",
     label: "Server scan",
     group: "Server setup",
     scope: "admin",
+    icon: "scan-search",
   },
   {
     href: "/admin/adopt/claims",
     label: "Channel claims",
     group: "Server setup",
     scope: "admin",
+    icon: "flag",
   },
   {
     href: "/admin/channels",
     label: "Channel manager",
     group: "Server setup",
     scope: "admin",
+    icon: "folder-tree",
   },
   {
     href: "/admin/adopt/history",
     label: "Adoption history",
     group: "Server setup",
     scope: "admin",
+    icon: "history",
   },
   // Bot.
   {
@@ -287,31 +318,42 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Presence",
     group: "Bot",
     scope: "admin",
+    icon: "activity",
   },
-  { href: "/admin/database", label: "Database", group: "Bot", scope: "admin" },
+  {
+    href: "/admin/database",
+    label: "Database",
+    group: "Bot",
+    scope: "admin",
+    icon: "database",
+  },
   {
     href: "/admin/bootstrap",
     label: "Environment",
     group: "Bot",
     scope: "admin",
+    icon: "server-cog",
   },
   {
     href: "/admin/audit/commands",
     label: "Command audit",
     group: "Bot",
     scope: "admin",
+    icon: "scroll-text",
   },
   {
     href: "/admin/metrics",
     label: "Command metrics",
     group: "Bot",
     scope: "admin",
+    icon: "chart-column",
   },
   {
     href: "/admin/settings",
     label: "All settings",
     group: "Pinned",
     scope: "admin",
+    icon: "sliders-horizontal",
   },
 ];
 
@@ -968,7 +1010,7 @@ function renderNav(
       : issues > 0
         ? `<span class="kb-badge kb-badge--warn kb-badge--count kb-sidenav__end" title="Missing permissions affect enabled features">${issues}</span>`
         : "";
-    return `<li><a href="${escapeHtml(item.href)}"${attrs}>${escapeHtml(item.label)}${badge}</a></li>`;
+    return `<li><a href="${escapeHtml(item.href)}"${attrs}>${icon(item.icon)}${escapeHtml(item.label)}${badge}</a></li>`;
   };
   const renderList = (items: NavItem[], labelledBy?: string): string => {
     const label = labelledBy ? ` aria-labelledby="${labelledBy}"` : "";

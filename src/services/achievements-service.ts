@@ -1918,11 +1918,7 @@ export class AchievementsService {
         if (!definition) continue;
 
         const message = [
-          `${definition.emoji} **Milestone unlocked!** ${definition.emoji}`,
-          "",
-          `🎉 <@${userId}> just earned **${definition.name}** — ${definition.description}!`,
-          "",
-          "Huge congratulations from the whole server! 🥳",
+          `${definition.emoji} <@${userId}> earned **${definition.name}**: ${definition.description}`,
         ].join("\n");
 
         await channel.send({

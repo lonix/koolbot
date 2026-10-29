@@ -184,4 +184,15 @@ describe("aka command", () => {
     });
     expect(out).toContain("@​everyone\\*");
   });
+
+  it("lists names with the - list marker, not a bullet (#1529)", () => {
+    const out = formatHistory({
+      ...empty,
+      username: [{ name: "alice", firstSeenAt: d, lastSeenAt: d }],
+    });
+    const stampOf = `<t:${Math.floor(d.getTime() / 1000)}:D>`;
+    expect(out.split("\n").pop()).toBe(
+      `- **alice** — first seen ${stampOf}, last seen ${stampOf}`,
+    );
+  });
 });

@@ -167,13 +167,14 @@ and services follow *Brand icons*, and every icon enters the repo as *Pulling ic
 | Weekly digest | `newspaper` | Channel manager | `folder-tree` |
 | Voice channels | `mic` | Channel claims | `flag` |
 | Voice analytics | `audio-lines` | Role groups | `users` |
-| Leaderboard roles | `trophy` | Command access | `key-round` |
+| Leaderboard roles | `trophy` | Command permissions | `key-round` |
 | Announcements | `megaphone` | Adoption history | `history` |
 | Notices | `sticky-note` | Presence | `activity` |
 | Rules | `book-open` | Bot permissions | `shield-check` |
 | Reaction roles | `smile-plus` | Command metrics | `chart-column` |
 | Database | `database` | Environment | `server-cog` |
 | All settings | `sliders-horizontal` | Game servers | `gamepad-2` |
+| Event presets (a subpage of Events) | `calendar-cog` | | |
 
 Interface icons: `check`, `circle-check`, `triangle-alert`, `circle-x`, `info`, `chevron-right` (disclosures, links out of a row), `chevron-down`
 (*More*), `external-link`, `user`, `log-out`, `clock`, `bell`, `hash` (text channel), `volume-2` (voice channel), `crown` (team leader), `tag`,

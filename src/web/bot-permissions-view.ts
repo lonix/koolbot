@@ -514,9 +514,9 @@ export function renderBotPermissionsPage(
   return renderAdminPage({
     title: "Bot permissions",
     active: "/admin/bot-permissions",
-    body: `<header class="kb-pagehead"><div class="kb-pagehead__text"><h1 class="kb-pagehead__title">Bot permissions</h1>
+    body: `<div class="kb-stack"><header class="kb-pagehead"><div class="kb-pagehead__text"><h1 class="kb-pagehead__title">Bot permissions</h1>
 <p class="kb-pagehead__sub">Which Discord permissions the bot has for the features you have switched on, and where it is missing any.</p></div></header>
-<div class="kb-stack">${body}</div>`,
+${body}</div>`,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
     navFeatureStatus: props.navFeatureStatus,

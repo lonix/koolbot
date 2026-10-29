@@ -272,6 +272,29 @@ describe("Config Command — execute", () => {
     const dm = userSend.mock.calls[0][0] as string;
     expect(dm).toContain("/admin/");
     expect(dm).toContain("/me/");
+    // `-` list items, a spelled-out unit and no "(s)" (#1529).
+    expect(dm).toContain(
+      "\n- **Admin panel:** the link above drops you on `/admin/`.\n",
+    );
+    expect(dm).toContain(
+      "\n- **My preferences:** your own settings are at `/me/` ",
+    );
+    expect(dm).toContain("expires in about 10 minutes. ");
+    expect(dm).not.toMatch(/•|\(s\)/);
+  });
+
+  it("says 'minute' for a link that lasts one minute (#1529)", async () => {
+    mockCreateSession.mockResolvedValue({
+      url: "https://example.test/admin/s/tok",
+      expiresAt: new Date(Date.now() + 60_000),
+      role: "admin",
+    });
+
+    await execute(buildInteraction({ permissionsBitfield: "8" }));
+
+    expect(userSend.mock.calls[0][0] as string).toContain(
+      "expires in about 1 minute. ",
+    );
   });
 
   it("rejects non-administrators and points them to /me", async () => {

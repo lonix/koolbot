@@ -21,7 +21,7 @@ export async function execute(
       `Opens **My preferences** (\`/me/\`) — your personal Koolbot settings ` +
       `for this server.\n` +
       `\n` +
-      `This link is single-use and expires in about ${ttlMinutes} minute(s). ` +
+      `This link is single-use and expires in about ${ttlMinutes} ${ttlMinutes === 1 ? "minute" : "minutes"}. ` +
       `If you did not run \`/me\`, ignore this message.`,
   });
 }

@@ -103,11 +103,17 @@ describe("VoiceChannelAnnouncer", () => {
           content: string;
           allowedMentions: unknown;
         };
-        expect(payload.content).toContain(
-          "Weekly Voice Channel Activity Report",
+        // The complete post: one leading emoji, sentence case, no count that
+        // is not true, no closing filler line (#1529).
+        expect(payload.content).toBe(
+          [
+            "🎙️ **Voice activity this week**",
+            "",
+            "**Most active members**",
+            "🥇 <@111>: 1h 1m",
+            "🥈 <@222>: 0h 10m",
+          ].join("\n"),
         );
-        expect(payload.content).toContain("🥇 <@111>: 1h 1m");
-        expect(payload.content).toContain("🥈 <@222>: 0h 10m");
         // Exactly the podium may be pinged.
         expect(payload.allowedMentions).toEqual({ users: ["111", "222"] });
       });
@@ -555,8 +561,14 @@ describe("VoiceChannelAnnouncer", () => {
           content: string;
           allowedMentions: unknown;
         };
-        expect(payload.content).toContain("New Accolades This Week");
-        expect(payload.content).toContain("🎖️ <@777> earned **Chatterbox**!");
+        expect(payload.content).toBe(
+          [
+            "",
+            "🏆 **New accolades this week**",
+            "",
+            "🎖️ <@777> earned **Chatterbox**!",
+          ].join("\n"),
+        );
         expect(payload.allowedMentions).toEqual({ users: ["777"] });
       });
 

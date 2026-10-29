@@ -3689,6 +3689,7 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
   );
 
   const body = `
+<div class="kb-stack">
 <header class="kb-pagehead">
   <div class="kb-pagehead__text">
     <h1 class="kb-pagehead__title">Events</h1>
@@ -3714,7 +3715,7 @@ ${liveHtml}
 ${upcomingHtml}
 ${pastHtml}
 </div>
-<p class="muted">A cover image is added to a scheduled event from its row in the lists above; it is shown on the Discord event.</p>
+<p class="kb-help">A cover image is added to a scheduled event from its row in the lists above; it is shown on the Discord event.</p>
 ${renderFeatureSettingsCard({
   intro:
     "Change event settings here without leaving the page. Saved through the shared settings route.",
@@ -3730,6 +3731,7 @@ ${renderFeatureSettingsCard({
   flash: props.flash,
 })}
 ${scriptTag(EVENT_COVER_UPLOAD_SCRIPT)}
+</div>
 `;
 
   return renderAdminPage({

@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import { DiscordAPIError } from "discord.js";
+import { ButtonStyle, DiscordAPIError } from "discord.js";
 
 // The lfg-service module registers a config reload callback and touches a
 // Mongoose model at import time. Mock the heavy dependencies so the pure
@@ -823,6 +823,13 @@ describe("buildPayload", () => {
         (c) => (c as { disabled?: boolean }).disabled === false,
       ),
     ).toBe(true);
+    // Join is the main action (Primary); Close ends the post for everyone and
+    // stays Danger (#1529).
+    expect(row.components.map((c) => (c as { style: number }).style)).toEqual([
+      ButtonStyle.Primary,
+      ButtonStyle.Secondary,
+      ButtonStyle.Danger,
+    ]);
   });
 
   it("greys out every button on a closed post and says why it closed", () => {
