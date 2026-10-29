@@ -3844,6 +3844,69 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The bot's message list could not be read (#1530): the bind form's Message ID is a text box.
+      name: "Reaction roles (message list unreadable)",
+      html: renderReactionRolesPage({
+        ...COMMON,
+        enabled: true,
+        configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
+        active: [],
+        archived: [],
+        settingRows: [],
+        textChannels: CHANNELS,
+        roles: ROLES,
+        messages: null,
+      }),
+    },
+    {
+      // A refused bind form that kept a message id, with the unreadable list (#1530).
+      name: "Reaction roles (bind form refused, message list unreadable)",
+      html: renderReactionRolesPage({
+        ...COMMON,
+        enabled: true,
+        configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
+        active: [],
+        archived: [],
+        settingRows: [],
+        textChannels: CHANNELS,
+        roles: ROLES,
+        messages: null,
+        refusedForm: {
+          formId: "reaction-role-bind",
+          errors: { messageId: "That message is not one the bot posted." },
+          values: {
+            roleId: "r2",
+            emoji: "🎨",
+            messageId: "123456789012345678",
+          },
+        },
+      }),
+    },
+    {
+      // A refused bind form that kept a message id the list does not hold (#1530).
+      name: "Reaction roles (bind form refused, message not in the list)",
+      html: renderReactionRolesPage({
+        ...COMMON,
+        enabled: true,
+        configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
+        active: [],
+        archived: [],
+        settingRows: [],
+        textChannels: CHANNELS,
+        roles: ROLES,
+        messages: WELCOME_MESSAGES,
+        refusedForm: {
+          formId: "reaction-role-bind",
+          errors: { messageId: "That message is not one the bot posted." },
+          values: {
+            roleId: "r2",
+            emoji: "🎨",
+            messageId: "123456789012345678",
+          },
+        },
+      }),
+    },
+    {
       // A refused group form (#1520): the first blank option row is marked, and
       // its line points at the message.
       name: "Reaction roles (group create form refused)",
