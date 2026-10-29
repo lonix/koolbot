@@ -6,6 +6,7 @@ import {
   ACTION_SUMMARY_ORDER,
   type ModerationHistorySummary,
 } from "../../src/utils/moderation-format.js";
+import { embedColor } from "../../src/utils/embed-style.js";
 import {
   MODERATION_ACTIONS,
   type ModerationAction,
@@ -31,6 +32,12 @@ describe("actionColor", () => {
     for (const action of ALL_ACTIONS) {
       expect(typeof actionColor(action)).toBe("number");
     }
+  });
+
+  it("keeps danger for the ban, which removes a member, and warn for a raid lockdown (#1529)", () => {
+    expect(actionColor("ban")).toBe(embedColor("danger"));
+    expect(actionColor("raid_lockdown")).toBe(embedColor("warn"));
+    expect(actionColor("raid_lockdown")).not.toBe(embedColor("danger"));
   });
 
   it("uses the same green for both reversals", () => {

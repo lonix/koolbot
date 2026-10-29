@@ -638,6 +638,91 @@ describe("discord command text guard (#1511)", () => {
   });
 });
 
+/** A `•` bullet or a "(s)" plural: lists use `-`, a count picks its own noun (#1529). */
+const BULLET_OR_PLURAL = /•|\(s\)/;
+
+/**
+ * Every string literal (plain, no-substitution template, and each text piece of
+ * a template with `${}`) that contains a `•` or "(s)". Reads the syntax tree, so
+ * comments and regex literals are never flagged.
+ */
+function bulletPluralProblems(
+  source: string,
+  file = "commands/x.ts",
+): string[] {
+  const sf = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const problems: string[] = [];
+  const visit = (n: ts.Node): void => {
+    if (
+      (ts.isStringLiteral(n) ||
+        ts.isNoSubstitutionTemplateLiteral(n) ||
+        ts.isTemplateHead(n) ||
+        ts.isTemplateMiddle(n) ||
+        ts.isTemplateTail(n)) &&
+      BULLET_OR_PLURAL.test(n.text)
+    ) {
+      const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
+      problems.push(`${file}:${line}: ${JSON.stringify(n.text)}`);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return problems;
+}
+
+describe("discord bullet and plural guard (#1529)", () => {
+  const files = [
+    ...walk(path.join(SRC, "commands")),
+    ...walk(path.join(SRC, "handlers")),
+  ];
+
+  it("scans the commands and the component handlers (self-test)", () => {
+    const scanned = files.map((f) => rel(f, SRC));
+    expect(scanned).toContain("commands/aka.ts");
+    expect(scanned).toContain("commands/voicestats.ts");
+    expect(scanned.some((f) => f.startsWith("handlers/"))).toBe(true);
+  });
+
+  it("has no • bullet and no (s) plural in a string in src/commands or src/handlers", () => {
+    const problems = files.flatMap((f) =>
+      bulletPluralProblems(fs.readFileSync(f, "utf8"), rel(f, SRC)),
+    );
+    expect(problems).toEqual([]);
+  });
+
+  it("catches a bullet or a (s) plural in every string form (self-test)", () => {
+    for (const bad of [
+      "const a = '• item';",
+      'const a = "2 spot(s) left";',
+      "const a = `• ${name}`;",
+      "const a = `about ${n} minute(s). `;",
+      "const a = `${n} minute(s)`;",
+      "const a = `x ${n} y` + '\\n• z';",
+    ]) {
+      expect(bulletPluralProblems(bad)).not.toEqual([]);
+    }
+  });
+
+  it("leaves dashes, comments and regex literals alone (self-test)", () => {
+    for (const fine of [
+      "const a = '- item';",
+      "const a = `${n} ${n === 1 ? 'minute' : 'minutes'}`;",
+      "// • bullet and spot(s) in a comment",
+      "/* minute(s) */ const a = 1;",
+      "const re = /•|\\(s\\)/;",
+      "const a = 'a (small) note';",
+    ]) {
+      expect(bulletPluralProblems(fine)).toEqual([]);
+    }
+  });
+});
+
 /**
  * Every string a reply text expression can produce: string and template
  * literals, `+` concatenation, conditionals (both branches) and same-file
@@ -815,7 +900,7 @@ describe("discord error reply guard (#1509, #1510)", () => {
       'logger.error("There was an error while executing this command!");',
       "await interaction.editReply({ content: result.message });",
       'await interaction.editReply({ content: "", embeds: [e], components: [] });',
-      'await safeReply(interaction, { content: "You\'re in — 2 spot(s) left." });',
+      'await safeReply(interaction, { content: "You\'re in — 2 spots left." });',
     ]) {
       expect(errorReplyProblems(fine)).toEqual([]);
     }

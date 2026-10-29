@@ -51,7 +51,7 @@ export function historyLines(history: NameHistoryByKind): string[] {
     lines.push(`**${KIND_TITLES[kind]}**`);
     for (const row of rows) {
       lines.push(
-        `• **${escapeDisplayText(row.name)}** — first seen ${stamp(row.firstSeenAt)}, last seen ${stamp(row.lastSeenAt)}`,
+        `- **${escapeDisplayText(row.name)}** — first seen ${stamp(row.firstSeenAt)}, last seen ${stamp(row.lastSeenAt)}`,
       );
     }
   }

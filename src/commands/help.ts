@@ -201,7 +201,7 @@ export async function execute(
       );
 
       const embed = new EmbedBuilder()
-        .setColor(isEnabled ? embedColor("ok") : embedColor("danger"))
+        .setColor(isEnabled ? embedColor("ok") : embedColor("neutral"))
         .setTitle(`Help: /${requestedCommand}`)
         .setDescription(commandInfo.description)
         .addFields(

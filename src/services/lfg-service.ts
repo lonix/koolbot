@@ -872,7 +872,7 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
         .setCustomId(`lfg_join_${post._id}`)
         .setLabel("Join")
         .setEmoji("✅")
-        .setStyle(ButtonStyle.Success)
+        .setStyle(ButtonStyle.Primary)
         .setDisabled(closed),
       new ButtonBuilder()
         .setCustomId(`lfg_leave_${post._id}`)

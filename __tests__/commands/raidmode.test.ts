@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { RAID_ACTION_PERMISSIONS } from "../../src/utils/raid-actions.js";
 import { settingsMetadata } from "../../src/services/config-schema.js";
+import { embedColor } from "../../src/utils/embed-style.js";
 import { errorEmbedPayload } from "../test-utils.js";
 
 const mockGetStatus = jest.fn<() => Promise<unknown>>();
@@ -172,6 +173,15 @@ describe("/raidmode", () => {
     );
     expect(text).toContain("Inactive");
     expect(text).toContain("Server Members Intent");
+  });
+
+  it("paints a lockdown as warn and a quiet server as ok, never danger (#1529)", () => {
+    expect(
+      buildStatusEmbed({ ...status, lockdown: true } as never).toJSON().color,
+    ).toBe(embedColor("warn"));
+    expect(
+      buildStatusEmbed({ ...status, lockdown: false } as never).toJSON().color,
+    ).toBe(embedColor("ok"));
   });
 
   it("reports a dry run clearly", () => {

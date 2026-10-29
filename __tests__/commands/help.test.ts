@@ -8,6 +8,7 @@ import {
 } from "../../src/commands/help.js";
 import { errorEmbedPayload, unexpectedErrorPayload } from "../test-utils.js";
 import { COMMAND_CONFIGS } from "../../src/services/command-registry.js";
+import { embedColor } from "../../src/utils/embed-style.js";
 import { getBotVersion } from "../../src/utils/version.js";
 import { ConfigService } from "../../src/services/config-service.js";
 import {
@@ -291,6 +292,22 @@ describe("Help Command", () => {
       expect(
         data.fields.find((f: { name: string }) => f.name === "Status").value,
       ).toMatch(/^(On|Off)$/);
+    });
+
+    it("shows a command that is off with the neutral accent, never danger (#1529)", async () => {
+      (mockInteraction.options!.getString as jest.Mock).mockReturnValue("ping");
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      const data = (mockInteraction.editReply as jest.Mock).mock.calls[0][0]
+        .embeds[0].data;
+      const status = data.fields.find(
+        (f: { name: string }) => f.name === "Status",
+      ).value;
+      expect(data.color).toBe(
+        status === "On" ? embedColor("ok") : embedColor("neutral"),
+      );
+      expect(data.color).not.toBe(embedColor("danger"));
     });
 
     it("should handle multiple known commands", async () => {

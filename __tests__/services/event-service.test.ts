@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import { ChannelType } from "discord.js";
+import { ButtonStyle, ChannelType } from "discord.js";
 
 // The event-service module registers a config reload callback and touches a
 // Mongoose model at import time. Mock the heavy dependencies so the pure
@@ -2833,6 +2833,23 @@ describe("link announcement and legacy RSVP compatibility (#1175)", () => {
     expect(json.fields?.find((f) => f.name === "Repeats")?.value).toBe(
       "weekly",
     );
+  });
+
+  it("gives the legacy RSVP post plain field names and Primary / Secondary buttons, no Success or Danger (#1529)", () => {
+    const payload = svc().buildLegacyRsvpPayload(row({}));
+    expect(payload.embeds[0].toJSON().fields?.map((f) => f.name)).toEqual(
+      expect.arrayContaining(["Going", "Maybe", "Can't"]),
+    );
+    const buttons = (
+      payload.components[0] as {
+        components: Array<{ data: { label?: string; style?: number } }>;
+      }
+    ).components.map((b) => [b.data.label, b.data.style]);
+    expect(buttons).toEqual([
+      ["Going", ButtonStyle.Primary],
+      ["Maybe", ButtonStyle.Secondary],
+      ["Can't", ButtonStyle.Secondary],
+    ]);
   });
 
   it("disables a legacy announcement's buttons once the event has ended", () => {
