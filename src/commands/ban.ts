@@ -191,10 +191,10 @@ export async function execute(
       .setDescription(
         `**${escapeDisplayText(targetUser.tag)}** has been banned.\nThey now have **${total}** entr${
           total === 1 ? "y" : "ies"
-        } in the moderation log.`,
+        } in the moderation log. Use \`/modlog\` to view their history.`,
       )
       .addFields({ name: "Reason", value: reason })
-      .setFooter({ text: `Use /modlog to view history` })
+      .setFooter({ text: "KoolBot · Moderation" })
       .setTimestamp();
 
     if (deleteDays > 0) {

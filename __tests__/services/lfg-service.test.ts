@@ -836,7 +836,10 @@ describe("buildPayload", () => {
     const embed = payload.embeds[0].toJSON();
 
     expect(embed.title).toContain("closed");
-    expect(embed.footer?.text).toMatch(/filled/i);
+    expect(embed.footer?.text).toBe("KoolBot · LFG");
+    expect(embed.fields?.find((f) => f.name === "Status")?.value).toMatch(
+      /filled/i,
+    );
     // A closed post drops the countdown and the channel link: the channel is
     // not this feature's to advertise once the party is over.
     expect(embed.fields?.some((f) => f.name === "Closes")).toBe(false);

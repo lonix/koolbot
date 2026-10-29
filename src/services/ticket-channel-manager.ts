@@ -611,10 +611,11 @@ export class TicketChannelManager {
     const embed = new EmbedBuilder()
       .setColor(embedColor("brand"))
       .setTitle("🎫 Support ticket")
-      .setDescription(ticket.subject)
-      .setFooter({
-        text: "Staff will be with you shortly. Use /ticket close when you're done.",
-      })
+      .setDescription(
+        "Staff will be with you shortly. Use `/ticket close` when you're done.",
+      )
+      .addFields({ name: "Subject", value: ticket.subject })
+      .setFooter({ text: "KoolBot · Tickets" })
       .setTimestamp();
     await channel.send({
       content: `<@${ticket.authorId}> <@&${staffRoleId}>`,

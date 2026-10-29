@@ -559,7 +559,12 @@ describe("ModerationService context notice (#907)", () => {
     expect(logToChannelMock.mock.calls[0][0]).toBe("moderation");
     const payload = noticePayload();
     expect(payload.title).toContain("Kick");
-    expect(payload.description).toBe("<@u1> · by <@m1>");
+    expect(payload.description).toBe(
+      "<@u1> · by <@m1>\nUse `/modlog` for their full history.",
+    );
+    expect((payload as { footer?: string }).footer).toBe(
+      "KoolBot · Moderation",
+    );
     expect(payload.fields[0]).toEqual({
       name: "Reason",
       value: "Repeated spam after warnings",
@@ -616,7 +621,9 @@ describe("ModerationService context notice (#907)", () => {
     );
 
     const payload = noticePayload();
-    expect(payload.description).toBe("<@u1> · by Unknown");
+    expect(payload.description).toBe(
+      "<@u1> · by Unknown\nUse `/modlog` for their full history.",
+    );
     expect(payload.fields[0].value).toBe("No reason given");
     expect(payload.fields[1].value).toBe("No earlier entries");
   });

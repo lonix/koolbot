@@ -168,6 +168,21 @@ describe("Modlog Command", () => {
       expect(description).not.toContain("more on this page");
     });
 
+    it("names the feature and page in the footer and shows the total as a field (#1522)", async () => {
+      mockCountHistory.mockResolvedValue(PAGE_SIZE * 3);
+      mockGetHistory.mockResolvedValue(worstCaseEntries(1));
+      const { interaction, editReply } = makeInteraction(2);
+
+      await execute(interaction);
+
+      const embed = (editReply.mock.calls[0][0] as { embeds: EmbedBuilder[] })
+        .embeds[0].data;
+      expect(embed.footer?.text).toBe("KoolBot · Moderation · Page 2 of 3");
+      expect(embed.fields).toEqual([
+        { name: "Entries", value: String(PAGE_SIZE * 3), inline: true },
+      ]);
+    });
+
     it("shortens each over-long reason to the display cap", async () => {
       mockCountHistory.mockResolvedValue(1);
       mockGetHistory.mockResolvedValue(worstCaseEntries(1));

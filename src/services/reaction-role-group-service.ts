@@ -19,6 +19,7 @@ import {
 } from "../models/reaction-role-config.js";
 import { MAX_GROUP_ENTRIES } from "../content/reaction-role-groups.js";
 import { embedColor } from "../utils/embed-style.js";
+import { groupPickerDescription } from "../utils/reaction-role-copy.js";
 
 /**
  * Grouped reaction-role generator (#1064).
@@ -437,18 +438,13 @@ export class ReactionRoleGroupService {
         .setColor(embedColor("brand"))
         .setTitle(name)
         .setDescription(
-          `React to choose your **${name}** role:\n\n${rowsAfter
-            .map((r) => `${r.emoji} — **${r.roleName}**`)
-            .join("\n")}`,
+          groupPickerDescription(
+            name,
+            effectiveMode,
+            rowsAfter.map((r) => `${r.emoji} — **${r.roleName}**`),
+          ),
         )
-        .setFooter({
-          text:
-            effectiveMode === "unique"
-              ? "Pick one — reacting swaps you to that role"
-              : effectiveMode === "sticky"
-                ? "React to opt in — removing your reaction keeps the role"
-                : "React to add a role, remove your reaction to lose it",
-        });
+        .setFooter({ text: "KoolBot · Reaction roles" });
 
       let target: Message;
       if (anchor) {

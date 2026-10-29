@@ -60,6 +60,7 @@ import {
   REACTION_ROLE_MODES,
 } from "../models/reaction-role-config.js";
 import { embedColor } from "../utils/embed-style.js";
+import { groupPickerDescription } from "../utils/reaction-role-copy.js";
 
 /**
  * Pickers posted before #1513 carry their adoption step's key in the embed
@@ -1085,9 +1086,9 @@ export class ReactionRoleService {
         .setColor(embedColor("brand"))
         .setTitle(`${emoji} ${roleName}`)
         .setDescription(
-          `Click the button below to toggle the <@&${roleId}> role and its channels.`,
+          `Click the button below to toggle the <@&${roleId}> role and its channels. Click it again to remove the role.`,
         )
-        .setFooter({ text: "Click again to remove the role" })
+        .setFooter({ text: "KoolBot · Reaction roles" })
         .setTimestamp();
 
       const button = new ButtonBuilder()
@@ -1109,9 +1110,9 @@ export class ReactionRoleService {
         .setColor(embedColor("brand"))
         .setTitle(`${emoji} ${roleName}`)
         .setDescription(
-          `Use the menu below to give yourself the <@&${roleId}> role and its channels.`,
+          `Use the menu below to give yourself the <@&${roleId}> role and its channels. Deselect it to remove the role.`,
         )
-        .setFooter({ text: "Deselect to remove the role" })
+        .setFooter({ text: "KoolBot · Reaction roles" })
         .setTimestamp();
 
       const option = {
@@ -1144,22 +1145,22 @@ export class ReactionRoleService {
     }
 
     // Default: legacy reaction surface. The caller adds the reaction after send.
-    // Description/footer track the assignment mode so a sticky mapping never
+    // The description tracks the assignment mode so a sticky mapping never
     // tells members that unreacting removes the role (it doesn't).
     let description = `React with ${emoji} to get access to the <@&${roleId}> role and channels!`;
-    let footer = "Remove your reaction to lose access";
     if (mode === "sticky") {
-      footer = "Removing your reaction keeps the role";
+      description += " Removing your reaction keeps the role.";
     } else if (mode === "unique") {
       description = `React with ${emoji} to get the <@&${roleId}> role and its channels. This clears the other roles offered on this message.`;
-      footer = "Reacting here swaps you to this role";
+    } else {
+      description += " Remove your reaction to lose access.";
     }
 
     const embed = new EmbedBuilder()
       .setColor(embedColor("brand"))
       .setTitle(`${emoji} ${roleName}`)
       .setDescription(description)
-      .setFooter({ text: footer })
+      .setFooter({ text: "KoolBot · Reaction roles" })
       .setTimestamp();
     return { embeds: [embed] };
   }
@@ -2927,19 +2928,13 @@ export class ReactionRoleService {
       const optionLines = entries.map(
         (e, i) => `${emojis[i]} — **${names[i]}**`,
       );
-      const footer =
-        normalizedMode === "unique"
-          ? "Pick one — reacting swaps you to that role"
-          : normalizedMode === "sticky"
-            ? "React to opt in — removing your reaction keeps the role"
-            : "React to add a role, remove your reaction to lose it";
       const embed = new EmbedBuilder()
         .setColor(embedColor("brand"))
         .setTitle(groupName)
         .setDescription(
-          `React to choose your **${groupName}** role:\n\n${optionLines.join("\n")}`,
+          groupPickerDescription(groupName, normalizedMode, optionLines),
         )
-        .setFooter({ text: footer })
+        .setFooter({ text: "KoolBot · Reaction roles" })
         .setTimestamp();
       message = await messageChannel.send({ embeds: [embed] });
 

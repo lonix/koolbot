@@ -2943,10 +2943,13 @@ export class EventService extends ScheduledService {
       embed.setDescription(event.description);
     }
     if (isRecurring(event)) {
-      embed.setFooter({
-        text: `🔁 Repeats ${recurrenceLabel(event.recurrence)}`,
+      embed.addFields({
+        name: "Repeats",
+        value: recurrenceLabel(event.recurrence),
+        inline: false,
       });
     }
+    embed.setFooter({ text: "KoolBot · Events" });
     if (event.channelId && !finished) {
       embed.addFields({
         name: "Voice channel",

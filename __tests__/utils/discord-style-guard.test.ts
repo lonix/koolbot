@@ -1,7 +1,9 @@
 /**
  * Guard (#1331, epic #1314): the text rules of `docs/design/discord.md`.
  *
- * 1. A footer reads `KoolBot · <Feature>`: it never contains the word
+ * 1. A footer reads `KoolBot · <Feature>` (#1522): every footer text the guard
+ *    can resolve starts with `KoolBot · `, so an instruction or a status goes in
+ *    the description or a field. It never contains the word
  *    "System" and never a database id (`ID: ...`, `${quote._id}`, `${noticeId}`).
  *    An id people need goes in a button or the Web UI, not in the footer.
  *    An embed field is no place for one either: no field `name` literal
@@ -83,6 +85,22 @@ function walk(dir: string): string[] {
  */
 const FOOTER_UNRESOLVED_ALLOWED: Record<string, string> = {};
 
+/**
+ * Footers that do not start with `KoolBot · ` yet, keyed `file:text`, each with
+ * the open issue that removes the entry. Never add one to silence the guard.
+ */
+const FOOTER_PREFIX_ALLOWED: Record<string, string> = {
+  "services/voice-channel-manager.ts:Only the channel owner can use these controls":
+    "voice controls footer; #1519 removes this entry",
+  "handlers/vc-preset-handler.ts:⭐ default preset auto-applies when you spawn a new channel":
+    "voice presets footer; #1519 removes this entry",
+  "commands/remind.ts:Cancel one with /remind cancel id:<id>":
+    "`/remind list` footer; #1532 removes this entry",
+  "services/digest-service.ts:${footer}":
+    "digest footer; #1526 removes this entry",
+};
+
+const FOOTER_PREFIX = "KoolBot · ";
 const SYSTEM_WORD = /\bSystem\b/;
 const ID_LABEL = /\bID:/;
 /** `${x._id}`, `${quoteId}`, `${noticeId}`, `${x.id}` inside a footer. */
@@ -124,6 +142,14 @@ function bindingsOf(sf: ts.SourceFile, name: string): ts.Expression[] {
 interface Resolved {
   /** Text to run the forbidden-content checks on. */
   texts: string[];
+  /**
+   * Complete footer values the expression can produce, with each same-file
+   * constant substituted into its template or concatenation and any unknown
+   * part (a call, a property read, an unresolved identifier) kept as a
+   * placeholder. A value whose START is unknown is left out. The `KoolBot · `
+   * prefix is checked on these, never on `texts` (which also holds fragments).
+   */
+  values: string[];
   /** Bare identifiers that could not be followed to a literal. */
   unresolved: string[];
 }
@@ -141,36 +167,55 @@ function resolveFooter(
   expr: ts.Expression,
   seen: string[] = [],
 ): Resolved {
-  const out: Resolved = { texts: [], unresolved: [] };
+  const out: Resolved = { texts: [], values: [], unresolved: [] };
   const merge = (r: Resolved): void => {
     out.texts.push(...r.texts);
+    out.values.push(...r.values);
     out.unresolved.push(...r.unresolved);
   };
   if (ts.isParenthesizedExpression(expr) || ts.isAsExpression(expr)) {
     merge(resolveFooter(sf, expr.expression, seen));
   } else if (ts.isStringLiteralLike(expr)) {
     out.texts.push(expr.text);
+    out.values.push(expr.text);
   } else if (ts.isTemplateExpression(expr)) {
     // Keep each `${...}` as written so an interpolated id is still visible;
     // also follow an identifier span to its value.
     let text = expr.head.text;
+    let values: string[] = [expr.head.text];
     for (const span of expr.templateSpans) {
       text += "${" + span.expression.getText(sf) + "}" + span.literal.text;
-      if (ts.isIdentifier(span.expression)) {
-        const r = resolveFooter(sf, span.expression, seen);
-        out.texts.push(...r.texts);
-      }
+      const r = resolveFooter(sf, span.expression, seen);
+      if (ts.isIdentifier(span.expression)) out.texts.push(...r.texts);
+      // A known span is substituted; an unknown one stays as written, so the
+      // text before it is still a known start.
+      const spanValues =
+        r.values.length > 0
+          ? r.values
+          : ["${" + span.expression.getText(sf) + "}"];
+      values = values.flatMap((v) =>
+        spanValues.map((sv) => v + sv + span.literal.text),
+      );
     }
     out.texts.push(text);
+    out.values.push(...values);
   } else if (
     ts.isBinaryExpression(expr) &&
     expr.operatorToken.kind === ts.SyntaxKind.PlusToken
   ) {
     const l = resolveFooter(sf, expr.left, seen);
     const r = resolveFooter(sf, expr.right, seen);
-    merge(l);
-    merge(r);
+    // Fragments feed the forbidden-content checks; the operands' own values
+    // are NOT complete footers, so only the joined values are kept.
+    merge({ texts: l.texts, values: [], unresolved: l.unresolved });
+    merge({ texts: r.texts, values: [], unresolved: r.unresolved });
     out.texts.push(`${l.texts.join("")}${r.texts.join("")}`);
+    // An unknown right side stays as a placeholder; an unknown left side makes
+    // the start unknown, so there is no complete value to check.
+    if (l.values.length > 0) {
+      const rights = r.values.length > 0 ? r.values : ["${…}"];
+      out.values.push(...l.values.flatMap((lv) => rights.map((rv) => lv + rv)));
+    }
   } else if (ts.isConditionalExpression(expr)) {
     merge(resolveFooter(sf, expr.whenTrue, seen));
     merge(resolveFooter(sf, expr.whenFalse, seen));
@@ -234,13 +279,25 @@ function footerExpressions(
 function footerProblems(source: string, file = "source.ts"): string[] {
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
   return footerExpressions(sf).flatMap(({ line, expr }) => {
-    const { texts, unresolved } = resolveFooter(sf, expr);
+    const { texts, values, unresolved } = resolveFooter(sf, expr);
     const problems: string[] = [];
     for (const name of new Set(unresolved)) {
       if (`${file}:${name}` in FOOTER_UNRESOLVED_ALLOWED) continue;
       problems.push(
         `${line}: footer uses \`${name}\`, which is not a same-file const/let literal; write the footer text where it is used, or list "${file}:${name}" in FOOTER_UNRESOLVED_ALLOWED with a reason`,
       );
+    }
+    // The prefix is a property of a COMPLETE footer value, not of the pieces
+    // `texts` also carries (`"Quotes"` in `"KoolBot · " + "Quotes"`).
+    for (const value of new Set(values)) {
+      if (
+        !value.startsWith(FOOTER_PREFIX) &&
+        !(`${file}:${value.split("\n")[0]}` in FOOTER_PREFIX_ALLOWED)
+      ) {
+        problems.push(
+          `${line}: footer "${value}" does not start with "${FOOTER_PREFIX}"; name the feature, or list "${file}:${value.split("\n")[0]}" in FOOTER_PREFIX_ALLOWED with the issue that removes it`,
+        );
+      }
     }
     for (const text of texts) {
       if (SYSTEM_WORD.test(text)) problems.push(`${line}: contains "System"`);
@@ -385,6 +442,11 @@ describe("discord footer guard", () => {
       "e.setFooter({ text: `${label} • ID: ${notice._id}` })",
       "e.setFooter({ text: `KoolBot · Quotes · ${quote.id}` })",
       'log({ footer: "KoolBot Logger System" });',
+      // an instruction or a status is not a footer (#1522)
+      'e.setFooter({ text: "Use /modlog to view history" })',
+      'log({ footer: "Use /modlog for the full history" });',
+      "e.setFooter({ text: `Page ${page}/${n} · ${total} total entries` });",
+      'const F = "Remove your reaction to lose access";\ne.setFooter({ text: F });',
       "log({ footer: { text: `x ${row._id}` } });",
     ]) {
       expect(footerProblems(bad)).not.toEqual([]);
@@ -392,7 +454,8 @@ describe("discord footer guard", () => {
     for (const fine of [
       'e.setFooter({ text: "KoolBot · Notices" })',
       "e.setFooter({ text: `KoolBot · Notices · ${categoryInfo.label}` })",
-      'e.setFooter({ text: "Use /modlog to view history" })',
+      'e.setFooter({ text: "KoolBot · Moderation" })',
+      "e.setFooter({ text: `KoolBot · Moderation · Page ${page} of ${n}` });",
       'log({ footer: "KoolBot · Logs · Startup" });',
       "// e.setFooter({ text: 'ID: 1' })",
       "const footer: string = '';",
@@ -426,12 +489,30 @@ describe("discord footer guard", () => {
     for (const fine of [
       'const F = "KoolBot · Quotes";\ne.setFooter({ text: F });',
       "const t = `KoolBot · Notices · ${label}`;\ne.setFooter({ text: t });",
-      'let f = "Remove your reaction to lose access";\nif (x) f = "Removing keeps the role";\ne.setFooter({ text: f });',
+      'let f = "KoolBot · Reaction roles";\nif (x) f = "KoolBot · Reaction roles · Group";\ne.setFooter({ text: f });',
       // dynamic reads and calls are checked where their literals are written
       "e.setFooter({ text: message.footer });",
       "e.setFooter({ text: closedSummary(reason) });",
     ]) {
       expect(footerProblems(fine)).toEqual([]);
+    }
+  });
+
+  it("checks the KoolBot prefix on the complete footer, not on its fragments (self-test)", () => {
+    for (const fine of [
+      'e.setFooter({ text: "KoolBot · " + "Quotes" });',
+      'const F = "Quotes";\ne.setFooter({ text: `KoolBot · ${F}` });',
+      'const P = "KoolBot · ";\nconst F = "Quotes";\ne.setFooter({ text: P + F });',
+      'const F = "Quotes";\ne.setFooter({ text: ok ? `KoolBot · ${F}` : "KoolBot · Other" });',
+    ]) {
+      expect(footerProblems(fine)).toEqual([]);
+    }
+    for (const bad of [
+      'e.setFooter({ text: "Use " + "/modlog" });',
+      'const F = "Quotes";\ne.setFooter({ text: `Feature: ${F}` });',
+      'const F = "Quotes";\ne.setFooter({ text: ok ? `KoolBot · ${F}` : "Quotes" });',
+    ]) {
+      expect(footerProblems(bad).join("\n")).toContain("does not start with");
     }
   });
 
@@ -457,6 +538,15 @@ describe("discord footer guard", () => {
       expect(problems.join("\n")).toContain(
         "not a same-file const/let literal",
       );
+    }
+  });
+
+  it("names the issue that removes every footer-prefix allow-list entry, and the entry is still needed", () => {
+    for (const [key, reason] of Object.entries(FOOTER_PREFIX_ALLOWED)) {
+      expect(reason).toMatch(/#\d+/);
+      const [file, ...rest] = key.split(":");
+      const source = fs.readFileSync(path.join(SRC, file), "utf8");
+      expect(source).toContain(rest.join(":"));
     }
   });
 

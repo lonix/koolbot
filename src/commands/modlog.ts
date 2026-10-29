@@ -142,10 +142,9 @@ export async function execute(
       .setTitle(`🛡️ Moderation history — ${targetUser.tag}`)
       .setThumbnail(targetUser.displayAvatarURL())
       .setDescription(description)
+      .addFields({ name: "Entries", value: String(total), inline: true })
       .setFooter({
-        text: `Page ${page}/${totalPages} · ${total} total entr${
-          total === 1 ? "y" : "ies"
-        }`,
+        text: `KoolBot · Moderation · Page ${page} of ${totalPages}`,
       })
       .setTimestamp();
 

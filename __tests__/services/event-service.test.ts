@@ -2819,6 +2819,22 @@ describe("link announcement and legacy RSVP compatibility (#1175)", () => {
     expect(sent.components).toEqual([]);
   });
 
+  it("names the feature in the legacy embed's footer and shows a repeat as a field (#1522)", () => {
+    const once = svc().buildLegacyRsvpPayload(row({ recurrence: "none" }));
+    const onceJson = once.embeds[0].toJSON();
+    expect(onceJson.footer?.text).toBe("KoolBot · Events");
+    expect(onceJson.fields?.some((f) => f.name === "Repeats")).toBe(false);
+
+    const weekly = svc().buildLegacyRsvpPayload(
+      row({ recurrence: "weekly", seriesId: "s1" }),
+    );
+    const json = weekly.embeds[0].toJSON();
+    expect(json.footer?.text).toBe("KoolBot · Events");
+    expect(json.fields?.find((f) => f.name === "Repeats")?.value).toBe(
+      "weekly",
+    );
+  });
+
   it("disables a legacy announcement's buttons once the event has ended", () => {
     const payload = svc().buildLegacyRsvpPayload(row({ state: "ended" }));
     const buttons = (

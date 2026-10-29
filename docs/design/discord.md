@@ -20,6 +20,9 @@ so this is the larger half of the brand.
   type `#channel` as text.
 - **Footer:** `KoolBot · <Feature>` and, where it helps, the sub-area (`KoolBot · Notices · Game servers`). Never "System", never a database id. An id
   that people need goes in a button or in the Web UI, not in the footer.
+  An instruction or a status is not a footer: it goes in the description or a field (`Use /modlog to view history` becomes a sentence in the
+  description; a closed post's reason becomes a `Status` field). `__tests__/utils/discord-style-guard.test.ts` fails on a footer that does not start
+  with "KoolBot ·".
 - **Time:** the embed `timestamp`, or `<t:…:f>` / `<t:…:R>` in text, so each reader sees their own timezone and format. Never a preformatted date string.
 - **Version** appears only on help and about messages, in the footer.
 

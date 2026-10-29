@@ -17,6 +17,9 @@ import { discordTimestamp } from "../utils/discord-time.js";
 
 /** Fallback for `moderation.cases.review_cron`, mirroring the schema default. */
 const DEFAULT_CRON = "0 9 * * *";
+/** Says why to open the Web UI; the case lines follow it. */
+const REVIEW_NOTICE_INTRO =
+  "Decide each case on the Moderation page of the Web UI.\n\n";
 
 /** Most cases one run will flip, oldest first; the next tick takes the rest. */
 const RUN_BATCH_SIZE = 100;
@@ -138,12 +141,14 @@ export class ModerationCaseReviewService extends ScheduledService<ModerationCase
         title: `🛡️ ${flipped.length} moderation case${
           flipped.length === 1 ? "" : "s"
         } need${flipped.length === 1 ? "s" : ""} a decision`,
-        description: truncateText(
-          lines.join("\n"),
-          DISCORD_EMBED_DESCRIPTION_LIMIT,
-        ),
+        description:
+          REVIEW_NOTICE_INTRO +
+          truncateText(
+            lines.join("\n"),
+            DISCORD_EMBED_DESCRIPTION_LIMIT - REVIEW_NOTICE_INTRO.length,
+          ),
         color: embedColor("warn"),
-        footer: "Decide them on the Moderation page of the Web UI",
+        footer: "KoolBot · Moderation",
       });
     } catch (error) {
       logger.error("Moderation case review: failed to post notice:", error);
