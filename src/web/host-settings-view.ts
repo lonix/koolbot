@@ -141,11 +141,11 @@ function renderGroups(d: SettingsViewData): string {
     .map(
       (g) =>
         `<tr><td>${g.marker ? `${escapeHtml(g.marker)} ` : ""}${escapeHtml(g.name)}</td>` +
-        `<td>${g.size === null ? '<span class="muted">No limit</span>' : escapeHtml(g.size)}</td>` +
-        `<td><span class="mono">${escapeHtml(g.memberCount)}</span>${g.overSize ? ' <span class="tag tag-off">over size</span>' : ""}</td></tr>`,
+        `<td>${g.size === null ? '<span class="kb-help">No limit</span>' : escapeHtml(g.size)}</td>` +
+        `<td><span class="kb-mono">${escapeHtml(g.memberCount)}</span>${g.overSize ? ' <span class="tag tag-off">over size</span>' : ""}</td></tr>`,
     )
     .join("");
-  return `<table class="prefs-table"><thead><tr><th scope="col">${escapeHtml(d.groupLabel)}</th><th scope="col">Size</th><th scope="col">People</th></tr></thead><tbody>${body}</tbody></table>`;
+  return `<div class="kb-panel__body--flush"><table class="kb-table"><thead><tr><th scope="col">${escapeHtml(d.groupLabel)}</th><th scope="col">Size</th><th scope="col">People</th></tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 /**
@@ -159,12 +159,12 @@ function renderLeaderExtras(d: SettingsViewData): string {
   const edits =
     x.edits.length === 0
       ? `<p class="kb-help">No ${escapeHtml(lead)} has changed a team yet.</p>`
-      : `<table class="kb-table"><caption class="kb-visually-hidden">Recent changes by ${escapeHtml(lead)}s</caption><thead><tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">Change</th></tr></thead><tbody>${x.edits
+      : `<div class="kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">Recent changes by ${escapeHtml(lead)}s</caption><thead><tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">Change</th></tr></thead><tbody>${x.edits
           .map(
             (e) =>
               `<tr><td><span class="kb-mono">${escapeHtml(e.at)}</span></td><td>${escapeHtml(e.who)}</td><td>${escapeHtml(e.text)}</td></tr>`,
           )
-          .join("")}</tbody></table>`;
+          .join("")}</tbody></table></div>`;
   return `<div class="kb-stack" id="host-leaders-extras">
 <h3 class="kb-label">Recent changes by ${escapeHtml(lead)}s</h3>
 ${edits}

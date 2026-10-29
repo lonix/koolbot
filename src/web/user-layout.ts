@@ -160,6 +160,8 @@ const STYLE = [
   // must not be one, or the bar sticks inside it instead of the viewport (as `main.has-savebar` in the
   // admin layout). `clip` still stops a wide child forcing a sideways page scroll.
   "#main.has-savebar{overflow-x:clip}",
+  // The clip above would cut off the right-hand Save on a narrow screen or at zoom, so the bar wraps instead.
+  "#main.has-savebar .kb-savebar{flex-wrap:wrap}",
   ".kb-main__inner{max-width:calc(var(--member-content-max) - 2 * var(--space-8))}",
   "#main:focus-visible{outline:none}",
   "h1{margin:0 0 var(--space-1);font-size:var(--type-page-title-size)}",

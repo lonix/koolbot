@@ -246,7 +246,7 @@ describe("Change the groups puts the editor in a form of its own, apart from Eve
     expect(renderGroupChanges(base)).not.toContain("koolGroupRows");
     const plain = renderGroupChanges(base);
     expect(plain).not.toContain("s_groupNameA");
-    expect(plain).toContain("prefs-table");
+    expect(plain).toContain("kb-table");
   });
 
   it("shows no editor while the section is blocked", () => {

@@ -238,6 +238,13 @@ describe("the member layout and a page with a save bar", () => {
       isAdmin: false,
     });
 
+  it("lets the bar wrap on a narrow screen, so clipping main never hides Save (reflow, 1.4.10)", () => {
+    const css =
+      /<style>([\s\S]*?)<\/style>/.exec(page("<h1>x</h1>"))?.[1] ?? "";
+    expect(css).toContain("#main.has-savebar{overflow-x:clip}");
+    expect(css).toContain("#main.has-savebar .kb-savebar{flex-wrap:wrap}");
+  });
+
   it("lets the bar stick: has-savebar on main, the bar and preset scripts only where their markup is", () => {
     const withBar = page(renderEventSettings(view()));
     expect(withBar).toMatch(/<main id="main" class="[^"]*has-savebar/);
@@ -253,7 +260,22 @@ describe("the member layout and a page with a save bar", () => {
 
 describe("every control and button of the folds and the confirmation uses the kb- classes (#1514)", () => {
   const folds = [
-    renderEventSettings(view()),
+    renderEventSettings(
+      view({
+        leaderExtras: {
+          leaderLabel: "Captain",
+          edits: [{ at: "2030-01-01 19:00", who: "Ana", text: "renamed Red" }],
+        },
+      }),
+    ),
+    // No group editor: the read-only table of the groups.
+    renderGroupChanges(
+      view({
+        groups: [
+          { name: "Red", marker: "", size: 2, memberCount: 3, overSize: true },
+        ],
+      }),
+    ),
     renderGroupChanges(
       view({
         groupEdit: {
@@ -350,6 +372,16 @@ describe("every control and button of the folds and the confirmation uses the kb
     expect(kind("Add team")).toBe("kb-btn");
     expect(kind("Apply preset")).toBe("kb-btn");
     expect(kind("Create the missing channels")).toBe("kb-btn");
+  });
+
+  it("keeps wide tables in their own scroll box, since a page with a save bar clips main sideways", () => {
+    const tables = Array.from(doc.querySelectorAll("table"));
+    expect(tables.length).toBeGreaterThan(0);
+    for (const t of tables) {
+      expect(t.parentElement?.classList.contains("kb-panel__body--flush")).toBe(
+        true,
+      );
+    }
   });
 
   it("never repeats an id across the two folds (the series tick is in every form)", () => {
