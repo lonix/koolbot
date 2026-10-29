@@ -178,10 +178,11 @@ export function renderNewEventBody(props: NewEventViewProps): string {
   const permissionLine = permissionBlock ? `${permissionBlock}\n` : "";
   const repeat = props.allowRecurrence
     ? `
-        <div class="kb-field">
-          <label class="kb-label" for="new-event-recurrence">Repeat</label>
-          <select class="kb-select" id="new-event-recurrence" name="recurrence"${mRepeat.attrs}>${RECURRENCE_CHOICES.map(([value, label]) => `<option value="${value}"${value === (v?.recurrence ?? "none") ? " selected" : ""}>${label}</option>`).join("")}</select>${mRepeat.after(10)}
-        </div>`
+      <div class="kb-field">
+        <label class="kb-label" for="new-event-recurrence">Repeat</label>
+        <select class="kb-select" id="new-event-recurrence" name="recurrence"${mRepeat.attrs}>${RECURRENCE_CHOICES.map(([value, label]) => `<option value="${value}"${value === (v?.recurrence ?? "none") ? " selected" : ""}>${label}</option>`).join("")}</select>${mRepeat.after(8)}
+        <p class="kb-help">An event that starts now cannot repeat.</p>
+      </div>`
     : "";
   return `<header class="kb-pagehead">
   <div class="kb-pagehead__text">
@@ -212,8 +213,8 @@ ${permissionLine}<form method="POST" action="${escapeHtml(props.formAction ?? "/
         <div class="kb-field">
           <label class="kb-label" for="new-event-timezone">Timezone</label>
           ${renderTimezoneSelect("timezone", v?.timezone ?? (props.timezoneBlank ? "" : props.timezone), { id: "new-event-timezone", defaultZone: props.timezone, ...(props.timezoneBlank ? { blank: true } : {}), ...(mZone.errorId ? { invalid: true, describedBy: mZone.errorId } : {}) })}${mZone.after(10)}
-        </div>${repeat}
-      </div>
+        </div>
+      </div>${repeat}
     </div>
   </section>
   <section class="kb-panel" aria-labelledby="new-event-details-h">
@@ -225,7 +226,7 @@ ${permissionLine}<form method="POST" action="${escapeHtml(props.formAction ?? "/
       </div>
       <div class="kb-field">
         <label class="kb-label" for="new-event-description">Description (optional)</label>
-        <textarea class="kb-textarea" id="new-event-description" name="description" rows="3" maxlength="${EVENT_DESCRIPTION_MAX}" placeholder="What is happening?"${mDesc.attrs}>${v ? escapeHtml(v.description) : ""}</textarea>${mDesc.after(8)}
+        <textarea class="kb-textarea" id="new-event-description" name="description" rows="3" maxlength="${EVENT_DESCRIPTION_MAX}" placeholder="What is happening?"${mDesc.attrs}>${v ? `\n${escapeHtml(v.description)}` : ""}</textarea>${mDesc.after(8)}
       </div>
       <div class="kb-field">
         <label class="kb-label" for="new-event-duration">Duration</label>

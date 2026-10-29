@@ -18,6 +18,7 @@ import {
   afterEach,
 } from "@jest/globals";
 import type { Client } from "discord.js";
+import { JSDOM } from "jsdom";
 import {
   startAdminHarness,
   stubRequireSession,
@@ -389,6 +390,37 @@ describe("a refused New event form (#1523, #1527)", () => {
     expect(r.html).toMatch(/name="groups_enabled" value="1" checked/);
     expect(r.html).toMatch(/name="group_0_name"[^>]*value="Red"/);
     expect(mockCreateEvent).not.toHaveBeenCalled();
+  });
+
+  it("puts back the text exactly as typed, whitespace and newlines included (#1551)", async () => {
+    const r = await refusal({
+      title: "  Raid night  ",
+      description: "\n  first line\nsecond  \n",
+      date: "2000-01-01",
+      time: " 18:00 ",
+    });
+    expect(r.html).toContain(
+      'name="title" required maxlength="100" placeholder="Game night" value="  Raid night  "',
+    );
+    // One newline after the tag is the parser's to drop; the typed text follows it.
+    expect(r.html).toContain(">\n\n  first line\nsecond  \n</textarea>");
+  });
+
+  it("shows the Now + repeat refusal on a Repeat field that is not in the hidden date and time block", async () => {
+    const r = await refusal({
+      title: "Now",
+      when: "now",
+      recurrence: "weekly",
+    });
+    const doc = new JSDOM(r.html).window.document;
+    const repeat = doc.getElementById("new-event-recurrence");
+    expect(repeat?.getAttribute("aria-invalid")).toBe("true");
+    expect(repeat?.closest("[data-when-pick]")).toBeNull();
+    expect(
+      doc
+        .getElementById("new-event-recurrence-error")
+        ?.closest("[data-when-pick]"),
+    ).toBeNull();
   });
 
   it("reads only the form's own field names, so a hostile one has no effect", async () => {

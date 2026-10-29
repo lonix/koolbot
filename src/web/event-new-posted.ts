@@ -14,6 +14,12 @@ export function posted(body: Record<string, unknown>, name: string): string {
   return typeof raw === "string" ? raw.trim() : "";
 }
 
+/** A posted string exactly as typed (#1551: echo as typed, the create validator trims what it saves). */
+function raw(body: Record<string, unknown>, name: string): string {
+  const value = body[name];
+  return typeof value === "string" ? value : "";
+}
+
 /** The text fields as posted. The zone and duration fall back to the page's own when absent or unusable. */
 export function valuesFromPost(
   body: Record<string, unknown>,
@@ -22,14 +28,14 @@ export function valuesFromPost(
 ): NewEventValues {
   const minutes = Number(posted(body, "duration"));
   return {
-    date: posted(body, "date"),
-    time: posted(body, "time"),
-    title: posted(body, "title"),
-    description: posted(body, "description"),
+    date: raw(body, "date"),
+    time: raw(body, "time"),
+    title: raw(body, "title"),
+    description: raw(body, "description"),
     durationMinutes:
       Number.isInteger(minutes) && minutes > 0 ? minutes : defaultDuration,
-    timezone: posted(body, "timezone") || timezone,
-    recurrence: posted(body, "recurrence"),
+    timezone: raw(body, "timezone") || timezone,
+    recurrence: raw(body, "recurrence"),
   };
 }
 

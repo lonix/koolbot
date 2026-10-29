@@ -87,7 +87,7 @@ describe("the When script hides the date and time (#1305)", () => {
     expect(block.style.display).toBe("");
   });
 
-  it("does the same on the admin form, and hides Repeat with the date and time", () => {
+  it("does the same on the admin form, and leaves Repeat shown", () => {
     // The body is the page's own; the admin layout's session scripts need `fetch`.
     const dom = boot(
       `<!doctype html><html><body>${renderNewEventBody({
@@ -102,12 +102,16 @@ describe("the When script hides the date and time (#1305)", () => {
       })}</body></html>`,
     );
     const block = pickBlock(dom);
-    const repeat = block.querySelector("select[name=recurrence]");
+    const repeat = dom.window.document.querySelector(
+      "select[name=recurrence]",
+    ) as HTMLElement;
     expect(repeat).not.toBeNull();
+    expect(block.contains(repeat)).toBe(false);
     expect(block.hidden).toBe(false);
     choose(dom, "now");
     expect(block.hidden).toBe(true);
     expect(block.style.display).toBe("none");
+    expect(repeat.closest("[hidden]")).toBeNull();
     choose(dom, "pick");
     expect(block.hidden).toBe(false);
     expect(block.style.display).toBe("");

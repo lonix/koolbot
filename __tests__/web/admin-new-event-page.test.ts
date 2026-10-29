@@ -81,7 +81,7 @@ describe("the admin New event page", () => {
     expect(doc.querySelector('a[href="/me/events/presets"]')).toBeNull();
   });
 
-  it("offers Repeat, with its four choices, inside the date and time fields that Now hides", () => {
+  it("offers Repeat, with its four choices, outside the date and time fields that Now hides", () => {
     const doc = page();
     const repeat = doc.querySelector<HTMLSelectElement>(
       'select[name="recurrence"]',
@@ -93,7 +93,7 @@ describe("the admin New event page", () => {
       "monthly",
     ]);
     expect(repeat?.value).toBe("none");
-    expect(repeat?.closest("[data-when-pick]")).not.toBeNull();
+    expect(repeat?.closest("[data-when-pick]")).toBeNull();
     expect(
       doc.querySelector('label[for="new-event-recurrence"]'),
     ).not.toBeNull();
@@ -212,7 +212,7 @@ describe("a refused New event post, read back", () => {
     expect(view.initialWhen).toBe("30");
     expect(view.values).toMatchObject({
       date: "2999-01-01",
-      description: "hi",
+      description: " hi ",
       recurrence: "weekly",
       timezone: "Europe/Oslo",
       durationMinutes: 90,
