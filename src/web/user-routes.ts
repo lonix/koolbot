@@ -1465,8 +1465,17 @@ export function createUserRouter(
     req: Request,
     res: Response,
     session: WebSessionContext,
-    refusal?: { refused: RefusedForm; flash?: UserFlashMessage },
-  ): Promise<void> {
+    refusal?: {
+      refused: RefusedForm;
+      flash?: UserFlashMessage;
+      /**
+       * The preset the refused draft belongs to. It is checked against the very
+       * list that is drawn, so a draft can never land in the card of a preset
+       * that took its place; on a mismatch nothing is sent and false returns.
+       */
+      presetIdentity?: { index: number; name: string };
+    },
+  ): Promise<boolean> {
     const { userId } = assertSelfScope(session, {
       userId: session.discordUserId,
       guildId: session.guildId,
@@ -1474,6 +1483,10 @@ export function createUserRouter(
 
     const service = UserVoicePrefsService.getInstance();
     const prefs = await service.getPrefs(userId);
+    const identity = refusal?.presetIdentity;
+    if (identity && prefs.presets[identity.index]?.name !== identity.name) {
+      return false;
+    }
     const displayName = await resolveDisplayName(
       client,
       session.guildId,
@@ -1508,6 +1521,7 @@ export function createUserRouter(
           ...flags,
         }),
       );
+    return true;
   }
 
   router.get(
@@ -1622,7 +1636,6 @@ export function createUserRouter(
       req: Request;
       res: Response;
       session: WebSessionContext;
-      userId: string;
       index: number;
       expectedName: string;
       body: Record<string, unknown>;
@@ -1711,7 +1724,6 @@ export function createUserRouter(
           req,
           res,
           session,
-          userId,
           index,
           expectedName,
           body,
@@ -1760,21 +1772,15 @@ export function createUserRouter(
           details: { name: saved.name },
         };
       },
-      async ({ req, res, session, userId, index, expectedName, body, err }) => {
-        // The refusal is about this row's form only if the row is still the one
-        // the form was drawn for; a preset another tab removed or shifted has
-        // no form to mark, so that stays the flash (#1535).
-        try {
-          const prefs =
-            await UserVoicePrefsService.getInstance().getPrefs(userId);
-          if (prefs.presets[index]?.name !== expectedName) return false;
-        } catch (lookupErr) {
-          logger.warn("Preset lookup before a refused edit failed", lookupErr);
-          return false;
-        }
+      async ({ req, res, session, index, expectedName, body, err }) => {
+        // The draft is shown only if the row is still the one the form was
+        // drawn for, checked against the list that is rendered; a preset
+        // another tab removed or shifted has no form to mark, so that stays the
+        // flash (#1535).
         const errors: FormErrors = {};
         if (err.field) addFieldError(errors, err.field, err.message);
-        await sendVoicePage(req, res, session, {
+        return sendVoicePage(req, res, session, {
+          presetIdentity: { index, name: expectedName },
           refused: {
             formId: voicePresetFormId(index),
             errors,
@@ -1786,7 +1792,6 @@ export function createUserRouter(
             ]),
           },
         });
-        return true;
       },
     ),
   );

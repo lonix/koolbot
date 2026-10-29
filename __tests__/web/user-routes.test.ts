@@ -1971,6 +1971,58 @@ describe("/me/voice (#656)", () => {
       expect(out.redirectedTo).toContain("flash=warn");
     });
 
+    it("a preset deleted between the refusal and the render never puts its draft in another preset's card", async () => {
+      const { VoicePrefsValidationError } =
+        await import("../../src/services/user-voice-prefs-service.js");
+      const both = prefs;
+      const survivor = { namePattern: "x", presets: [prefs.presets[1]] };
+      // Every read after the first sees the list without "Squad".
+      const getPrefs = jest
+        .fn<() => Promise<unknown>>()
+        .mockResolvedValueOnce(both)
+        .mockResolvedValue(survivor);
+      const out = await dispatch({
+        method: "POST",
+        url: "/voice/preset/edit",
+        body: {
+          _csrf: csrf(),
+          index: "0",
+          expectedName: "Squad",
+          name: "Squad draft",
+          userLimit: "150",
+        },
+        csrfHeader: csrf(),
+        prefs,
+        serviceImpl: {
+          getPrefs,
+          editPreset: jest
+            .fn()
+            .mockRejectedValue(
+              new VoicePrefsValidationError(
+                "Limit is out of range.",
+                "userLimit",
+              ),
+            ),
+        },
+      });
+      if (out.statusCode === 422) {
+        // Rendered from the snapshot that still holds Squad: the draft is in
+        // Squad's card, whose hidden expectedName is Squad.
+        const doc = new JSDOM(out.body).window.document;
+        const draft = doc.getElementById("voice-preset-0-name")!;
+        expect((draft as unknown as InputEl).value).toBe("Squad draft");
+        expect(
+          draft
+            .closest("form")!
+            .querySelector('input[name="expectedName"]')!
+            .getAttribute("value"),
+        ).toBe("Squad");
+      } else {
+        expect(out.statusCode).toBe(303);
+        expect(out.redirectedTo).toContain("flash=warn");
+      }
+    });
+
     it("a stale-row refusal stays a callout", async () => {
       const { VoicePrefsValidationError } =
         await import("../../src/services/user-voice-prefs-service.js");
