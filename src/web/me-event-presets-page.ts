@@ -31,10 +31,6 @@ export interface MyEventPresetsPageProps {
   defaultCount: number;
 }
 
-// The shared editor form uses `stack`, which the member layout does not style.
-const EDITOR_STYLE =
-  "<style>form.stack label{display:block;margin:0 0 .75rem}form.stack input[type=text],form.stack input[type=number],form.stack select{display:block;max-width:100%}form.stack fieldset{margin:0 0 .75rem}form.inline{display:inline}</style>";
-
 function presetRow(entry: PresetEntry, csrfInput: string): string {
   const id = encodeURIComponent(entry.id);
   return `<tr>
@@ -79,7 +75,7 @@ export function renderMyEventPresetsBody(
   const heading = props.editing
     ? `Edit "${escapeHtml(props.editing.label)}"`
     : "Add a preset";
-  return `${EDITOR_STYLE}<h1>My event presets</h1>
+  return `<h1>My event presets</h1>
 <p class="subtitle">Presets fill in the groups of an event in one click. These are yours: other hosts cannot see or use them. Server admins can see them (the admin needs that to publish one) and may publish one to the server's presets, which makes a copy for everyone while your own preset stays. Changing or deleting a preset never changes events that already used it. <a href="/me/">Back to overview</a></p>
 <div class="card">
   <h2>Your presets</h2>

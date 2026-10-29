@@ -170,7 +170,7 @@ describe("sidebar per scope (non-admin /me)", () => {
     const doc = userPage(member, { navRegistry: BUILT });
     expect(doc.querySelector(".kb-sidenav")).toBeNull();
     expect(doc.querySelector(".kb-shell")).toBeNull();
-    expect(doc.querySelector("div.shell > main#main")).not.toBeNull();
+    expect(doc.querySelector("body > main#main.kb-member")).not.toBeNull();
     // The My preferences tabs stay in that column.
     expect(doc.querySelector("nav.kb-tabs")).not.toBeNull();
     expect(badges(doc)).toEqual([]);
@@ -580,6 +580,10 @@ describe("reflow (#855)", () => {
     ]) {
       expect(doc.querySelector(sel)).not.toBeNull();
     }
+    // The column inside the sidebar page is kb-main__inner, not a bare `main` rule (#1541).
+    expect(
+      doc.querySelector("main#main.kb-main > .kb-main__inner"),
+    ).not.toBeNull();
   });
 });
 
