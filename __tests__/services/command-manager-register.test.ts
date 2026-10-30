@@ -8,6 +8,7 @@ import {
 } from "@jest/globals";
 import { REST, RESTEvents } from "discord.js";
 import { CommandManager } from "../../src/services/command-manager.js";
+import { DiscordLogger } from "../../src/services/discord-logger.js";
 import { PermissionsService } from "../../src/services/permissions-service.js";
 import logger from "../../src/utils/logger.js";
 import {
@@ -76,6 +77,58 @@ describe("CommandManager.registerCommands (#1293)", () => {
       (call) => (call[1] as { body: unknown[] }).body.length === 0,
     );
     expect(emptyClears).toHaveLength(0);
+  });
+
+  describe("registration failure log (#1556)", () => {
+    let logRegistrationFailure: jest.Mock;
+
+    beforeEach(() => {
+      logRegistrationFailure = jest.fn(async () => undefined);
+      jest.spyOn(DiscordLogger, "getInstance").mockReturnValue({
+        logDiscordRegistrationFailure: logRegistrationFailure,
+      } as unknown as DiscordLogger);
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("posts a failed registration once and still rejects with the original error", async () => {
+      putSpy.mockRejectedValue(new Error("Discord said no"));
+      jest
+        .spyOn(
+          manager as unknown as { makeDiscordApiCall: () => Promise<unknown> },
+          "makeDiscordApiCall",
+        )
+        .mockRejectedValue(new Error("Discord said no"));
+
+      await expect(manager.registerCommands()).rejects.toThrow(
+        "Discord said no",
+      );
+
+      expect(logRegistrationFailure).toHaveBeenCalledTimes(1);
+      expect(logRegistrationFailure).toHaveBeenCalledWith("Discord said no");
+    });
+
+    it("posts nothing when registration succeeds", async () => {
+      await manager.registerCommands();
+
+      expect(logRegistrationFailure).not.toHaveBeenCalled();
+    });
+
+    it("keeps the original error when the post itself fails", async () => {
+      logRegistrationFailure.mockRejectedValue(new Error("log channel gone"));
+      jest
+        .spyOn(
+          manager as unknown as { makeDiscordApiCall: () => Promise<unknown> },
+          "makeDiscordApiCall",
+        )
+        .mockRejectedValue(new Error("Discord said no"));
+
+      await expect(manager.registerCommands()).rejects.toThrow(
+        "Discord said no",
+      );
+    });
   });
 
   it("removes every command with a single overwrite when none is enabled", async () => {

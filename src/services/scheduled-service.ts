@@ -2,6 +2,8 @@ import { CronJob } from "cron";
 import type { Client } from "discord.js";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
+import { getErrorMessage } from "../utils/error-guards.js";
+import { DiscordLogger } from "./discord-logger.js";
 import {
   sanitizeCronExpression,
   validateCronExpression,
@@ -266,6 +268,26 @@ export abstract class ScheduledService<TSummary = void> {
       await this.runNow();
     } catch (error) {
       logger.error(`${this.options.label}: scheduled run failed:`, error);
+      await this.postFailureLog(error);
+    }
+  }
+
+  /**
+   * Tell the cron log channel (`core.cron.*`) that a scheduled run failed
+   * (#1556). Lives here, once, so every cron-driven service is covered. Never
+   * throws: a failed post must not turn a handled failure into a crash.
+   */
+  private async postFailureLog(error: unknown): Promise<void> {
+    try {
+      await DiscordLogger.getInstance(this.client).logCronFailure(
+        this.options.label,
+        getErrorMessage(error),
+      );
+    } catch (logError) {
+      logger.error(
+        `${this.options.label}: failed to post the failure to the cron log:`,
+        logError,
+      );
     }
   }
 

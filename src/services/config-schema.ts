@@ -2463,7 +2463,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "core.startup.enabled": {
     label: "Startup log to Discord",
     description:
-      "Post bot lifecycle events (startup, shutdown, database connection, Discord registration, service initialization) as embeds to the startup log channel.",
+      "Post bot lifecycle events (startup, shutdown, database connection, and whether the slash commands registered with Discord) as embeds to the startup log channel.",
     category: "core",
     type: "boolean",
   },
@@ -2477,7 +2477,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "core.errors.enabled": {
     label: "Error log to Discord",
     description:
-      "Post critical errors (unhandled command failures, service crashes) as embeds to the error log channel.",
+      "Post errors that stop startup or fail a clean-up run (service initialisation, message activity clean-up, voice channel truncation) as embeds to the error log channel.",
     category: "core",
     type: "boolean",
   },
@@ -2505,7 +2505,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "core.config.enabled": {
     label: "Config log to Discord",
     description:
-      "Post configuration reloads and their outcome (success/failure, commands updated) as embeds to the config log channel.",
+      "Post settings reloads and whether they worked as embeds to the config log channel. A reload happens when the Setup Wizard applies its settings or the server scan is applied; saving a single setting does not post.",
     category: "core",
     type: "boolean",
   },
@@ -2519,7 +2519,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "core.cron.enabled": {
     label: "Cron log to Discord",
     description:
-      "Post scheduled-job outcomes (announcement triggers, digest runs, other cron tasks) as embeds to the cron log channel.",
+      "Post scheduled-job outcomes as embeds to the cron log channel: runs of the weekly digest, birthdays, Rewind nudge and events, and any scheduled job that failed.",
     category: "core",
     type: "boolean",
   },

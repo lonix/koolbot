@@ -47,6 +47,12 @@ function toBoolean(value: unknown, defaultValue: boolean): boolean {
   return defaultValue;
 }
 
+/** How one `triggerReload()` went, as reported to reload-outcome listeners. */
+export interface ReloadOutcome {
+  success: boolean;
+  message: string;
+}
+
 export class ConfigService {
   private static instance: ConfigService;
   private cache: Map<string, unknown> = new Map();
@@ -54,6 +60,9 @@ export class ConfigService {
   private client: Client | null = null;
   private reloadCallbacks: Set<() => Promise<void>> = new Set();
   private changeListeners: Set<(key: string) => void> = new Set();
+  private reloadOutcomeListeners: Set<
+    (outcome: ReloadOutcome) => Promise<void>
+  > = new Set();
 
   private constructor() {}
 
@@ -74,6 +83,27 @@ export class ConfigService {
 
   public removeReloadCallback(callback: () => Promise<void>): void {
     this.reloadCallbacks.delete(callback);
+  }
+
+  /**
+   * Be told how each `triggerReload()` went, after every reload callback has
+   * run (the Discord config log, #1556). A throwing listener is logged and
+   * ignored, so reporting can never break a reload.
+   */
+  public addReloadOutcomeListener(
+    listener: (outcome: ReloadOutcome) => Promise<void>,
+  ): void {
+    this.reloadOutcomeListeners.add(listener);
+  }
+
+  private async notifyReloadOutcome(outcome: ReloadOutcome): Promise<void> {
+    for (const listener of this.reloadOutcomeListeners) {
+      try {
+        await listener(outcome);
+      } catch (error) {
+        logger.error("Reload outcome listener failed:", error);
+      }
+    }
   }
 
   /**
@@ -112,18 +142,40 @@ export class ConfigService {
     this.initialized = false;
 
     // Reinitialize the service
-    await this.initialize();
+    try {
+      await this.initialize();
+    } catch (error) {
+      await this.notifyReloadOutcome({
+        success: false,
+        message: "The settings could not be read from the database.",
+      });
+      throw error;
+    }
 
     // Execute all registered reload callbacks
+    let failed = 0;
     for (const callback of this.reloadCallbacks) {
       try {
         await callback();
       } catch (error) {
+        failed++;
         logger.error("Error during configuration reload callback:", error);
       }
     }
 
     logger.info("Configuration reload completed");
+
+    await this.notifyReloadOutcome(
+      failed === 0
+        ? {
+            success: true,
+            message: "The settings were read again and applied.",
+          }
+        : {
+            success: false,
+            message: `The settings were read again, but ${failed} ${failed === 1 ? "part" : "parts"} of the bot could not apply them.`,
+          },
+    );
   }
 
   public async initialize(): Promise<void> {

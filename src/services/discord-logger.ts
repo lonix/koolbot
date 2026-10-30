@@ -85,6 +85,10 @@ export class DiscordLogger {
         this.configService.registerReloadCallback(async () => {
           await this.refreshChannels();
         });
+        // Post the outcome to the config log once the reload has finished.
+        this.configService.addReloadOutcomeListener((outcome) =>
+          this.logConfigReload(outcome),
+        );
         this.reloadCallbackRegistered = true;
       }
 
@@ -340,24 +344,6 @@ export class DiscordLogger {
             ]
           : [],
       footer: "KoolBot · Logs · Configuration",
-    });
-  }
-
-  /**
-   * Log service initialisation
-   */
-  public async logServiceInit(
-    serviceName: string,
-    success: boolean,
-    details?: string,
-  ): Promise<void> {
-    await this.logToChannel("startup", {
-      title: success
-        ? `${serviceName} started`
-        : `${serviceName} failed to start`,
-      description: details || (success ? undefined : CHECK_LOG_HINT),
-      color: success ? embedColor("ok") : embedColor("danger"),
-      footer: "KoolBot · Logs · Services",
     });
   }
 

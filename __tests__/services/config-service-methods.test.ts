@@ -571,6 +571,73 @@ describe("ConfigService - Methods", () => {
       await expect(service.triggerReload()).resolves.not.toThrow();
     });
 
+    describe("reload outcome listeners (#1556)", () => {
+      it("reports a clean reload once, after the callbacks have run", async () => {
+        mockFind.mockResolvedValue([]);
+        const order: string[] = [];
+        service.registerReloadCallback(async () => {
+          order.push("callback");
+        });
+        const listener = jest.fn(async () => {
+          order.push("listener");
+        });
+        service.addReloadOutcomeListener(listener);
+
+        await service.triggerReload();
+
+        expect(listener).toHaveBeenCalledTimes(1);
+        expect(listener).toHaveBeenCalledWith(
+          expect.objectContaining({ success: true }),
+        );
+        expect(order).toEqual(["callback", "listener"]);
+      });
+
+      it("reports a failure when a reload callback failed", async () => {
+        mockFind.mockResolvedValue([]);
+        service.registerReloadCallback(
+          jest.fn().mockRejectedValue(new Error("Callback failed")),
+        );
+        const listener = jest.fn(async () => undefined);
+        service.addReloadOutcomeListener(listener);
+
+        await service.triggerReload();
+
+        expect(listener).toHaveBeenCalledTimes(1);
+        expect(listener).toHaveBeenCalledWith(
+          expect.objectContaining({
+            success: false,
+            message: expect.stringContaining("1 part"),
+          }),
+        );
+      });
+
+      it("reports a failure and rethrows when the settings cannot be read", async () => {
+        mockFind.mockRejectedValue(new Error("db down"));
+        const listener = jest.fn(async () => undefined);
+        service.addReloadOutcomeListener(listener);
+
+        await expect(service.triggerReload()).rejects.toThrow();
+
+        expect(listener).toHaveBeenCalledTimes(1);
+        expect(listener).toHaveBeenCalledWith(
+          expect.objectContaining({ success: false }),
+        );
+      });
+
+      it("is not stopped by a throwing listener", async () => {
+        mockFind.mockResolvedValue([]);
+        service.addReloadOutcomeListener(
+          jest.fn().mockRejectedValue(new Error("log failed")),
+        );
+        const second = jest.fn(async () => undefined);
+        service.addReloadOutcomeListener(second);
+
+        await expect(service.triggerReload()).resolves.toBeUndefined();
+
+        expect(second).toHaveBeenCalledTimes(1);
+      });
+    });
+
     it("should remove reload callback correctly", async () => {
       mockFind.mockResolvedValue([]);
       const callback = jest.fn().mockResolvedValue(undefined);

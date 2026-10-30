@@ -1469,7 +1469,7 @@ channels and temporary rooms, events (channels, host access, the leaders-only
 channel, moves, clan tags, the Events list), reaction roles, leaderboard roles,
 role groups and the rules role (including a role that sits above the bot's
 highest role). It also covers the features that post into a configured channel:
-the Discord log channels (startup, errors, cleanup, config changes, scheduled jobs,
+the Discord log channels (startup, errors, cleanup, settings reloads, scheduled jobs,
 moderation, case review, update notes and role groups), anti-raid alerts, the weekly
 voice-activity announcement, and the quotes and notices channels. Each is checked in
 its own channel, with overwrites, only while the feature is on and the channel is set.

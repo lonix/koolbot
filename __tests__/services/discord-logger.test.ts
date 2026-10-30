@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const mockRegisterReloadCallback = jest.fn();
+const mockAddReloadOutcomeListener = jest.fn();
 const mockGetBoolean = jest.fn();
 const mockGetString = jest.fn();
 
@@ -11,6 +12,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: jest.fn(() => ({
       registerReloadCallback: mockRegisterReloadCallback,
+      addReloadOutcomeListener: mockAddReloadOutcomeListener,
       getBoolean: mockGetBoolean,
       getString: mockGetString,
     })),
@@ -135,6 +137,30 @@ describe("DiscordLogger (#844)", () => {
       await logger.initialize();
 
       expect(mockRegisterReloadCallback).toHaveBeenCalledTimes(1);
+    });
+
+    it("posts each reload outcome to the config log exactly once, and nothing while the category is off", async () => {
+      const send = jest.fn(async () => undefined);
+      stubConfig({
+        "core.config.enabled": true,
+        "core.config.channel_id": "444",
+      });
+      const logger = DiscordLogger.getInstance(makeClient({ "444": { send } }));
+      await logger.initialize();
+      await logger.initialize();
+
+      expect(mockAddReloadOutcomeListener).toHaveBeenCalledTimes(1);
+      const listener = mockAddReloadOutcomeListener.mock.calls[0][0] as (o: {
+        success: boolean;
+        message: string;
+      }) => Promise<void>;
+
+      await listener({ success: true, message: "Done." });
+      expect(send).toHaveBeenCalledTimes(1);
+
+      stubConfig({ "core.config.channel_id": "444" });
+      await listener({ success: false, message: "Nope." });
+      expect(send).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -377,18 +403,6 @@ describe("DiscordLogger (#844)", () => {
         category: "config",
         call: (l) => l.logConfigReload({ success: false, message: "m" }),
         title: "Couldn't reload settings",
-      },
-      {
-        label: "service ok",
-        category: "startup",
-        call: (l) => l.logServiceInit("Quotes", true),
-        title: "Quotes started",
-      },
-      {
-        label: "service failed",
-        category: "startup",
-        call: (l) => l.logServiceInit("Quotes", false),
-        title: "Quotes failed to start",
       },
       {
         label: "cleanup ok",

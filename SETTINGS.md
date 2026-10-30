@@ -2153,11 +2153,11 @@ apply to the next log message — no restart is needed.
 
 | Key                                                                    | Type           | Default        | Events                                                                                                    |
 | ---------------------------------------------------------------------- | -------------- | -------------- | --------------------------------------------------------------------------------------------------------- |
-| `core.startup.enabled` / `core.startup.channel_id`                     | bool / channel | `false` / `""` | Startup, shutdown, DB connection, Discord registration, service init                                      |
-| `core.errors.enabled` / `core.errors.channel_id`                       | bool / channel | `false` / `""` | Unhandled command failures, service crashes                                                               |
+| `core.startup.enabled` / `core.startup.channel_id`                     | bool / channel | `false` / `""` | Startup, shutdown, DB connection, Discord command registration (success or failure)                       |
+| `core.errors.enabled` / `core.errors.channel_id`                       | bool / channel | `false` / `""` | Errors that stop startup or fail a clean-up run (message activity, voice channel truncation)              |
 | `core.cleanup.enabled` / `core.cleanup.channel_id`                     | bool / channel | `false` / `""` | Voice-session cleanup results (rows removed / aggregated)                                                 |
-| `core.config.enabled` / `core.config.channel_id`                       | bool / channel | `false` / `""` | Configuration reloads and their outcome                                                                   |
-| `core.cron.enabled` / `core.cron.channel_id`                           | bool / channel | `false` / `""` | Scheduled-job outcomes (announcements, digests, other cron tasks)                                         |
+| `core.config.enabled` / `core.config.channel_id`                       | bool / channel | `false` / `""` | Settings reloads and whether they worked (Setup Wizard, server scan; not a single setting save)           |
+| `core.cron.enabled` / `core.cron.channel_id`                           | bool / channel | `false` / `""` | Weekly digest, birthdays, Rewind nudge and events runs, and any scheduled job that failed                 |
 | `core.moderation.enabled` / `core.moderation.channel_id`               | bool / channel | `false` / `""` | Recorded moderation actions plus the member's earlier actions (needs `moderation.enabled`)                |
 | `core.moderation_review.enabled` / `core.moderation_review.channel_id` | bool / channel | `false` / `""` | Daily summary of moderation cases that need a decision (needs `moderation.cases.enabled`)                 |
 | `core.updates.enabled` / `core.updates.channel_id`                     | bool / channel | `false` / `""` | One-time note when the update check first sees a newer KoolBot release (needs `core.updatecheck.enabled`) |

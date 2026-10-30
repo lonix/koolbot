@@ -17,6 +17,7 @@ import { commandListsMatch } from "../utils/command-diff.js";
 import { recordCommandAudit } from "../utils/record-command-audit.js";
 import { voiceRoomNameOf } from "../utils/voice-room-name.js";
 import { ConfigService } from "./config-service.js";
+import { DiscordLogger } from "./discord-logger.js";
 import { COMMAND_CONFIGS, isCommandEnabled } from "./command-registry.js";
 import { MonitoringService } from "./monitoring-service.js";
 import { recordCommandInvocation } from "../web/metrics.js";
@@ -410,7 +411,24 @@ export class CommandManager {
       }
     } catch (error) {
       logger.error("Error in registerCommands:", error);
+      await this.postRegistrationFailureLog(error);
       throw error;
+    }
+  }
+
+  /**
+   * Tell the startup log channel that registering the slash commands failed
+   * (#1556). Posted once per failed run, from the one place every failure
+   * passes through. Never throws: the caller still gets the original error.
+   */
+  private async postRegistrationFailureLog(error: unknown): Promise<void> {
+    if (!this.client) return;
+    try {
+      await DiscordLogger.getInstance(
+        this.client,
+      ).logDiscordRegistrationFailure(getErrorMessage(error));
+    } catch (logError) {
+      logger.error("Failed to post the registration failure:", logError);
     }
   }
 
