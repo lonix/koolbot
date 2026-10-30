@@ -206,28 +206,18 @@ describe("the quick builder's numbered names use the chosen wording", () => {
   });
 });
 
-describe("the empty option names what an empty choice saves", () => {
-  it("follows the checked preset's word and goes back to the server default", () => {
+describe("the empty option is always the server default", () => {
+  it("keeps its label whatever preset is checked", () => {
     const dom = page(null, { group: "Squad", leader: "Captain" });
-    const radios = [
+    const r = [
       ...dom.window.document.querySelectorAll(
         "input[type=radio][name=groups_preset]",
       ),
-    ] as HTMLInputElement[];
-    const preset = radios.find((x) => x.value === EVENT_GROUP_PRESETS[0].id)!;
-    preset.setAttribute("data-label", "Crew");
-    preset.setAttribute("data-leader-label", "Boss");
-    preset.checked = true;
-    preset.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-    expect(sel(dom, "groups_label_choice").options[0].textContent).toBe(
-      "Preset's word (Crew)",
-    );
-    expect(sel(dom, "groups_leader_label_choice").options[0].textContent).toBe(
-      "Preset's word (Boss)",
-    );
-    const custom = radios.find((x) => x.value === "")!;
-    custom.checked = true;
-    custom.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    ].find(
+      (x) => (x as HTMLInputElement).value === EVENT_GROUP_PRESETS[0].id,
+    ) as HTMLInputElement;
+    r.checked = true;
+    r.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
     expect(sel(dom, "groups_label_choice").options[0].textContent).toBe(
       "Server default (Squad)",
     );

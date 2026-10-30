@@ -2083,7 +2083,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "events.groups.group_label": {
     label: "What a group is called",
     description:
-      "The word an event's groups go by when the host picks none: Team, Squad, Room or Party. It shows on the event form as the server default, a group preset's own word comes first, and the host can pick another word, or type their own, for each event. Events already saved keep the word they have.",
+      "The word an event's groups go by when the host picks none: Team, Squad, Room or Party. It shows on the event form as the server default, choosing a group preset there sets that preset's own word, and the host can pick another word, or type their own, for each event. Events already saved keep the word they have.",
     category: "events",
     type: "string",
     options: GROUP_WORDING_OPTIONS.map((w) => ({ value: w, label: w })),
@@ -2091,7 +2091,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "events.groups.leader_label": {
     label: "What a group leader is called",
     description:
-      "The word a group leader goes by when the host picks none: Leader or Captain. It names the captains lobby and is used in the leader messages. A group preset's own word comes first, and the host can pick another word, or type their own, for each event. Events already saved keep the word they have.",
+      "The word a group leader goes by when the host picks none: Leader or Captain. It names the captains lobby and is used in the leader messages. Choosing a group preset on the form sets that preset's own word, and the host can pick another word, or type their own, for each event. Events already saved keep the word they have.",
     category: "events",
     type: "string",
     options: LEADER_WORDING_OPTIONS.map((w) => ({ value: w, label: w })),

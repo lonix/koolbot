@@ -2080,8 +2080,9 @@ separate voice channel that only the host and the current leaders can join, and 
 server nicknames while the event runs (off by default; see **Clan tags** below).
 **The wording is a dropdown with a server default** (#1471). The first option, **Server default (Team)**, names the word that
 applies when the host picks none; an admin sets it in the Events settings (`events.groups.group_label` and
-`events.groups.leader_label`, each a dropdown of the listed words). A group preset's own word comes before the server default, and
-choosing a preset on the form sets the dropdown to that word. **Custom** shows a text box for any other word; the box is hidden
+`events.groups.leader_label`, each a dropdown of the listed words). Choosing a group preset on the form (with scripts) sets the
+dropdown to the preset's word; the empty dropdown always means the server default,
+so without scripts a preset does not change it. **Custom** shows a text box for any other word; the box is hidden
 while another option is chosen, and without JavaScript it is always shown and only counts when **Custom** is chosen. A word saved
 as free text before the dropdown existed (an event, a preset or a remembered setup) stays valid: it shows as **Custom** with its text. An
 event already saved keeps the word it has when the server default changes. A refused form comes back with both dropdowns and the

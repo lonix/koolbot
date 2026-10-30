@@ -67,7 +67,11 @@ function prefill() {
 
 type Form = "admin" | "member";
 
-function page(form: Form, draft?: Record<string, unknown>): JSDOM {
+function page(
+  form: Form,
+  draft?: Record<string, unknown>,
+  scripts = true,
+): JSDOM {
   const remembered = prefill();
   let html =
     form === "admin"
@@ -101,11 +105,12 @@ function page(form: Form, draft?: Record<string, unknown>): JSDOM {
       JSON.stringify(draft),
     );
   }
-  const scripts = [
+  if (!scripts) return dom;
+  const sources = [
     ...html.matchAll(/<script nonce="[^"]*">([\s\S]*?)<\/script>/g),
   ].map((m) => m[1]);
-  dom.window.eval(scripts.find((c) => c.includes("koolGroupRows="))!);
-  dom.window.eval(scripts.find((c) => c.includes("koolbot-event-form-draft"))!);
+  dom.window.eval(sources.find((c) => c.includes("koolGroupRows="))!);
+  dom.window.eval(sources.find((c) => c.includes("koolbot-event-form-draft"))!);
   return dom;
 }
 
@@ -198,9 +203,9 @@ const steps: Array<{
     expected: { group: "Crew", leader: "Boss" },
   },
   {
-    name: "preset to another preset that has no leader word",
+    name: "preset to another preset that has no leader word (the leader word stays as shown)",
     run: (dom) => choose(dom, raid.id),
-    expected: { group: "Raid", leader: "Leader" },
+    expected: { group: "Raid", leader: "Boss" },
   },
   {
     name: "other preset, then Custom",
@@ -208,7 +213,7 @@ const steps: Array<{
       choose(dom, raid.id);
       choose(dom, "");
     },
-    expected: { group: "Raid", leader: "Leader" },
+    expected: { group: "Raid", leader: "Boss" },
   },
 ];
 
@@ -240,13 +245,13 @@ describe.each(["admin", "member"] as Form[])(
         { group: "Team", leader: "Leader" },
       ],
       [
-        "preset card, empty dropdowns: the preset's words",
+        "preset card, empty dropdowns: the server default (what is shown)",
         {
           groups_preset: crew.id,
           groups_label_choice: "",
           groups_leader_label_choice: "",
         },
-        { group: "Crew", leader: "Boss" },
+        { group: "Team", leader: "Leader" },
       ],
       [
         "Custom card, own words typed",
@@ -266,6 +271,38 @@ describe.each(["admin", "member"] as Form[])(
         group_1_name: "B",
         ...draft,
       });
+      expect({
+        group: shown(dom, "group"),
+        leader: shown(dom, "leader"),
+      }).toEqual(expected);
+      expect(saved(dom)).toEqual(expected);
+    });
+  },
+);
+
+/** Without scripts a card change posts only what the controls show; nothing carries a word over. */
+describe.each(["admin", "member"] as Form[])(
+  "without scripts on the %s form",
+  (f) => {
+    it.each([
+      ["as rendered", () => {}, { group: "Crew", leader: "Boss" }],
+      [
+        "the Custom card chosen",
+        (dom: JSDOM) => {
+          card(dom, "").checked = true;
+        },
+        { group: "Crew", leader: "Boss" },
+      ],
+      [
+        "another preset chosen",
+        (dom: JSDOM) => {
+          card(dom, raid.id).checked = true;
+        },
+        { group: "Crew", leader: "Boss" },
+      ],
+    ])("%s: the shown word is the saved word", (_name, run, expected) => {
+      const dom = page(f, undefined, false);
+      run(dom);
       expect({
         group: shown(dom, "group"),
         leader: shown(dom, "leader"),

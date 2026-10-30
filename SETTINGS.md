@@ -871,8 +871,8 @@ channel.
   `events.groups.default_count` and `events.groups.max_count` only shape the form and cap the number of groups.
   The wording of an event's groups is a dropdown on the event form (Team, Squad, Room or Party for groups; Leader or
   Captain for leaders) with **Custom** for any other word. The first option is the server default, set with
-  `events.groups.group_label` and `events.groups.leader_label`; a group preset's own word comes before it, and an event
-  already saved keeps the word it has.
+  `events.groups.group_label` and `events.groups.leader_label`; choosing a group preset on the form sets the dropdown to the preset's own word (with scripts),
+  and an event already saved keeps the word it has.
 - **Discord scheduled events** (#1034, #1175): every KoolBot event is also created as a native guild scheduled event, and
   that is the only RSVP: members press **Interested** on Discord's own event card, and Discord notifies them when it
   starts. New events are announced with a plain message containing the event link (Discord renders it as an event card);

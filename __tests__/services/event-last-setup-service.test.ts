@@ -89,44 +89,29 @@ describe("prefillFromStored", () => {
       ctx,
     );
     expect(out?.presetId).toBe("lib:clan");
-    // Equal to what the preset supplies when the box is empty, so left empty.
-    expect(out?.groupLabel).toBe("");
+    // The preset's own word comes back as an explicit wording (#1471): the form's
+    // empty dropdown means the server default, never "whatever the preset says".
+    expect(out?.groupLabel).toBe("Squad");
     expect(out?.channelLeadMinutes).toBe("10");
   });
 
-  it("keeps an explicit default wording when the preset's own wording differs", () => {
+  it("blanks a wording only when it is the server default, whatever the preset says (#1471)", () => {
     const wordy = { ...preset, leaderLabel: "Captain" };
     const out = prefillFromStored(
       stored({
         presetId: "lib:clan",
         groupLabel: "Team",
-        leaderLabel: "Leader",
+        leaderLabel: "Captain",
       }),
       { maxCount: 15, presets: [wordy] },
     );
-    // An empty box would turn into "Squad" / "Captain" on submit.
-    expect(out?.groupLabel).toBe("Team");
-    expect(out?.leaderLabel).toBe("Leader");
-    // Under Custom (no preset fallback) the default words are still blanked.
+    // "Team" is the (built-in) server default: shown as the empty dropdown, and
+    // an empty dropdown saves exactly that. The preset's "Captain" stays explicit.
+    expect(out?.groupLabel).toBe("");
+    expect(out?.leaderLabel).toBe("Captain");
     const custom = prefillFromStored(stored(), ctx);
     expect(custom?.groupLabel).toBe("");
     expect(custom?.leaderLabel).toBe("");
-  });
-
-  it("blanks a wording only when it equals the server default, and keeps any other (#1471)", () => {
-    const wording = { group: "Squad", leader: "Captain" };
-    const withServer = { maxCount: 15, presets: [], wording };
-    // The server default is shown as the "Server default" choice: stored empty.
-    const same = prefillFromStored(
-      stored({ groupLabel: "Squad", leaderLabel: "Captain" }),
-      withServer,
-    );
-    expect(same?.groupLabel).toBe("");
-    expect(same?.leaderLabel).toBe("");
-    // The built-in "Team" is an explicit word now, not the default: it stays.
-    const other = prefillFromStored(stored(), withServer);
-    expect(other?.groupLabel).toBe("Team");
-    expect(other?.leaderLabel).toBe("Leader");
   });
 
   it("falls back to Custom, keeping the rows, when the preset is gone", () => {

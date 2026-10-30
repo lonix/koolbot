@@ -3330,12 +3330,6 @@ function renderWordingField(opts: {
   label: string;
   help: string;
   serverDefault: string;
-  /**
-   * The checked preset's own word for this field, if it has one. An empty choice
-   * means "the preset's word, else the server default" on submit, so while a
-   * preset is checked the empty option names the preset's word.
-   */
-  presetWord?: string;
   stored: string | undefined;
   choice: string | undefined;
 }): string {
@@ -3349,8 +3343,8 @@ function renderWordingField(opts: {
   return `<div class="kb-stack" data-wording="${opts.kind}">
             <div class="kb-field">
             <label class="kb-label" for="${opts.idBase}-choice">${escapeHtml(opts.label)}</label>
-            <select class="kb-select" id="${opts.idBase}-choice" name="${opts.choiceName}" data-wording-choice${opts.presetWord ? ` data-preset-word="${escapeHtml(opts.presetWord)}"` : ""} data-default="${escapeHtml(opts.serverDefault)}" aria-describedby="${opts.idBase}-help">
-              ${option("", opts.presetWord ? `Preset's word (${opts.presetWord})` : `Server default (${opts.serverDefault})`)}${WORDING_OPTIONS[opts.kind].map((w) => `\n              ${option(w, w)}`).join("")}
+            <select class="kb-select" id="${opts.idBase}-choice" name="${opts.choiceName}" data-wording-choice data-default="${escapeHtml(opts.serverDefault)}" aria-describedby="${opts.idBase}-help">
+              ${option("", `Server default (${opts.serverDefault})`)}${WORDING_OPTIONS[opts.kind].map((w) => `\n              ${option(w, w)}`).join("")}
               ${option(WORDING_CUSTOM, "Custom")}
             </select>
             <p class="kb-help" id="${opts.idBase}-help">${escapeHtml(opts.help)}</p>
@@ -3408,13 +3402,6 @@ export function renderGroupsSection(
     prefill !== null &&
     prefill.presetId !== "" &&
     presets.some((p) => p.id === prefill.presetId);
-  // The preset card that is checked on first render (the same test as `presetPicked`).
-  const picked = presetPicked
-    ? presets.find((p) => p.id === prefill?.presetId)
-    : undefined;
-  // A preset over the cap is disabled, so it is not the checked one.
-  const checkedPreset =
-    picked && picked.groups.length <= limits.maxCount ? picked : undefined;
   const rowCount = Math.max(limits.defaultCount, prefill?.rows.length ?? 0);
   const rows = Array.from({ length: rowCount }, (_, i) =>
     renderGroupRow(String(i), String(i + 1), prefill?.rows[i]),
@@ -3481,7 +3468,6 @@ export function renderGroupsSection(
           label: "What a leader is called",
           help: "It names the captains lobby and is used in the leader messages. Custom takes any word.",
           serverDefault: wording.leader,
-          presetWord: checkedPreset?.leaderLabel,
           stored: prefill?.leaderLabel,
           choice: prefill?.leaderLabelChoice,
         })}
@@ -3501,9 +3487,8 @@ export function renderGroupsSection(
             choiceName: GROUP_FORM_FIELDS.labelChoice,
             idBase: "groups-label",
             label: "What a group is called",
-            help: "Choosing a preset sets it. Custom takes any word.",
+            help: "Choosing a preset sets it when scripts are on. Custom takes any word.",
             serverDefault: wording.group,
-            presetWord: checkedPreset?.groupLabel,
             stored: prefill?.groupLabel,
             choice: prefill?.groupLabelChoice,
           })}
@@ -3576,17 +3561,9 @@ function eventGroupsScript(): string {
     "function setWording(n,v){var s=pick(n),t=form.elements[n];if(!s){if(t)t.value=v;return}" +
     "var hit=false;Array.prototype.forEach.call(s.options,function(o){if(o.value===v&&v!==''&&v!=='custom')hit=true});" +
     "if(hit){s.value=v}else{s.value='custom';t.value=v}wording()}" +
-    "function wordOf(){var s=pick('groups_label');if(!s||s.value==='custom')return val('groups_label');return s.value===''?(s.__pw||s.getAttribute('data-default')||''):s.value}" +
-    // The empty option names what an empty choice saves: the checked preset's word, else the server default.
-    // Leaving the checked preset (Generate names, or its Custom card) carries its word into the dropdown, so the word is not lost
-    // (`keep` is a draft being put back: what it holds stays as it is).
-    "function wordLabels(keep){var o=chosen(),live=!!(o&&o.value);Array.prototype.forEach.call(form.querySelectorAll('[data-wording-choice]'),function(s){var k=s.closest('[data-wording]').getAttribute('data-wording');" +
-    "var pw=live?o.getAttribute(k==='group'?'data-label':'data-leader-label')||'':'';" +
-    "if(!keep&&!live&&s.value===''&&s.__pw)setWording(k==='group'?'groups_label':'groups_leader_label',s.__pw);s.__pw=pw;" +
-    "s.options[0].textContent=pw?\"Preset's word (\"+pw+\")\":'Server default ('+(s.getAttribute('data-default')||'')+')'})}" +
+    "function wordOf(){var s=pick('groups_label');if(!s||s.value==='custom')return val('groups_label');return s.value===''?(s.getAttribute('data-default')||''):s.value}" +
     "function wordingSet(){var a=pick('groups_label');return !!((a&&a.value)||val('groups_label'))}" +
     "Array.prototype.forEach.call(form.querySelectorAll('[data-wording-choice]'),function(s){s.addEventListener('change',wording)});wording();" +
-    "Array.prototype.forEach.call(form.querySelectorAll('input[type=radio][name=groups_preset]'),function(r){r.addEventListener('change',function(){wordLabels()})});wordLabels();" +
     // The pieces that need scripts are unhidden here; the Advanced section starts
     // folded; the rows are one line each.
     "if(builder)builder.hidden=false;if(sizeQuick)sizeQuick.hidden=false;if(adv&&!(wordingSet()||val('groups_lead_minutes')))adv.open=false;" +
@@ -3659,7 +3636,7 @@ function eventGroupsScript(): string {
     "Array.prototype.forEach.call(rows(),function(x,i){if(val('group_'+i+'_name')){var s=f(i,'size');s.value=r.value;s.removeAttribute('data-manual');if(r.value)s.setAttribute('data-auto','1');else s.removeAttribute('data-auto')}});summarise()})});" +
     // A preset card fills the rows, then folds them behind the summary.
     "function compact(on){summary.hidden=!on;customise.hidden=!on;setEditor(!on)}" +
-    "function custom(){var c=form.querySelector('input[type=radio][name=groups_preset][value=\"\"]');if(c)c.checked=true;wordLabels();compact(false)}" +
+    "function custom(){var c=form.querySelector('input[type=radio][name=groups_preset][value=\"\"]');if(c)c.checked=true;compact(false)}" +
     "function onPreset(){var o=chosen();if(!o||!o.value){compact(false);return}" +
     "var raw=o.getAttribute('data-groups');if(!raw)return;" +
     "var g;try{g=JSON.parse(raw)}catch(x){return}if(!Array.isArray(g))return;" +
@@ -3736,7 +3713,7 @@ function eventGroupsScript(): string {
     // The person gets the rows back, open, so they can fix what the server refused.
     "['auto','manual'].forEach(function(a){(Array.isArray(d['__'+a])?d['__'+a]:[]).forEach(function(n){var el=form.elements[n];if(el&&el.setAttribute)el.setAttribute('data-'+a,'1')})});" +
     "var back=chosen();if(back&&back.value){summary.hidden=false;customise.hidden=false}" +
-    "wording();wordLabels(true);if(adv&&(wordingSet()||val('groups_lead_minutes')))adv.open=true;" +
+    "wording();if(adv&&(wordingSet()||val('groups_lead_minutes')))adv.open=true;" +
     // Setting `checked` fires no change event, so reapply the dependent state by hand.
     "if(kr())kr().syncAll();show();validity();lobby();summarise();setEditor(true)}}catch(x){}" +
     "})();"

@@ -1,9 +1,9 @@
 /* global HTMLFormElement, HTMLSelectElement, HTMLInputElement */
 /**
  * A remembered setup whose wording is its preset's own word (#1471, review of
- * #1614): the dropdown must show what a submit would save. An empty choice
- * means "the preset's word, else the server default", so the empty option has to
- * name the preset's word while that preset is the checked one.
+ * #1614): the dropdown must show what a submit would save. The preset's word
+ * comes back as an explicit choice, since an empty choice always means the
+ * server default.
  */
 import { describe, it, expect, jest } from "@jest/globals";
 import { JSDOM } from "jsdom";
@@ -76,6 +76,12 @@ function roundTrip(preset: typeof crew | null): {
   ) as HTMLFormElement;
   const selected = (name: string): string => {
     const s = form.elements.namedItem(name) as HTMLSelectElement;
+    // A Custom choice shows its word in the box under it.
+    if (s.value === "custom") {
+      return (
+        form.elements.namedItem(name.replace("_choice", "")) as HTMLInputElement
+      ).value;
+    }
     return s.options[s.selectedIndex].textContent ?? "";
   };
   const body: Record<string, string> = { groups_enabled: "1" };

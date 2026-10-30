@@ -147,14 +147,11 @@ export function prefillFromStored(
   if (!result.ok) return null;
 
   const setup = result.setup;
-  // An empty label box means "the preset's wording, else the default" on submit,
-  // so a default label is only blanked when that fallback is the same word.
-  // Otherwise an explicit "Team" under a "Squad" preset would turn into "Squad".
-  // The fallback is the server default when no preset says otherwise (#1471).
-  const groupFallback =
-    offered?.groupLabel ?? ctx.wording?.group ?? DEFAULT_GROUP_LABEL;
-  const leaderFallback =
-    offered?.leaderLabel ?? ctx.wording?.leader ?? DEFAULT_LEADER_LABEL;
+  // The form's empty dropdown means the server default whatever preset is checked
+  // (#1471), so a wording is only blanked when it is that default. A preset's own
+  // word comes back as an explicit choice (a listed word, else Custom).
+  const groupFallback = ctx.wording?.group ?? DEFAULT_GROUP_LABEL;
+  const leaderFallback = ctx.wording?.leader ?? DEFAULT_LEADER_LABEL;
   return {
     presetId: setup.presetId ?? "",
     groupLabel: setup.groupLabel === groupFallback ? "" : setup.groupLabel,

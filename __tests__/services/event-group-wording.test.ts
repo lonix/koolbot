@@ -138,28 +138,42 @@ describe("a posted wording dropdown (#1471)", () => {
     });
   });
 
-  it("lets a group preset's own word come before the server default", () => {
-    const input = parseGroupForm({
-      groups_enabled: "1",
-      groups_preset: "squads",
-      groups_label_choice: "",
-    });
-    const result = validateGroupSetup(input, {
-      maxCount: 15,
-      wording: { group: "Party", leader: "Captain" },
-      resolvePreset: () => ({
-        preset: {
-          id: "squads",
-          label: "Squads",
-          description: "",
-          groupLabel: "Squad",
-          groups: [
-            { name: "Alpha", kind: "team", size: null, tag: "", marker: "" },
-          ],
+  it("lets a preset's own word come before the server default only on the text path; an empty dropdown is the server default", () => {
+    const check = (body: Record<string, string>): string | undefined => {
+      const result = validateGroupSetup(
+        parseGroupForm({
+          groups_enabled: "1",
+          groups_preset: "squads",
+          ...body,
+        }),
+        {
+          maxCount: 15,
+          wording: { group: "Party", leader: "Captain" },
+          resolvePreset: () => ({
+            preset: {
+              id: "squads",
+              label: "Squads",
+              description: "",
+              groupLabel: "Squad",
+              groups: [
+                {
+                  name: "Alpha",
+                  kind: "team",
+                  size: null,
+                  tag: "",
+                  marker: "",
+                },
+              ],
+            },
+          }),
         },
-      }),
-    });
-    expect(result.ok && result.setup.groupLabel).toBe("Squad");
+      );
+      return result.ok ? result.setup.groupLabel : undefined;
+    };
+    // No dropdown posted (preset editor, scripts): the old order, preset first.
+    expect(check({})).toBe("Squad");
+    // An empty dropdown is what the form shows: the server default.
+    expect(check({ groups_label_choice: "" })).toBe("Party");
   });
 
   it.each([

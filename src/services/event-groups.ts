@@ -652,13 +652,19 @@ export function validateGroupSetup(
   const groupLabel = checkLabel(
     "Group label",
     input.groupLabel,
-    preset?.groupLabel ?? wording.group,
+    // An empty dropdown is the server default whatever preset is checked (#1471):
+    // the form shows it that way, and a browser without scripts cannot link the two.
+    input.groupLabelChoice === ""
+      ? wording.group
+      : (preset?.groupLabel ?? wording.group),
     errors,
   );
   const leaderLabel = checkLabel(
     "Leader label",
     input.leaderLabel,
-    preset?.leaderLabel ?? wording.leader,
+    input.leaderLabelChoice === ""
+      ? wording.leader
+      : (preset?.leaderLabel ?? wording.leader),
     errors,
   );
 
