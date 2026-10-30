@@ -4294,7 +4294,7 @@ function groupOptionRows(
     return `<div class="inline-form">
       <input type="text" name="roleName" maxlength="100" aria-label="${escapeHtml(`${formLabel}: option ${i + 1} role name`)}" placeholder="${escapeHtml(role)}"${f.valueAttr(nameField)}${f.attrs(nameField)}>
       ${renderEmojiField("emoji", f.value(emojiField), {
-        ...f.control(emojiField),
+        ...f.refusedControl(emojiField),
         label: `${formLabel}: option ${i + 1}`,
         inputLabel: `${formLabel}: option ${i + 1} emoji`,
         placeholder: emoji,
@@ -4339,7 +4339,7 @@ export function renderReactionRolesPage(props: ReactionRolesProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const create = formView(props.refusedForm, REACTION_ROLE_CREATE_FORM);
   const bind = formView(props.refusedForm, REACTION_ROLE_BIND_FORM);
-  const bindRole = bind.control("roleId");
+  const bindRole = bind.refusedControl("roleId");
   // A refused form keeps the message it was given selected, whatever the list holds.
   const bindCut = props.messages?.truncated === true;
   // The destination a refused form was given: the typed id, else the picked one.
@@ -4412,7 +4412,7 @@ ${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPicker
     <div class="kb-field">
       <span class="kb-label">Emoji (Unicode or <code>&lt;:name:id&gt;</code>)</span>
       ${renderEmojiField("emoji", create.value("emoji"), {
-        ...create.control("emoji"),
+        ...create.refusedControl("emoji"),
         label: "the new role",
         inputLabel: "Emoji for the new role",
         required: true,
@@ -4451,7 +4451,7 @@ ${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPicker
     <div class="kb-field">
       <span class="kb-label">Emoji (Unicode or <code>&lt;:name:id&gt;</code>)</span>
       ${renderEmojiField("emoji", bind.value("emoji"), {
-        ...bind.control("emoji"),
+        ...bind.refusedControl("emoji"),
         label: "the bound role",
         inputLabel: "Emoji for the bound role",
         required: true,
@@ -4467,7 +4467,7 @@ ${
         bindCut ? "messageIdListed" : "messageId",
         bindCut ? bind.value("messageIdListed") : bindDest,
         {
-          ...bind.control(bindCut ? "messageIdListed" : "messageId"),
+          ...bind.refusedControl(bindCut ? "messageIdListed" : "messageId"),
           messages: props.messages,
           ariaLabel: "Message",
           noneLabel: REACTION_ROLE_MESSAGE_NEW_LABEL,

@@ -87,7 +87,7 @@ export interface FormView {
    * for a form that was not refused, otherwise `id`, and `invalid` with the
    * error id in `describedBy` when the field was refused.
    */
-  control(
+  refusedControl(
     name: string,
     describedBy?: string,
   ): {
@@ -157,7 +157,10 @@ export function formView(
       }
       return out;
     },
-    control: (name, describedBy = ""): ReturnType<FormView["control"]> => {
+    refusedControl: (
+      name,
+      describedBy = "",
+    ): ReturnType<FormView["refusedControl"]> => {
       if (!state) return describedBy ? { describedBy } : {};
       const invalid = hasError(name);
       const ids = [describedBy, invalid ? errorId(name) : ""]
