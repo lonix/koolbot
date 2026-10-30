@@ -1,3 +1,4 @@
+/* global HTMLInputElement */
 /**
  * Route-handler tests for the Polls write router (issue #849).
  *
@@ -17,6 +18,7 @@ import {
   afterEach,
 } from "@jest/globals";
 import type { Client } from "discord.js";
+import { JSDOM } from "jsdom";
 import {
   startAdminHarness,
   stubRequireSession,
@@ -77,6 +79,7 @@ const { createPollsRouter } =
 const { requireCsrf } = await import("../../src/web/csrf.js");
 const { registerFormPage } = await import("../../src/web/form-pages.js");
 const { renderPollsPage } = await import("../../src/web/admin-views.js");
+const { renderedFormBody, setField } = await import("./rendered-form.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
 
 const client = { user: { id: "bot" } } as unknown as Client;
@@ -88,7 +91,10 @@ const SCHEDULE = {
   cron: "0 12 * * 5",
   durationHours: "24",
 };
-const ITEM = { question: "Best snack?", answers: "Crisps, Chocolate, Fruit" };
+const ITEM = {
+  question: "Best snack?",
+  answers: ["Crisps", "Chocolate", "Fruit"],
+};
 
 // The read router registers the page's renderer in the app (#1517); here the
 // real view stands in, with one stored schedule and question to edit, so a
@@ -222,12 +228,41 @@ describe("POST /polls/schedules/create", () => {
       expect(r.errorLines["poll-schedule-create-durationHours-error"]).toBe(
         message,
       );
-      expect(r.html).toContain(
-        `value="${durationHours}" required id="poll-schedule-create-durationHours"`,
-      );
+      expect(
+        new JSDOM(r.html).window.document
+          .getElementById("poll-schedule-create-durationHours")
+          ?.getAttribute("value"),
+      ).toBe(durationHours);
       expect(mockCreateSchedule).not.toHaveBeenCalled();
     },
   );
+
+  it("builds the schedule from the picker's parts when only they are posted", async () => {
+    await harness.post("/polls/schedules/create", {
+      channelId: "channel-9",
+      durationHours: "24",
+      cron_mode: "weekly",
+      cron_time: "12:00",
+      cron_dow: "1",
+    });
+    expect(mockCreateSchedule.mock.calls[0][0]).toMatchObject({
+      cronSchedule: "0 12 * * 1",
+    });
+  });
+
+  it("marks a picker part that cannot make a schedule on the schedule field", async () => {
+    const res = await harness.post("/polls/schedules/create", {
+      ...SCHEDULE,
+      cron_mode: "monthly",
+      cron_time: "12:00",
+      cron_dom: "0",
+    });
+    const r = await refusal(res);
+    expect(r.invalidIds).toEqual(["poll-schedule-create-cron"]);
+    expect(r.errorLines["poll-schedule-create-cron-error"]).toBe(
+      "Use a day of the month from 1 to 31.",
+    );
+  });
 
   it("refuses an invalid cron expression, keeping the typed cron, channel and ping role", async () => {
     const res = await harness.post("/polls/schedules/create", {
@@ -238,7 +273,11 @@ describe("POST /polls/schedules/create", () => {
     });
     const r = await refusal(res);
     expect(r.invalidIds).toEqual(["poll-schedule-create-cron"]);
-    expect(r.html).toContain('value="every &lt;friday&gt;"');
+    expect(
+      new JSDOM(r.html).window.document.querySelector<HTMLInputElement>(
+        "#poll-schedule-create-cron .cron-hidden",
+      )?.value,
+    ).toBe("every <friday>");
     expect(r.html).toContain('<option value="channel-3" selected>');
     expect(r.html).toContain('<option value="role-5" selected>');
     expect(mockCreateSchedule).not.toHaveBeenCalled();
@@ -334,8 +373,17 @@ describe("POST /polls/schedules/:id/{edit,delete,toggle,test}", () => {
     expect(r.html).toContain(
       '<details class="helper edit-details" open><summary>Edit</summary>',
     );
-    expect(r.html).toContain('value="bad cron"');
-    expect(r.html).toContain('value="5"');
+    const doc = new JSDOM(r.html).window.document;
+    expect(
+      doc.querySelector<HTMLInputElement>(
+        "#poll-schedule-edit-sched-1-cron .cron-hidden",
+      )?.value,
+    ).toBe("bad cron");
+    expect(
+      doc.querySelector<HTMLInputElement>(
+        "#poll-schedule-edit-sched-1-durationHours",
+      )?.value,
+    ).toBe("5");
     expect(mockUpdateSchedule).not.toHaveBeenCalled();
   });
 
@@ -446,12 +494,16 @@ describe("POST /polls/items/create", () => {
       cron: "  bad cron  ",
     });
     const r = await refusal(res);
-    expect(r.html).toContain('value="  bad cron  "');
+    expect(
+      new JSDOM(r.html).window.document.querySelector<HTMLInputElement>(
+        "#poll-schedule-create-cron .cron-hidden",
+      )?.value,
+    ).toBe("  bad cron  ");
   });
 
   it("refuses a missing question, keeping the answers and tags", async () => {
     const res = await harness.post("/polls/items/create", {
-      answers: "a, b",
+      answers: ["a", "", "b, with a comma"],
       tags: "x, y",
       multiSelect: "1",
     });
@@ -460,7 +512,15 @@ describe("POST /polls/items/create", () => {
     expect(r.errorLines["poll-item-create-question-error"]).toBe(
       "Enter the question.",
     );
-    expect(r.html).toContain('value="a, b"');
+    // Each answer comes back in the box it was typed in, an empty one included.
+    const doc = new JSDOM(r.html).window.document;
+    expect(
+      [0, 1, 2, 3].map(
+        (i) =>
+          doc.querySelector<HTMLInputElement>(`#poll-item-create-answers-${i}`)
+            ?.value,
+      ),
+    ).toEqual(["a", "", "b, with a comma", ""]);
     expect(r.html).toContain('value="x, y"');
     expect(r.html).toMatch(/name="multiSelect" value="1" checked/);
     expect(mockCreatePollItem).not.toHaveBeenCalled();
@@ -478,17 +538,26 @@ describe("POST /polls/items/create", () => {
   });
 
   it.each([
-    ["one answer", "just one"],
-    ["eleven answers", "a,b,c,d,e,f,g,h,i,j,k"],
+    ["one answer", ["just one"]],
+    ["one answer and empty boxes", ["just one", "", " "]],
+    ["no answer field", undefined],
+    ["a comma-separated answer only", ["a, b"]],
+    ["eleven answers", "abcdefghijk".split("")],
   ])("refuses %s", async (_label, answers) => {
     const res = await harness.post("/polls/items/create", {
       ...ITEM,
       answers,
     });
     const r = await refusal(res);
-    expect(r.invalidIds).toEqual(["poll-item-create-answers"]);
+    // Every answer box is marked, each with its own id.
+    expect(r.invalidIds).toEqual([
+      ...Array.from(
+        { length: 10 },
+        (_unused, i) => `poll-item-create-answers-${i}`,
+      ),
+    ]);
     expect(r.errorLines["poll-item-create-answers-error"]).toBe(
-      "Give 2 to 10 answers, separated by commas.",
+      "Give 2 to 10 answers, one in each box.",
     );
     expect(mockCreatePollItem).not.toHaveBeenCalled();
   });
@@ -496,7 +565,7 @@ describe("POST /polls/items/create", () => {
   it("refuses an answer past Discord's 55-character cap", async () => {
     const res = await harness.post("/polls/items/create", {
       ...ITEM,
-      answers: `ok, ${"x".repeat(56)}`,
+      answers: ["ok", "x".repeat(56)],
     });
     const r = await refusal(res);
     expect(r.errorLines["poll-item-create-answers-error"]).toBe(
@@ -504,7 +573,26 @@ describe("POST /polls/items/create", () => {
     );
   });
 
-  it("splits and trims answers and tags, defaulting multiSelect off", async () => {
+  it("keeps a comma inside an answer and drops empty boxes", async () => {
+    await harness.post("/polls/items/create", {
+      ...ITEM,
+      answers: [" Yes, please ", "", "No"],
+    });
+    expect(mockCreatePollItem.mock.calls[0][0]).toMatchObject({
+      answers: ["Yes, please", "No"],
+    });
+  });
+
+  it("takes a single posted answer field as one answer", async () => {
+    const res = await harness.post("/polls/items/create", {
+      ...ITEM,
+      answers: "Only one",
+    });
+    expect(res.status).toBe(422);
+    expect(mockCreatePollItem).not.toHaveBeenCalled();
+  });
+
+  it("splits and trims tags and defaults multiSelect off", async () => {
     const res = await harness.post("/polls/items/create", {
       ...ITEM,
       tags: " food , fun , ",
@@ -540,10 +628,11 @@ describe("POST /polls/items/:id/{edit,delete,toggle}", () => {
     mockListPollItems.mockRejectedValue(new Error("db down"));
     const res = await harness.post("/polls/items/item-1/edit", {
       question: "Q",
-      answers: "only-one",
+      answers: ["only-one"],
     });
     const r = await refusal(res);
-    expect(r.invalidIds).toEqual(["poll-item-edit-item-1-answers"]);
+    expect(r.invalidIds).toHaveLength(10);
+    expect(r.invalidIds[0]).toBe("poll-item-edit-item-1-answers-0");
     expect(mockUpdatePollItem).not.toHaveBeenCalled();
   });
 
@@ -551,7 +640,7 @@ describe("POST /polls/items/:id/{edit,delete,toggle}", () => {
     mockListPollItems.mockResolvedValue([]);
     const res = await harness.post("/polls/items/gone/edit", {
       question: "Q",
-      answers: "only-one",
+      answers: ["only-one"],
     });
     expect(res.status).toBe(303);
     expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
@@ -563,7 +652,7 @@ describe("POST /polls/items/:id/{edit,delete,toggle}", () => {
     mockListPollItems.mockResolvedValue([{ _id: "item-1" }]);
     const res = await harness.post("/polls/items/item-1/edit", {
       question: "  Q?  ",
-      answers: " only-one ",
+      answers: [" only-one "],
     });
     const r = await refusal(res);
     expect(r.html).toContain('value="  Q?  "');
@@ -574,12 +663,12 @@ describe("POST /polls/items/:id/{edit,delete,toggle}", () => {
     mockListPollItems.mockResolvedValue([{ _id: "item-1" }]);
     const res = await harness.post("/polls/items/item-1/edit", {
       question: "Q",
-      answers: "only-one",
+      answers: ["only-one"],
     });
     const r = await refusal(res);
-    expect(r.invalidIds).toEqual(["poll-item-edit-item-1-answers"]);
+    expect(r.invalidIds[0]).toBe("poll-item-edit-item-1-answers-0");
     expect(r.errorLines["poll-item-edit-item-1-answers-error"]).toBe(
-      "Give 2 to 10 answers, separated by commas.",
+      "Give 2 to 10 answers, one in each box.",
     );
     expect(r.html).toContain(
       '<details class="helper edit-details" open><summary>Edit</summary>',
@@ -705,5 +794,120 @@ describe("POST /polls/items/import-text", () => {
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("unparseable");
+  });
+});
+
+// A browser without JavaScript posts what the page rendered. The page comes
+// from a refused post, whose other forms are drawn untouched.
+describe("the polls forms as rendered, posted without a script", () => {
+  const page = async (): Promise<string> =>
+    (await harness.post("/polls/items/create", {})).text();
+
+  it("creates the default schedule from an untouched create form", async () => {
+    const body = renderedFormBody(
+      await page(),
+      "/polls/schedules/create",
+      (f) => setField(f, "channelId", "channel-9"),
+    );
+    expect(body).toMatchObject({
+      cron: "0 12 * * *",
+      cron_mode: "daily",
+      durationHours: "24",
+    });
+    await harness.post("/polls/schedules/create", body);
+    expect(mockCreateSchedule.mock.calls[0][0]).toMatchObject({
+      channelId: "channel-9",
+      cronSchedule: "0 12 * * *",
+      pollDuration: 24,
+    });
+  });
+
+  it("builds a weekly schedule when the mode and weekday are chosen", async () => {
+    const body = renderedFormBody(
+      await page(),
+      "/polls/schedules/create",
+      (f) => {
+        setField(f, "channelId", "channel-9");
+        setField(f, "cron_mode", "weekly");
+        setField(f, "cron_dow", "1");
+        setField(f, "cron_time", "18:45");
+      },
+    );
+    await harness.post("/polls/schedules/create", body);
+    expect(mockCreateSchedule.mock.calls[0][0]).toMatchObject({
+      cronSchedule: "45 18 * * 1",
+    });
+  });
+
+  it("saves an untouched edit form with the schedule it was drawn with", async () => {
+    const body = renderedFormBody(
+      await page(),
+      "/polls/schedules/sched-1/edit",
+    );
+    await harness.post("/polls/schedules/sched-1/edit", body);
+    expect(mockUpdateSchedule).toHaveBeenCalledWith(
+      "sched-1",
+      expect.objectContaining({
+        channelId: "channel-9",
+        cronSchedule: "0 12 * * 5",
+        pollDuration: 24,
+      }),
+      session.guildId,
+    );
+  });
+
+  it("posts one repeated answers field from the filled boxes, commas kept", async () => {
+    const res = await harness.post("/polls/schedules/create", {});
+    const body = renderedFormBody(
+      await res.text(),
+      "/polls/items/create",
+      (f) => {
+        setField(f, "question", "Best snack?");
+        setField(f, "answers", "Crisps, salted", 0);
+        setField(f, "answers", "Fruit", 1);
+      },
+    );
+    expect(body.answers).toHaveLength(10);
+    await harness.post("/polls/items/create", body);
+    expect(mockCreatePollItem.mock.calls[0][0]).toMatchObject({
+      question: "Best snack?",
+      answers: ["Crisps, salted", "Fruit"],
+    });
+  });
+
+  it("lets an answer in the middle be cleared: the form is valid in the browser and the route accepts it", async () => {
+    mockListPollItems.mockResolvedValue([{ _id: "item-1" }]);
+    let valid = false;
+    const body = renderedFormBody(
+      await page(),
+      "/polls/items/item-1/edit",
+      (f) => {
+        setField(f, "answers", "A", 0);
+        setField(f, "answers", "", 1);
+        setField(f, "answers", "C", 2);
+        valid = f.checkValidity();
+      },
+    );
+    expect(valid).toBe(true);
+    await harness.post("/polls/items/item-1/edit", body);
+    expect(mockUpdatePollItem).toHaveBeenCalledWith(
+      "item-1",
+      expect.objectContaining({ answers: ["A", "C"] }),
+      session.guildId,
+    );
+  });
+
+  it("saves an untouched question edit form with its stored answers", async () => {
+    mockListPollItems.mockResolvedValue([{ _id: "item-1" }]);
+    const body = renderedFormBody(await page(), "/polls/items/item-1/edit");
+    await harness.post("/polls/items/item-1/edit", body);
+    expect(mockUpdatePollItem).toHaveBeenCalledWith(
+      "item-1",
+      expect.objectContaining({
+        question: "Stored question?",
+        answers: ["Yes", "No"],
+      }),
+      session.guildId,
+    );
   });
 });

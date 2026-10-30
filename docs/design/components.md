@@ -270,6 +270,8 @@ plus a second one (_Keep the stored value_) when the stored value is not `#RRGGB
 
 - A colour input cannot be empty, so the checkbox is the empty state. It posts `use_default_<key>=true` and wins over the swatch, with or without
   JavaScript; with the script, picking a colour unticks it and the two boxes exclude each other.
+- On a feature form the box is worded for it (_No colour_ for an embed or a new role, _Leave as it is_ when editing one) and named
+  `use_default_<field>`; a settings row keeps _Use default_.
 - The swatch of the default shows Discord's default grey (`#99aab5`).
 - A stored value that is not `#RRGGBB` is kept by the ticked _Keep the stored value_ box (`keep_<key>=true`, read by the server as the stored value) and
   noted under the control ("is not a #RRGGBB colour. It stays as it is until you pick a colour or use the default").

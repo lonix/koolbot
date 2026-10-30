@@ -47,7 +47,10 @@ import {
 } from "./setting-pickers.js";
 import type { ReactionRoleMessageOptions } from "./reaction-role-messages.js";
 import { getServerTimezone } from "../utils/timezone.js";
-import type { SettingFormat } from "../utils/setting-formats.js";
+import {
+  validateSettingFormat,
+  type SettingFormat,
+} from "../utils/setting-formats.js";
 import {
   CHEVRON_ICON,
   SETTINGS_FOLD_SCRIPT,
@@ -753,11 +756,12 @@ const WEEKDAY_NAMES = [
   "Saturday",
 ];
 
-function renderCronPicker(
+export function renderCronPicker(
   currentValue: string,
   valueName: string,
   depLocked = false,
   a11y: ControlA11y = {},
+  namedParts = false,
 ): string {
   const state = parseCronToPickerState(currentValue);
   const pad = (n: number): string => String(n).padStart(2, "0");
@@ -803,29 +807,137 @@ function renderCronPicker(
   // script in admin-layout keeps it in sync with the controls; it locates
   // the input via the `.cron-hidden` class so the form-field name can vary
   // per row (e.g. `value_<key>` under the per-section save form).
+  //
+  // A feature form (`namedParts`) also names the parts, so a browser without
+  // JavaScript posts the mode and the fields it shows, and `readCronField`
+  // builds the string from them. Every part is then rendered shown (the script
+  // hides the ones the mode does not use when it starts), since a part that is
+  // hidden without a script could never be filled in.
+  const part = (suffix: string): string =>
+    namedParts ? ` name="${escapeHtml(valueName)}_${suffix}"` : "";
+  const hide = (cond: boolean): string => (namedParts ? "" : hidden(cond));
   return (
     `<div class="cron-picker" data-mode="${state.mode}"${groupAttrs}>` +
     `<input type="hidden" class="cron-hidden" name="${escapeHtml(valueName)}" value="${escapeHtml(currentValue)}">` +
-    `<select class="cron-mode" aria-label="Schedule type"${lockAttr}>` +
+    `<select class="cron-mode" aria-label="Schedule type"${part("mode")}${lockAttr}>` +
     `<option value="daily"${sel(state.mode === "daily")}>Daily</option>` +
     `<option value="weekly"${sel(state.mode === "weekly")}>Weekly</option>` +
     `<option value="monthly"${sel(state.mode === "monthly")}>Monthly</option>` +
     `<option value="custom"${sel(state.mode === "custom")}>Custom (cron)</option>` +
     `</select>` +
-    `<span class="cron-time-wrap"${hidden(state.mode === "custom")}>` +
-    ` at <input type="time" class="cron-time" aria-label="Time of day" value="${timeAttr}"${lockAttr}>` +
+    `<span class="cron-time-wrap"${hide(state.mode === "custom")}>` +
+    ` at <input type="time" class="cron-time" aria-label="Time of day" value="${timeAttr}"${part("time")}${lockAttr}>` +
     `</span>` +
-    `<span class="cron-dow-wrap"${hidden(state.mode !== "weekly")}>` +
-    ` on <select class="cron-dow" aria-label="Day of week"${lockAttr}>${dowOptions}</select>` +
+    `<span class="cron-dow-wrap"${hide(state.mode !== "weekly")}>` +
+    ` on <select class="cron-dow" aria-label="Day of week"${part("dow")}${lockAttr}>${dowOptions}</select>` +
     `</span>` +
-    `<span class="cron-dom-wrap"${hidden(state.mode !== "monthly")}>` +
-    ` on day <input type="number" class="cron-dom" aria-label="Day of month" min="1" max="31" value="${state.dayOfMonth}" style="width:5rem"${lockAttr}>` +
+    `<span class="cron-dom-wrap"${hide(state.mode !== "monthly")}>` +
+    ` on day ${namedParts ? '<input type="text" inputmode="numeric" autocomplete="off" class="cron-dom" aria-label="Day of month"' : '<input type="number" class="cron-dom" aria-label="Day of month" min="1" max="31"'} value="${state.dayOfMonth}" style="width:5rem"${part("dom")}${lockAttr}>` +
     `</span>` +
-    `<span class="cron-custom-wrap"${hidden(state.mode !== "custom")}>` +
-    `<input type="text" class="cron-custom" aria-label="Cron expression" value="${escapeHtml(state.raw)}" placeholder="0 16 * * 5" style="width:12rem"${lockAttr}>` +
+    `<span class="cron-custom-wrap"${hide(state.mode !== "custom")}>` +
+    `<input type="text" class="cron-custom" aria-label="Cron expression" value="${escapeHtml(state.raw)}" placeholder="0 16 * * 5" style="width:12rem"${part("custom")}${lockAttr}>` +
     `</span>` +
     `</div>`
   );
+}
+
+/**
+ * What the feature forms say under a cron picker. It replaces the examples
+ * disclosure the forms used to carry: Daily, Weekly and Monthly cover the
+ * common schedules, and Custom takes the one format people had to know.
+ */
+const CRON_FIELD_HELP =
+  "Pick Daily, Weekly or Monthly and a time, or Custom for a cron expression: minute hour day-of-month month day-of-week, " +
+  "for example 0 16 * * 5 for Fridays at 16:00 or */30 * * * * for every 30 minutes.";
+
+/**
+ * A schedule field of a feature form (Announcements, Polls): the cron picker as
+ * a named group, with help and the refused field's error line. The picker posts
+ * the string in `name` and, for a browser without JavaScript, its parts as
+ * `<name>_mode`, `_time`, `_dow`, `_dom` and `_custom` (`readCronField`). A
+ * refused form shows the expression it was sent as typed.
+ */
+export function renderCronField(
+  f: FormView,
+  name: string,
+  label: string,
+  fallback: string,
+): string {
+  const id = f.id(name);
+  const helpId = `${id}-help`;
+  const control = f.control(name, helpId);
+  return `<div class="kb-field">
+      <p class="kb-label" id="${escapeHtml(id)}-label">${escapeHtml(label)}</p>
+      ${renderCronPicker(f.value(name, fallback), name, false, { ...control, labelledBy: `${id}-label` }, true)}
+      <p class="kb-help" id="${escapeHtml(helpId)}">${escapeHtml(CRON_FIELD_HELP)}</p>${f.error(name)}
+    </div>`;
+}
+
+/**
+ * An optional colour of a feature form: the swatch and its empty-state box, worded
+ * for the form ("No colour"). The box is named `use_default_<name>` and wins over
+ * the swatch (`readColourField`). A refused form shows the colour it was sent
+ * with, or the box ticked; `current` is the stored colour (`#rrggbb`) or `""`.
+ */
+export function renderColourField(
+  f: FormView,
+  name: string,
+  label: string,
+  current: string,
+  emptyLabel: string,
+): string {
+  const id = f.id(name);
+  const typed = validateSettingFormat("colour", f.value(name, current));
+  return `<div class="kb-field">
+      <label class="kb-label" for="${escapeHtml(id)}">${escapeHtml(label)}</label>
+      ${renderColourInput(name, `use_default_${name}`, typed.ok ? typed.value : "", f.control(name), emptyLabel)}${f.error(name)}
+    </div>`;
+}
+
+/** Hours a poll can run, as the schedule forms and the route check them. */
+const POLL_DURATION_MIN = 1;
+const POLL_DURATION_MAX = 768;
+
+/** A bounded box for the hours of a poll schedule (#1304). */
+function renderPollDurationField(f: FormView, current: string): string {
+  const id = f.id("durationHours");
+  const helpId = `${id}-help`;
+  return `<div class="kb-field">
+      <label class="kb-label" for="${escapeHtml(id)}">Duration (hours)</label>
+      ${renderNumberInput("durationHours", f.value("durationHours", current), { min: POLL_DURATION_MIN, max: POLL_DURATION_MAX }, f.control("durationHours", helpId))}
+      <p class="kb-help" id="${escapeHtml(helpId)}">From ${POLL_DURATION_MIN} to ${POLL_DURATION_MAX} hours.</p>${f.error("durationHours")}
+    </div>`;
+}
+
+/**
+ * The answers of a poll question: one box each, the first two shown and the
+ * rest (up to `POLL_ANSWER_MAX`) in a disclosure that opens when one of them
+ * holds an answer. Every box posts the repeated field `answers`; a refused form
+ * keeps each box where it was typed.
+ */
+function renderPollAnswerRows(f: FormView, stored: readonly string[]): string {
+  const id = f.id("answers");
+  const helpId = `${id}-help`;
+  const control = f.control("answers", helpId);
+  const invalid = control.invalid
+    ? ` aria-invalid="true" aria-describedby="${escapeHtml(control.describedBy ?? "")}"`
+    : ` aria-describedby="${escapeHtml(helpId)}"`;
+  const valueOf = (i: number): string =>
+    f.value(pollAnswerField(i), stored[i] ?? "");
+  const row = (i: number): string =>
+    `<input type="text" class="kb-input" id="${escapeHtml(f.id(pollAnswerField(i)))}" name="answers" maxlength="${POLL_ANSWER_TEXT_MAX}" aria-label="Answer ${i + 1}" value="${escapeHtml(valueOf(i))}"${invalid}>`;
+  const rows = (from: number, to: number): string =>
+    Array.from({ length: to - from }, (_unused, i) => row(from + i)).join("");
+  const foldedUsed = Array.from(
+    { length: POLL_ANSWER_MAX - POLL_ANSWER_VISIBLE },
+    (_unused, i) => valueOf(POLL_ANSWER_VISIBLE + i),
+  ).some((v) => v !== "");
+  return `<fieldset class="kb-field">
+      <legend class="kb-label">Answers</legend>
+      <div class="kb-stack">${rows(0, POLL_ANSWER_VISIBLE)}
+      <details${foldedUsed ? " open" : ""}><summary>More answers (up to ${POLL_ANSWER_MAX})</summary><div class="kb-stack">${rows(POLL_ANSWER_VISIBLE, POLL_ANSWER_MAX)}</div></details></div>
+      <p class="kb-help" id="${escapeHtml(helpId)}">At least ${POLL_ANSWER_VISIBLE} answers, up to ${POLL_ANSWER_MAX}, ${POLL_ANSWER_TEXT_MAX} characters each. Leave a box empty to skip it.</p>${f.error("answers")}
+    </fieldset>`;
 }
 
 /**
@@ -2796,19 +2908,6 @@ function roleOptionsHtml(options: RoleOption[], selectedId?: string): string {
   return out.join("");
 }
 
-const CRON_EXAMPLES_HTML = `
-<details class="helper">
-  <summary>Cron expression examples</summary>
-  <ul class="mono">
-    <li><code>0 9 * * *</code> — every day at 09:00</li>
-    <li><code>0 12 * * 1</code> — every Monday at 12:00</li>
-    <li><code>0 16 * * 5</code> — every Friday at 16:00 (weekly VC stats default)</li>
-    <li><code>0 0 1 * *</code> — first of every month at 00:00</li>
-    <li><code>*/30 * * * *</code> — every 30 minutes</li>
-  </ul>
-  <p class="muted">Format: <code>minute hour day-of-month month day-of-week</code>.</p>
-</details>`;
-
 const PLACEHOLDER_REFERENCE_HTML = `
 <details class="helper">
   <summary>Available placeholders</summary>
@@ -2892,10 +2991,7 @@ ${renderStatusLine({
     <label>Channel
       <select name="channelId" required${create.attrs("channelId")}>${channelOptionsHtml(props.textChannels, create.selected("channelId") || undefined)}</select>
     </label>${create.error("channelId")}
-    <label>Cron schedule
-      <input type="text" name="cron" placeholder="0 9 * * *" required pattern=".{3,}"${create.valueAttr("cron")}${create.attrs("cron")}>
-    </label>${create.error("cron")}
-    ${CRON_EXAMPLES_HTML}
+    ${renderCronField(create, "cron", "Schedule", "0 9 * * *")}
     <label>Message
       <textarea name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"${create.attrs("message")}>${create.textareaContent("message")}</textarea>
     </label>${create.error("message")}
@@ -2912,9 +3008,7 @@ ${renderStatusLine({
       <label>Description
         <textarea name="embedDescription" rows="3" maxlength="4000"${create.attrs("embedDescription")}>${create.textareaContent("embedDescription")}</textarea>
       </label>${create.error("embedDescription")}
-      <label>Colour (hex, e.g. <code>#5865F2</code>)
-        <input type="text" name="embedColor" pattern="^#?[0-9A-Fa-f]{6}$" placeholder="#5865F2"${create.valueAttr("embedColor")}${create.attrs("embedColor")}>
-      </label>${create.error("embedColor")}
+      ${renderColourField(create, "embedColor", "Colour", "", "No colour")}
     </fieldset>
     <button type="submit" class="btn btn-primary">Create announcement</button>
   </form>
@@ -2943,9 +3037,7 @@ ${renderStatusLine({
       <label>Description
         <textarea name="embedDescription" rows="3" maxlength="4000"${once.attrs("embedDescription")}>${once.textareaContent("embedDescription")}</textarea>
       </label>${once.error("embedDescription")}
-      <label>Colour (hex, e.g. <code>#5865F2</code>)
-        <input type="text" name="embedColor" pattern="^#?[0-9A-Fa-f]{6}$" placeholder="#5865F2"${once.valueAttr("embedColor")}${once.attrs("embedColor")}>
-      </label>${once.error("embedColor")}
+      ${renderColourField(once, "embedColor", "Colour", "", "No colour")}
     </fieldset>
     <button type="submit" class="btn btn-primary">Post now</button>
   </form>
@@ -3841,6 +3933,12 @@ export const POLL_ITEM_CREATE_FORM = "poll-item-create";
 export const pollScheduleEditForm = (id: string): string =>
   `poll-schedule-edit-${id}`;
 export const pollItemEditForm = (id: string): string => `poll-item-edit-${id}`;
+/** Answers a poll question can have, the boxes shown at first, and the length of one (Discord's cap). */
+export const POLL_ANSWER_MAX = 10;
+const POLL_ANSWER_VISIBLE = 2;
+const POLL_ANSWER_TEXT_MAX = 55;
+/** Field key of the answer box at `i` in a refused form's values (the posted field is the repeated `answers`). */
+export const pollAnswerField = (i: number): string => `answers-${i}`;
 
 // Progressive enhancement for the poll-import file picker (#646). Reading the
 // chosen file in the browser and dropping its text into the existing textarea
@@ -3901,8 +3999,8 @@ export function renderPollsPage(props: PollsProps): string {
   <details class="helper edit-details"${f.open()}><summary>Edit</summary>
     <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/edit" class="stack">${csrfInput}
       <label>Channel<select name="channelId" required${f.attrs("channelId")}>${channelOptionsHtml(props.textChannels, f.selected("channelId", s.channelId))}</select></label>${f.error("channelId")}
-      <label>Cron schedule<input type="text" name="cron" value="${escapeHtml(f.value("cron", s.cron))}" required${f.attrs("cron")}></label>${f.error("cron")}
-      <label>Duration (hours, 1–768)<input type="number" name="durationHours" min="1" max="768" value="${escapeHtml(f.value("durationHours", String(s.durationHours)))}" required${f.attrs("durationHours")}></label>${f.error("durationHours")}
+      ${renderCronField(f, "cron", "Schedule", s.cron)}
+      ${renderPollDurationField(f, String(s.durationHours))}
       <label>Ping role<select name="pingRoleId"${f.attrs("pingRoleId")}>${roleOptionsHtml(props.roles, f.selected("pingRoleId", s.pingRoleId ?? "") || undefined)}</select></label>${f.error("pingRoleId")}
       <button type="submit" class="btn btn-primary">Save changes</button>
     </form>
@@ -3929,7 +4027,7 @@ export function renderPollsPage(props: PollsProps): string {
   <details class="helper edit-details"${f.open()}><summary>Edit</summary>
     <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/edit" class="stack">${csrfInput}
       <label>Question<input type="text" name="question" maxlength="300" value="${escapeHtml(f.value("question", it.question))}" required${f.attrs("question")}></label>${f.error("question")}
-      <label>Answers (comma-separated, 2–10 options, ≤55 chars each)<input type="text" name="answers" maxlength="600" value="${escapeHtml(f.value("answers", it.answers.join(", ")))}" required${f.attrs("answers")}></label>${f.error("answers")}
+      ${renderPollAnswerRows(f, it.answers)}
       <label>Tags (comma-separated, optional)<input type="text" name="tags" value="${escapeHtml(f.value("tags", it.tags.join(", ")))}"${f.attrs("tags")}></label>${f.error("tags")}
       <label class="checkbox"><input type="checkbox" name="multiSelect" value="1"${f.checked("multiSelect", it.multiSelect) ? " checked" : ""}> Allow multiple answer selections</label>
       <button type="submit" class="btn btn-primary">Save changes</button>
@@ -3972,13 +4070,8 @@ ${renderStatusLine({
     <label>Channel
       <select name="channelId" required${newSchedule.attrs("channelId")}>${channelOptionsHtml(props.textChannels, newSchedule.selected("channelId") || undefined)}</select>
     </label>${newSchedule.error("channelId")}
-    <label>Cron schedule
-      <input type="text" name="cron" placeholder="0 12 * * *" required${newSchedule.valueAttr("cron")}${newSchedule.attrs("cron")}>
-    </label>${newSchedule.error("cron")}
-    ${CRON_EXAMPLES_HTML}
-    <label>Duration (hours, 1–768)
-      <input type="number" name="durationHours" min="1" max="768" value="${escapeHtml(newSchedule.value("durationHours", String(props.defaultDurationHours)))}" required${newSchedule.attrs("durationHours")}>
-    </label>${newSchedule.error("durationHours")}
+    ${renderCronField(newSchedule, "cron", "Schedule", "0 12 * * *")}
+    ${renderPollDurationField(newSchedule, String(props.defaultDurationHours))}
     <label>Ping role
       <select name="pingRoleId"${newSchedule.attrs("pingRoleId")}>${roleOptionsHtml(props.roles, newSchedule.selected("pingRoleId") || undefined)}</select>
     </label>${newSchedule.error("pingRoleId")}
@@ -4000,9 +4093,7 @@ ${renderStatusLine({
     <label>Question
       <input type="text" name="question" maxlength="300" required${newItem.valueAttr("question")}${newItem.attrs("question")}>
     </label>${newItem.error("question")}
-    <label>Answers (comma-separated, 2–10 options, ≤55 chars each)
-      <input type="text" name="answers" maxlength="600" placeholder="Yes, No, Maybe" required${newItem.valueAttr("answers")}${newItem.attrs("answers")}>
-    </label>${newItem.error("answers")}
+    ${renderPollAnswerRows(newItem, [])}
     <label>Tags (comma-separated, optional)
       <input type="text" name="tags" placeholder="icebreaker, funny"${newItem.valueAttr("tags")}${newItem.attrs("tags")}>
     </label>${newItem.error("tags")}

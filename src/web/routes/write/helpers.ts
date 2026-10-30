@@ -371,6 +371,82 @@ export const normalizeCron = sanitizeCronExpression;
  */
 export const validCron = isValidCronExpression;
 
+/** What the feature forms' schedule picker posted: the string, and why it could not be built. */
+export interface CronField {
+  /** The expression as the form shows it again when refused ("" when none could be built). */
+  raw: string;
+  /** Set when a part of the picker held something no schedule can be built from. */
+  problem?: string;
+}
+
+const CRON_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const CRON_MODES = ["daily", "weekly", "monthly", "custom"] as const;
+
+/**
+ * The schedule a feature form's cron picker posted (`renderCronPicker` with named
+ * parts). With the picker's script the hidden `<name>` field already holds the
+ * string; without it only the mode and the parts it shows are posted, so the
+ * string is built from those: the same one the script would produce. A post
+ * without `<name>_mode` (an older form, a script) falls back to `<name>` as
+ * typed. The caller still runs `normalizeCron` and `validCron` on `raw`.
+ */
+export function readCronField(
+  req: AuthenticatedRequest,
+  name: string,
+): CronField {
+  const mode = getString(req, `${name}_mode`);
+  if (mode === "") return { raw: getRawString(req, name) };
+  if (!(CRON_MODES as readonly string[]).includes(mode)) {
+    return { raw: "", problem: "Pick a schedule type." };
+  }
+  if (mode === "custom") return { raw: getRawString(req, `${name}_custom`) };
+  const time = CRON_TIME.exec(getString(req, `${name}_time`));
+  if (!time) return { raw: "", problem: "Pick a time of day." };
+  const minute = Number(time[2]);
+  const hour = Number(time[1]);
+  if (mode === "daily") return { raw: `${minute} ${hour} * * *` };
+  if (mode === "weekly") {
+    const dow = getString(req, `${name}_dow`);
+    return /^[0-6]$/.test(dow)
+      ? { raw: `${minute} ${hour} * * ${dow}` }
+      : { raw: "", problem: "Pick a day of the week." };
+  }
+  const dom = getString(req, `${name}_dom`);
+  return /^\d{1,2}$/.test(dom) && Number(dom) >= 1 && Number(dom) <= 31
+    ? { raw: `${minute} ${hour} ${Number(dom)} * *` }
+    : { raw: "", problem: "Use a day of the month from 1 to 31." };
+}
+
+/**
+ * What a colour box with an empty-state checkbox posted (`renderColourInput`):
+ * `""` when the box named `use_default_<name>` is ticked, otherwise the swatch.
+ * The swatch always posts a colour, so the box has to win, as in the settings.
+ */
+export function readColourField(
+  req: AuthenticatedRequest,
+  name: string,
+): string {
+  const body = (req.body as Record<string, unknown> | undefined) ?? {};
+  if (body[`use_default_${name}`] === "true") return "";
+  return getString(req, name);
+}
+
+/**
+ * The values of a repeated field (one box per entry), each as posted. One value
+ * arrives as a string and several as an array; anything else is no entry. A
+ * hostile post cannot add fields: only `name` is read, and at most `max` entries
+ * are kept.
+ */
+export function readRepeated(
+  req: AuthenticatedRequest,
+  name: string,
+  max: number,
+): string[] {
+  const raw = (req.body as Record<string, unknown> | undefined)?.[name];
+  const list = Array.isArray(raw) ? raw : [raw];
+  return list.filter((v): v is string => typeof v === "string").slice(0, max);
+}
+
 export function parseHexColor(input: string): number | null {
   const match = input.match(/^#?([0-9A-Fa-f]{6})$/);
   if (!match) return null;

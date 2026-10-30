@@ -20,6 +20,8 @@ import {
   getCheckbox,
   normalizeCron,
   validCron,
+  readCronField,
+  readRepeated,
   requireSessionContext,
   asyncHandler,
   refuseForm,
@@ -33,7 +35,9 @@ import {
 } from "../../form-errors.js";
 import {
   POLL_ITEM_CREATE_FORM,
+  POLL_ANSWER_MAX,
   POLL_SCHEDULE_CREATE_FORM,
+  pollAnswerField,
   pollItemEditForm,
   pollScheduleEditForm,
 } from "../../admin-views.js";
@@ -68,13 +72,16 @@ export function checkPollScheduleForm(req: Req): {
   pingRoleId: string;
 } {
   const channelId = getString(req, "channelId");
-  const cron = normalizeCron(getString(req, "cron"));
+  const cronField = readCronField(req, "cron");
+  const cron = normalizeCron(cronField.raw);
   const durationRaw = getString(req, "durationHours");
   const pingRoleId = getString(req, "pingRoleId");
 
   const errors: FormErrors = {};
   if (!channelId) addFieldError(errors, "channelId", "Pick a channel.");
-  if (!cron) {
+  if (cronField.problem) {
+    addFieldError(errors, "cron", cronField.problem);
+  } else if (!cron) {
     addFieldError(
       errors,
       "cron",
@@ -101,7 +108,7 @@ export function checkPollScheduleForm(req: Req): {
     errors,
     values: {
       channelId,
-      cron: getRawString(req, "cron"),
+      cron: cronField.raw,
       durationHours: getRawString(req, "durationHours"),
       pingRoleId,
     },
@@ -122,7 +129,9 @@ export function checkPollItemForm(req: Req): {
   multiSelect: boolean;
 } {
   const question = getString(req, "question");
-  const answersStr = getString(req, "answers");
+  // One box per answer, posted as a repeated `answers` field. Read a few more
+  // than the limit so a post with too many is refused, not cut short.
+  const answerBoxes = readRepeated(req, "answers", POLL_ANSWER_MAX * 3);
   const tagsStr = getString(req, "tags");
   const multiSelect = getCheckbox(req, "multiSelect");
 
@@ -136,15 +145,12 @@ export function checkPollItemForm(req: Req): {
       `At most ${TEXT_LIMITS.pollQuestion} characters.`,
     );
   }
-  const answers = answersStr
-    .split(",")
-    .map((a) => a.trim())
-    .filter((a) => a.length > 0);
-  if (answers.length < 2 || answers.length > 10) {
+  const answers = answerBoxes.map((a) => a.trim()).filter((a) => a.length > 0);
+  if (answers.length < 2 || answers.length > POLL_ANSWER_MAX) {
     addFieldError(
       errors,
       "answers",
-      "Give 2 to 10 answers, separated by commas.",
+      `Give 2 to ${POLL_ANSWER_MAX} answers, one in each box.`,
     );
   } else if (answers.some((a) => a.length > TEXT_LIMITS.pollAnswer)) {
     // Discord caps each poll answer (option) at 55 characters; reject an
@@ -166,7 +172,12 @@ export function checkPollItemForm(req: Req): {
     errors,
     values: {
       question: getRawString(req, "question"),
-      answers: getRawString(req, "answers"),
+      ...Object.fromEntries(
+        Array.from({ length: POLL_ANSWER_MAX }, (_unused, i) => [
+          pollAnswerField(i),
+          answerBoxes[i] ?? "",
+        ]),
+      ),
       tags: getRawString(req, "tags"),
       multiSelect: multiSelect ? "1" : "",
     },

@@ -21,6 +21,8 @@ import {
   normalizeCron,
   validCron,
   parseHexColor,
+  readColourField,
+  readCronField,
   requireSessionContext,
   asyncHandler,
   refuseForm,
@@ -52,17 +54,21 @@ export function checkAnnouncementForm(
   embedData: IScheduledAnnouncement["embedData"] | undefined;
 } {
   const channelId = getString(req, "channelId");
-  const cron = normalizeCron(getString(req, "cron"));
+  const cronField = readCronField(req, "cron");
+  const cron = normalizeCron(cronField.raw);
   const message = getString(req, "message");
   const placeholders = getCheckbox(req, "placeholders");
   const embedTitle = getString(req, "embedTitle");
   const embedDescription = getString(req, "embedDescription");
-  const embedColorHex = getString(req, "embedColor");
+  // The swatch always posts a colour; the "No colour" box wins over it.
+  const embedColorHex = readColourField(req, "embedColor");
 
   const errors: FormErrors = {};
   if (!channelId) addFieldError(errors, "channelId", "Pick a channel.");
   if (withCron) {
-    if (!cron) {
+    if (cronField.problem) {
+      addFieldError(errors, "cron", cronField.problem);
+    } else if (!cron) {
       addFieldError(
         errors,
         "cron",
@@ -121,9 +127,10 @@ export function checkAnnouncementForm(
     placeholders: placeholders ? "1" : "",
     embedTitle: getRawString(req, "embedTitle"),
     embedDescription: getRawString(req, "embedDescription"),
-    embedColor: getRawString(req, "embedColor"),
+    // "" is the ticked "No colour" box, so a refused form draws it ticked again.
+    embedColor: embedColorHex,
   };
-  if (withCron) values.cron = getRawString(req, "cron");
+  if (withCron) values.cron = cronField.raw;
   return {
     errors,
     values,
