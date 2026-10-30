@@ -98,9 +98,14 @@ describe("a refused Announcements form", () => {
     const invalid = doc.querySelectorAll('[aria-invalid="true"]');
     expect(invalid).toHaveLength(1);
     const cron = invalid[0];
-    expect(cron.getAttribute("name")).toBe("cron");
+    // The schedule is a picker group: the refusal marks the group, not the hidden field.
+    expect(cron.getAttribute("id")).toBe("announcement-create-cron");
+    expect(cron.getAttribute("role")).toBe("group");
+    expect(cron.getAttribute("aria-labelledby")).toBe(
+      "announcement-create-cron-label",
+    );
     expect(cron.getAttribute("aria-describedby")).toBe(
-      "announcement-create-cron-error",
+      "announcement-create-cron-help announcement-create-cron-error",
     );
     const line = doc.getElementById("announcement-create-cron-error");
     expect(line?.tagName).toBe("P");
@@ -141,10 +146,10 @@ describe("a refused Polls edit form", () => {
   it("opens only the row that was refused", () => {
     const html = polls({
       formId: "poll-item-edit-i1",
-      errors: { answers: "Give 2 to 10 answers, separated by commas." },
+      errors: { answers: "Give 2 to 10 answers, one in each box." },
       values: {
         question: "Q1?",
-        answers: "only one",
+        "answers-0": "only one",
         tags: "",
         multiSelect: "",
       },
@@ -159,14 +164,24 @@ describe("a refused Polls edit form", () => {
       doc.querySelector('[aria-invalid="true"]')?.getAttribute("name"),
     ).toBe("answers");
     expect(
-      doc.querySelector<HTMLInputElement>("#poll-item-edit-i1-answers")?.value,
+      doc.querySelector<HTMLInputElement>("#poll-item-edit-i1-answers-0")
+        ?.value,
     ).toBe("only one");
-    // The same field in the other row keeps its stored value, unmarked.
+    // The second box was typed empty, so it is empty again (not the stored "No").
     expect(
-      doc.querySelector<HTMLInputElement>(
-        'form[action$="/items/i0/edit"] [name=answers]',
-      )?.value,
-    ).toBe("Yes, No");
+      doc.querySelector<HTMLInputElement>("#poll-item-edit-i1-answers-1")
+        ?.value,
+    ).toBe("");
+    // The same field in the other row keeps its stored answers, unmarked.
+    expect(
+      Array.from(
+        doc.querySelectorAll<HTMLInputElement>(
+          'form[action$="/items/i0/edit"] [name=answers]',
+        ),
+      )
+        .map((i) => i.value)
+        .slice(0, 2),
+    ).toEqual(["Yes", "No"]);
   });
 });
 
@@ -203,7 +218,7 @@ describe("focus on load", () => {
     };
     expect(
       focused(announcements(refused, { type: "err", text: "Not saved." })),
-    ).toBe("INPUT#announcement-create-cron");
+    ).toBe("DIV#announcement-create-cron");
   });
 
   it("moves to a failure flash when no field is marked", () => {

@@ -5,7 +5,11 @@ import {
   renderAdminPage,
   type NavFeatureStatus,
 } from "./admin-layout.js";
-import { renderFlash, type FlashMessage } from "./admin-views.js";
+import {
+  renderColourField,
+  renderFlash,
+  type FlashMessage,
+} from "./admin-views.js";
 import { formView, type FormView, type RefusedForm } from "./form-errors.js";
 import { renderAdoptionDiff } from "./adoption-diff.js";
 import { roleMention } from "./discord-labels.js";
@@ -242,7 +246,7 @@ ${
 <fieldset><legend>Permissions${g.permissions === null ? " (currently left as they are)" : ""}</legend>
 <label class="check"><input type="checkbox" name="editPermissions" value="1"${f.checked("editPermissions", g.permissions !== null) ? " checked" : ""}> Set the role's permissions to the selection below</label>
 ${permissionChecks(g.permissions, f)}</fieldset>
-<label>Colour <input type="text" name="colour" value="${escapeHtml(f.value("colour", formatColour(g.colour)))}" placeholder="#RRGGBB (empty = leave as is)" maxlength="7"${f.attrs("colour")}></label>${f.error("colour")}`
+${renderColourField(f, "colour", "Colour", formatColour(g.colour), "Leave as it is")}`
 }
 <label>When its Discord role changes <select name="syncPolicy">${syncPolicyOptions(g.syncPolicy, globalPolicy, f)}</select></label>
 <button type="submit" class="btn">Save group</button>
@@ -433,7 +437,7 @@ ${presetSelect()}
 <fieldset><legend>Permissions (new roles; an existing role is left alone unless you tick below)</legend>
 <label class="check"><input type="checkbox" name="editPermissions" value="1"${f.checked("editPermissions") ? " checked" : ""}> Set the role's permissions to the selection below</label>
 ${permissionChecks(null, f)}</fieldset>
-<label>Colour <input type="text" name="colour" placeholder="#RRGGBB (optional)" maxlength="7"${f.valueAttr("colour")}${f.attrs("colour")}></label>${f.error("colour")}
+${renderColourField(f, "colour", "Colour", "", "No colour")}
 <button type="submit" class="${planCanApply(props) ? "btn" : "btn btn-primary"}">Add group</button>
 </form>`;
 }

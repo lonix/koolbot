@@ -1021,6 +1021,16 @@ enable/disable and delete. **Post weekly VC stats now** triggers the weekly
 voice-stats announcement on demand, and **Compose & send once** posts a one-off
 announcement without storing a schedule. Every action is CSRF-protected and audited.
 
+**Feature forms use the setting controls (#1533).** A schedule on the **Announcements** and **Polls** forms is the
+same picker as in Settings (Daily, Weekly, Monthly or Custom for a cron expression), with one help line under it
+instead of a list of examples. An announcement's embed colour is a swatch with a **No colour** box, and a poll
+schedule's duration is a whole-number box from 1 to 768 hours. A poll question's answers are one box each (two shown,
+up to ten, the rest under **More answers**), so an answer can hold a comma. The picker also posts its parts
+(`cron_mode`, `cron_time`, `cron_dow`, `cron_dom`, `cron_custom`) next to the `cron` string it builds, so a browser
+without JavaScript, which shows every part, still posts a schedule the server can build; the server checks the result
+again. The colour box is posted as `use_default_<field>` and wins over the swatch, which always posts a colour.
+On the **Role Groups** forms the colour is the same swatch, with **No colour** on Add and **Leave as it is** on Edit.
+
 The **Announcements** page's card is a single `announcements.enabled` toggle, so
 scheduled announcements can be switched off as well as on without leaving the
 page.
@@ -1075,9 +1085,14 @@ reaction role_ mints a brand-new Discord role and posts a picker message; the
 _Create a private category + channel_ checkbox is on by default (preserving the
 original behaviour) — untick it to opt out and get a plain self-assign role with
 no attached channel. _Bind an existing role_ maps an
-emoji to a role you already manage (no role/category/channel is created) and,
-when given an existing message ID, adds the mapping to that message — so one
-picker message can carry many emoji→role mappings. Both paths validate the role
+emoji to a role you already manage (no role/category/channel is created): you
+choose the role in a searchable picker and, to add the mapping to a picker message
+the bot already posted, choose that message in the list (_Post a new message_ is the
+empty choice) — so one picker message can carry many emoji→role mappings. Every
+emoji box on the page, and the pairing emoji on Channel claims, is a text box with an
+emoji grid beside it (#1530): the grid offers Unicode emoji, and a server's custom emoji
+(`<:name:id>`) are still typed. Without JavaScript the lists are plain selects and the
+boxes are plain text. Both paths validate the role
 hierarchy up front (the bot needs **Manage Roles** and a role ranked above the
 target) and surface an actionable error instead of silently failing at reaction
 time. Rows are tagged **managed** (bot-created; delete tears down the role +

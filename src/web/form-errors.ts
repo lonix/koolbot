@@ -81,10 +81,43 @@ export interface FormView {
    * points at (help text). Empty for a form that was not refused.
    */
   attrs(name: string, describedBy?: string): string;
+  /**
+   * The same as {@link attrs}, as the fields of a `ControlAttrs` for the
+   * setting-picker renderers (the emoji field): like `attrs`, nothing at all
+   * for a form that was not refused, otherwise `id`, and `invalid` with the
+   * error id in `describedBy` when the field was refused.
+   */
+  control(
+    name: string,
+    describedBy?: string,
+  ): {
+    id?: string;
+    invalid?: boolean;
+    describedBy?: string;
+    describedByBase?: string;
+  };
   /** The `p.kb-field__error` line for a refused field, otherwise "". */
   error(name: string): string;
+  /**
+   * The DOM id of a field's control, present on every render (unlike `attrs`,
+   * which only emits it for a refused form), for a `label[for]` to point at.
+   */
+  id(name: string): string;
+  /**
+   * The same facts as `attrs`, as the object a shared control renderer takes
+   * (`id`, `invalid`, `describedBy`), for a control that is not a plain input.
+   */
+  control(name: string, describedBy?: string): FormControlAttrs;
   /** ` open` for a disclosure that holds a refused form, otherwise "". */
   open(): string;
+}
+
+/** What a shared control renderer needs to link a field to its error line. */
+export interface FormControlAttrs {
+  id: string;
+  describedBy?: string;
+  invalid?: boolean;
+  describedByBase?: string;
 }
 
 /** The view of one form of the page, given what the server refused (if anything). */
@@ -124,10 +157,36 @@ export function formView(
       }
       return out;
     },
+    control: (name, describedBy = ""): ReturnType<FormView["control"]> => {
+      if (!state) return describedBy ? { describedBy } : {};
+      const invalid = hasError(name);
+      const ids = [describedBy, invalid ? errorId(name) : ""]
+        .filter(Boolean)
+        .join(" ");
+      return {
+        id: idOf(name),
+        ...(invalid ? { invalid: true, describedByBase: describedBy } : {}),
+        ...(ids ? { describedBy: ids } : {}),
+      };
+    },
     error: (name): string =>
       state && hasError(name)
         ? `<p class="kb-field__error" id="${escapeHtml(errorId(name))}">${escapeHtml(state.errors[name])}</p>`
         : "",
+    id: idOf,
+    control: (name, describedBy = ""): FormControlAttrs => {
+      const out: FormControlAttrs = { id: idOf(name) };
+      if (hasError(name)) {
+        out.invalid = true;
+        out.describedBy = [describedBy, errorId(name)]
+          .filter(Boolean)
+          .join(" ");
+        out.describedByBase = describedBy;
+      } else if (describedBy) {
+        out.describedBy = describedBy;
+      }
+      return out;
+    },
     open: () => (state ? " open" : ""),
   };
 }

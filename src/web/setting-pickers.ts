@@ -237,6 +237,10 @@ export const CHANNEL_PICKER_SCRIPT =
   "b.setAttribute('aria-label','Show '+(sels.length-lim)+' more selected');chips.appendChild(b)}}" +
   "function paint(){var cur=items[sel.selectedIndex]||items[0];trig.textContent='';" +
   "if(multi){paintChips();trig.appendChild(el('span','kb-picker__add','Add'))}else if(cur)trig.appendChild(mention(cur));trig.appendChild(svg(CHEVRON));attrs();" +
+  // Without a visible label the trigger's name is the select's `aria-label`, and
+  // a fixed name would hide the choice: add it, as the label path does by
+  // pointing at the trigger's own text.
+  "if(!ids.length&&!multi&&cur)trig.setAttribute('aria-label',name+': '+chipLabel(cur));" +
   "for(var k=0;k<rows.length;k++){var on=isOn(k),c=rows[k].querySelector('svg[data-check]');" +
   "rows[k].setAttribute('aria-selected',on?'true':'false');" +
   "if(on&&!c){c=svg(CHECK);c.setAttribute('data-check','');rows[k].appendChild(c)}else if(!on&&c)rows[k].removeChild(c)}" +
@@ -347,6 +351,12 @@ export const CHANNEL_PICKER_SCRIPT =
  * - Keep ticked: the value is the stored one, whatever it is;
  * - neither: the value is the swatch.
  *
+ * `emptyLabel` words the empty-state box for a form where "default" is not the
+ * right word ("No colour", "Leave as it is"). A form outside the settings
+ * rows (an announcement's embed colour) names the box `use_default_<field>` so
+ * the Keep box, which exists only for a stored value that is not `#RRGGBB`,
+ * would be `keep_<field>`; those forms never render one.
+ *
  * Every piece of state is a form control the save bar already compares, commits
  * on a saved response and restores on Discard, so this control has no state of
  * its own to keep in step. The save handlers turn the boxes into the value
@@ -359,6 +369,7 @@ export function renderColourInput(
   defaultName: string,
   current: string,
   a: ControlAttrs = {},
+  emptyLabel = "Use default",
 ): string {
   const checked = validateSettingFormat("colour", current);
   const empty = current.trim() === "";
@@ -373,7 +384,7 @@ export function renderColourInput(
     `${attr("aria-describedby", a.describedBy)}${invalidAttrs(a)}` +
     ` name="${escapeHtml(name)}" value="${escapeHtml(shown)}"${lock}>` +
     `<label class="kb-colour__default"><input type="checkbox" data-colour-default ` +
-    `name="${escapeHtml(defaultName)}" value="true"${empty ? " checked" : ""}${lock}> Use default</label>` +
+    `name="${escapeHtml(defaultName)}" value="true"${empty ? " checked" : ""}${lock}> ${escapeHtml(emptyLabel)}</label>` +
     (legacy
       ? `<label class="kb-colour__default"><input type="checkbox" data-colour-keep ` +
         `name="${escapeHtml(keepName)}" value="true" checked${lock}> Keep the stored value</label>` +
@@ -423,6 +434,18 @@ export const COLOUR_INPUT_SCRIPT =
 export interface EmojiFieldOptions extends ControlAttrs {
   /** Names the field for the picker button and group, e.g. the setting's label. */
   label: string;
+  /**
+   * Names the text box itself (`aria-label`) when no `<label for>` points at it,
+   * as in a table cell or an option row. The group and the grid's button keep
+   * `label`.
+   */
+  inputLabel?: string;
+  /** The box must be filled before the form posts. */
+  required?: boolean;
+  /** Example text shown in the empty box. */
+  placeholder?: string;
+  /** The longest text the server takes. */
+  maxLength?: number;
 }
 
 /**
@@ -443,7 +466,7 @@ export function renderEmojiField(
   return (
     `<span class="kb-emoji-field" data-emoji-field data-emoji-noun="emoji" role="group" aria-label="${escapeHtml(o.label)}">` +
     `<span data-marker-wrap class="kb-emoji-wrap">` +
-    `<input type="text" class="kb-input" data-marker-input${attr("id", o.id)}` +
+    `<input type="text" class="kb-input" data-marker-input${attr("id", o.id)}${attr("aria-label", o.inputLabel)}${attr("placeholder", o.placeholder)}${o.required ? " required" : ""}${o.maxLength ? ` maxlength="${o.maxLength}"` : ""}` +
     `${attr("aria-describedby", o.describedBy)}${invalidAttrs(o)} name="${escapeHtml(name)}" ` +
     `value="${escapeHtml(value)}" autocomplete="off" style="width:14rem"${o.disabled ? LOCK : ""}>` +
     `<button type="button" data-marker-btn class="kb-emoji-btn" aria-haspopup="true" aria-expanded="false" ` +
@@ -461,16 +484,28 @@ export interface ReactionRoleMessageSelectOptions extends ControlAttrs {
    * says so, instead of claiming there are none).
    */
   messages: ReactionRoleMessageOptions | null;
+  /**
+   * What the empty option is called, when it is not "Link the channel instead":
+   * the Reaction roles form calls it "Post a new message".
+   */
+  noneLabel?: string;
+  /** Names the select (`aria-label`) when no `<label for>` points at it. */
+  ariaLabel?: string;
+  /** The line shown when the guild has no reaction-role messages yet; the default points at the Reaction Roles page. */
+  emptyNote?: string;
 }
 
 /** What the empty option is called: `{roles}` then mentions the channel. */
 export const REACTION_ROLE_MESSAGE_NONE_LABEL = "Link the channel instead";
 
+/** The empty option on the Reaction roles page itself (#1530): no message chosen posts a new one. */
+export const REACTION_ROLE_MESSAGE_NEW_LABEL = "Post a new message";
+
 /**
  * A select of the bot's own reaction-role messages, the stored value being the
  * message id (`welcome.roles_message_id`, #1433).
  *
- * - The first option is empty: "Link the channel instead".
+ * - The first option is empty: "Link the channel instead" (or `noneLabel`).
  * - A stored id that is not in the list (archived or deleted since, or older
  *   than the cap) is a selected `<id> (not found)` option, so it is shown and
  *   posts unchanged. If the list could not be read, it reads `(could not check)`.
@@ -492,6 +527,7 @@ export function renderReactionRoleMessageSelect(
   // surrounding spaces (the welcome service trims it) must round-trip
   // unchanged, because the server's exemption compares the exact string.
   const trimmed = current.trim();
+  const noneLabel = o.noneLabel ?? REACTION_ROLE_MESSAGE_NONE_LABEL;
   const list = o.messages?.options ?? [];
   const listed = list.find((m) => m.messageId === current);
   const option = (value: string, label: string): string =>
@@ -499,12 +535,11 @@ export function renderReactionRoleMessageSelect(
   const stray = (): string => {
     const known = list.find((m) => m.messageId === trimmed);
     if (known) return known.label;
-    if (trimmed === "")
-      return `${REACTION_ROLE_MESSAGE_NONE_LABEL} (stored as blank text)`;
+    if (trimmed === "") return `${noneLabel} (stored as blank text)`;
     return `${trimmed} (${o.messages ? "not found" : "could not check"})`;
   };
   const options = [
-    option("", REACTION_ROLE_MESSAGE_NONE_LABEL),
+    option("", noneLabel),
     ...(current === "" || listed ? [] : [option(current, stray())]),
     ...list.map((m) => option(m.messageId, m.label)),
   ].join("");
@@ -514,13 +549,15 @@ export function renderReactionRoleMessageSelect(
       "The list of reaction-role messages could not be read. The stored choice is kept.";
   } else if (list.length === 0) {
     note =
-      'There are no reaction-role messages yet. Post one on the <a href="/admin/reaction-roles">Reaction Roles</a> page, then choose it here.';
+      o.emptyNote !== undefined
+        ? escapeHtml(o.emptyNote)
+        : 'There are no reaction-role messages yet. Post one on the <a href="/admin/reaction-roles">Reaction Roles</a> page, then choose it here.';
   } else if (o.messages.truncated) {
     note = `Showing the ${list.length} newest reaction-role messages. A choice made earlier stays selected.`;
   }
   return (
     `<span class="kb-msgpick">` +
-    `<select class="kb-select"${attr("id", o.id)}${attr("aria-describedby", o.describedBy)}${invalidAttrs(o)} ` +
+    `<select class="kb-select"${attr("id", o.id)}${attr("aria-label", o.ariaLabel)}${attr("aria-describedby", o.describedBy)}${invalidAttrs(o)} ` +
     `name="${escapeHtml(name)}"${o.disabled ? LOCK : ""}>${options}</select>` +
     (note ? `<span class="kb-help">${note}</span>` : "") +
     `</span>`

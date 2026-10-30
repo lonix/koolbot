@@ -245,11 +245,13 @@ An IANA zone for a setting or an event (#1426).
 
 ### MessageSelect
 
-One of the bot's own reaction-role messages, for `welcome.roles_message_id` (#1433). The stored value is the message id; the operator never types it.
+One of the bot's own reaction-role messages, for `welcome.roles_message_id` (#1433) and for _Bind an existing role_ on the Reaction Roles
+page (#1530). The stored value is the message id; the operator never types it.
 
 **Markup.** `span.kb-msgpick` → `select.kb-select` and an optional `span.kb-help` under it.
 
-- The first option is empty, _Link the channel instead_. Each message is an option labelled where it is and what it hands out
+- The first option is empty, _Link the channel instead_; the Reaction Roles form calls it _Post a new message_ (`noneLabel`).
+  Each message is an option labelled where it is and what it hands out
   (`# roles · 🎮 Gamer, 🎨 Artist +2`, at most 100 characters), newest first, at most 50.
 - Labels come from stored rows and the channel names the page already holds: no Discord call per option. A channel that is gone reads
   `⚠ <id> (unavailable)`.
@@ -268,6 +270,8 @@ plus a second one (_Keep the stored value_) when the stored value is not `#RRGGB
 
 - A colour input cannot be empty, so the checkbox is the empty state. It posts `use_default_<key>=true` and wins over the swatch, with or without
   JavaScript; with the script, picking a colour unticks it and the two boxes exclude each other.
+- On a feature form the box is worded for it (_No colour_ for an embed or a new role, _Leave as it is_ when editing one) and named
+  `use_default_<field>`; a settings row keeps _Use default_.
 - The swatch of the default shows Discord's default grey (`#99aab5`).
 - A stored value that is not `#RRGGBB` is kept by the ticked _Keep the stored value_ box (`keep_<key>=true`, read by the server as the stored value) and
   noted under the control ("is not a #RRGGBB colour. It stays as it is until you pick a colour or use the default").

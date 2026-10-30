@@ -51,6 +51,7 @@ import {
   getCheckbox,
   getRawString,
   getString,
+  readColourField,
   refuseForm,
   requireSessionContext,
 } from "./helpers.js";
@@ -83,7 +84,7 @@ function groupFormValues(req: Parameters<typeof getString>[0]): FormValues {
   const values: FormValues = {
     name: getRawString(req, "name"),
     roleId: getString(req, "roleId"),
-    colour: getRawString(req, "colour"),
+    colour: readColourField(req, "colour"),
     editPermissions: getCheckbox(req, "editPermissions") ? "1" : "",
     syncPolicy: getString(req, "syncPolicy"),
   };
@@ -120,7 +121,7 @@ export function createRoleGroupsRouter(client: Client): Router {
       const session = requireSessionContext(req);
       const body = (req.body as Record<string, unknown> | undefined) ?? {};
       const roleId = getString(req, "roleId");
-      const colour = parseColour(getString(req, "colour"));
+      const colour = parseColour(readColourField(req, "colour"));
       const refuse = (field: string, message: string): Promise<boolean> => {
         const errors: FormErrors = {};
         addFieldError(errors, field, message);
@@ -272,7 +273,7 @@ export function createRoleGroupsRouter(client: Client): Router {
         });
         return;
       }
-      const colour = parseColour(getString(req, "colour"));
+      const colour = parseColour(readColourField(req, "colour"));
       const refuse = (field: string, message: string): Promise<boolean> => {
         const errors: FormErrors = {};
         addFieldError(errors, field, message);

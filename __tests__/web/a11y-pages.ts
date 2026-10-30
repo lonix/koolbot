@@ -841,6 +841,47 @@ const ADOPTION_SNAPSHOT = {
   createdRoles: 2,
 };
 
+/** The Polls page with one schedule and one question, drawing the form the server refused. */
+function pollsRefusedPage(refusedForm: RefusedForm): string {
+  return renderPollsPage({
+    ...COMMON,
+    enabled: true,
+    defaultDurationHours: 24,
+    cooldownDays: 30,
+    settingRows: [],
+    textChannels: CHANNELS,
+    roles: ROLES,
+    schedules: [
+      {
+        id: "s1",
+        channelId: "c1",
+        channelName: "general",
+        channelType: ChannelType.GuildText,
+        cron: "0 12 * * 3",
+        durationHours: 24,
+        pingRoleId: null,
+        pingRoleName: null,
+        enabled: true,
+        lastRun: "2026-01-07",
+      },
+    ],
+    items: [
+      {
+        id: "p1",
+        question: "Best pizza topping?",
+        answers: ["Pineapple", "Not pineapple"],
+        tags: [],
+        multiSelect: false,
+        usageCount: 2,
+        lastUsed: "2026-01-07",
+        enabled: true,
+        source: "library",
+      },
+    ],
+    refusedForm,
+  });
+}
+
 const CHANNELS = [
   { id: "c1", name: "general", type: ChannelType.GuildText },
   { id: "c2", name: "announcements", type: ChannelType.GuildAnnouncement },
@@ -3104,13 +3145,43 @@ export function adminPages(): A11yPage[] {
         flash: FLASH,
         refusedForm: {
           formId: "poll-item-edit-p1",
-          errors: { answers: "Give 2 to 10 answers, separated by commas." },
+          errors: { answers: "Give 2 to 10 answers, one in each box." },
           values: {
             question: "Best snack?",
-            answers: "only one",
+            "answers-0": "only one",
             tags: "",
             multiSelect: "",
           },
+        },
+      }),
+    },
+    {
+      name: "Polls (schedule create refused)",
+      html: pollsRefusedPage({
+        formId: "poll-schedule-create",
+        errors: {
+          cron: "Not a valid cron expression. Use five fields (minute hour day-of-month month day-of-week), for example 0 12 * * *.",
+          durationHours: "Use 1 to 768 hours.",
+        },
+        values: {
+          channelId: "c1",
+          cron: "every friday",
+          durationHours: "900",
+          pingRoleId: "",
+        },
+      }),
+    },
+    {
+      name: "Polls (question create refused, more answers open)",
+      html: pollsRefusedPage({
+        formId: "poll-item-create",
+        errors: { answers: "Give 2 to 10 answers, one in each box." },
+        values: {
+          question: "Best snack?",
+          "answers-0": "Crisps, salted",
+          "answers-4": "Fruit",
+          tags: "",
+          multiSelect: "",
         },
       }),
     },
@@ -3460,6 +3531,9 @@ export function adminPages(): A11yPage[] {
         ...COMMON,
         enabled,
         configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
+        // The bind form's role picker and message select (#1530).
+        roles: ROLES,
+        messages: WELCOME_MESSAGES,
         active: [
           {
             mappingId: "m1",
@@ -3846,6 +3920,108 @@ export function adminPages(): A11yPage[] {
           },
         ],
         flash: FLASH,
+      }),
+    },
+    {
+      // The bot's message list could not be read (#1530): the bind form's Message ID is a text box.
+      name: "Reaction roles (message list unreadable)",
+      html: renderReactionRolesPage({
+        ...COMMON,
+        enabled: true,
+        configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
+        active: [],
+        archived: [],
+        settingRows: [],
+        textChannels: CHANNELS,
+        roles: ROLES,
+        messages: null,
+      }),
+    },
+    {
+      // The list is cut at the cap (#1530): the select plus a Message ID box for older messages.
+      name: "Reaction roles (message list cut at the cap)",
+      html: renderReactionRolesPage({
+        ...COMMON,
+        enabled: true,
+        configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
+        active: [],
+        archived: [],
+        settingRows: [],
+        textChannels: CHANNELS,
+        roles: ROLES,
+        messages: { ...WELCOME_MESSAGES, truncated: true },
+      }),
+    },
+    {
+      name: "Reaction roles (bind form refused, message list cut at the cap)",
+      html: renderReactionRolesPage({
+        ...COMMON,
+        enabled: true,
+        configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
+        active: [],
+        archived: [],
+        settingRows: [],
+        textChannels: CHANNELS,
+        roles: ROLES,
+        messages: { ...WELCOME_MESSAGES, truncated: true },
+        refusedForm: {
+          formId: "reaction-role-bind",
+          errors: { messageId: "That message is not one the bot posted." },
+          values: {
+            roleId: "r2",
+            emoji: "🎨",
+            messageId: "123456789012345678",
+            messageIdListed: "",
+          },
+        },
+      }),
+    },
+    {
+      // A refused bind form that kept a message id, with the unreadable list (#1530).
+      name: "Reaction roles (bind form refused, message list unreadable)",
+      html: renderReactionRolesPage({
+        ...COMMON,
+        enabled: true,
+        configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
+        active: [],
+        archived: [],
+        settingRows: [],
+        textChannels: CHANNELS,
+        roles: ROLES,
+        messages: null,
+        refusedForm: {
+          formId: "reaction-role-bind",
+          errors: { messageId: "That message is not one the bot posted." },
+          values: {
+            roleId: "r2",
+            emoji: "🎨",
+            messageId: "123456789012345678",
+          },
+        },
+      }),
+    },
+    {
+      // A refused bind form that kept a message id the list does not hold (#1530).
+      name: "Reaction roles (bind form refused, message not in the list)",
+      html: renderReactionRolesPage({
+        ...COMMON,
+        enabled: true,
+        configChannel: { name: "roles", id: "c1", type: ChannelType.GuildText },
+        active: [],
+        archived: [],
+        settingRows: [],
+        textChannels: CHANNELS,
+        roles: ROLES,
+        messages: WELCOME_MESSAGES,
+        refusedForm: {
+          formId: "reaction-role-bind",
+          errors: { messageId: "That message is not one the bot posted." },
+          values: {
+            roleId: "r2",
+            emoji: "🎨",
+            messageId: "123456789012345678",
+          },
+        },
       }),
     },
     {

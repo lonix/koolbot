@@ -2168,7 +2168,12 @@ describe("renderPollsPage", () => {
     expect(html).toContain("/admin/polls/items/i1/edit");
     // Edit forms are pre-filled with the row's current values.
     expect(html).toContain('value="0 12 * * 1"');
-    expect(html).toContain('value="Yes, No"');
+    // One box per answer, each holding its own answer (the schedule's cron, the
+    // duration and the answer boxes are asserted on the DOM in feature-form-controls.test.ts).
+    expect(html).toContain(
+      'name="answers" maxlength="55" aria-label="Answer 1" value="Yes"',
+    );
+    expect(html).toContain('aria-label="Answer 2" value="No"');
     expect(html).toContain('value="food"');
     // The selected channel/role and multiSelect state are reflected.
     expect(html).toContain('value="c1" selected');
