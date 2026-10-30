@@ -3576,14 +3576,17 @@ function eventGroupsScript(): string {
     "function setWording(n,v){var s=pick(n),t=form.elements[n];if(!s){if(t)t.value=v;return}" +
     "var hit=false;Array.prototype.forEach.call(s.options,function(o){if(o.value===v&&v!==''&&v!=='custom')hit=true});" +
     "if(hit){s.value=v}else{s.value='custom';t.value=v}wording()}" +
-    "function wordOf(){var s=pick('groups_label');if(!s||s.value==='custom')return val('groups_label');return s.value===''?(s.getAttribute('data-default')||''):s.value}" +
+    "function wordOf(){var s=pick('groups_label');if(!s||s.value==='custom')return val('groups_label');return s.value===''?(s.__pw||s.getAttribute('data-default')||''):s.value}" +
     // The empty option names what an empty choice saves: the checked preset's word, else the server default.
-    "function wordLabels(){var o=chosen();Array.prototype.forEach.call(form.querySelectorAll('[data-wording-choice]'),function(s){var k=s.closest('[data-wording]').getAttribute('data-wording');" +
-    "var pw=o&&o.value?o.getAttribute(k==='group'?'data-label':'data-leader-label'):'';" +
+    // Leaving the checked preset (Generate names, or its Custom card) carries its word into the dropdown, so the word is not lost
+    // (`keep` is a draft being put back: what it holds stays as it is).
+    "function wordLabels(keep){var o=chosen(),live=!!(o&&o.value);Array.prototype.forEach.call(form.querySelectorAll('[data-wording-choice]'),function(s){var k=s.closest('[data-wording]').getAttribute('data-wording');" +
+    "var pw=live?o.getAttribute(k==='group'?'data-label':'data-leader-label')||'':'';" +
+    "if(!keep&&!live&&s.value===''&&s.__pw)setWording(k==='group'?'groups_label':'groups_leader_label',s.__pw);s.__pw=pw;" +
     "s.options[0].textContent=pw?\"Preset's word (\"+pw+\")\":'Server default ('+(s.getAttribute('data-default')||'')+')'})}" +
     "function wordingSet(){var a=pick('groups_label');return !!((a&&a.value)||val('groups_label'))}" +
     "Array.prototype.forEach.call(form.querySelectorAll('[data-wording-choice]'),function(s){s.addEventListener('change',wording)});wording();" +
-    "Array.prototype.forEach.call(form.querySelectorAll('input[type=radio][name=groups_preset]'),function(r){r.addEventListener('change',wordLabels)});wordLabels();" +
+    "Array.prototype.forEach.call(form.querySelectorAll('input[type=radio][name=groups_preset]'),function(r){r.addEventListener('change',function(){wordLabels()})});wordLabels();" +
     // The pieces that need scripts are unhidden here; the Advanced section starts
     // folded; the rows are one line each.
     "if(builder)builder.hidden=false;if(sizeQuick)sizeQuick.hidden=false;if(adv&&!(wordingSet()||val('groups_lead_minutes')))adv.open=false;" +
@@ -3656,7 +3659,7 @@ function eventGroupsScript(): string {
     "Array.prototype.forEach.call(rows(),function(x,i){if(val('group_'+i+'_name')){var s=f(i,'size');s.value=r.value;s.removeAttribute('data-manual');if(r.value)s.setAttribute('data-auto','1');else s.removeAttribute('data-auto')}});summarise()})});" +
     // A preset card fills the rows, then folds them behind the summary.
     "function compact(on){summary.hidden=!on;customise.hidden=!on;setEditor(!on)}" +
-    "function custom(){var c=form.querySelector('input[type=radio][name=groups_preset][value=\"\"]');if(c)c.checked=true;compact(false)}" +
+    "function custom(){var c=form.querySelector('input[type=radio][name=groups_preset][value=\"\"]');if(c)c.checked=true;wordLabels();compact(false)}" +
     "function onPreset(){var o=chosen();if(!o||!o.value){compact(false);return}" +
     "var raw=o.getAttribute('data-groups');if(!raw)return;" +
     "var g;try{g=JSON.parse(raw)}catch(x){return}if(!Array.isArray(g))return;" +
@@ -3733,7 +3736,7 @@ function eventGroupsScript(): string {
     // The person gets the rows back, open, so they can fix what the server refused.
     "['auto','manual'].forEach(function(a){(Array.isArray(d['__'+a])?d['__'+a]:[]).forEach(function(n){var el=form.elements[n];if(el&&el.setAttribute)el.setAttribute('data-'+a,'1')})});" +
     "var back=chosen();if(back&&back.value){summary.hidden=false;customise.hidden=false}" +
-    "wording();wordLabels();if(adv&&(wordingSet()||val('groups_lead_minutes')))adv.open=true;" +
+    "wording();wordLabels(true);if(adv&&(wordingSet()||val('groups_lead_minutes')))adv.open=true;" +
     // Setting `checked` fires no change event, so reapply the dependent state by hand.
     "if(kr())kr().syncAll();show();validity();lobby();summarise();setEditor(true)}}catch(x){}" +
     "})();"
