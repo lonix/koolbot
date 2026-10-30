@@ -661,16 +661,10 @@ describe("every data-confirm site in the rendered pages (drift)", () => {
       removeDialogStandIn();
     }
     expect(sites).toBeGreaterThan(10);
-    // Plan-apply forms that the a11y fixtures do not render (no applicable
-    // plan there); their tone is covered by the attribute check above on every
-    // site that does render. Anything else missing means a fixture was lost.
-    const NOT_FIXTURED = ["/admin/rules/apply", "/admin/role-groups/apply"].map(
-      (a) => NEUTRAL_CONFIRM_ACTIONS.findIndex((re) => re.test(a)),
-    );
+    // Every neutral confirm site is fixtured now, the plan-apply forms of Rules
+    // and Role groups included (#1512): anything missing means a fixture was lost.
     expect(Array.from(neutralSeen).sort((a, b) => a - b)).toEqual(
-      NEUTRAL_CONFIRM_ACTIONS.map((_, i) => i).filter(
-        (i) => !NOT_FIXTURED.includes(i),
-      ),
+      NEUTRAL_CONFIRM_ACTIONS.map((_, i) => i),
     );
     expect(Array.from(matched).sort()).toEqual(
       NEEDS_LIST.map(([name]) => name).sort(),

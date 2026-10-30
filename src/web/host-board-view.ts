@@ -177,7 +177,7 @@ function renderMenu(
       : `<p class="kb-help">${d.presenceOk ? `There is no ${escapeHtml(label)} to move this person to yet.` : "Not available: the voice state could not be read."}</p>`) +
     `<div class="kb-row">` +
     (canAssign
-      ? `<button class="kb-btn kb-btn--sm kb-btn--primary" type="submit" data-board-do="assign">${team === null ? "Add to " : "Move to "}${escapeHtml(label)}${hiddenName}</button>`
+      ? `<button class="kb-btn kb-btn--sm" type="submit" data-board-do="assign">${team === null ? "Add to " : "Move to "}${escapeHtml(label)}${hiddenName}</button>`
       : "") +
     (team !== null
       ? `<button class="kb-btn kb-btn--sm" type="submit" formaction="${escapeHtml(d.actionPath("unassign"))}" data-board-do="unassign">Not in a ${escapeHtml(label)}${hiddenName}</button>`

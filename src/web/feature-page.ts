@@ -98,6 +98,20 @@ export const SETTINGS_FOLD_SCRIPT =
   "reveal();window.addEventListener('hashchange',reveal)})();";
 
 /**
+ * The class of a feature page's one primary button (#1512). While the feature
+ * is off the callout's *Enable* is the view's primary (components.md, Callout),
+ * so the page's own main button renders neutral until the feature is on.
+ */
+export function mainButtonClass(enabled: boolean): string {
+  return enabled ? "btn btn-primary" : "btn";
+}
+
+/** `mainButtonClass` for the `kb-btn` components. */
+export function mainKbButtonClass(enabled: boolean): string {
+  return enabled ? "kb-btn kb-btn--primary" : "kb-btn";
+}
+
+/**
  * The callout at the top of a feature page whose feature is off (#610, #1544).
  * Feature pages stay reachable while off (the nav link is greyed, not hidden),
  * so the page says so and offers the fix. The feature being off is a choice,

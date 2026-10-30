@@ -204,7 +204,7 @@ function actions(
     <form method="POST" action="${CHANNELS_PATH}/${id}/edit" class="stack">${csrf}${baselineInputs(c, f)}
       <label>Name <input type="text" name="name" value="${escapeHtml(f.value("name", c.name))}" maxlength="${CHANNEL_LIMITS.nameMax}" required${off}${f.attrs("name")}></label>${f.error("name")}
       ${fieldRows(c, p, tree, off, f)}
-      <button type="submit" class="btn btn-primary"${off}>Save changes</button>
+      <button type="submit" class="btn"${off}>Save changes</button>
     </form></details>`;
   const del = `<a class="btn btn-sm btn-danger" href="${CHANNELS_PATH}/${id}/delete"${confirmLinkAttr("channel-delete")} aria-label="Delete ${name}">Delete…</a>`;
   return `<div class="actions">${move("up", "Up")} ${move("down", "Down")} ${del}</div>${edit}`;

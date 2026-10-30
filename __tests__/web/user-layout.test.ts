@@ -533,3 +533,20 @@ describe("renderUserPage layout and shared rules on the design tokens (#1541)", 
     expect(css).not.toMatch(/body\{[^}]*font-family/);
   });
 });
+
+describe("one primary button on the member pages (#1512)", () => {
+  const sheet = (html: string): string =>
+    /<style>([\s\S]*?)<\/style>/.exec(html)?.[1] ?? "";
+
+  it("makes .btn neutral and keeps the primary fill for .btn-primary", () => {
+    const css = sheet(render());
+    expect(css).toContain(".btn{background:var(--fill);color:var(--text)}");
+    expect(css).toContain(
+      ".btn-primary{background:var(--primary);color:var(--on-primary)}",
+    );
+    expect(css).toContain(
+      "a.btn-primary,a.btn-primary:hover{color:var(--on-primary)}",
+    );
+    expect(css).not.toMatch(/(^|\})\.btn\{background:var\(--primary\)/);
+  });
+});

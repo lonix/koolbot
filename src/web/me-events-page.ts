@@ -64,7 +64,7 @@ function rowHtml(
       ? `<a class="kb-btn kb-btn--sm" href="${escapeHtml(panel)}/edit" aria-label="Edit ${label}">Edit</a> `
       : "";
   const open = e.running
-    ? `<a class="kb-btn kb-btn--sm kb-btn--primary" href="${escapeHtml(panel)}" aria-label="Open the host panel for ${label}">Host panel</a>`
+    ? `<a class="kb-btn kb-btn--sm" href="${escapeHtml(panel)}" aria-label="Open the host panel for ${label}">Host panel</a>`
     : "";
   const cancel = opts.cancel
     ? `<form method="POST" action="${escapeHtml(panel)}/cancel" class="kb-row" data-confirm="Cancel the event '${label}'?"${confirmListAttr(eventCancelItems(false, e.recurring))}>` +
@@ -139,7 +139,7 @@ ${off}
     e.upcoming.length,
     e.upcoming.length > 0
       ? `<div class="kb-panel__body--flush">${table("Upcoming events", e.upcoming, props.csrfToken, { cancel: true })}</div>`
-      : `<div class="kb-empty"><p class="kb-empty__title">No upcoming events.</p><p class="kb-empty__text">Events you plan show up here, with Edit and Cancel.</p>${props.eventsEnabled ? `<a class="kb-btn kb-btn--primary" href="${HOST_NEW_EVENT_PATH}">New event</a>` : ""}</div>`,
+      : `<div class="kb-empty"><p class="kb-empty__title">No upcoming events.</p><p class="kb-empty__text">Events you plan show up here, with Edit and Cancel.</p>${props.eventsEnabled ? `<a class="kb-btn" href="${HOST_NEW_EVENT_PATH}">New event</a>` : ""}</div>`,
   );
   const pastHtml =
     e.past.length > 0

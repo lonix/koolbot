@@ -185,7 +185,7 @@ function renderStatus(p: RulesPageProps, csrf: string): string {
   </tbody></table>
   <p class="muted">Turn the feature on and pick the channel, role and texts on the <a href="/admin/settings">Settings</a> page. Make the rules channel read-only for members in Discord.</p>
   <div class="row">
-    <form method="POST" action="/admin/rules/post">${csrf}<button type="submit" class="btn btn-primary"${p.enabled && p.channelId ? "" : " disabled"}>${p.messagePosted ? "Update the rules message" : "Post the rules message"}</button></form>
+    <form method="POST" action="/admin/rules/post">${csrf}<button type="submit" class="${p.plan && rulesPlanIsApplicable(p.plan) ? "btn" : "btn btn-primary"}"${p.enabled && p.channelId ? "" : " disabled"}>${p.messagePosted ? "Update the rules message" : "Post the rules message"}</button></form>
     <form method="POST" action="/admin/rules/sync" data-confirm="Record everyone who already holds the acceptance role as accepted (adopted)? Nothing is changed in Discord."${CONFIRM_NEUTRAL_ATTR}>${csrf}<button type="submit" class="btn"${p.roleId ? "" : " disabled"}>Record current role holders as accepted</button></form>
   </div>
 </div>`;

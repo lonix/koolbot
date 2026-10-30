@@ -519,6 +519,8 @@ const STYLE = [
   // Disabled-feature banner (#610): explanatory text on the left, inline
   // enable action + Settings link on the right; wraps on narrow screens.
   "form.stack{display:flex;flex-direction:column;gap:.6rem}",
+  // A legacy form's buttons keep their natural width instead of stretching across the column (#1512).
+  "form.stack > .btn{align-self:flex-start}",
   "form.stack label{display:flex;flex-direction:column;gap:.25rem;font-size:.85rem;color:var(--text-secondary)}",
   "form.stack label.checkbox{flex-direction:row;align-items:center;gap:.5rem}",
   // Control borders use --control (3.97:1) — the hairline --border was

@@ -249,7 +249,7 @@ ${permissionChecks(g.permissions, f)}</fieldset>
 ${renderColourField(f, "colour", "Colour", formatColour(g.colour), "Leave as it is")}`
 }
 <label>When its Discord role changes <select name="syncPolicy">${syncPolicyOptions(g.syncPolicy, globalPolicy, f)}</select></label>
-<button type="submit" class="btn btn-primary">Save group</button>
+<button type="submit" class="btn">Save group</button>
 </form></details>`;
 }
 
@@ -387,6 +387,17 @@ function renderGroups(props: RoleGroupsPageProps, csrf: string): string {
 <p class="muted">Listed highest first: a group ranks above the ones below it, and role positions in Discord follow this order when applied. Member counts come from Discord without loading every member.</p>`;
 }
 
+/** True when the page shows a plan whose Apply plan button is offered; that is then the view's primary (#1512). */
+function planCanApply(props: RoleGroupsPageProps): boolean {
+  return Boolean(
+    props.plan &&
+    !props.planUnavailable &&
+    props.plan.errors.length === 0 &&
+    props.extraErrors.length === 0 &&
+    props.plan.operations.length > 0,
+  );
+}
+
 function renderAddForm(props: RoleGroupsPageProps, csrf: string): string {
   const f = formView(props.refusedForm, ROLE_GROUP_CREATE_FORM);
   const pickedRole = f.selected("roleId", "");
@@ -427,7 +438,7 @@ ${presetSelect()}
 <label class="check"><input type="checkbox" name="editPermissions" value="1"${f.checked("editPermissions") ? " checked" : ""}> Set the role's permissions to the selection below</label>
 ${permissionChecks(null, f)}</fieldset>
 ${renderColourField(f, "colour", "Colour", "", "No colour")}
-<button type="submit" class="btn btn-primary">Add group</button>
+<button type="submit" class="${planCanApply(props) ? "btn" : "btn btn-primary"}">Add group</button>
 </form>`;
 }
 
@@ -449,11 +460,7 @@ function renderPlan(props: RoleGroupsPageProps, csrf: string): string {
     : props.botsMissing > 0
       ? `<p class="muted">${props.botsMissing} bot(s) are not in the bot group; the plan adds the shared role. Their own managed roles are untouched.</p>`
       : "";
-  const applicable =
-    props.plan.errors.length === 0 &&
-    props.extraErrors.length === 0 &&
-    props.plan.operations.length > 0;
-  const form = applicable
+  const form = planCanApply(props)
     ? `<form method="POST" action="/admin/role-groups/apply" data-confirm="Apply this plan to Discord? A snapshot is saved first so it can be rolled back."${CONFIRM_NEUTRAL_ATTR}>${csrf}<input type="hidden" name="planId" value="${escapeHtml(props.plan.id)}"><button type="submit" class="btn btn-primary">Apply plan</button> <span class="muted">A snapshot of everything touched is saved first.</span></form>`
     : "";
   return `${extra}${bots}${renderAdoptionDiff(props.plan)}${form}`;

@@ -3228,10 +3228,10 @@ describe("renderBirthdaysPage (#986)", () => {
 
   it("disables run-now while the feature is off or the channel is unset", () => {
     expect(renderBirthdaysPage({ ...BASE, enabled: false })).toMatch(
-      /btn btn-primary" disabled>Run now/,
+      /class="btn" disabled>Run now/,
     );
     const noChannel = renderBirthdaysPage({ ...BASE, channel: null });
-    expect(noChannel).toMatch(/btn btn-primary" disabled>Run now/);
+    expect(noChannel).toMatch(/class="btn" disabled>Run now/);
     expect(noChannel).toContain("Set <code>birthdays.channel_id</code> first.");
   });
 });
@@ -3314,7 +3314,7 @@ describe("renderQuotesPage (#984)", () => {
 
   it("disables resync while the feature is off and offers to enable it", () => {
     const html = renderQuotesPage({ ...QUOTE_BASE, enabled: false });
-    expect(html).toMatch(/btn btn-primary" disabled>Resync quote channel/);
+    expect(html).toMatch(/class="btn" disabled>Resync quote channel/);
     expect(html).toContain("quotes.enabled");
   });
 

@@ -28,6 +28,8 @@ import {
   renderStatusLine,
   SETTINGS_FOLD_SCRIPT,
   settingHref,
+  mainButtonClass,
+  mainKbButtonClass,
 } from "../../src/web/feature-page.js";
 import { readFlash } from "../../src/web/read-only-routes.js";
 import { signFlash } from "../../src/web/http-flash.js";
@@ -1028,5 +1030,14 @@ describe("callout wrap modifier (#1544)", () => {
     expect(css).toMatch(
       /\.kb-callout--wrap > \.kb-callout__body \{ flex: 1 1 16rem; \}/,
     );
+  });
+});
+
+describe("mainButtonClass (#1512)", () => {
+  it("is the primary fill while the feature is on and neutral while its Enable is the primary", () => {
+    expect(mainButtonClass(true)).toBe("btn btn-primary");
+    expect(mainButtonClass(false)).toBe("btn");
+    expect(mainKbButtonClass(true)).toBe("kb-btn kb-btn--primary");
+    expect(mainKbButtonClass(false)).toBe("kb-btn");
   });
 });
