@@ -6205,6 +6205,114 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      name: "/me new event (wording: listed words chosen, server default Squad)",
+      html: shell(
+        "New event",
+        "/me/events/new",
+        renderNewEventBody({
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Oslo",
+          defaultDurationMinutes: 120,
+          groupLimits: {
+            defaultCount: 2,
+            maxCount: 15,
+            wording: { group: "Squad", leader: "Captain" },
+          },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+          groupRemembered: {
+            resetHref: "/me/events/new?defaults=1",
+            prefill: {
+              presetId: "",
+              groupLabel: "Room",
+              leaderLabel: "Captain",
+              channelLeadMinutes: "",
+              rows: [
+                { name: "Red", kind: "team", size: "", tag: "", marker: "" },
+              ],
+              captainsEnabled: true,
+              captainCustomisationEnabled: false,
+              captainsLobby: false,
+              tagsEnabled: false,
+              tagsSuffix: false,
+            },
+          },
+        }),
+      ),
+    },
+    {
+      name: "/me new event (wording: Custom with its text shown)",
+      html: shell(
+        "New event",
+        "/me/events/new",
+        renderNewEventBody({
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Oslo",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 15 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+          groupRemembered: {
+            resetHref: "/me/events/new?defaults=1",
+            prefill: {
+              presetId: "",
+              groupLabel: "Raiders",
+              leaderLabel: "Shotcaller",
+              channelLeadMinutes: "",
+              rows: [
+                { name: "Red", kind: "team", size: "", tag: "", marker: "" },
+              ],
+              captainsEnabled: true,
+              captainCustomisationEnabled: false,
+              captainsLobby: false,
+              tagsEnabled: false,
+              tagsSuffix: false,
+            },
+          },
+        }),
+      ),
+    },
+    {
+      name: "/me new event (wording: refused, Custom with nothing typed)",
+      html: shell(
+        "New event",
+        "/me/events/new",
+        renderNewEventBody({
+          csrfToken: COMMON.csrfToken,
+          timezone: "Europe/Oslo",
+          defaultDurationMinutes: 120,
+          groupLimits: { defaultCount: 2, maxCount: 15 },
+          groupPresets: EVENT_GROUP_PRESETS,
+          groupPresetsNotice: null,
+          refusal: {
+            field: "groups",
+            message:
+              "Groups: Group label: type the wording, or choose another.",
+          },
+          groupRemembered: {
+            resetHref: null,
+            enabled: true,
+            prefill: {
+              presetId: "",
+              groupLabel: "",
+              leaderLabel: "",
+              groupLabelChoice: "custom",
+              leaderLabelChoice: "",
+              channelLeadMinutes: "",
+              rows: [
+                { name: "Red", kind: "team", size: "", tag: "", marker: "" },
+              ],
+              captainsEnabled: true,
+              captainCustomisationEnabled: false,
+              captainsLobby: false,
+              tagsEnabled: false,
+              tagsSuffix: false,
+            },
+          },
+        }),
+      ),
+    },
+    {
       name: "/me new event (setup missing, presets unreadable)",
       html: shell(
         "New event",

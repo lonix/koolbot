@@ -252,8 +252,9 @@ describe("the New event page Groups section (#1188)", () => {
       expect(html).toMatch(/name="group_0_size"[^>]*value="5"/);
       expect(html).toMatch(/name="group_2_name"[^>]*value="Green"/);
       expect(html).toContain('<option value="open" selected>');
-      expect(html).toMatch(/name="groups_label"[^>]*value="Squad"/);
-      expect(html).toMatch(/name="groups_leader_label"[^>]*value="Captain"/);
+      // Listed words are the dropdown's chosen option (#1471), not text in the box.
+      expect(html).toContain('<option value="Squad" selected>');
+      expect(html).toContain('<option value="Captain" selected>');
       expect(html).toMatch(/name="groups_lead_minutes"[^>]*value="10"/);
     });
 

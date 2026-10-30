@@ -8,6 +8,13 @@ import {
   getEventGroupPreset,
   type EventGroupPreset,
 } from "../content/event-group-presets.js";
+import {
+  BUILTIN_WORDING,
+  readWordingChoice,
+  WORDING_CUSTOM,
+  type WordingDefaults,
+  type WordingKind,
+} from "./event-group-wording.js";
 
 /**
  * Event group setup (#1188): the pure helpers for validating, building and
@@ -35,8 +42,8 @@ export const GROUP_COUNT_HARD_MAX = 25;
 export const CHANNEL_LEAD_MIN = 0;
 export const CHANNEL_LEAD_MAX = 1440;
 
-export const DEFAULT_GROUP_LABEL = "Team";
-export const DEFAULT_LEADER_LABEL = "Leader";
+export const DEFAULT_GROUP_LABEL = BUILTIN_WORDING.group;
+export const DEFAULT_LEADER_LABEL = BUILTIN_WORDING.leader;
 
 /** Discord's nickname cap. */
 export const NICKNAME_MAX = 32;
@@ -107,8 +114,19 @@ export interface GroupSetupInput {
   enabled: boolean;
   /** `""` or `"custom"` for Custom, else a built-in preset id. */
   presetId: string;
+  /** The wording to use ("" = the preset's, else the server default), already resolved from the dropdown. */
   groupLabel: string;
   leaderLabel: string;
+  /**
+   * The wording dropdowns as posted (#1471): a listed word, `custom`, or `""` for
+   * the server default. Absent when the form posted only the text box (the
+   * preset editor, drafts, scripts), which is the free-text path.
+   */
+  groupLabelChoice?: string;
+  leaderLabelChoice?: string;
+  /** The wording text boxes as posted, for putting a refused form back. */
+  groupLabelText?: string;
+  leaderLabelText?: string;
   /**
    * Group leaders on for this event (#1195). Optional: only the event form
    * posts it. The preset library never does (a preset has no default for
@@ -191,6 +209,9 @@ export const GROUP_FORM_FIELDS = {
   preset: "groups_preset",
   label: "groups_label",
   leaderLabel: "groups_leader_label",
+  /** The dropdowns beside the two wording text boxes (#1471). */
+  labelChoice: "groups_label_choice",
+  leaderLabelChoice: "groups_leader_label_choice",
   captains: "groups_captains",
   captainCustom: "groups_captain_custom",
   tags: "groups_tags",
@@ -286,11 +307,23 @@ export function parseGroupForm(body: unknown): GroupSetupInput {
     if (isBlankRow(row)) continue;
     rows.push(row);
   }
+  const choice = (name: string): string | undefined => {
+    const raw = source[name];
+    return typeof raw === "string" ? raw.trim() : undefined;
+  };
+  const groupLabelText = str(GROUP_FORM_FIELDS.label);
+  const leaderLabelText = str(GROUP_FORM_FIELDS.leaderLabel);
+  const groupLabelChoice = choice(GROUP_FORM_FIELDS.labelChoice);
+  const leaderLabelChoice = choice(GROUP_FORM_FIELDS.leaderLabelChoice);
   return {
     enabled: str(GROUP_FORM_FIELDS.enabled).length > 0,
     presetId: str(GROUP_FORM_FIELDS.preset),
-    groupLabel: str(GROUP_FORM_FIELDS.label),
-    leaderLabel: str(GROUP_FORM_FIELDS.leaderLabel),
+    groupLabel: resolveWording("group", groupLabelChoice, groupLabelText),
+    leaderLabel: resolveWording("leader", leaderLabelChoice, leaderLabelText),
+    ...(groupLabelChoice !== undefined ? { groupLabelChoice } : {}),
+    ...(leaderLabelChoice !== undefined ? { leaderLabelChoice } : {}),
+    groupLabelText,
+    leaderLabelText,
     captainsEnabled: str(GROUP_FORM_FIELDS.captains).length > 0,
     captainCustomisationEnabled:
       str(GROUP_FORM_FIELDS.captainCustom).length > 0,
@@ -300,6 +333,42 @@ export function parseGroupForm(body: unknown): GroupSetupInput {
     channelLeadMinutes: str(GROUP_FORM_FIELDS.leadMinutes),
     rows,
   };
+}
+
+/**
+ * The wording a posted dropdown and text box mean together (#1471): a listed
+ * word wins over the text, Custom and a form with no dropdown use the text, and
+ * the server-default choice (or an unknown one, which `validateGroupSetup`
+ * refuses) leaves it empty.
+ */
+function resolveWording(
+  kind: WordingKind,
+  choice: string | undefined,
+  text: string,
+): string {
+  const read = readWordingChoice(kind, choice);
+  if (read.kind === "word") return read.word;
+  return read.kind === "text" ? text : "";
+}
+
+/**
+ * The refusals for a dropdown that cannot be honoured: an unlisted value (the
+ * field is a fixed allow-list) and Custom with nothing typed. Worded "Group
+ * label: ..." so `groupErrorFields` puts them under the field.
+ */
+function checkWordingChoice(
+  kind: WordingKind,
+  choice: string | undefined,
+  text: string,
+  errors: string[],
+): void {
+  const name = kind === "group" ? "Group" : "Leader";
+  const read = readWordingChoice(kind, choice);
+  if (read.kind === "unknown") {
+    errors.push(`${name} label: choose one of the listed words, or Custom.`);
+  } else if (choice === WORDING_CUSTOM && !text.trim()) {
+    errors.push(`${name} label: type the wording, or choose another.`);
+  }
 }
 
 /** The kind select always posts a value, so it does not make a row non-blank. */
@@ -527,7 +596,12 @@ function clampInt(
  */
 export function validateGroupSetup(
   input: GroupSetupInput,
-  options: { maxCount: number; resolvePreset?: PresetResolver },
+  options: {
+    maxCount: number;
+    resolvePreset?: PresetResolver;
+    /** The server's default wording (#1471); the built-in words when omitted. */
+    wording?: WordingDefaults;
+  },
 ): GroupSetupResult {
   if (!input.enabled) return { ok: true, setup: emptyGroupSetup() };
 
@@ -562,16 +636,35 @@ export function validateGroupSetup(
     );
   }
 
+  const wording = options.wording ?? BUILTIN_WORDING;
+  checkWordingChoice(
+    "group",
+    input.groupLabelChoice,
+    input.groupLabelText ?? input.groupLabel,
+    errors,
+  );
+  checkWordingChoice(
+    "leader",
+    input.leaderLabelChoice,
+    input.leaderLabelText ?? input.leaderLabel,
+    errors,
+  );
   const groupLabel = checkLabel(
     "Group label",
     input.groupLabel,
-    preset?.groupLabel ?? DEFAULT_GROUP_LABEL,
+    // An empty dropdown is the server default whatever preset is checked (#1471):
+    // the form shows it that way, and a browser without scripts cannot link the two.
+    input.groupLabelChoice === ""
+      ? wording.group
+      : (preset?.groupLabel ?? wording.group),
     errors,
   );
   const leaderLabel = checkLabel(
     "Leader label",
     input.leaderLabel,
-    preset?.leaderLabel ?? DEFAULT_LEADER_LABEL,
+    input.leaderLabelChoice === ""
+      ? wording.leader
+      : (preset?.leaderLabel ?? wording.leader),
     errors,
   );
 

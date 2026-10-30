@@ -67,8 +67,16 @@ export function groupPrefillFromPost(body: Record<string, unknown>): {
     enabled: input.enabled,
     prefill: {
       presetId: input.presetId === "custom" ? "" : input.presetId,
-      groupLabel: input.groupLabel,
-      leaderLabel: input.leaderLabel,
+      // The text boxes and dropdowns as posted (#1471), so a refused form comes
+      // back as typed: Custom with "Team" typed stays Custom.
+      groupLabel: input.groupLabelText ?? input.groupLabel,
+      leaderLabel: input.leaderLabelText ?? input.leaderLabel,
+      ...(input.groupLabelChoice !== undefined
+        ? { groupLabelChoice: input.groupLabelChoice }
+        : {}),
+      ...(input.leaderLabelChoice !== undefined
+        ? { leaderLabelChoice: input.leaderLabelChoice }
+        : {}),
       channelLeadMinutes: input.channelLeadMinutes,
       rows,
       captainsEnabled: input.captainsEnabled === true,
