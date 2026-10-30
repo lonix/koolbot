@@ -156,6 +156,58 @@ describe("DiscordLogger (#844)", () => {
     });
   });
 
+  describe("the startup post and a shutdown that begins while it waits", () => {
+    function deferredBoolean(): {
+      release: () => void;
+    } {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      mockGetBoolean.mockImplementation(
+        async (_key: unknown, fallback: unknown) => {
+          await gate;
+          return fallback === false ? true : fallback;
+        },
+      );
+      mockGetString.mockImplementation(async () => "111");
+      return { release };
+    }
+
+    it("does not send when the skip check turns true while the settings are being read", async () => {
+      const send = jest.fn(async () => undefined);
+      stubConfig({
+        "core.startup.enabled": true,
+        "core.startup.channel_id": "111",
+      });
+      const logger = DiscordLogger.getInstance(makeClient({ "111": { send } }));
+      await logger.initialize();
+
+      let shuttingDown = false;
+      const { release } = deferredBoolean();
+      const pending = logger.logBotStartup(() => shuttingDown);
+      shuttingDown = true;
+      release();
+      await pending;
+
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it("still sends once on the normal path", async () => {
+      const send = jest.fn(async () => undefined);
+      stubConfig({
+        "core.startup.enabled": true,
+        "core.startup.channel_id": "111",
+      });
+      const logger = DiscordLogger.getInstance(makeClient({ "111": { send } }));
+      await logger.initialize();
+
+      await logger.logBotStartup(() => false);
+
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("isCategoryEnabled()", () => {
     it("is true only when the category is on and has a channel id", async () => {
       stubConfig({

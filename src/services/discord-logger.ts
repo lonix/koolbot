@@ -39,6 +39,12 @@ export interface ILogMessage {
   }>;
   timestamp?: Date;
   footer?: string;
+  /**
+   * Looked at once more right before the send, after every settings read, so
+   * a post that became stale while it waited (a "started" note when a shutdown
+   * has begun since) is dropped instead of sent.
+   */
+  skipIf?: () => boolean;
 }
 
 export class DiscordLogger {
@@ -232,6 +238,11 @@ export class DiscordLogger {
         embed.setFooter({ text: message.footer });
       }
 
+      if (message.skipIf?.()) {
+        logger.debug(`Discord logger: skipping stale message to ${logType}`);
+        return false;
+      }
+
       // Suppress every mention this message could resolve. Log embeds carry
       // untrusted text — a moderation reason, an error message — and a log
       // channel must never be a way to ping @everyone. Mentions still render
@@ -257,8 +268,9 @@ export class DiscordLogger {
   /**
    * Log bot startup
    */
-  public async logBotStartup(): Promise<void> {
+  public async logBotStartup(skipIf?: () => boolean): Promise<void> {
     await this.logToChannel("startup", {
+      skipIf,
       title: "KoolBot started",
       color: embedColor("ok"),
       fields: [{ name: "Environment", value: env.nodeEnv, inline: true }],

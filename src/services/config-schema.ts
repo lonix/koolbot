@@ -2502,7 +2502,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "core.errors.enabled": {
     label: "Error log to Discord",
     description:
-      "Post errors that stop startup or fail a clean-up run (service initialisation, message activity clean-up, voice channel truncation) as embeds to the error log channel.",
+      "Post an error as an embed to the error log channel when startup fails after the Discord log is ready, or when a message activity or voice channel clean-up run fails unexpectedly. Not posted: a startup failure before the logger exists, database errors inside a clean-up run (they are in the bot's log), and a database that is not connected (that counts as a failed scheduled run in the cron log).",
     category: "core",
     type: "boolean",
   },
@@ -2544,7 +2544,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "core.cron.enabled": {
     label: "Cron log to Discord",
     description:
-      "Post scheduled-job outcomes as embeds to the cron log channel: runs of the weekly digest, birthdays, Rewind nudge and events, and a run that crashed in a job on the shared scheduler (digest, birthdays, Rewind nudge, events, reminders, LFG, leaderboard roles, case review, role groups and the clean-up jobs). Polls, scheduled announcements and errors a job handles itself are not posted.",
+      "Post scheduled-job outcomes as embeds to the cron log channel: a summary of each weekly digest and Rewind nudge run, a birthday run that announced someone or removed a role (quiet runs are not posted), an event that changed (for example its state or channel) or was ended by hand (not every scan), and a run that crashed in a job on the shared scheduler (digest, birthdays, Rewind nudge, events, reminders, LFG, leaderboard roles, case review, role groups and the clean-up jobs). Polls, scheduled announcements and errors a job handles itself are not posted.",
     category: "core",
     type: "boolean",
   },

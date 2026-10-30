@@ -47,6 +47,15 @@ describe("lifecycle log posts (#1556)", () => {
       expect(logBotStartup).not.toHaveBeenCalled();
     });
 
+    it("hands the shutdown check on, so the logger can look again right before it sends", () => {
+      const logBotStartup = jest.fn(async () => undefined);
+      const isShuttingDown = (): boolean => false;
+
+      postStartupLog({ logBotStartup }, isShuttingDown);
+
+      expect(logBotStartup).toHaveBeenCalledWith(isShuttingDown);
+    });
+
     it("survives a post that throws synchronously", () => {
       const logBotStartup = jest.fn(() => {
         throw new Error("boom");
