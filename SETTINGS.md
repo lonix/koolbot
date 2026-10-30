@@ -2157,11 +2157,15 @@ apply to the next log message — no restart is needed.
 | `core.errors.enabled` / `core.errors.channel_id`                       | bool / channel | `false` / `""` | Errors that stop startup or fail a clean-up run (message activity, voice channel truncation)              |
 | `core.cleanup.enabled` / `core.cleanup.channel_id`                     | bool / channel | `false` / `""` | Voice-session cleanup results (rows removed / aggregated)                                                 |
 | `core.config.enabled` / `core.config.channel_id`                       | bool / channel | `false` / `""` | Settings reloads and whether they worked (Setup Wizard, server scan; not a single setting save)           |
-| `core.cron.enabled` / `core.cron.channel_id`                           | bool / channel | `false` / `""` | Weekly digest, birthdays, Rewind nudge and events runs, and any scheduled job that failed                 |
+| `core.cron.enabled` / `core.cron.channel_id`                           | bool / channel | `false` / `""` | Digest, birthdays, Rewind nudge and events runs; a crashed run of a scheduler-based job (see below)       |
 | `core.moderation.enabled` / `core.moderation.channel_id`               | bool / channel | `false` / `""` | Recorded moderation actions plus the member's earlier actions (needs `moderation.enabled`)                |
 | `core.moderation_review.enabled` / `core.moderation_review.channel_id` | bool / channel | `false` / `""` | Daily summary of moderation cases that need a decision (needs `moderation.cases.enabled`)                 |
 | `core.updates.enabled` / `core.updates.channel_id`                     | bool / channel | `false` / `""` | One-time note when the update check first sees a newer KoolBot release (needs `core.updatecheck.enabled`) |
 | `core.role_groups.enabled` / `core.role_groups.channel_id`             | bool / channel | `false` / `""` | Role group drift (a role edited or deleted in Discord) and what the sync did about it                     |
+
+The cron category posts a crashed run of the jobs that run on the shared scheduler (digest,
+birthdays, Rewind nudge, events, reminders, LFG, leaderboard roles, case review, role groups and the
+clean-up jobs). Polls, scheduled announcements and errors a job handles itself are not posted.
 
 Point every category at one channel for a single consolidated log, or split
 them (e.g. `#bot-status` for startup, `#admin-alerts` for errors).

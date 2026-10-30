@@ -60,6 +60,21 @@ export class ConfigService {
   private client: Client | null = null;
   private reloadCallbacks: Set<() => Promise<void>> = new Set();
   private changeListeners: Set<(key: string) => void> = new Set();
+  /**
+   * Reloads run one at a time. A second `triggerReload()` while one is
+   * reading would swap the cache again under it and the two would publish
+   * over each other.
+   */
+  private reloadQueue: Promise<void> = Promise.resolve();
+  /**
+   * While a reload is reading, every `set()` / `delete()` that completes is
+   * noted here, so the saved value is laid over whatever the reload
+   * publishes (or restores) instead of being lost with the swapped-out map.
+   */
+  private reloadWrites: Map<
+    string,
+    { deleted: boolean; value?: unknown }
+  > | null = null;
   private reloadOutcomeListeners: Set<
     (outcome: ReloadOutcome) => Promise<void>
   > = new Set();
@@ -142,7 +157,21 @@ export class ConfigService {
     }
   }
 
-  public async triggerReload(): Promise<void> {
+  public triggerReload(): Promise<void> {
+    const run = this.reloadQueue.then(() => this.reloadNow());
+    this.reloadQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Lay the writes made during a reload over the map that stays. */
+  private applyReloadWrites(target: Map<string, unknown>): void {
+    for (const [key, write] of this.reloadWrites ?? []) {
+      if (write.deleted) target.delete(key);
+      else target.set(key, write.value);
+    }
+  }
+
+  private async reloadNow(): Promise<void> {
     logger.info("Triggering configuration reload...");
 
     // Clear the cache, keeping the old one until the re-read has worked: a
@@ -151,12 +180,17 @@ export class ConfigService {
     const previousCache = this.cache;
     this.cache = new Map();
     this.initialized = false;
+    this.reloadWrites = new Map();
 
     // Reinitialize the service
     try {
       await this.initialize();
+      this.applyReloadWrites(this.cache);
+      this.reloadWrites = null;
     } catch (error) {
       this.cache = previousCache;
+      this.applyReloadWrites(this.cache);
+      this.reloadWrites = null;
       this.notifyReloadOutcome({
         success: false,
         message: "The settings could not be read from the database.",
@@ -708,6 +742,7 @@ export class ConfigService {
       );
 
       this.cache.set(key, value);
+      this.reloadWrites?.set(key, { deleted: false, value });
       logger.info(
         `Configuration updated: ${sanitizeForLog(key)} = ${sanitizeForLog(value)}`,
       );
@@ -727,6 +762,7 @@ export class ConfigService {
     try {
       await Config.deleteOne({ key });
       this.cache.delete(key);
+      this.reloadWrites?.set(key, { deleted: true });
       logger.info(`Configuration deleted: ${key}`);
       this.notifyChange(key);
 

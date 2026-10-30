@@ -316,7 +316,7 @@ client.once(Events.ClientReady, async (readyClient) => {
   // "KoolBot started" for the startup log channel. After the services are up,
   // so a failed start never claims it started. Not awaited: readiness must
   // never wait on a Discord send; it never throws.
-  postStartupLog(discordLogger);
+  postStartupLog(discordLogger, () => isShuttingDown);
 
   // Guild scoping (#1144): warn about, and optionally leave, guilds other than
   // GUILD_ID. Needs ConfigService, so it runs once services are wired up.

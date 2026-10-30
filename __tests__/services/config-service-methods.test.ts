@@ -685,6 +685,115 @@ describe("ConfigService - Methods", () => {
         expect(seenInListener).toBe(true);
       });
 
+      describe("a save while a reload is reading", () => {
+        const KEY = "voicechannels.enabled";
+
+        function deferredRead(): {
+          promise: Promise<unknown[]>;
+          resolve: (rows: unknown[]) => void;
+          reject: (error: Error) => void;
+        } {
+          let resolve!: (rows: unknown[]) => void;
+          let reject!: (error: Error) => void;
+          const promise = new Promise<unknown[]>((res, rej) => {
+            resolve = res;
+            reject = rej;
+          });
+          return { promise, resolve, reject };
+        }
+
+        async function startWithStored(value: boolean): Promise<void> {
+          mockFind.mockResolvedValue([
+            { key: KEY, value, category: "voicechannels" },
+          ]);
+          await service.initialize();
+        }
+
+        const tick = async (): Promise<void> => {
+          for (let i = 0; i < 5; i++) await Promise.resolve();
+        };
+
+        it("keeps the saved value when the re-read then fails", async () => {
+          await startWithStored(false);
+          const read = deferredRead();
+          mockFind.mockReturnValueOnce(read.promise);
+          mockFindOneAndUpdate.mockResolvedValue({});
+
+          const reload = service.triggerReload();
+          await tick();
+          await service.set(KEY, true, "d", "voicechannels", {
+            skipDependencyCheck: true,
+          });
+          read.reject(new Error("db down"));
+          await expect(reload).rejects.toThrow("db down");
+
+          mockFindOne.mockRejectedValue(new Error("db down"));
+          expect(await service.getBoolean(KEY, false)).toBe(true);
+        });
+
+        it("keeps the saved value when the re-read succeeds with rows read before the save", async () => {
+          await startWithStored(false);
+          const read = deferredRead();
+          mockFind.mockReturnValueOnce(read.promise);
+          mockFindOneAndUpdate.mockResolvedValue({});
+
+          const reload = service.triggerReload();
+          await tick();
+          await service.set(KEY, true, "d", "voicechannels", {
+            skipDependencyCheck: true,
+          });
+          read.resolve([{ key: KEY, value: false, category: "voicechannels" }]);
+          await reload;
+
+          expect(await service.getBoolean(KEY, false)).toBe(true);
+        });
+
+        it("keeps a delete made during the read", async () => {
+          await startWithStored(true);
+          const read = deferredRead();
+          mockFind.mockReturnValueOnce(read.promise);
+          mockDeleteOne.mockResolvedValue({});
+
+          const reload = service.triggerReload();
+          await tick();
+          await service.delete(KEY);
+          read.resolve([{ key: KEY, value: true, category: "voicechannels" }]);
+          await reload;
+
+          mockFindOne.mockResolvedValue(null);
+          expect(await service.getBoolean(KEY, false)).toBe(false);
+        });
+
+        it("runs two overlapping reloads one after the other", async () => {
+          await startWithStored(false);
+          const first = deferredRead();
+          mockFind.mockClear();
+          mockFind.mockReturnValueOnce(first.promise);
+          mockFind.mockResolvedValue([
+            { key: KEY, value: true, category: "voicechannels" },
+          ]);
+          const order: string[] = [];
+          service.registerReloadCallback(async () => {
+            order.push("callback");
+          });
+
+          const a = service.triggerReload();
+          const b = service.triggerReload();
+          await tick();
+          expect(mockFind).toHaveBeenCalledTimes(1);
+
+          first.resolve([
+            { key: KEY, value: false, category: "voicechannels" },
+          ]);
+          await Promise.all([a, b]);
+
+          // Two `find` calls per initialize (settings, then the sweep).
+          expect(mockFind).toHaveBeenCalledTimes(4);
+          expect(order).toEqual(["callback", "callback"]);
+          expect(await service.getBoolean(KEY, false)).toBe(true);
+        });
+      });
+
       it("is not stopped by a throwing listener", async () => {
         mockFind.mockResolvedValue([]);
         service.addReloadOutcomeListener(

@@ -14,12 +14,17 @@ export const SHUTDOWN_LOG_TIMEOUT_MS = 2000;
 /**
  * Post "KoolBot started" once the services are up. Fire and forget: it hands
  * back at once, so a stalled or rate-limited send can never hold up readiness.
+ * Posts nothing once a shutdown has begun.
  * Never throws, however the post fails.
  */
 export function postStartupLog(
   discordLogger: Pick<DiscordLogger, "logBotStartup"> | undefined,
+  isShuttingDown: () => boolean = () => false,
 ): void {
   if (!discordLogger) return;
+  // A signal can arrive while the services are still starting; "started"
+  // after "shutting down" would be a lie.
+  if (isShuttingDown()) return;
   try {
     discordLogger.logBotStartup().catch((error: unknown) => {
       logger.error("Failed to post the startup log:", error);

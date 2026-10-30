@@ -2519,7 +2519,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "core.cron.enabled": {
     label: "Cron log to Discord",
     description:
-      "Post scheduled-job outcomes as embeds to the cron log channel: runs of the weekly digest, birthdays, Rewind nudge and events, and any scheduled job that failed.",
+      "Post scheduled-job outcomes as embeds to the cron log channel: runs of the weekly digest, birthdays, Rewind nudge and events, and a run that crashed in a job on the shared scheduler (digest, birthdays, Rewind nudge, events, reminders, LFG, leaderboard roles, case review, role groups and the clean-up jobs). Polls, scheduled announcements and errors a job handles itself are not posted.",
     category: "core",
     type: "boolean",
   },
