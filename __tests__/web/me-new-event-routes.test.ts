@@ -801,7 +801,7 @@ describe("the host's remembered group setup (#1406)", () => {
     expect(html).toMatch(/name="groups_tags" value="1" checked/);
     expect(html).not.toMatch(/name="groups_tags_suffix" value="1" checked/);
     expect(html).toMatch(/name="group_2_name"[^>]*value="Green"/);
-    expect(html).toMatch(/name="groups_label"[^>]*value="Squad"/);
+    expect(html).toContain('<option value="Squad" selected>');
     expect(html).toMatch(/name="groups_lead_minutes"[^>]*value="10"/);
     // Custom stays the checked card, as no preset was remembered.
     expect(html).toMatch(/name="groups_preset" value="" checked/);

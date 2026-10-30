@@ -595,6 +595,8 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "events.native.link_room",
     "events.groups.default_count",
     "events.groups.max_count",
+    "events.groups.group_label",
+    "events.groups.leader_label",
     "events.max_active_per_host",
   ],
   digest: [

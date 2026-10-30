@@ -97,8 +97,6 @@ import { EVENT_COVER_UPLOAD_SCRIPT } from "./event-cover-upload.js";
 import {
   CHANNEL_LEAD_MAX,
   CHANNEL_LEAD_MIN,
-  DEFAULT_GROUP_LABEL,
-  DEFAULT_LEADER_LABEL,
   GROUP_FORM_FIELDS,
   GROUP_FORM_MAX_ROWS,
   GROUP_LABEL_MAX,
@@ -108,6 +106,14 @@ import {
   GROUP_SIZE_MIN,
   GROUP_TAG_MAX,
 } from "../services/event-groups.js";
+import {
+  BUILTIN_WORDING,
+  WORDING_CUSTOM,
+  WORDING_OPTIONS,
+  wordingChoiceFor,
+  type WordingDefaults,
+  type WordingKind,
+} from "../services/event-group-wording.js";
 import {
   EVENT_GROUP_PRESETS,
   LIBRARY_PRESET_PREFIX,
@@ -3307,8 +3313,48 @@ function groupSwitch(
       </div>`;
 }
 
-/** Names offered for the group wording; any text is still accepted. */
-const GROUP_LABEL_SUGGESTIONS = ["Team", "Squad", "Room", "Party"];
+/**
+ * One wording control of the Groups section (#1471): a dropdown of the listed
+ * words (first option the server default, last Custom) and, under it, the text
+ * box that only counts while Custom is chosen. Without scripts both are shown;
+ * the script hides the box unless Custom is chosen. `choice` is the dropdown as
+ * posted when a refused form comes back, else it is derived from the stored
+ * text, so a wording saved as free text shows as Custom with its text.
+ */
+function renderWordingField(opts: {
+  kind: WordingKind;
+  /** The text box's form name; the dropdown posts `<name>_choice`. */
+  textName: string;
+  choiceName: string;
+  idBase: string;
+  label: string;
+  help: string;
+  serverDefault: string;
+  stored: string | undefined;
+  choice: string | undefined;
+}): string {
+  const text = opts.stored ?? "";
+  const picked = opts.choice ?? wordingChoiceFor(opts.kind, text);
+  // A derived Custom keeps its text; a derived word or default leaves the box empty.
+  const boxText =
+    opts.choice !== undefined || picked === WORDING_CUSTOM ? text : "";
+  const option = (value: string, label: string): string =>
+    `<option value="${escapeHtml(value)}"${value === picked ? " selected" : ""}>${escapeHtml(label)}</option>`;
+  return `<div class="kb-stack" data-wording="${opts.kind}">
+            <div class="kb-field">
+            <label class="kb-label" for="${opts.idBase}-choice">${escapeHtml(opts.label)}</label>
+            <select class="kb-select" id="${opts.idBase}-choice" name="${opts.choiceName}" data-wording-choice data-default="${escapeHtml(opts.serverDefault)}" aria-describedby="${opts.idBase}-help">
+              ${option("", `Server default (${opts.serverDefault})`)}${WORDING_OPTIONS[opts.kind].map((w) => `\n              ${option(w, w)}`).join("")}
+              ${option(WORDING_CUSTOM, "Custom")}
+            </select>
+            <p class="kb-help" id="${opts.idBase}-help">${escapeHtml(opts.help)}</p>
+            </div>
+            <div class="kb-field" data-wording-custom>
+              <label class="kb-label" for="${opts.idBase}">Custom wording</label>
+              <input type="text" id="${opts.idBase}" class="kb-input kb-input--sm" name="${opts.textName}" maxlength="${GROUP_LABEL_MAX}" placeholder="${escapeHtml(opts.serverDefault)}"${boxText ? ` value="${escapeHtml(boxText)}"` : ""}>
+            </div>
+          </div>`;
+}
 
 // Exported for the host's New event page (#1305); `presetsHref` is where the
 // preset library is managed for the viewer.
@@ -3316,6 +3362,8 @@ export function renderGroupsSection(
   limits: {
     defaultCount: number;
     maxCount: number;
+    /** The server's default wording (#1471); the built-in words when absent. */
+    wording?: WordingDefaults;
   },
   presets: readonly EventGroupPreset[] = EVENT_GROUP_PRESETS,
   presetsNotice: string | null = null,
@@ -3340,6 +3388,7 @@ export function renderGroupsSection(
   const inline = (html: string | undefined): string =>
     html ? `\n      ${html}` : "";
   const prefill = remembered?.prefill ?? null;
+  const wording = limits.wording ?? BUILTIN_WORDING;
   const presetCards = presets
     .map((p) =>
       renderPresetCard(
@@ -3411,11 +3460,17 @@ export function renderGroupsSection(
       </div>
       ${groupSwitch(GROUP_FORM_FIELDS.captains, "Group leaders", "The host picks one member of each team as its leader and can move just the leaders.", "captains", prefill?.captainsEnabled === true)}${inline(permissionInline.leaders)}
       <div class="kb-nested" data-nested-for="${GROUP_FORM_FIELDS.captains}">
-        <div class="kb-field">
-          <label class="kb-label" for="groups-leader-label">What a leader is called</label>
-          <input type="text" id="groups-leader-label" class="kb-input kb-input--sm" name="${GROUP_FORM_FIELDS.leaderLabel}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_LEADER_LABEL}"${prefill?.leaderLabel ? ` value="${escapeHtml(prefill.leaderLabel)}"` : ""} aria-describedby="groups-leader-label-help">
-          <p class="kb-help" id="groups-leader-label-help">For example Leader or Captain. It names the captains lobby and is used in the leader messages.</p>
-        </div>
+        ${renderWordingField({
+          kind: "leader",
+          textName: GROUP_FORM_FIELDS.leaderLabel,
+          choiceName: GROUP_FORM_FIELDS.leaderLabelChoice,
+          idBase: "groups-leader-label",
+          label: "What a leader is called",
+          help: "It names the captains lobby and is used in the leader messages. Custom takes any word.",
+          serverDefault: wording.leader,
+          stored: prefill?.leaderLabel,
+          choice: prefill?.leaderLabelChoice,
+        })}
         ${groupSwitch(GROUP_FORM_FIELDS.captainCustom, "Leaders can customise", "Each leader may rename their own team and set its tag from a button in the team's channel chat. The host can reset any team from the host panel.", "captain-custom", prefill?.captainCustomisationEnabled === true)}
         ${groupSwitch(GROUP_FORM_FIELDS.captainsLobby, "Captains lobby", "A separate voice channel only you and the current leaders can join. Nobody is assigned to it. You can switch it on or off from the host panel while the event runs.", "captains-lobby", prefill?.captainsLobby === true)}
       </div>
@@ -3426,12 +3481,17 @@ export function renderGroupsSection(
       <details class="kb-disclosure" data-groups-advanced open>
         <summary>${icon("chevron-right", { className: "kb-chev" })}Advanced</summary>
         <div class="kb-disclosure__body kb-stack">
-          <div class="kb-field">
-            <label class="kb-label" for="groups-label">What a group is called</label>
-            <input type="text" id="groups-label" class="kb-input kb-input--sm" name="${GROUP_FORM_FIELDS.label}" maxlength="${GROUP_LABEL_MAX}" placeholder="${DEFAULT_GROUP_LABEL}" list="groups-label-options"${prefill?.groupLabel ? ` value="${escapeHtml(prefill.groupLabel)}"` : ""} aria-describedby="groups-label-help">
-            <datalist id="groups-label-options">${GROUP_LABEL_SUGGESTIONS.map((s) => `<option value="${s}"></option>`).join("")}</datalist>
-            <p class="kb-help" id="groups-label-help">For example Team, Squad, Room or Party. Choosing a preset sets it.</p>
-          </div>
+          ${renderWordingField({
+            kind: "group",
+            textName: GROUP_FORM_FIELDS.label,
+            choiceName: GROUP_FORM_FIELDS.labelChoice,
+            idBase: "groups-label",
+            label: "What a group is called",
+            help: "Choosing a preset sets it. Custom takes any word.",
+            serverDefault: wording.group,
+            stored: prefill?.groupLabel,
+            choice: prefill?.groupLabelChoice,
+          })}
           <div class="kb-field">
             <label class="kb-label" for="groups-lead-minutes">Create channels this many minutes before the start</label>
             <input type="number" id="groups-lead-minutes" class="kb-input kb-input--sm kb-input--num" name="${GROUP_FORM_FIELDS.leadMinutes}" min="${CHANNEL_LEAD_MIN}" max="${CHANNEL_LEAD_MAX}" placeholder="Default"${prefill?.channelLeadMinutes ? ` value="${escapeHtml(prefill.channelLeadMinutes)}"` : ""} aria-describedby="groups-lead-minutes-help">
@@ -3494,9 +3554,19 @@ function eventGroupsScript(): string {
     "function sync(){if(add)add.hidden=used()>=max}" +
     "if(add){add.hidden=false;add.addEventListener('click',function(){addRow()})}" +
     "sync();" +
+    // The wording dropdowns (#1471): the Custom box only shows while Custom is
+    // chosen; a word a preset sets picks the listed option, else Custom + text.
+    "function pick(n){return form.elements[n+'_choice']}" +
+    "function wording(){Array.prototype.forEach.call(form.querySelectorAll('[data-wording]'),function(w){var s=w.querySelector('[data-wording-choice]'),c=w.querySelector('[data-wording-custom]');if(s&&c)c.hidden=s.value!=='custom'})}" +
+    "function setWording(n,v){var s=pick(n),t=form.elements[n];if(!s){if(t)t.value=v;return}" +
+    "var hit=false;Array.prototype.forEach.call(s.options,function(o){if(o.value===v&&v!==''&&v!=='custom')hit=true});" +
+    "if(hit){s.value=v}else{s.value='custom';t.value=v}wording()}" +
+    "function wordOf(){var s=pick('groups_label');if(!s||s.value==='custom')return val('groups_label');return s.value===''?(s.getAttribute('data-default')||''):s.value}" +
+    "function wordingSet(){var a=pick('groups_label');return !!((a&&a.value)||val('groups_label'))}" +
+    "Array.prototype.forEach.call(form.querySelectorAll('[data-wording-choice]'),function(s){s.addEventListener('change',wording)});wording();" +
     // The pieces that need scripts are unhidden here; the Advanced section starts
     // folded; the rows are one line each.
-    "if(builder)builder.hidden=false;if(sizeQuick)sizeQuick.hidden=false;if(adv&&!(val('groups_label')||val('groups_lead_minutes')))adv.open=false;" +
+    "if(builder)builder.hidden=false;if(sizeQuick)sizeQuick.hidden=false;if(adv&&!(wordingSet()||val('groups_lead_minutes')))adv.open=false;" +
     // While groups are off the section's number fields leave native validation
     // (the server ignores them then); ticking the box restores min, max and step.
     "function validity(){var on=enabled.checked;" +
@@ -3575,8 +3645,8 @@ function eventGroupsScript(): string {
     "var hadLobby=false;g=g.filter(function(r){if(r&&r.kind==='leads'){hadLobby=true;return false}return true});" +
     "if(g.length+(hadLobby?1:0)>max){custom();return}" +
     "var lb=form.elements['groups_captains_lobby'];if(lb)lb.checked=hadLobby;" +
-    "var lbl=o.getAttribute('data-label');if(lbl)form.elements['groups_label'].value=lbl;" +
-    "var ll=o.getAttribute('data-leader-label');if(ll)form.elements['groups_leader_label'].value=ll;" +
+    "var lbl=o.getAttribute('data-label');if(lbl)setWording('groups_label',lbl);" +
+    "var ll=o.getAttribute('data-leader-label');if(ll)setWording('groups_leader_label',ll);" +
     "var ld=o.getAttribute('data-lead');if(ld!==null)form.elements['groups_lead_minutes'].value=ld;" +
     // The preset's clan tags default (#1194); the host can still change the box.
     "var tg=o.getAttribute('data-tags');if(tg!==null&&form.elements['groups_tags'])form.elements['groups_tags'].checked=tg==='1';" +
@@ -3643,7 +3713,7 @@ function eventGroupsScript(): string {
     // The person gets the rows back, open, so they can fix what the server refused.
     "['auto','manual'].forEach(function(a){(Array.isArray(d['__'+a])?d['__'+a]:[]).forEach(function(n){var el=form.elements[n];if(el&&el.setAttribute)el.setAttribute('data-'+a,'1')})});" +
     "var back=chosen();if(back&&back.value){summary.hidden=false;customise.hidden=false}" +
-    "if(adv&&(val('groups_label')||val('groups_lead_minutes')))adv.open=true;" +
+    "wording();if(adv&&(wordingSet()||val('groups_lead_minutes')))adv.open=true;" +
     // Setting `checked` fires no change event, so reapply the dependent state by hand.
     "if(kr())kr().syncAll();show();validity();lobby();summarise();setEditor(true)}}catch(x){}" +
     "})();"

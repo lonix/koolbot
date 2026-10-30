@@ -21,6 +21,7 @@ import {
   loadPresetCatalog,
 } from "../../services/event-group-preset-service.js";
 import { resolveGroupCountLimits } from "../../services/event-groups.js";
+import { loadWordingDefaults } from "../../services/event-group-wording.js";
 import { loadGroupPrefill } from "../../services/event-last-setup-service.js";
 import { parseEventWhen } from "../event-when.js";
 import type { EventFormRefusal } from "../event-field-errors.js";
@@ -99,7 +100,11 @@ export function createMeNewEventRouter(client: Client): Router {
       // The host's own presets are offered too (#1216).
       loadPresetCatalog(session.guildId, { ownerId: session.discordUserId }),
     ]);
-    const limits = resolveGroupCountLimits(defaultCount, configuredMax);
+    const wording = await loadWordingDefaults(config);
+    const limits = {
+      ...resolveGroupCountLimits(defaultCount, configuredMax),
+      wording,
+    };
     const presets = enabledPresets(catalog);
     const startNow = req.query.when === "now";
     // The host's last setup (#1406), unless they asked for the defaults. A
@@ -112,6 +117,7 @@ export function createMeNewEventRouter(client: Client): Router {
         : await loadGroupPrefill(session.guildId, session.discordUserId, {
             maxCount: limits.maxCount,
             presets,
+            wording,
           });
     const postedGroups = refused ? groupPrefillFromPost(refused.body) : null;
     const setupNotice = !categoryId

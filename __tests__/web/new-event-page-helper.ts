@@ -14,7 +14,11 @@ export interface NewEventTestProps {
   remainingMs?: number;
   enabled?: boolean;
   timezone?: string;
-  groupLimits?: { defaultCount: number; maxCount: number };
+  groupLimits?: {
+    defaultCount: number;
+    maxCount: number;
+    wording?: { group: string; leader: string };
+  };
   groupPresets?: NewEventViewProps["groupPresets"];
   groupPresetsNotice?: string | null;
   groupRemembered?: NewEventViewProps["groupRemembered"];
@@ -34,10 +38,15 @@ export function renderAdminNewEvent(props: NewEventTestProps = {}): string {
       timezone: props.timezone ?? "UTC",
       defaultDurationMinutes: 120,
       // Clamped as the route clamps what it reads from the config.
-      groupLimits: resolveGroupCountLimits(
-        props.groupLimits?.defaultCount ?? 2,
-        props.groupLimits?.maxCount ?? 15,
-      ),
+      groupLimits: {
+        ...resolveGroupCountLimits(
+          props.groupLimits?.defaultCount ?? 2,
+          props.groupLimits?.maxCount ?? 15,
+        ),
+        ...(props.groupLimits?.wording
+          ? { wording: props.groupLimits.wording }
+          : {}),
+      },
       groupPresets: props.groupPresets ?? EVENT_GROUP_PRESETS,
       groupPresetsNotice: props.groupPresetsNotice ?? null,
       groupRemembered: props.groupRemembered ?? null,

@@ -9,6 +9,7 @@ import {
   type GroupSetupInput,
   type RawGroupRow,
 } from "./event-groups.js";
+import type { WordingDefaults } from "./event-group-wording.js";
 import logger from "../utils/logger.js";
 
 /**
@@ -33,9 +34,16 @@ import logger from "../utils/logger.js";
 export interface GroupFormPrefill {
   /** The preset card to check; `""` is Custom. */
   presetId: string;
-  /** Empty when it is the default wording, so the placeholder shows. */
+  /**
+   * The wording text; empty when it is the default wording. With a choice it is
+   * the Custom text box's content, without one the dropdown is derived from it
+   * (a listed word, else Custom, else the server default).
+   */
   groupLabel: string;
   leaderLabel: string;
+  /** The wording dropdowns as posted (#1471), for putting a refused form back as typed. */
+  groupLabelChoice?: string;
+  leaderLabelChoice?: string;
   /** Empty = the server default. */
   channelLeadMinutes: string;
   rows: Array<{
@@ -58,6 +66,8 @@ export interface PrefillContext {
   maxCount: number;
   /** The presets the picker shows now (enabled ones; library, personal, built-in). */
   presets: readonly EventGroupPreset[];
+  /** The server's default wording (#1471); the built-in words when absent. */
+  wording?: WordingDefaults;
 }
 
 function text(value: unknown): string {
@@ -128,6 +138,7 @@ export function prefillFromStored(
   };
   const result = validateGroupSetup(input, {
     maxCount: ctx.maxCount,
+    ...(ctx.wording ? { wording: ctx.wording } : {}),
     resolvePreset: (id) =>
       offered && id === offered.id
         ? { preset: offered }
@@ -139,8 +150,11 @@ export function prefillFromStored(
   // An empty label box means "the preset's wording, else the default" on submit,
   // so a default label is only blanked when that fallback is the same word.
   // Otherwise an explicit "Team" under a "Squad" preset would turn into "Squad".
-  const groupFallback = offered?.groupLabel ?? DEFAULT_GROUP_LABEL;
-  const leaderFallback = offered?.leaderLabel ?? DEFAULT_LEADER_LABEL;
+  // The fallback is the server default when no preset says otherwise (#1471).
+  const groupFallback =
+    offered?.groupLabel ?? ctx.wording?.group ?? DEFAULT_GROUP_LABEL;
+  const leaderFallback =
+    offered?.leaderLabel ?? ctx.wording?.leader ?? DEFAULT_LEADER_LABEL;
   return {
     presetId: setup.presetId ?? "",
     groupLabel: setup.groupLabel === groupFallback ? "" : setup.groupLabel,

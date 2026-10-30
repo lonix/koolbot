@@ -113,6 +113,22 @@ describe("prefillFromStored", () => {
     expect(custom?.leaderLabel).toBe("");
   });
 
+  it("blanks a wording only when it equals the server default, and keeps any other (#1471)", () => {
+    const wording = { group: "Squad", leader: "Captain" };
+    const withServer = { maxCount: 15, presets: [], wording };
+    // The server default is shown as the "Server default" choice: stored empty.
+    const same = prefillFromStored(
+      stored({ groupLabel: "Squad", leaderLabel: "Captain" }),
+      withServer,
+    );
+    expect(same?.groupLabel).toBe("");
+    expect(same?.leaderLabel).toBe("");
+    // The built-in "Team" is an explicit word now, not the default: it stays.
+    const other = prefillFromStored(stored(), withServer);
+    expect(other?.groupLabel).toBe("Team");
+    expect(other?.leaderLabel).toBe("Leader");
+  });
+
   it("falls back to Custom, keeping the rows, when the preset is gone", () => {
     const out = prefillFromStored(stored({ presetId: "lib:deleted" }), ctx);
     expect(out?.presetId).toBe("");

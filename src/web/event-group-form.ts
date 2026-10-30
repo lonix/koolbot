@@ -266,7 +266,8 @@ export function groupBuilderScript(afterBuild: string): string {
     "var n=Math.max(1,Math.min(parseInt(cnt.value,10)||1,room));cnt.value=n;" +
     "var s=parseInt(sz.value,10);var size=s>=MINSIZE&&s<=MAXSIZE?String(s):'';" +
     "var byColour=form.querySelector('input[name=groups_build_names]:checked').value==='colours'&&n<=COLOURS.length;" +
-    "var word=val('groups_label')||'Team';" +
+    // The event form has a wording dropdown (#1471) and defines `wordOf` to read it; the preset editor has only the text box.
+    "var word=(typeof wordOf==='function'?wordOf():val('groups_label'))||'Team';" +
     "var total=Math.max(rows().length,n);" +
     "for(var i=0;i<total;i++){if(i<n){var c=COLOURS[i%COLOURS.length];" +
     "setRow(i,{name:byColour?c[1]:word+' '+(i+1),kind:'team',size:size,tag:'',marker:c[0]});" +

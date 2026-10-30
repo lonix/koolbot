@@ -25,6 +25,7 @@ import {
 } from "../models/event.js";
 import { ConfigService } from "../services/config-service.js";
 import { loadPresetResolver } from "../services/event-group-preset-service.js";
+import { loadWordingDefaults } from "../services/event-group-wording.js";
 import { rememberLastSetup } from "../services/event-last-setup-service.js";
 import {
   hasCaptainsLobby,
@@ -278,9 +279,10 @@ async function createEventUnlocked(
   const groupInput = parseGroupForm(body);
   let groups: EventGroupSetup | undefined;
   if (groupInput.enabled) {
-    const [defaultCount, configuredMax] = await Promise.all([
+    const [defaultCount, configuredMax, wording] = await Promise.all([
       config.getNumber("events.groups.default_count", 2),
       config.getNumber("events.groups.max_count", 15),
+      loadWordingDefaults(config),
     ]);
     const { maxCount } = resolveGroupCountLimits(defaultCount, configuredMax);
     // The enabled presets are read once, here, and used for the whole request.
@@ -297,6 +299,7 @@ async function createEventUnlocked(
         : undefined;
     const result = validateGroupSetup(groupInput, {
       maxCount,
+      wording,
       ...(resolvePreset ? { resolvePreset } : {}),
     });
     if (!result.ok) {

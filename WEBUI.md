@@ -2067,16 +2067,27 @@ picker of coloured circles and squares and common team icons, Unicode only and n
 marker limit), name, size (1 to 99, the voice user limit, copied down from the first row), tag (up to 8
 characters, so a nickname keeps room within Discord's 32; it starts as the name in capitals while clan tags
 are on) and, behind **More**, the kind (**team**: members belong to it; **open**: anyone can join, such as
-spectators). **Advanced** holds what a group is called (Team, Squad, Room, Party), and a **channel
+spectators). **Advanced** holds what a group is called (a dropdown: **Server default**, Team, Squad, Room, Party or **Custom**, #1471) and a **channel
 creation time** in minutes before the start (empty uses `events.create_lead_minutes`). Without
 JavaScript everything is shown open, the marker is a text box and the kind a select, and the same fields
 are posted. A separate switch, **Group
 leaders**, switches on one leader per team group for this event (off by default; see
-**Leaders** below); **What a leader is called**, **Leaders can customise** (#1196, off by default; see
+**Leaders** below); **What a leader is called** (a dropdown: **Server default**, Leader, Captain or **Custom**),
+**Leaders can customise** (#1196, off by default; see
 **Team names and tags** below) and **Captains lobby** (#1251, off by
 default; see **Captains lobby** below) appear under it only while it is on. The captains lobby is a
 separate voice channel that only the host and the current leaders can join, and **Clan tags** (#1194) puts each team's tag on its members'
 server nicknames while the event runs (off by default; see **Clan tags** below).
+**The wording is a dropdown with a server default** (#1471). The first option, **Server default (Team)**, names the word that
+applies when the host picks none; an admin sets it in the Events settings (`events.groups.group_label` and
+`events.groups.leader_label`, each a dropdown of the listed words). A group preset's own word comes before the server default, and
+choosing a preset on the form sets the dropdown to that word. **Custom** shows a text box for any other word; the box is hidden
+while another option is chosen, and without JavaScript it is always shown and only counts when **Custom** is chosen. A word saved
+as free text before the dropdown existed (an event, a preset or a remembered setup) stays valid: it shows as **Custom** with its text. An
+event already saved keeps the word it has when the server default changes. A refused form comes back with both dropdowns and the
+text as typed; **Custom** with nothing typed, or a word that is not in the list, is refused with a message that names the field. The group
+preset editor keeps its free-text boxes.
+
 The leaders-only channel is no longer a kind of group in the list: a preset (or a
 draft) that still has a `leads` group ticks the **Captains lobby** box instead of
 adding a row, and an event or preset saved before keeps its `leads` group as it is.

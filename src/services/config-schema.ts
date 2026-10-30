@@ -1,5 +1,9 @@
 import { GUILD_MEMBERS_INTENT_HOWTO } from "../utils/guild-members-intent.js";
 import type { SettingFormat } from "../utils/setting-formats.js";
+import {
+  GROUP_WORDING_OPTIONS,
+  LEADER_WORDING_OPTIONS,
+} from "./event-group-wording.js";
 
 export interface ConfigSchema {
   // Voice Channel Management
@@ -140,6 +144,8 @@ export interface ConfigSchema {
   "events.native.link_room": boolean; // Point the native event at the event's voice room once it exists
   "events.groups.default_count": number; // Group rows the event form offers up front
   "events.groups.max_count": number; // Most groups one event may have
+  "events.groups.group_label": string; // What a group is called when an event names none (a listed word)
+  "events.groups.leader_label": string; // What a group leader is called when an event names none (a listed word)
   "events.max_active_per_host": number; // Most open events one non-admin host may have at once (0 = no limit)
 
   // LFG — ad-hoc "looking for group" posts (#957)
@@ -472,6 +478,8 @@ export const defaultConfig: ConfigSchema = {
   "events.native.link_room": true,
   "events.groups.default_count": 2,
   "events.groups.max_count": 15,
+  "events.groups.group_label": "Team",
+  "events.groups.leader_label": "Leader",
   "events.max_active_per_host": 0, // 0 = no limit
 
   // LFG (#957) — feature gate off by default (rule 1)
@@ -2072,6 +2080,23 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     stepper: true,
     reloadOnSave: true,
   },
+  "events.groups.group_label": {
+    label: "What a group is called",
+    description:
+      "The word an event's groups go by when the host picks none: Team, Squad, Room or Party. It shows on the event form as the server default, a group preset's own word comes first, and the host can pick another word, or type their own, for each event. Events already saved keep the word they have.",
+    category: "events",
+    type: "string",
+    options: GROUP_WORDING_OPTIONS.map((w) => ({ value: w, label: w })),
+  },
+  "events.groups.leader_label": {
+    label: "What a group leader is called",
+    description:
+      "The word a group leader goes by when the host picks none: Leader or Captain. It names the captains lobby and is used in the leader messages. A group preset's own word comes first, and the host can pick another word, or type their own, for each event. Events already saved keep the word they have.",
+    category: "events",
+    type: "string",
+    options: LEADER_WORDING_OPTIONS.map((w) => ({ value: w, label: w })),
+  },
+
   "events.max_active_per_host": {
     label: "Most open events per host",
     description:
