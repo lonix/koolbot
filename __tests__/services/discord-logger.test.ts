@@ -4,7 +4,6 @@ import fs from "node:fs";
 import path from "node:path";
 
 const mockRegisterReloadCallback = jest.fn();
-const mockAddReloadOutcomeListener = jest.fn();
 const mockGetBoolean = jest.fn();
 const mockGetString = jest.fn();
 
@@ -12,7 +11,6 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: jest.fn(() => ({
       registerReloadCallback: mockRegisterReloadCallback,
-      addReloadOutcomeListener: mockAddReloadOutcomeListener,
       getBoolean: mockGetBoolean,
       getString: mockGetString,
     })),
@@ -138,8 +136,10 @@ describe("DiscordLogger (#844)", () => {
 
       expect(mockRegisterReloadCallback).toHaveBeenCalledTimes(1);
     });
+  });
 
-    it("posts each reload outcome to the config log exactly once, and nothing while the category is off", async () => {
+  describe("settings reloads", () => {
+    it("post nothing, even with the config category on and the reload callback fired", async () => {
       const send = jest.fn(async () => undefined);
       stubConfig({
         "core.config.enabled": true,
@@ -147,20 +147,12 @@ describe("DiscordLogger (#844)", () => {
       });
       const logger = DiscordLogger.getInstance(makeClient({ "444": { send } }));
       await logger.initialize();
-      await logger.initialize();
 
-      expect(mockAddReloadOutcomeListener).toHaveBeenCalledTimes(1);
-      const listener = mockAddReloadOutcomeListener.mock.calls[0][0] as (o: {
-        success: boolean;
-        message: string;
-      }) => Promise<void>;
+      const reload = mockRegisterReloadCallback.mock
+        .calls[0][0] as () => Promise<void>;
+      await reload();
 
-      await listener({ success: true, message: "Done." });
-      expect(send).toHaveBeenCalledTimes(1);
-
-      stubConfig({ "core.config.channel_id": "444" });
-      await listener({ success: false, message: "Nope." });
-      expect(send).toHaveBeenCalledTimes(1);
+      expect(send).not.toHaveBeenCalled();
     });
   });
 
@@ -277,17 +269,17 @@ describe("DiscordLogger (#844)", () => {
       const logger = DiscordLogger.getInstance(makeClient({ "444": { send } }));
       await logger.initialize();
 
-      await logger.logConfigReload({ success: true, message: "ok" });
+      await logger.logCronSuccess("job");
       expect(send).not.toHaveBeenCalled();
 
       // Operator enables the category on the Settings page; the write goes
       // straight through ConfigService's cache.
       stubConfig({
-        "core.config.enabled": true,
-        "core.config.channel_id": "444",
+        "core.cron.enabled": true,
+        "core.cron.channel_id": "444",
       });
 
-      await logger.logConfigReload({ success: true, message: "ok" });
+      await logger.logCronSuccess("job");
       expect(send).toHaveBeenCalledTimes(1);
     });
 
@@ -388,23 +380,6 @@ describe("DiscordLogger (#844)", () => {
         title: "Couldn't register commands with Discord",
       },
       {
-        label: "reload ok",
-        category: "config",
-        call: (l) =>
-          l.logConfigReload({
-            success: true,
-            message: "m",
-            commandsUpdated: 3,
-          }),
-        title: "Settings reloaded",
-      },
-      {
-        label: "reload failed",
-        category: "config",
-        call: (l) => l.logConfigReload({ success: false, message: "m" }),
-        title: "Couldn't reload settings",
-      },
-      {
         label: "cleanup ok",
         category: "cleanup",
         call: (l) =>
@@ -497,12 +472,6 @@ describe("DiscordLogger (#844)", () => {
       expect(cleanup.fields?.find((f) => f.name === "Run time")?.value).toBe(
         "120 ms",
       );
-
-      (DiscordLogger as unknown as { instance?: unknown }).instance = undefined;
-      const reload = await post("config", (l) =>
-        l.logConfigReload({ success: true, message: "m", commandsUpdated: 3 }),
-      );
-      expect(reload.fields?.map((f) => f.name)).toEqual(["Commands updated"]);
 
       (DiscordLogger as unknown as { instance?: unknown }).instance = undefined;
       const err = await post("errors", (l) =>

@@ -47,12 +47,6 @@ function toBoolean(value: unknown, defaultValue: boolean): boolean {
   return defaultValue;
 }
 
-/** How one `triggerReload()` went, as reported to reload-outcome listeners. */
-export interface ReloadOutcome {
-  success: boolean;
-  message: string;
-}
-
 export class ConfigService {
   private static instance: ConfigService;
   private cache: Map<string, unknown> = new Map();
@@ -60,36 +54,6 @@ export class ConfigService {
   private client: Client | null = null;
   private reloadCallbacks: Set<() => Promise<void>> = new Set();
   private changeListeners: Set<(key: string) => void> = new Set();
-  /**
-   * The cache read and swap of a reload run one at a time: a second
-   * `triggerReload()` while one is reading would swap the cache again under
-   * it and the two would publish over each other. Only that part is queued;
-   * the reload callbacks (Discord calls, possibly slow) are not, so a stalled
-   * callback can never stop a later reload from reading and publishing.
-   */
-  private reloadQueue: Promise<void> = Promise.resolve();
-  /**
-   * While a reload is reading, every `set()` / `delete()` that completes is
-   * noted here, so the saved value is laid over whatever the reload
-   * publishes (or restores) instead of being lost with the swapped-out map.
-   */
-  private reloadWrites: Map<
-    string,
-    { deleted: boolean; value?: unknown }
-  > | null = null;
-  /**
-   * Reload callbacks with a run in flight. A callback is never run twice at
-   * the same time (several of them stop and rebuild Discord state): a later
-   * reload marks it `dirty` instead, and the run in flight goes round once
-   * more when it ends, reading the newest settings.
-   */
-  private callbacksInFlight = new Map<
-    () => Promise<void>,
-    { dirty: boolean }
-  >();
-  private reloadOutcomeListeners: Set<
-    (outcome: ReloadOutcome) => Promise<void>
-  > = new Set();
 
   private constructor() {}
 
@@ -110,35 +74,6 @@ export class ConfigService {
 
   public removeReloadCallback(callback: () => Promise<void>): void {
     this.reloadCallbacks.delete(callback);
-  }
-
-  /**
-   * Be told how each `triggerReload()` went, after every reload callback has
-   * run (the Discord config log, #1556). Listeners are not awaited, and a
-   * throwing one is logged and ignored, so reporting can never delay or break
-   * a reload.
-   */
-  public addReloadOutcomeListener(
-    listener: (outcome: ReloadOutcome) => Promise<void>,
-  ): void {
-    this.reloadOutcomeListeners.add(listener);
-  }
-
-  /**
-   * Hand the outcome to every listener without waiting for them: a reload
-   * (and the rethrow of a failed one) must not wait on an optional Discord
-   * post. A listener that throws or rejects is logged and ignored.
-   */
-  private notifyReloadOutcome(outcome: ReloadOutcome): void {
-    for (const listener of this.reloadOutcomeListeners) {
-      try {
-        listener(outcome).catch((error: unknown) => {
-          logger.error("Reload outcome listener failed:", error);
-        });
-      } catch (error) {
-        logger.error("Reload outcome listener failed:", error);
-      }
-    }
   }
 
   /**
@@ -169,117 +104,26 @@ export class ConfigService {
     }
   }
 
-  public triggerReload(): Promise<void> {
-    const published = this.reloadQueue.then(() => this.readAndPublish());
-    this.reloadQueue = published.catch(() => undefined);
-    return published.then(() => this.runReloadCallbacks());
-  }
-
-  /**
-   * Run one reload callback, or ask the run already in flight to go round
-   * again. Resolves when its own run has finished; a call that only marked
-   * the run in flight resolves at once, so a stalled callback holds up
-   * nothing but its own next run (no timeout: some callbacks legitimately
-   * work for a long time). A failure of the first run is rethrown; a failure
-   * of a re-run is logged.
-   */
-  private async runReloadCallback(
-    callback: () => Promise<void>,
-  ): Promise<void> {
-    const inFlight = this.callbacksInFlight.get(callback);
-    if (inFlight) {
-      inFlight.dirty = true;
-      return;
-    }
-    const state = { dirty: false };
-    this.callbacksInFlight.set(callback, state);
-    let failed = false;
-    let firstError: unknown;
-    try {
-      do {
-        state.dirty = false;
-        try {
-          await callback();
-        } catch (error) {
-          if (failed) {
-            logger.error("Error during configuration reload callback:", error);
-          } else {
-            failed = true;
-            firstError = error;
-          }
-        }
-      } while (state.dirty);
-    } finally {
-      this.callbacksInFlight.delete(callback);
-    }
-    if (failed) throw firstError;
-  }
-
-  /** Lay the writes made during a reload over the map that stays. */
-  private applyReloadWrites(target: Map<string, unknown>): void {
-    for (const [key, write] of this.reloadWrites ?? []) {
-      if (write.deleted) target.delete(key);
-      else target.set(key, write.value);
-    }
-  }
-
-  /** Re-read the settings and publish them. The queued part of a reload. */
-  private async readAndPublish(): Promise<void> {
+  public async triggerReload(): Promise<void> {
     logger.info("Triggering configuration reload...");
 
-    // Clear the cache, keeping the old one until the re-read has worked: a
-    // failed read must not leave the bot with no settings at all (and the
-    // failure post would then not find its own channel setting).
-    const previousCache = this.cache;
-    this.cache = new Map();
+    // Clear the cache
+    this.cache.clear();
     this.initialized = false;
-    this.reloadWrites = new Map();
 
     // Reinitialize the service
-    try {
-      await this.initialize();
-      this.applyReloadWrites(this.cache);
-      this.reloadWrites = null;
-    } catch (error) {
-      this.cache = previousCache;
-      this.applyReloadWrites(this.cache);
-      this.reloadWrites = null;
-      this.notifyReloadOutcome({
-        success: false,
-        message: "The settings could not be read from the database.",
-      });
-      throw error;
-    }
-  }
+    await this.initialize();
 
-  /** Tell every feature about the new settings, then report the outcome. */
-  private async runReloadCallbacks(): Promise<void> {
-    let failed = 0;
+    // Execute all registered reload callbacks
     for (const callback of this.reloadCallbacks) {
       try {
-        await this.runReloadCallback(callback);
+        await callback();
       } catch (error) {
-        failed++;
         logger.error("Error during configuration reload callback:", error);
       }
     }
 
     logger.info("Configuration reload completed");
-
-    // A callback that catches its own failure and resolves (most services do)
-    // is not seen here, so the wording claims no more than "handed on".
-    this.notifyReloadOutcome(
-      failed === 0
-        ? {
-            success: true,
-            message:
-              "The settings were read again and passed on to the bot's features. A feature that can't use them says so in the bot's log.",
-          }
-        : {
-            success: false,
-            message: `The settings were read again, but ${failed} ${failed === 1 ? "part" : "parts"} of the bot reported an error while taking them in.`,
-          },
-    );
   }
 
   public async initialize(): Promise<void> {
@@ -797,7 +641,6 @@ export class ConfigService {
       );
 
       this.cache.set(key, value);
-      this.reloadWrites?.set(key, { deleted: false, value });
       logger.info(
         `Configuration updated: ${sanitizeForLog(key)} = ${sanitizeForLog(value)}`,
       );
@@ -817,7 +660,6 @@ export class ConfigService {
     try {
       await Config.deleteOne({ key });
       this.cache.delete(key);
-      this.reloadWrites?.set(key, { deleted: true });
       logger.info(`Configuration deleted: ${key}`);
       this.notifyChange(key);
 

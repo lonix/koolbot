@@ -85,10 +85,6 @@ export class DiscordLogger {
         this.configService.registerReloadCallback(async () => {
           await this.refreshChannels();
         });
-        // Post the outcome to the config log once the reload has finished.
-        this.configService.addReloadOutcomeListener((outcome) =>
-          this.logConfigReload(outcome),
-        );
         this.reloadCallbackRegistered = true;
       }
 
@@ -316,34 +312,6 @@ export class DiscordLogger {
         { name: "Error", value: error.substring(0, 1000), inline: false },
       ],
       footer: "KoolBot · Logs · Discord",
-    });
-  }
-
-  /**
-   * Log configuration reload
-   */
-  public async logConfigReload(result: {
-    success: boolean;
-    message: string;
-    commandsUpdated?: number;
-  }): Promise<void> {
-    await this.logToChannel("config", {
-      title: result.success ? "Settings reloaded" : "Couldn't reload settings",
-      description: result.success
-        ? result.message
-        : `${result.message} ${CHECK_LOG_HINT}`,
-      color: result.success ? embedColor("ok") : embedColor("danger"),
-      fields:
-        result.commandsUpdated !== undefined
-          ? [
-              {
-                name: "Commands updated",
-                value: result.commandsUpdated.toString(),
-                inline: true,
-              },
-            ]
-          : [],
-      footer: "KoolBot · Logs · Configuration",
     });
   }
 

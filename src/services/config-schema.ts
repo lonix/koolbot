@@ -2505,14 +2505,14 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "core.config.enabled": {
     label: "Config log to Discord",
     description:
-      "Post settings reloads and whether they worked as embeds to the config log channel. A reload happens when the Setup Wizard applies its settings or the server scan is applied; saving a single setting does not post.",
+      "Nothing is posted to the config log at present: a settings reload is not reported. The category is kept so settings you already saved stay valid.",
     category: "core",
     type: "boolean",
   },
   "core.config.channel_id": {
     label: "Config log channel",
     description:
-      "Text channel that receives config log embeds. Nothing is posted while this is empty.",
+      "Text channel for config log embeds. Nothing is posted to it at present.",
     category: "core",
     type: "channel",
   },
