@@ -11,13 +11,19 @@ import { runWithTimeout } from "./run-with-timeout.js";
 /** How long the shutdown post may take before the shutdown carries on. */
 export const SHUTDOWN_LOG_TIMEOUT_MS = 2000;
 
-/** Post "KoolBot started" once the services are up. Never throws. */
-export async function postStartupLog(
+/**
+ * Post "KoolBot started" once the services are up. Fire and forget: it hands
+ * back at once, so a stalled or rate-limited send can never hold up readiness.
+ * Never throws, however the post fails.
+ */
+export function postStartupLog(
   discordLogger: Pick<DiscordLogger, "logBotStartup"> | undefined,
-): Promise<void> {
+): void {
   if (!discordLogger) return;
   try {
-    await discordLogger.logBotStartup();
+    discordLogger.logBotStartup().catch((error: unknown) => {
+      logger.error("Failed to post the startup log:", error);
+    });
   } catch (error) {
     logger.error("Failed to post the startup log:", error);
   }

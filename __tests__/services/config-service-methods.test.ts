@@ -624,6 +624,67 @@ describe("ConfigService - Methods", () => {
         );
       });
 
+      it("does not wait for a listener that never finishes", async () => {
+        mockFind.mockResolvedValue([]);
+        service.addReloadOutcomeListener(
+          () => new Promise<void>(() => undefined),
+        );
+
+        const outcome = await Promise.race([
+          service.triggerReload().then(() => "done"),
+          new Promise<string>((resolve) =>
+            setTimeout(() => resolve("held up by the listener"), 300),
+          ),
+        ]);
+
+        expect(outcome).toBe("done");
+      });
+
+      it("rethrows a failed read at once even when the listener never finishes", async () => {
+        mockFind.mockRejectedValue(new Error("db down"));
+        service.addReloadOutcomeListener(
+          () => new Promise<void>(() => undefined),
+        );
+
+        const outcome = await Promise.race([
+          service.triggerReload().then(
+            () => "resolved",
+            (error: Error) => error.message,
+          ),
+          new Promise<string>((resolve) =>
+            setTimeout(() => resolve("held up by the listener"), 300),
+          ),
+        ]);
+
+        expect(outcome).toBe("db down");
+      });
+
+      it("keeps the last known settings when the re-read fails, so the failure post can still find its channel", async () => {
+        mockFind.mockResolvedValue([
+          { key: "core.config.enabled", value: true, category: "core" },
+        ]);
+        await service.initialize();
+        expect(await service.getBoolean("core.config.enabled", false)).toBe(
+          true,
+        );
+
+        mockFind.mockRejectedValue(new Error("db down"));
+        mockFindOne.mockRejectedValue(new Error("db down"));
+        let seenInListener: boolean | undefined;
+        service.addReloadOutcomeListener(async () => {
+          seenInListener = await service.getBoolean(
+            "core.config.enabled",
+            false,
+          );
+        });
+
+        await expect(service.triggerReload()).rejects.toThrow("db down");
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(seenInListener).toBe(true);
+      });
+
       it("is not stopped by a throwing listener", async () => {
         mockFind.mockResolvedValue([]);
         service.addReloadOutcomeListener(

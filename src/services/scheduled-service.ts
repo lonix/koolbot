@@ -84,6 +84,8 @@ export abstract class ScheduledService<TSummary = void> {
   private job: CronJob | null = null;
   private initialized = false;
   private inFlight: Promise<TSummary | null> | null = null;
+  /** Runs whose failure already went to the cron log (one post per run). */
+  private reportedRuns = new WeakSet<Promise<TSummary | null>>();
   /**
    * Tail of the reload queue. `reload()` stops the job and then awaits
    * `start()`, which awaits config reads before arming, so two overlapping
@@ -264,10 +266,17 @@ export abstract class ScheduledService<TSummary = void> {
    * rejection and take the process down.
    */
   private async tick(): Promise<void> {
+    // `runNow()` sets `inFlight` before it first yields, so right after the
+    // call it is the run this tick started or joined.
+    const pending = this.runNow();
+    const run = this.inFlight;
     try {
-      await this.runNow();
+      await pending;
     } catch (error) {
       logger.error(`${this.options.label}: scheduled run failed:`, error);
+      // Ticks that joined one run all see its rejection; post it once.
+      if (run && this.reportedRuns.has(run)) return;
+      if (run) this.reportedRuns.add(run);
       await this.postFailureLog(error);
     }
   }

@@ -87,8 +87,9 @@ export class ConfigService {
 
   /**
    * Be told how each `triggerReload()` went, after every reload callback has
-   * run (the Discord config log, #1556). A throwing listener is logged and
-   * ignored, so reporting can never break a reload.
+   * run (the Discord config log, #1556). Listeners are not awaited, and a
+   * throwing one is logged and ignored, so reporting can never delay or break
+   * a reload.
    */
   public addReloadOutcomeListener(
     listener: (outcome: ReloadOutcome) => Promise<void>,
@@ -96,10 +97,17 @@ export class ConfigService {
     this.reloadOutcomeListeners.add(listener);
   }
 
-  private async notifyReloadOutcome(outcome: ReloadOutcome): Promise<void> {
+  /**
+   * Hand the outcome to every listener without waiting for them: a reload
+   * (and the rethrow of a failed one) must not wait on an optional Discord
+   * post. A listener that throws or rejects is logged and ignored.
+   */
+  private notifyReloadOutcome(outcome: ReloadOutcome): void {
     for (const listener of this.reloadOutcomeListeners) {
       try {
-        await listener(outcome);
+        listener(outcome).catch((error: unknown) => {
+          logger.error("Reload outcome listener failed:", error);
+        });
       } catch (error) {
         logger.error("Reload outcome listener failed:", error);
       }
@@ -137,15 +145,19 @@ export class ConfigService {
   public async triggerReload(): Promise<void> {
     logger.info("Triggering configuration reload...");
 
-    // Clear the cache
-    this.cache.clear();
+    // Clear the cache, keeping the old one until the re-read has worked: a
+    // failed read must not leave the bot with no settings at all (and the
+    // failure post would then not find its own channel setting).
+    const previousCache = this.cache;
+    this.cache = new Map();
     this.initialized = false;
 
     // Reinitialize the service
     try {
       await this.initialize();
     } catch (error) {
-      await this.notifyReloadOutcome({
+      this.cache = previousCache;
+      this.notifyReloadOutcome({
         success: false,
         message: "The settings could not be read from the database.",
       });
@@ -165,15 +177,18 @@ export class ConfigService {
 
     logger.info("Configuration reload completed");
 
-    await this.notifyReloadOutcome(
+    // A callback that catches its own failure and resolves (most services do)
+    // is not seen here, so the wording claims no more than "handed on".
+    this.notifyReloadOutcome(
       failed === 0
         ? {
             success: true,
-            message: "The settings were read again and applied.",
+            message:
+              "The settings were read again and passed on to the bot's features. A feature that can't use them says so in the bot's log.",
           }
         : {
             success: false,
-            message: `The settings were read again, but ${failed} ${failed === 1 ? "part" : "parts"} of the bot could not apply them.`,
+            message: `The settings were read again, but ${failed} ${failed === 1 ? "part" : "parts"} of the bot reported an error while taking them in.`,
           },
     );
   }

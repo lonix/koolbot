@@ -411,7 +411,9 @@ export class CommandManager {
       }
     } catch (error) {
       logger.error("Error in registerCommands:", error);
-      await this.postRegistrationFailureLog(error);
+      // Not awaited: the caller (startup fallback, Web UI) and the serialized
+      // registration queue must not wait on a Discord send.
+      void this.postRegistrationFailureLog(error);
       throw error;
     }
   }

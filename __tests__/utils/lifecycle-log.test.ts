@@ -21,13 +21,30 @@ describe("lifecycle log posts (#1556)", () => {
     it("posts once", async () => {
       const logBotStartup = jest.fn(async () => undefined);
 
-      await postStartupLog({ logBotStartup });
+      postStartupLog({ logBotStartup });
 
       expect(logBotStartup).toHaveBeenCalledTimes(1);
     });
 
-    it("does nothing before the logger exists", async () => {
-      await expect(postStartupLog(undefined)).resolves.toBeUndefined();
+    it("does nothing before the logger exists", () => {
+      expect(postStartupLog(undefined)).toBeUndefined();
+    });
+
+    it("hands back at once without waiting for Discord, so readiness never waits on a log post", () => {
+      const logBotStartup = jest.fn(() => new Promise<void>(() => undefined));
+
+      const result = postStartupLog({ logBotStartup });
+
+      expect(result).toBeUndefined();
+      expect(logBotStartup).toHaveBeenCalledTimes(1);
+    });
+
+    it("survives a post that throws synchronously", () => {
+      const logBotStartup = jest.fn(() => {
+        throw new Error("boom");
+      });
+
+      expect(() => postStartupLog({ logBotStartup })).not.toThrow();
     });
 
     it("never throws, so a failed post cannot break startup", async () => {
@@ -35,7 +52,8 @@ describe("lifecycle log posts (#1556)", () => {
         throw new Error("discord down");
       });
 
-      await expect(postStartupLog({ logBotStartup })).resolves.toBeUndefined();
+      expect(() => postStartupLog({ logBotStartup })).not.toThrow();
+      await Promise.resolve();
     });
   });
 

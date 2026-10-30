@@ -110,6 +110,31 @@ describe("CommandManager.registerCommands (#1293)", () => {
       expect(logRegistrationFailure).toHaveBeenCalledWith("Discord said no");
     });
 
+    it("rejects with the original error at once even when the post never finishes", async () => {
+      logRegistrationFailure.mockImplementation(
+        () => new Promise<void>(() => undefined),
+      );
+      jest
+        .spyOn(
+          manager as unknown as { makeDiscordApiCall: () => Promise<unknown> },
+          "makeDiscordApiCall",
+        )
+        .mockRejectedValue(new Error("Discord said no"));
+
+      const outcome = await Promise.race([
+        manager.registerCommands().then(
+          () => "resolved",
+          (error: Error) => error.message,
+        ),
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve("held up by the post"), 300),
+        ),
+      ]);
+
+      expect(outcome).toBe("Discord said no");
+      expect(logRegistrationFailure).toHaveBeenCalledTimes(1);
+    });
+
     it("posts nothing when registration succeeds", async () => {
       await manager.registerCommands();
 

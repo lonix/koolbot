@@ -375,6 +375,51 @@ describe("ScheduledService", () => {
       );
     });
 
+    // One failed execution is one post, however many ticks joined it.
+    it.each([
+      { label: "one tick", ticks: 1, manual: false, posts: 1 },
+      {
+        label: "three ticks sharing one run",
+        ticks: 3,
+        manual: false,
+        posts: 1,
+      },
+      { label: "a manual run-now only", ticks: 0, manual: true, posts: 0 },
+      {
+        label: "a tick joining a manual run",
+        ticks: 2,
+        manual: true,
+        posts: 1,
+      },
+    ])("$label -> $posts post(s)", async ({ ticks, manual, posts }) => {
+      const service = new TestService();
+      service.runResult = new Error("run blew up");
+      service.release = () => undefined;
+      await service.start();
+
+      const manualRun = manual ? service.runNow().catch(() => undefined) : null;
+      for (let i = 0; i < ticks; i++) lastTick?.();
+      await flush();
+      service.release?.();
+      await flush();
+      await manualRun;
+
+      expect(mockLogCronFailure).toHaveBeenCalledTimes(posts);
+    });
+
+    it("posts once per failed run when two separate runs fail", async () => {
+      const service = new TestService();
+      service.runResult = new Error("run blew up");
+      await service.start();
+
+      lastTick?.();
+      await flush();
+      lastTick?.();
+      await flush();
+
+      expect(mockLogCronFailure).toHaveBeenCalledTimes(2);
+    });
+
     it("posts nothing when the tick succeeds", async () => {
       const service = new TestService();
       await service.start();
