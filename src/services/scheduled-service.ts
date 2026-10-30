@@ -2,6 +2,8 @@ import { CronJob } from "cron";
 import type { Client } from "discord.js";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
+import { getErrorMessage } from "../utils/error-guards.js";
+import { DiscordLogger } from "./discord-logger.js";
 import {
   sanitizeCronExpression,
   validateCronExpression,
@@ -82,6 +84,8 @@ export abstract class ScheduledService<TSummary = void> {
   private job: CronJob | null = null;
   private initialized = false;
   private inFlight: Promise<TSummary | null> | null = null;
+  /** Runs whose failure already went to the cron log (one post per run). */
+  private reportedRuns = new WeakSet<Promise<TSummary | null>>();
   /**
    * Tail of the reload queue. `reload()` stops the job and then awaits
    * `start()`, which awaits config reads before arming, so two overlapping
@@ -262,10 +266,37 @@ export abstract class ScheduledService<TSummary = void> {
    * rejection and take the process down.
    */
   private async tick(): Promise<void> {
+    // `runNow()` sets `inFlight` before it first yields, so right after the
+    // call it is the run this tick started or joined.
+    const pending = this.runNow();
+    const run = this.inFlight;
     try {
-      await this.runNow();
+      await pending;
     } catch (error) {
       logger.error(`${this.options.label}: scheduled run failed:`, error);
+      // Ticks that joined one run all see its rejection; post it once.
+      if (run && this.reportedRuns.has(run)) return;
+      if (run) this.reportedRuns.add(run);
+      await this.postFailureLog(error);
+    }
+  }
+
+  /**
+   * Tell the cron log channel (`core.cron.*`) that a scheduled run failed
+   * (#1556). Lives here, once, so every cron-driven service is covered. Never
+   * throws: a failed post must not turn a handled failure into a crash.
+   */
+  private async postFailureLog(error: unknown): Promise<void> {
+    try {
+      await DiscordLogger.getInstance(this.client).logCronFailure(
+        this.options.label,
+        getErrorMessage(error),
+      );
+    } catch (logError) {
+      logger.error(
+        `${this.options.label}: failed to post the failure to the cron log:`,
+        logError,
+      );
     }
   }
 

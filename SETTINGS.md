@@ -2161,15 +2161,27 @@ apply to the next log message — no restart is needed.
 
 | Key                                                                    | Type           | Default        | Events                                                                                                    |
 | ---------------------------------------------------------------------- | -------------- | -------------- | --------------------------------------------------------------------------------------------------------- |
-| `core.startup.enabled` / `core.startup.channel_id`                     | bool / channel | `false` / `""` | Startup, shutdown, DB connection, Discord registration, service init                                      |
-| `core.errors.enabled` / `core.errors.channel_id`                       | bool / channel | `false` / `""` | Unhandled command failures, service crashes                                                               |
+| `core.startup.enabled` / `core.startup.channel_id`                     | bool / channel | `false` / `""` | Startup, shutdown, DB connection, Discord command registration (success or failure)                       |
+| `core.errors.enabled` / `core.errors.channel_id`                       | bool / channel | `false` / `""` | Startup failures once the log is ready; an unexpected clean-up run failure (see below)                    |
 | `core.cleanup.enabled` / `core.cleanup.channel_id`                     | bool / channel | `false` / `""` | Voice-session cleanup results (rows removed / aggregated)                                                 |
-| `core.config.enabled` / `core.config.channel_id`                       | bool / channel | `false` / `""` | Configuration reloads and their outcome                                                                   |
-| `core.cron.enabled` / `core.cron.channel_id`                           | bool / channel | `false` / `""` | Scheduled-job outcomes (announcements, digests, other cron tasks)                                         |
+| `core.config.enabled` / `core.config.channel_id`                       | bool / channel | `false` / `""` | Nothing at present (a settings reload is not reported)                                                    |
+| `core.cron.enabled` / `core.cron.channel_id`                           | bool / channel | `false` / `""` | Digest and Rewind nudge summaries, birthday and event changes, crashed scheduled runs (see below)         |
 | `core.moderation.enabled` / `core.moderation.channel_id`               | bool / channel | `false` / `""` | Recorded moderation actions plus the member's earlier actions (needs `moderation.enabled`)                |
 | `core.moderation_review.enabled` / `core.moderation_review.channel_id` | bool / channel | `false` / `""` | Daily summary of moderation cases that need a decision (needs `moderation.cases.enabled`)                 |
 | `core.updates.enabled` / `core.updates.channel_id`                     | bool / channel | `false` / `""` | One-time note when the update check first sees a newer KoolBot release (needs `core.updatecheck.enabled`) |
 | `core.role_groups.enabled` / `core.role_groups.channel_id`             | bool / channel | `false` / `""` | Role group drift (a role edited or deleted in Discord) and what the sync did about it                     |
+
+The error category posts a startup failure that happens after the Discord log is ready, and a message
+activity or voice channel clean-up run that fails unexpectedly. It does not post a startup failure before
+the logger exists, database errors inside a clean-up run (they are in the bot's log), or a database
+that is not connected (that is a failed scheduled run, in the cron category).
+
+The cron category posts a summary of each weekly digest and Rewind nudge run, a birthday run that
+announced someone or removed a role (quiet runs are not posted), an event that changed (for example
+its state or channel) or was ended by hand (not every scan), and a run that crashed in a job on the shared
+scheduler (digest, birthdays, Rewind nudge, events, reminders, LFG, leaderboard roles, case review, role
+groups and the clean-up jobs). Polls, scheduled announcements and errors a job handles itself are not
+posted. A quiet channel does not mean a job did not run.
 
 Point every category at one channel for a single consolidated log, or split
 them (e.g. `#bot-status` for startup, `#admin-alerts` for errors).

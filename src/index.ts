@@ -22,6 +22,7 @@ import {
   replyWithUnexpectedError,
 } from "./utils/error-reply.js";
 import { runWithTimeout } from "./utils/run-with-timeout.js";
+import { postShutdownLog, postStartupLog } from "./utils/lifecycle-log.js";
 import { ConfigService } from "./services/config-service.js";
 import { startComponentAudit } from "./utils/component-audit.js";
 import { runNameToIdMigrations } from "./services/name-id-migrator.js";
@@ -312,6 +313,11 @@ client.once(Events.ClientReady, async (readyClient) => {
 
   await initializeServices();
 
+  // "KoolBot started" for the startup log channel. After the services are up,
+  // so a failed start never claims it started. Not awaited: readiness must
+  // never wait on a Discord send; it never throws.
+  postStartupLog(discordLogger, () => isShuttingDown);
+
   // Guild scoping (#1144): warn about, and optionally leave, guilds other than
   // GUILD_ID. Needs ConfigService, so it runs once services are wired up.
   await enforceGuildScope();
@@ -471,6 +477,11 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
   try {
     logger.info(`🔄 Received ${signal}, starting graceful shutdown...`);
+
+    // 0. Tell the startup log channel we are going (#1556). Best effort and
+    // bounded; it runs first because the post needs the database (settings)
+    // and the Discord client, both closed further down.
+    await postShutdownLog(discordLogger);
 
     // 1. Switch lobby to offline mode (priority 1) - 5 second timeout
     await runWithTimeout(

@@ -39,6 +39,12 @@ export interface ILogMessage {
   }>;
   timestamp?: Date;
   footer?: string;
+  /**
+   * Looked at once more right before the send, after every settings read, so
+   * a post that became stale while it waited (a "started" note when a shutdown
+   * has begun since) is dropped instead of sent.
+   */
+  skipIf?: () => boolean;
 }
 
 export class DiscordLogger {
@@ -232,6 +238,11 @@ export class DiscordLogger {
         embed.setFooter({ text: message.footer });
       }
 
+      if (message.skipIf?.()) {
+        logger.debug(`Discord logger: skipping stale message to ${logType}`);
+        return false;
+      }
+
       // Suppress every mention this message could resolve. Log embeds carry
       // untrusted text — a moderation reason, an error message — and a log
       // channel must never be a way to ping @everyone. Mentions still render
@@ -257,8 +268,9 @@ export class DiscordLogger {
   /**
    * Log bot startup
    */
-  public async logBotStartup(): Promise<void> {
+  public async logBotStartup(skipIf?: () => boolean): Promise<void> {
     await this.logToChannel("startup", {
+      skipIf,
       title: "KoolBot started",
       color: embedColor("ok"),
       fields: [{ name: "Environment", value: env.nodeEnv, inline: true }],
@@ -312,52 +324,6 @@ export class DiscordLogger {
         { name: "Error", value: error.substring(0, 1000), inline: false },
       ],
       footer: "KoolBot · Logs · Discord",
-    });
-  }
-
-  /**
-   * Log configuration reload
-   */
-  public async logConfigReload(result: {
-    success: boolean;
-    message: string;
-    commandsUpdated?: number;
-  }): Promise<void> {
-    await this.logToChannel("config", {
-      title: result.success ? "Settings reloaded" : "Couldn't reload settings",
-      description: result.success
-        ? result.message
-        : `${result.message} ${CHECK_LOG_HINT}`,
-      color: result.success ? embedColor("ok") : embedColor("danger"),
-      fields:
-        result.commandsUpdated !== undefined
-          ? [
-              {
-                name: "Commands updated",
-                value: result.commandsUpdated.toString(),
-                inline: true,
-              },
-            ]
-          : [],
-      footer: "KoolBot · Logs · Configuration",
-    });
-  }
-
-  /**
-   * Log service initialisation
-   */
-  public async logServiceInit(
-    serviceName: string,
-    success: boolean,
-    details?: string,
-  ): Promise<void> {
-    await this.logToChannel("startup", {
-      title: success
-        ? `${serviceName} started`
-        : `${serviceName} failed to start`,
-      description: details || (success ? undefined : CHECK_LOG_HINT),
-      color: success ? embedColor("ok") : embedColor("danger"),
-      footer: "KoolBot · Logs · Services",
     });
   }
 

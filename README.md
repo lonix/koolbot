@@ -421,11 +421,11 @@ both are set. Available log categories:
 
 | Log Type | Description | Example Events |
 | --- | --- | --- |
-| `core.startup.*` | Bot lifecycle | Startup, shutdown, service initialization |
-| `core.errors.*` | Critical errors | Command failures, service crashes |
+| `core.startup.*` | Bot lifecycle | Startup, shutdown, database connection, command registration |
+| `core.errors.*` | Errors | Startup failures once the log is ready, unexpected clean-up run failures |
 | `core.cleanup.*` | Data maintenance | Cleanup results, sessions removed |
-| `core.config.*` | Settings changes | Configuration reloads, value updates |
-| `core.cron.*` | Scheduled tasks | Announcement triggers, cleanup runs |
+| `core.config.*` | Settings changes | Nothing at present |
+| `core.cron.*` | Scheduled tasks | Digest and Rewind nudge summaries, birthday and event changes, crashed scheduled-job runs |
 | `core.moderation.*` | Moderation actions | A recorded warn/kick/ban/timeout plus the member's earlier actions |
 
 You can point each category at the same channel for one consolidated log,

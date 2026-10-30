@@ -138,6 +138,76 @@ describe("DiscordLogger (#844)", () => {
     });
   });
 
+  describe("settings reloads", () => {
+    it("post nothing, even with the config category on and the reload callback fired", async () => {
+      const send = jest.fn(async () => undefined);
+      stubConfig({
+        "core.config.enabled": true,
+        "core.config.channel_id": "444",
+      });
+      const logger = DiscordLogger.getInstance(makeClient({ "444": { send } }));
+      await logger.initialize();
+
+      const reload = mockRegisterReloadCallback.mock
+        .calls[0][0] as () => Promise<void>;
+      await reload();
+
+      expect(send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("the startup post and a shutdown that begins while it waits", () => {
+    function deferredBoolean(): {
+      release: () => void;
+    } {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      mockGetBoolean.mockImplementation(
+        async (_key: unknown, fallback: unknown) => {
+          await gate;
+          return fallback === false ? true : fallback;
+        },
+      );
+      mockGetString.mockImplementation(async () => "111");
+      return { release };
+    }
+
+    it("does not send when the skip check turns true while the settings are being read", async () => {
+      const send = jest.fn(async () => undefined);
+      stubConfig({
+        "core.startup.enabled": true,
+        "core.startup.channel_id": "111",
+      });
+      const logger = DiscordLogger.getInstance(makeClient({ "111": { send } }));
+      await logger.initialize();
+
+      let shuttingDown = false;
+      const { release } = deferredBoolean();
+      const pending = logger.logBotStartup(() => shuttingDown);
+      shuttingDown = true;
+      release();
+      await pending;
+
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it("still sends once on the normal path", async () => {
+      const send = jest.fn(async () => undefined);
+      stubConfig({
+        "core.startup.enabled": true,
+        "core.startup.channel_id": "111",
+      });
+      const logger = DiscordLogger.getInstance(makeClient({ "111": { send } }));
+      await logger.initialize();
+
+      await logger.logBotStartup(() => false);
+
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("isCategoryEnabled()", () => {
     it("is true only when the category is on and has a channel id", async () => {
       stubConfig({
@@ -251,17 +321,17 @@ describe("DiscordLogger (#844)", () => {
       const logger = DiscordLogger.getInstance(makeClient({ "444": { send } }));
       await logger.initialize();
 
-      await logger.logConfigReload({ success: true, message: "ok" });
+      await logger.logCronSuccess("job");
       expect(send).not.toHaveBeenCalled();
 
       // Operator enables the category on the Settings page; the write goes
       // straight through ConfigService's cache.
       stubConfig({
-        "core.config.enabled": true,
-        "core.config.channel_id": "444",
+        "core.cron.enabled": true,
+        "core.cron.channel_id": "444",
       });
 
-      await logger.logConfigReload({ success: true, message: "ok" });
+      await logger.logCronSuccess("job");
       expect(send).toHaveBeenCalledTimes(1);
     });
 
@@ -362,35 +432,6 @@ describe("DiscordLogger (#844)", () => {
         title: "Couldn't register commands with Discord",
       },
       {
-        label: "reload ok",
-        category: "config",
-        call: (l) =>
-          l.logConfigReload({
-            success: true,
-            message: "m",
-            commandsUpdated: 3,
-          }),
-        title: "Settings reloaded",
-      },
-      {
-        label: "reload failed",
-        category: "config",
-        call: (l) => l.logConfigReload({ success: false, message: "m" }),
-        title: "Couldn't reload settings",
-      },
-      {
-        label: "service ok",
-        category: "startup",
-        call: (l) => l.logServiceInit("Quotes", true),
-        title: "Quotes started",
-      },
-      {
-        label: "service failed",
-        category: "startup",
-        call: (l) => l.logServiceInit("Quotes", false),
-        title: "Quotes failed to start",
-      },
-      {
         label: "cleanup ok",
         category: "cleanup",
         call: (l) =>
@@ -483,12 +524,6 @@ describe("DiscordLogger (#844)", () => {
       expect(cleanup.fields?.find((f) => f.name === "Run time")?.value).toBe(
         "120 ms",
       );
-
-      (DiscordLogger as unknown as { instance?: unknown }).instance = undefined;
-      const reload = await post("config", (l) =>
-        l.logConfigReload({ success: true, message: "m", commandsUpdated: 3 }),
-      );
-      expect(reload.fields?.map((f) => f.name)).toEqual(["Commands updated"]);
 
       (DiscordLogger as unknown as { instance?: unknown }).instance = undefined;
       const err = await post("errors", (l) =>

@@ -17,6 +17,14 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   },
 }));
 
+const mockLogCronFailure =
+  jest.fn<(job: string, error: string) => Promise<void>>();
+jest.unstable_mockModule("../../src/services/discord-logger.js", () => ({
+  DiscordLogger: {
+    getInstance: jest.fn(() => ({ logCronFailure: mockLogCronFailure })),
+  },
+}));
+
 const mockLogger = {
   info: jest.fn(),
   warn: jest.fn(),
@@ -106,6 +114,8 @@ describe("ScheduledService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     lastTick = undefined;
+    mockLogCronFailure.mockReset();
+    mockLogCronFailure.mockResolvedValue(undefined);
   });
 
   describe("start", () => {
@@ -344,6 +354,103 @@ describe("ScheduledService", () => {
 
       expect(mockLogger.error).toHaveBeenCalledWith(
         "Test service: scheduled run failed:",
+        expect.any(Error),
+      );
+    });
+  });
+
+  describe("the cron log (#1556)", () => {
+    it("posts a failed tick to the cron log exactly once, named by the service label", async () => {
+      const service = new TestService();
+      service.runResult = new Error("run blew up");
+      await service.start();
+
+      lastTick?.();
+      await flush();
+
+      expect(mockLogCronFailure).toHaveBeenCalledTimes(1);
+      expect(mockLogCronFailure).toHaveBeenCalledWith(
+        "Test service",
+        "run blew up",
+      );
+    });
+
+    // One failed execution is one post, however many ticks joined it.
+    it.each([
+      { label: "one tick", ticks: 1, manual: false, posts: 1 },
+      {
+        label: "three ticks sharing one run",
+        ticks: 3,
+        manual: false,
+        posts: 1,
+      },
+      { label: "a manual run-now only", ticks: 0, manual: true, posts: 0 },
+      {
+        label: "a tick joining a manual run",
+        ticks: 2,
+        manual: true,
+        posts: 1,
+      },
+    ])("$label -> $posts post(s)", async ({ ticks, manual, posts }) => {
+      const service = new TestService();
+      service.runResult = new Error("run blew up");
+      service.release = () => undefined;
+      await service.start();
+
+      const manualRun = manual ? service.runNow().catch(() => undefined) : null;
+      for (let i = 0; i < ticks; i++) lastTick?.();
+      await flush();
+      service.release?.();
+      await flush();
+      await manualRun;
+
+      expect(mockLogCronFailure).toHaveBeenCalledTimes(posts);
+    });
+
+    it("posts once per failed run when two separate runs fail", async () => {
+      const service = new TestService();
+      service.runResult = new Error("run blew up");
+      await service.start();
+
+      lastTick?.();
+      await flush();
+      lastTick?.();
+      await flush();
+
+      expect(mockLogCronFailure).toHaveBeenCalledTimes(2);
+    });
+
+    it("posts nothing when the tick succeeds", async () => {
+      const service = new TestService();
+      await service.start();
+
+      lastTick?.();
+      await flush();
+
+      expect(mockLogCronFailure).not.toHaveBeenCalled();
+    });
+
+    it("posts nothing for a failing run-now, which has a caller to tell", async () => {
+      const service = new TestService();
+      service.runResult = new Error("run blew up");
+
+      await expect(service.runNow()).rejects.toThrow("run blew up");
+
+      expect(mockLogCronFailure).not.toHaveBeenCalled();
+    });
+
+    it("survives a failing post: the tick still resolves and the failure is logged", async () => {
+      const service = new TestService();
+      service.runResult = new Error("run blew up");
+      mockLogCronFailure.mockRejectedValue(new Error("discord down"));
+      await service.start();
+
+      expect(() => lastTick?.()).not.toThrow();
+      await flush();
+
+      expect(mockLogCronFailure).toHaveBeenCalledTimes(1);
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        "Test service: failed to post the failure to the cron log:",
         expect.any(Error),
       );
     });

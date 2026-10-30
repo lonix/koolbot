@@ -2488,7 +2488,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "core.startup.enabled": {
     label: "Startup log to Discord",
     description:
-      "Post bot lifecycle events (startup, shutdown, database connection, Discord registration, service initialization) as embeds to the startup log channel.",
+      "Post bot lifecycle events (startup, shutdown, database connection, and whether the slash commands registered with Discord) as embeds to the startup log channel.",
     category: "core",
     type: "boolean",
   },
@@ -2502,7 +2502,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "core.errors.enabled": {
     label: "Error log to Discord",
     description:
-      "Post critical errors (unhandled command failures, service crashes) as embeds to the error log channel.",
+      "Post an error as an embed to the error log channel when startup fails after the Discord log is ready, or when a message activity or voice channel clean-up run fails unexpectedly. Not posted: a startup failure before the logger exists, database errors inside a clean-up run (they are in the bot's log), and a database that is not connected (that counts as a failed scheduled run in the cron log).",
     category: "core",
     type: "boolean",
   },
@@ -2530,21 +2530,21 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "core.config.enabled": {
     label: "Config log to Discord",
     description:
-      "Post configuration reloads and their outcome (success/failure, commands updated) as embeds to the config log channel.",
+      "Nothing is posted to the config log at present: a settings reload is not reported. The category is kept so settings you already saved stay valid.",
     category: "core",
     type: "boolean",
   },
   "core.config.channel_id": {
     label: "Config log channel",
     description:
-      "Text channel that receives config log embeds. Nothing is posted while this is empty.",
+      "Text channel for config log embeds. Nothing is posted to it at present.",
     category: "core",
     type: "channel",
   },
   "core.cron.enabled": {
     label: "Cron log to Discord",
     description:
-      "Post scheduled-job outcomes (announcement triggers, digest runs, other cron tasks) as embeds to the cron log channel.",
+      "Post scheduled-job outcomes as embeds to the cron log channel: a summary of each weekly digest and Rewind nudge run, a birthday run that announced someone or removed a role (quiet runs are not posted), an event that changed (for example its state or channel) or was ended by hand (not every scan), and a run that crashed in a job on the shared scheduler (digest, birthdays, Rewind nudge, events, reminders, LFG, leaderboard roles, case review, role groups and the clean-up jobs). Polls, scheduled announcements and errors a job handles itself are not posted.",
     category: "core",
     type: "boolean",
   },
