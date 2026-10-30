@@ -1075,9 +1075,14 @@ reaction role_ mints a brand-new Discord role and posts a picker message; the
 _Create a private category + channel_ checkbox is on by default (preserving the
 original behaviour) — untick it to opt out and get a plain self-assign role with
 no attached channel. _Bind an existing role_ maps an
-emoji to a role you already manage (no role/category/channel is created) and,
-when given an existing message ID, adds the mapping to that message — so one
-picker message can carry many emoji→role mappings. Both paths validate the role
+emoji to a role you already manage (no role/category/channel is created): you
+choose the role in a searchable picker and, to add the mapping to a picker message
+the bot already posted, choose that message in the list (_Post a new message_ is the
+empty choice) — so one picker message can carry many emoji→role mappings. Every
+emoji box on the page, and the pairing emoji on Channel claims, is a text box with an
+emoji grid beside it (#1530): the grid offers Unicode emoji, and a server's custom emoji
+(`<:name:id>`) are still typed. Without JavaScript the lists are plain selects and the
+boxes are plain text. Both paths validate the role
 hierarchy up front (the bot needs **Manage Roles** and a role ranked above the
 target) and surface an actionable error instead of silently failing at reaction
 time. Rows are tagged **managed** (bot-created; delete tears down the role +

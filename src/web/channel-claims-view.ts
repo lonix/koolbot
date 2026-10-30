@@ -12,6 +12,7 @@ import {
 } from "./discord-labels.js";
 import { ChannelType } from "discord.js";
 import { renderFlash, type FlashMessage } from "./admin-views.js";
+import { renderEmojiField } from "./setting-pickers.js";
 import {
   renderAdoptionDiff,
   renderDestructiveConfirm,
@@ -216,7 +217,7 @@ function renderSuggestions(
       const claim = claimOf.get(p.categoryId);
       const action =
         p.state === "proposed"
-          ? `<label class="check"><input type="checkbox" name="pair_${cid}" value="1"${checked(claim?.registerPairing)}> Register <span class="visually-hidden">${escapeHtml(p.roleName)} for ${escapeHtml(p.categoryName)}</span></label> <label>Emoji <input type="text" name="pairemoji_${cid}" value="${escapeHtml(claim?.pairEmoji ?? DEFAULT_PAIR_EMOJI)}" size="6" maxlength="64"><span class="visually-hidden"> for ${escapeHtml(p.categoryName)}</span></label>`
+          ? `<label class="check"><input type="checkbox" name="pair_${cid}" value="1"${checked(claim?.registerPairing)}> Register <span class="visually-hidden">${escapeHtml(p.roleName)} for ${escapeHtml(p.categoryName)}</span></label> <span class="muted">Emoji <span class="visually-hidden">for ${escapeHtml(p.categoryName)}</span></span> ${renderEmojiField(`pairemoji_${p.categoryId}`, claim?.pairEmoji ?? DEFAULT_PAIR_EMOJI, { label: p.categoryName, inputLabel: `Emoji for ${p.categoryName}`, maxLength: 64 })}`
           : `<span class="tag ${p.state === "refused" ? "tag-off" : "tag-on"}">${p.state === "refused" ? "refused" : "already a reaction role"}</span> ${escapeHtml(p.reason ?? "")}`;
       return `<tr><th scope="row">${channelMention({ name: p.categoryName, type: ChannelType.GuildCategory })}</th><td>${roleMention(p.roleName)}</td><td>${action}</td></tr>`;
     })

@@ -275,12 +275,67 @@ describe("POST /reaction-roles/bind and /remove-mapping", () => {
     const r = await refusal(res);
     expect(r.invalidIds).toEqual(["reaction-role-bind-roleId"]);
     expect(r.errorLines["reaction-role-bind-roleId-error"]).toBe(
-      "Enter the role ID.",
+      "Choose a role.",
     );
     expect(r.html).toContain('value="🎉"');
     expect(r.html).toContain('value=" 777 "');
     expect(mockBindReactionRole).not.toHaveBeenCalled();
   });
+
+  it("binds onto the message picked from a list cut at the cap", async () => {
+    await harness.post("/reaction-roles/bind", {
+      roleId: "role-1",
+      emoji: "🎉",
+      messageIdListed: "message-8",
+    });
+    expect(mockBindReactionRole).toHaveBeenCalledWith(
+      session.guildId,
+      "role-1",
+      "🎉",
+      { messageId: "message-8" },
+    );
+  });
+
+  it("lets a typed older message id win over the picked one", async () => {
+    await harness.post("/reaction-roles/bind", {
+      roleId: "role-1",
+      emoji: "🎉",
+      messageId: "message-old",
+      messageIdListed: "message-8",
+    });
+    expect(mockBindReactionRole).toHaveBeenCalledWith(
+      session.guildId,
+      "role-1",
+      "🎉",
+      { messageId: "message-old" },
+    );
+  });
+
+  it.each([
+    ["", "", undefined],
+    ["   ", "", undefined],
+    ["", "message-8", "message-8"],
+    ["   ", "message-8", "message-8"],
+    ["message-old", "", "message-old"],
+    [" message-old ", "message-8", "message-old"],
+  ])(
+    "aims at the typed id, else the picked one: typed %j, picked %j",
+    async (typed, listed, want) => {
+      mockBindReactionRole.mockClear();
+      await harness.post("/reaction-roles/bind", {
+        roleId: "role-1",
+        emoji: "🎉",
+        messageId: typed,
+        messageIdListed: listed,
+      });
+      expect(mockBindReactionRole).toHaveBeenCalledWith(
+        session.guildId,
+        "role-1",
+        "🎉",
+        want === undefined ? {} : { messageId: want },
+      );
+    },
+  );
 
   it("marks an oversized emoji", async () => {
     const res = await harness.post("/reaction-roles/bind", {

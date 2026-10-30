@@ -1,4 +1,6 @@
+/* global Element, HTMLInputElement */
 import { describe, it, expect } from "@jest/globals";
+import { JSDOM } from "jsdom";
 import { renderChannelClaimsPage } from "../../src/web/channel-claims-view.js";
 
 const flags = {
@@ -329,6 +331,22 @@ describe("renderChannelClaimsPage (#1022)", () => {
       expect(html).not.toContain("Root <i>");
       expect(html).toContain('name="pairs_all"');
       expect(html).toContain("Register all 1 detected pair");
+    });
+
+    it("uses the emoji field for the pairing emoji, named for its category (#1530)", () => {
+      const html = renderChannelClaimsPage({ ...empty, scan: gatedScan });
+      const doc = new JSDOM(html).window.document;
+      const field = doc.querySelector("[data-emoji-field]") as Element;
+      const input = field.querySelector("input") as HTMLInputElement;
+      expect(input.name).toBe("pairemoji_10");
+      expect(input.value).toBe("🎮");
+      expect(input.maxLength).toBe(64);
+      expect(input.getAttribute("aria-label")).toBe("Emoji for Games <script>");
+      expect(
+        field.querySelector("[data-marker-btn]")?.getAttribute("aria-label"),
+      ).toBe("Choose an emoji for Games <script>");
+      expect(html).not.toContain("<script>Games");
+      expect(html).toContain("data-emoji-field");
     });
 
     it("shows the feed choice, and says webhook data is unavailable instead of guessing", () => {

@@ -40,6 +40,7 @@ import {
   renderColourInput,
   renderDurationPresets,
   renderEmojiField,
+  REACTION_ROLE_MESSAGE_NEW_LABEL,
   renderReactionRoleMessageSelect,
   renderStepper,
   renderTimezoneSelect,
@@ -588,11 +589,12 @@ function buildOptionsHtml(
   selected: Set<string>,
   includeNoneRow: boolean,
   meta?: PickerMeta[],
+  noneLabel = "(none)",
 ): string {
   const parts: string[] = [];
   if (includeNoneRow) {
     const noneSel = selected.size === 0 ? " selected" : "";
-    parts.push(`<option value=""${noneSel}>(none)</option>`);
+    parts.push(`<option value=""${noneSel}>${escapeHtml(noneLabel)}</option>`);
     meta?.push(null);
   }
   const knownIds = new Set(options.map((o) => o.id));
@@ -1032,6 +1034,44 @@ export function renderRolePicker(opts: {
   return (
     `<span class="kb-picker" data-picker data-picker-meta="${escapeHtml(JSON.stringify(meta))}">` +
     `<select class="kb-select" id="${escapeHtml(opts.id)}" name="${escapeHtml(opts.name)}" multiple size="${Math.min(8, Math.max(3, opts.options.length))}"${describedBy}>` +
+    optionsHtml +
+    `</select></span>`
+  );
+}
+
+/**
+ * One role as the single-select Picker (#1530): `span.kb-picker[data-picker]`
+ * around a native select, the same markup All settings uses for a `role` key.
+ * The empty row (`emptyLabel`) is selected until a role is chosen; a selected
+ * id that is not in `options` stays selected and is listed as unavailable, so
+ * a refused form draws again with what was posted. Without JavaScript it is the
+ * select, and it posts the role id exactly as the typed box did.
+ */
+export function renderRoleSelectPicker(opts: {
+  id?: string;
+  ariaLabel?: string;
+  name: string;
+  options: RoleOption[];
+  selected: string;
+  emptyLabel: string;
+  required?: boolean;
+  invalid?: boolean;
+  describedBy?: string;
+}): string {
+  const meta: PickerMeta[] = [];
+  const optionsHtml = buildOptionsHtml(
+    opts.options,
+    new Set(opts.selected ? [opts.selected] : []),
+    true,
+    meta,
+    opts.emptyLabel,
+  );
+  const describedBy = opts.describedBy
+    ? ` aria-describedby="${escapeHtml(opts.describedBy)}"`
+    : "";
+  return (
+    `<span class="kb-picker" data-picker data-picker-meta="${escapeHtml(JSON.stringify(meta))}">` +
+    `<select class="kb-select"${opts.id ? ` id="${escapeHtml(opts.id)}"` : ""}${opts.ariaLabel ? ` aria-label="${escapeHtml(opts.ariaLabel)}"` : ""} name="${escapeHtml(opts.name)}"${opts.required ? " required" : ""}${opts.invalid ? ' aria-invalid="true"' : ""}${describedBy}>` +
     optionsHtml +
     `</select></span>`
   );
@@ -4065,6 +4105,10 @@ export interface ReactionRolesProps extends CommonProps {
   settingsUnavailable?: boolean;
   /** Text-channel options backing the `reactionroles.message_channel_id` picker. */
   textChannels?: ChannelOption[];
+  /** The guild's roles for the *Bind an existing role* picker (#1530). */
+  roles?: RoleOption[];
+  /** The bot's reaction-role messages for the *Message* select; `null` when the list could not be read (#1530). */
+  messages?: ReactionRoleMessageOptions | null;
   /** The create, bind or group form the server just refused, to draw again with its values and messages (#1520). */
   refusedForm?: RefusedForm | null;
   flash?: FlashMessage | null;
@@ -4156,7 +4200,13 @@ function groupOptionRows(
     const emojiField = groupEmojiField(i);
     return `<div class="inline-form">
       <input type="text" name="roleName" maxlength="100" aria-label="${escapeHtml(`${formLabel}: option ${i + 1} role name`)}" placeholder="${escapeHtml(role)}"${f.valueAttr(nameField)}${f.attrs(nameField)}>
-      <input type="text" name="emoji" maxlength="100" aria-label="${escapeHtml(`${formLabel}: option ${i + 1} emoji`)}" placeholder="${escapeHtml(emoji)}"${f.valueAttr(emojiField)}${f.attrs(emojiField)}>
+      ${renderEmojiField("emoji", f.value(emojiField), {
+        ...f.control(emojiField),
+        label: `${formLabel}: option ${i + 1}`,
+        inputLabel: `${formLabel}: option ${i + 1} emoji`,
+        placeholder: emoji,
+        maxLength: 100,
+      })}
     </div>${f.error(nameField)}${f.error(emojiField)}`;
   };
   const visible = 6;
@@ -4178,10 +4228,35 @@ function groupOptionRows(
     <details${foldedUsed ? " open" : ""}><summary>More options (up to ${MAX_GROUP_ENTRIES})</summary>${rows(visible, MAX_GROUP_ENTRIES)}</details>`;
 }
 
+/**
+ * The message a refused bind form was aimed at: the typed id when it is not
+ * blank, otherwise the picked one, "" for a new message. The write route trims
+ * both fields before choosing in the same order, so a blank typed id (spaces
+ * only) counts as empty there and here. A nonblank id is kept as typed.
+ */
+export function retainedMessageDestination(
+  typed: string,
+  listed: string,
+): string {
+  if (typed.trim() !== "") return typed;
+  return listed.trim() !== "" ? listed : "";
+}
+
 export function renderReactionRolesPage(props: ReactionRolesProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const create = formView(props.refusedForm, REACTION_ROLE_CREATE_FORM);
   const bind = formView(props.refusedForm, REACTION_ROLE_BIND_FORM);
+  const bindRole = bind.control("roleId");
+  // A refused form keeps the message it was given selected, whatever the list holds.
+  const bindCut = props.messages?.truncated === true;
+  // The destination a refused form was given: the typed id, else the picked one.
+  // Whichever control is drawn now echoes it, so a list that changed state since
+  // the form was posted does not lose it.
+  const bindDest = retainedMessageDestination(
+    bind.value("messageId"),
+    bind.value("messageIdListed"),
+  );
+  const bindKeeps = bindDest !== "";
   const groupCreate = formView(
     props.refusedForm,
     REACTION_ROLE_GROUP_CREATE_FORM,
@@ -4241,9 +4316,17 @@ ${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPicker
     <label>Role name
       <input type="text" name="name" required maxlength="100" placeholder="Gamer"${create.valueAttr("name")}${create.attrs("name")}>
     </label>${create.error("name")}
-    <label>Emoji (Unicode or <code>&lt;:name:id&gt;</code>)
-      <input type="text" name="emoji" required maxlength="100" placeholder="🎮"${create.valueAttr("emoji")}${create.attrs("emoji")}>
-    </label>${create.error("emoji")}
+    <div class="kb-field">
+      <span class="kb-label">Emoji (Unicode or <code>&lt;:name:id&gt;</code>)</span>
+      ${renderEmojiField("emoji", create.value("emoji"), {
+        ...create.control("emoji"),
+        label: "the new role",
+        inputLabel: "Emoji for the new role",
+        required: true,
+        placeholder: "🎮",
+        maxLength: 100,
+      })}
+    </div>${create.error("emoji")}
     <label class="inline"><input type="checkbox" name="createChannel" value="1"${create.checked("createChannel", true) ? " checked" : ""}> Create a private category + channel for this role</label>
     <label>Assignment mode
       <select name="mode"${create.attrs("mode")}>
@@ -4257,18 +4340,63 @@ ${olderPickers > 0 ? `<div class="notice warn" role="note"><strong>${olderPicker
 </div>
 <div class="card">
   <h2>Bind an existing role</h2>
-  <p class="muted">Maps an emoji to a role you already manage — no new role, category, or channel is created. Leave <em>Message ID</em> blank to post a fresh message to the configured channel, or paste an existing reaction-role message ID to add this mapping to it (one message can carry many emoji→role mappings).</p>
+  <p class="muted">Maps an emoji to a role you already manage — no new role, category, or channel is created. Choose <em>Post a new message</em> to post a fresh message to the configured channel, or choose an existing reaction-role message to add this mapping to it (one message can carry many emoji→role mappings).</p>
   <form method="POST" action="/admin/reaction-roles/bind" class="stack">
     ${csrfInput}
-    <label>Role ID
-      <input type="text" name="roleId" required maxlength="30" placeholder="123456789012345678"${bind.valueAttr("roleId")}${bind.attrs("roleId")}>
-    </label>${bind.error("roleId")}
-    <label>Emoji (Unicode or <code>&lt;:name:id&gt;</code>)
-      <input type="text" name="emoji" required maxlength="100" placeholder="🎨"${bind.valueAttr("emoji")}${bind.attrs("emoji")}>
-    </label>${bind.error("emoji")}
-    <label>Message ID <span class="muted">(optional — add to an existing picker message)</span>
-      <input type="text" name="messageId" maxlength="30" placeholder="(new message)"${bind.valueAttr("messageId")}${bind.attrs("messageId")}>
-    </label>${bind.error("messageId")}
+    <div class="kb-field">
+      <span class="kb-label">Role</span>
+      ${renderRoleSelectPicker({
+        ...bindRole,
+        name: "roleId",
+        ariaLabel: "Role",
+        options: props.roles ?? [],
+        selected: bind.value("roleId"),
+        emptyLabel: "Choose a role",
+        required: true,
+      })}
+    </div>${bind.error("roleId")}
+    <div class="kb-field">
+      <span class="kb-label">Emoji (Unicode or <code>&lt;:name:id&gt;</code>)</span>
+      ${renderEmojiField("emoji", bind.value("emoji"), {
+        ...bind.control("emoji"),
+        label: "the bound role",
+        inputLabel: "Emoji for the bound role",
+        required: true,
+        placeholder: "🎨",
+        maxLength: 100,
+      })}
+    </div>${bind.error("emoji")}
+${
+  props.messages
+    ? `    <div class="kb-field">
+      <span class="kb-label">Message <span class="muted">(optional — add to an existing picker message)</span></span>
+      ${renderReactionRoleMessageSelect(
+        bindCut ? "messageIdListed" : "messageId",
+        bindCut ? bind.value("messageIdListed") : bindDest,
+        {
+          ...bind.control(bindCut ? "messageIdListed" : "messageId"),
+          messages: props.messages,
+          ariaLabel: "Message",
+          noneLabel: REACTION_ROLE_MESSAGE_NEW_LABEL,
+          emptyNote: bindKeeps
+            ? "There are no reaction-role messages yet. Choose Post a new message to start a new one."
+            : "There are no reaction-role messages yet, so this posts a new one.",
+        },
+      )}
+    </div>`
+    : ""
+}${
+    // Without the list, or with it cut at the cap, a typed id is the way to an older message.
+    !props.messages || bindCut
+      ? `    <div class="kb-field">
+      <label class="kb-field">
+        <span class="kb-label">Message ID (optional)</span>
+        <input type="text" class="kb-input" name="messageId" maxlength="30"${bindCut ? bind.valueAttr("messageId") : bindDest ? ` value="${escapeHtml(bindDest)}"` : ""}${bind.attrs("messageId")}>
+        <span class="kb-help">${bindCut ? "Not in the list? Enter the id of an older reaction-role message. It wins over the choice above." : "Leave empty to post a new message. The id of an existing reaction-role message adds this mapping to it."}</span>
+      </label>
+    </div>`
+      : ""
+  }${bind.error("messageId")}${bind.error("messageIdListed")}
     <button type="submit" class="btn btn-primary">Bind existing role</button>
   </form>
 </div>
