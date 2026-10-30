@@ -832,6 +832,8 @@ channel.
 | `events.native.link_room`         | `true`    | Point the native Discord event at the event's main voice room once it is created, instead of the location text                    |
 | `events.groups.default_count`     | `2`       | Empty group rows the Groups section of the event form shows up front (1 up to the maximum below)                                  |
 | `events.groups.max_count`         | `15`      | The most groups one event may have, at most 25 (a Discord category holds 50 channels)                                             |
+| `events.groups.group_label`       | `Team`    | What an event's groups are called when the host picks no word: `Team`, `Squad`, `Room` or `Party`                                 |
+| `events.groups.leader_label`      | `Leader`  | What a group leader is called when the host picks no word: `Leader` or `Captain`                                                  |
 | `events.max_active_per_host`      | `0`       | The most open events (scheduled or running) a non-admin host may have at once. `0` = no limit; administrators are never limited   |
 
 **Notes:**
@@ -867,6 +869,10 @@ channel.
   each group also gets a voice channel next to the event's channel (its size is the user limit, the host gets View,
   Connect and Move Members on every event channel), and they are removed together with the event's channel.
   `events.groups.default_count` and `events.groups.max_count` only shape the form and cap the number of groups.
+  The wording of an event's groups is a dropdown on the event form (Team, Squad, Room or Party for groups; Leader or
+  Captain for leaders) with **Custom** for any other word. The first option is the server default, set with
+  `events.groups.group_label` and `events.groups.leader_label`; choosing a group preset on the form sets the dropdown to the preset's own word (with scripts),
+  and an event already saved keeps the word it has.
 - **Discord scheduled events** (#1034, #1175): every KoolBot event is also created as a native guild scheduled event, and
   that is the only RSVP: members press **Interested** on Discord's own event card, and Discord notifies them when it
   starts. New events are announced with a plain message containing the event link (Discord renders it as an event card);
@@ -1989,6 +1995,8 @@ leave the graph in a broken state.
 - `events.native.link_room` (bool, default: true)
 - `events.groups.default_count` (number, default: 2)
 - `events.groups.max_count` (number, default: 15)
+- `events.groups.group_label` (string, default: "Team")
+- `events.groups.leader_label` (string, default: "Leader")
 - `events.max_active_per_host` (number, default: 0)
 
 #### LFG (Looking for Group)

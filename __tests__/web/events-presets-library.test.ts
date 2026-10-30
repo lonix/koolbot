@@ -203,7 +203,8 @@ describe("the event form's preset picker (#1200)", () => {
       dom.window.document.querySelector('[name="group_2_name"]'),
     ).toBeNull();
     expect(field(dom, "groups_captains_lobby").checked).toBe(true);
-    expect(field(dom, "groups_label").value).toBe("Squad");
+    // A listed word picks the dropdown option (#1471); the Custom box stays hidden.
+    expect(field(dom, "groups_label_choice").value).toBe("Squad");
     expect(field(dom, "groups_leader_label").value).toBe("Lead");
     expect(field(dom, "groups_lead_minutes").value).toBe("30");
     expect(field(dom, "groups_enabled").checked).toBe(true);
@@ -1329,7 +1330,8 @@ describe("the event form with a remembered setup (#1406)", () => {
     );
     choose(dom, LIB_ID);
     expect(field(dom, "group_0_name").value).toBe("Assault");
-    expect(field(dom, "groups_label").value).toBe("Squad");
+    // A listed word picks the dropdown option (#1471); the Custom box stays hidden.
+    expect(field(dom, "groups_label_choice").value).toBe("Squad");
   });
 });
 

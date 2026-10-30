@@ -41,6 +41,7 @@ import {
   type EventFormRefusal,
 } from "./event-field-errors.js";
 import type { EventGroupPreset } from "../content/event-group-presets.js";
+import type { WordingDefaults } from "../services/event-group-wording.js";
 import type { GroupFormPrefill } from "../services/event-last-setup-service.js";
 
 export interface NewEventViewProps {
@@ -49,7 +50,12 @@ export interface NewEventViewProps {
   timezone: string;
   /** `events.default_duration_minutes`, selected by default. */
   defaultDurationMinutes: number;
-  groupLimits: { defaultCount: number; maxCount: number };
+  groupLimits: {
+    defaultCount: number;
+    maxCount: number;
+    /** The server's default wording (#1471), for the dropdown's first option. */
+    wording?: WordingDefaults;
+  };
   groupPresets: readonly EventGroupPreset[];
   groupPresetsNotice: string | null;
   /** The host's last group setup, to prefill the form (#1406); absent = defaults. */

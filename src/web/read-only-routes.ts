@@ -43,6 +43,7 @@ import {
   PRESET_FORM_FIELDS,
 } from "../services/event-group-preset-service.js";
 import { resolveGroupCountLimits } from "../services/event-groups.js";
+import { loadWordingDefaults } from "../services/event-group-wording.js";
 import { loadGroupPrefill } from "../services/event-last-setup-service.js";
 import {
   loadRulesPage,
@@ -316,6 +317,8 @@ export const EVENTS_SETTING_KEYS = [
   "events.native.link_room",
   "events.groups.default_count",
   "events.groups.max_count",
+  "events.groups.group_label",
+  "events.groups.leader_label",
   "events.max_active_per_host",
 ] as const;
 
@@ -1725,7 +1728,11 @@ export function createReadOnlyRouter(
       config.getNumber("events.groups.max_count", 15),
     ]);
     const zone = resolveTimezone(tz);
-    const limits = resolveGroupCountLimits(defaultCount, configuredMax);
+    const wording = await loadWordingDefaults(config);
+    const limits = {
+      ...resolveGroupCountLimits(defaultCount, configuredMax),
+      wording,
+    };
     // The enabled built-ins plus the library's (#1200), and the viewing admin's
     // own personal presets (#1216). Never throws; an unreadable library says so.
     const catalog = await loadPresetCatalog(common.guildId, {
@@ -1745,6 +1752,7 @@ export function createReadOnlyRouter(
             {
               maxCount: limits.maxCount,
               presets,
+              wording,
             },
           );
     const refusedView = refusedForm
