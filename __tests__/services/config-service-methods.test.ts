@@ -710,7 +710,7 @@ describe("ConfigService - Methods", () => {
         }
 
         const tick = async (): Promise<void> => {
-          for (let i = 0; i < 5; i++) await Promise.resolve();
+          for (let i = 0; i < 50; i++) await Promise.resolve();
         };
 
         it("keeps the saved value when the re-read then fails", async () => {
@@ -762,6 +762,73 @@ describe("ConfigService - Methods", () => {
 
           mockFindOne.mockResolvedValue(null);
           expect(await service.getBoolean(KEY, false)).toBe(false);
+        });
+
+        describe("a reload callback that never finishes", () => {
+          it("does not stop a second reload from reading, publishing and running the other callbacks", async () => {
+            await startWithStored(false);
+            let hangFirstCall = true;
+            const stalled = jest.fn(async () => {
+              if (hangFirstCall) {
+                hangFirstCall = false;
+                await new Promise<void>(() => undefined);
+              }
+            });
+            const other = jest.fn(async () => undefined);
+            service.registerReloadCallback(stalled);
+            service.registerReloadCallback(other);
+
+            void service.triggerReload();
+            await tick();
+            expect(stalled).toHaveBeenCalledTimes(1);
+
+            mockFind.mockResolvedValue([
+              { key: KEY, value: true, category: "voicechannels" },
+            ]);
+            const outcome = await Promise.race([
+              service.triggerReload().then(() => "done"),
+              new Promise<string>((resolve) =>
+                setTimeout(
+                  () => resolve("held up by the stalled callback"),
+                  300,
+                ),
+              ),
+            ]);
+
+            expect(outcome).toBe("done");
+            expect(await service.getBoolean(KEY, false)).toBe(true);
+            expect(other).toHaveBeenCalledTimes(1);
+          });
+
+          it("never runs one callback twice at the same time, and runs it again after the stale run ends", async () => {
+            await startWithStored(false);
+            let running = 0;
+            let maxRunning = 0;
+            let release: (() => void) | undefined;
+            const slow = jest.fn(async () => {
+              running++;
+              maxRunning = Math.max(maxRunning, running);
+              if (!release) {
+                await new Promise<void>((resolve) => {
+                  release = resolve;
+                });
+              }
+              running--;
+            });
+            service.registerReloadCallback(slow);
+
+            const first = service.triggerReload();
+            await tick();
+            await service.triggerReload();
+            expect(slow).toHaveBeenCalledTimes(1);
+
+            release?.();
+            await first;
+            await tick();
+
+            expect(slow).toHaveBeenCalledTimes(2);
+            expect(maxRunning).toBe(1);
+          });
         });
 
         it("runs two overlapping reloads one after the other", async () => {

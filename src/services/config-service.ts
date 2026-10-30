@@ -61,9 +61,11 @@ export class ConfigService {
   private reloadCallbacks: Set<() => Promise<void>> = new Set();
   private changeListeners: Set<(key: string) => void> = new Set();
   /**
-   * Reloads run one at a time. A second `triggerReload()` while one is
-   * reading would swap the cache again under it and the two would publish
-   * over each other.
+   * The cache read and swap of a reload run one at a time: a second
+   * `triggerReload()` while one is reading would swap the cache again under
+   * it and the two would publish over each other. Only that part is queued;
+   * the reload callbacks (Discord calls, possibly slow) are not, so a stalled
+   * callback can never stop a later reload from reading and publishing.
    */
   private reloadQueue: Promise<void> = Promise.resolve();
   /**
@@ -75,6 +77,16 @@ export class ConfigService {
     string,
     { deleted: boolean; value?: unknown }
   > | null = null;
+  /**
+   * Reload callbacks with a run in flight. A callback is never run twice at
+   * the same time (several of them stop and rebuild Discord state): a later
+   * reload marks it `dirty` instead, and the run in flight goes round once
+   * more when it ends, reading the newest settings.
+   */
+  private callbacksInFlight = new Map<
+    () => Promise<void>,
+    { dirty: boolean }
+  >();
   private reloadOutcomeListeners: Set<
     (outcome: ReloadOutcome) => Promise<void>
   > = new Set();
@@ -158,9 +170,49 @@ export class ConfigService {
   }
 
   public triggerReload(): Promise<void> {
-    const run = this.reloadQueue.then(() => this.reloadNow());
-    this.reloadQueue = run.catch(() => undefined);
-    return run;
+    const published = this.reloadQueue.then(() => this.readAndPublish());
+    this.reloadQueue = published.catch(() => undefined);
+    return published.then(() => this.runReloadCallbacks());
+  }
+
+  /**
+   * Run one reload callback, or ask the run already in flight to go round
+   * again. Resolves when its own run has finished; a call that only marked
+   * the run in flight resolves at once, so a stalled callback holds up
+   * nothing but its own next run (no timeout: some callbacks legitimately
+   * work for a long time). A failure of the first run is rethrown; a failure
+   * of a re-run is logged.
+   */
+  private async runReloadCallback(
+    callback: () => Promise<void>,
+  ): Promise<void> {
+    const inFlight = this.callbacksInFlight.get(callback);
+    if (inFlight) {
+      inFlight.dirty = true;
+      return;
+    }
+    const state = { dirty: false };
+    this.callbacksInFlight.set(callback, state);
+    let failed = false;
+    let firstError: unknown;
+    try {
+      do {
+        state.dirty = false;
+        try {
+          await callback();
+        } catch (error) {
+          if (failed) {
+            logger.error("Error during configuration reload callback:", error);
+          } else {
+            failed = true;
+            firstError = error;
+          }
+        }
+      } while (state.dirty);
+    } finally {
+      this.callbacksInFlight.delete(callback);
+    }
+    if (failed) throw firstError;
   }
 
   /** Lay the writes made during a reload over the map that stays. */
@@ -171,7 +223,8 @@ export class ConfigService {
     }
   }
 
-  private async reloadNow(): Promise<void> {
+  /** Re-read the settings and publish them. The queued part of a reload. */
+  private async readAndPublish(): Promise<void> {
     logger.info("Triggering configuration reload...");
 
     // Clear the cache, keeping the old one until the re-read has worked: a
@@ -197,12 +250,14 @@ export class ConfigService {
       });
       throw error;
     }
+  }
 
-    // Execute all registered reload callbacks
+  /** Tell every feature about the new settings, then report the outcome. */
+  private async runReloadCallbacks(): Promise<void> {
     let failed = 0;
     for (const callback of this.reloadCallbacks) {
       try {
-        await callback();
+        await this.runReloadCallback(callback);
       } catch (error) {
         failed++;
         logger.error("Error during configuration reload callback:", error);
