@@ -87,7 +87,13 @@ describe("formView for the refused form", () => {
     );
   });
 
-  it("hands a control the same ids and error line as attrs does (#1530)", () => {
+  it("control carries its id on every render, refused or not (#1533)", () => {
+    const plain = formView(null, "demo-create");
+    expect(plain.control("cron")).toEqual({ id: "demo-create-cron" });
+    expect(plain.control("cron", "help-id")).toEqual({
+      id: "demo-create-cron",
+      describedBy: "help-id",
+    });
     expect(v.control("cron", "help-id")).toEqual({
       id: "demo-create-cron",
       invalid: true,
@@ -95,9 +101,21 @@ describe("formView for the refused form", () => {
       describedBy: "help-id demo-create-cron-error",
     });
     expect(v.control("channelId")).toEqual({ id: "demo-create-channelId" });
+  });
+
+  it("hands a control the same ids and error line as attrs does (#1530)", () => {
+    expect(v.refusedControl("cron", "help-id")).toEqual({
+      id: "demo-create-cron",
+      invalid: true,
+      describedByBase: "help-id",
+      describedBy: "help-id demo-create-cron-error",
+    });
+    expect(v.refusedControl("channelId")).toEqual({
+      id: "demo-create-channelId",
+    });
     const plain = formView(null, "demo-create");
-    expect(plain.control("cron")).toEqual({});
-    expect(plain.control("cron", "help-id")).toEqual({
+    expect(plain.refusedControl("cron")).toEqual({});
+    expect(plain.refusedControl("cron", "help-id")).toEqual({
       describedBy: "help-id",
     });
   });
