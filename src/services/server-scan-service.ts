@@ -1122,6 +1122,11 @@ export class ServerScanService {
           PermissionFlagsBits.ReadMessageHistory,
         ])
       ) {
+        // Same note as a failed read, so the page says the scan is partial.
+        note(
+          "message sampling (stopped at the first channel it could not read)",
+          new Error("missing View Channel or Read Message History"),
+        );
         sampling.stoppedAt = { id: ch.id, name: ch.name, reason: "no-access" };
         break;
       }

@@ -1165,6 +1165,31 @@ describe("Server scan message sampling switch (#1630)", () => {
     expect(h).toContain(`quotes</span>, ${words}</span>`);
   });
 
+  it("lists the sampling in the Not read callout next to where it stopped", () => {
+    const html = withSampling(
+      sampling({
+        channelsRead: 12,
+        stoppedAt: { id: "c1", name: "quotes", reason: "no-access" },
+      }),
+      {
+        scan: {
+          ...scan,
+          sampling: sampling({
+            channelsRead: 12,
+            stoppedAt: { id: "c1", name: "quotes", reason: "no-access" },
+          }),
+          partial: [
+            "message sampling (stopped at the first channel it could not read)",
+          ],
+        } as ServerScan,
+      },
+    );
+    expect(html).toContain(
+      "Not read: message sampling (stopped at the first channel it could not read).",
+    );
+    expect(header(html)).toContain("the bot cannot read its history");
+  });
+
   it("escapes the channel it stopped at", () => {
     const h = header(
       withSampling(

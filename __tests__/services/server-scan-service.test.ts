@@ -662,6 +662,9 @@ describe("ServerScanService message sampling report (#1630)", () => {
       expect(
         guild.channels.cache.get("t3").messages.fetch,
       ).not.toHaveBeenCalled();
+      expect(scan.partial).toEqual([
+        "message sampling (stopped at the first channel it could not read)",
+      ]);
       expect(
         scan.channels.find((c) => c.id === "ch-quotes")!.ownerHint,
       ).toMatchObject({ botId: "dyno" });
@@ -720,6 +723,10 @@ describe("ServerScanService message sampling report (#1630)", () => {
       guild.channels.cache.get("t3").messages.fetch,
     ).not.toHaveBeenCalled();
     expect(guild.__seen[0]).toBe("bot-1");
+    // The same note as a failed read, so the page's "Not read" callout shows.
+    expect(scan.partial).toEqual([
+      "message sampling (stopped at the first channel it could not read)",
+    ]);
   });
 
   it("reads on when the bot may read the history (control)", async () => {
@@ -732,6 +739,7 @@ describe("ServerScanService message sampling report (#1630)", () => {
       stoppedAt: null,
     });
     expect(guild.channels.cache.get("t3").messages.fetch).toHaveBeenCalled();
+    expect(scan.partial).toEqual([]);
   });
 
   it("does not throw or stop when the bot's own permissions cannot be resolved", async () => {
