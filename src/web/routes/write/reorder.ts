@@ -9,6 +9,7 @@
  */
 
 import type { AuthenticatedRequest } from "../../session.js";
+import { orderToken } from "../../reorder-view.js";
 import { getString, parseIntInRange } from "./helpers.js";
 
 /** The largest list a move form can describe; far above any real list. */
@@ -21,6 +22,8 @@ export interface MoveRequest {
   count: number;
   /** The category (Notices) or pool (Presence) the page showed the row in. */
   scope: string;
+  /** {@link orderToken} of the list as the page drew it; absent on a form that does not send one. */
+  order?: string;
 }
 
 /** The move form's four fields, or null when one is missing or not a whole number. */
@@ -32,7 +35,8 @@ export function parseMoveRequest(
   const count = parseIntInRange(getString(req, "count"), 1, MOVE_INDEX_MAX);
   const scope = getString(req, "scope");
   if (from === null || to === null || count === null || !scope) return null;
-  return { from, to, count, scope };
+  const order = getString(req, "order");
+  return { from, to, count, scope, ...(order ? { order } : {}) };
 }
 
 export type MovePlan =
@@ -55,6 +59,10 @@ export function planMove(
   req: MoveRequest,
 ): MovePlan {
   if (ids.length !== req.count || ids[req.from] !== id) {
+    return { kind: "stale" };
+  }
+  // A form that carries the order it was drawn in must match the live order.
+  if (req.order !== undefined && req.order !== orderToken(ids)) {
     return { kind: "stale" };
   }
   if (req.to >= ids.length) return { kind: "out-of-range" };

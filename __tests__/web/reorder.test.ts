@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect } from "@jest/globals";
+import { orderToken } from "../../src/web/reorder-view.js";
 import {
   allMatched,
   casOps,
@@ -178,5 +179,47 @@ describe("casOps and allMatched", () => {
     [null, 2, false, 0],
   ])("reads %j for 2 planned writes", (result, planned, ok, matched) => {
     expect(allMatched(result, planned)).toEqual({ ok, matched });
+  });
+});
+
+describe("planMove with an order token (#1616)", () => {
+  const req = (order: string) => ({
+    from: 0,
+    to: 1,
+    count: 3,
+    scope: "g",
+    order,
+  });
+
+  it("is stale when the live order differs although the count and place match", () => {
+    // Drawn from [a, b, c]; live is [a, c, b].
+    expect(
+      planMove(["a", "c", "b"], "a", req(orderToken(["a", "b", "c"]))),
+    ).toEqual({ kind: "stale" });
+  });
+
+  it("moves when the live order is the one drawn", () => {
+    expect(
+      planMove(["a", "b", "c"], "a", req(orderToken(["a", "b", "c"]))),
+    ).toEqual({ kind: "moved", ids: ["b", "a", "c"] });
+  });
+
+  it("still reports out of range for a matching order", () => {
+    expect(
+      planMove(["a", "b", "c"], "a", {
+        ...req(orderToken(["a", "b", "c"])),
+        to: 3,
+      }),
+    ).toEqual({ kind: "out-of-range" });
+  });
+
+  it("does not check a form that sends no token", () => {
+    expect(
+      planMove(["a", "c", "b"], "a", { from: 0, to: 1, count: 3, scope: "g" }),
+    ).toEqual({ kind: "moved", ids: ["c", "a", "b"] });
+  });
+
+  it("gives different tokens for different orders", () => {
+    expect(orderToken(["a", "b"])).not.toBe(orderToken(["b", "a"]));
   });
 });

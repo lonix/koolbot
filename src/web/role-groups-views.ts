@@ -14,6 +14,7 @@ import { icon } from "./icons.js";
 import {
   REORDER_SCRIPT,
   REORDER_STATUS_HTML,
+  orderToken,
   renderReorderCell,
   reorderListAttrs,
   reorderRowAttrs,
@@ -384,6 +385,7 @@ function renderGroups(props: RoleGroupsPageProps, csrf: string): string {
   if (props.groups.length === 0) {
     return `<div class="empty">No groups yet. Groups are optional: with none, every feature keeps its current behaviour.</div>`;
   }
+  const shownOrder = orderToken(props.groups.map((g) => g.id));
   const rows = props.groups
     .map((g, i) => {
       const caps = g.capabilities.length
@@ -395,12 +397,12 @@ function renderGroups(props: RoleGroupsPageProps, csrf: string): string {
             .join("")}</span>`
         : `<span class="muted">none (gating only)</span>`;
       return `<tr${reorderRowAttrs(`role-group-${g.id}`, g.name)}>
-<td>${renderReorderCell({ action: `/admin/role-groups/${g.id}/move`, scope: ROLE_GROUP_REORDER_SCOPE, csrfInput: csrf, index: i, count: props.groups.length, label: g.name })}</td>
+<td>${renderReorderCell({ action: `/admin/role-groups/${g.id}/move`, scope: ROLE_GROUP_REORDER_SCOPE, csrfInput: csrf, index: i, count: props.groups.length, orderToken: shownOrder, label: g.name })}</td>
 <th scope="row"><strong>${escapeHtml(g.name)}</strong></th>
 <td>${roleCell(g)}${driftCell(g)}${g.unlinked || g.roleMissing ? relinkForm(g, csrf, props.roleOptions) : ""}</td>
 <td>${g.memberCount === null ? `<span class="muted">?</span>` : g.memberCount}</td>
 <td>${caps}</td>
-<td class="kb-actions"><div class="kb-row">${editForm(g, csrf, props.globalPolicy, props.refusedForm)}${deleteForm(g, csrf)}${deleteRoleLink(g)}</div></td>
+<td class="kb-actions"><div class="kb-row kb-row--nowrap">${editForm(g, csrf, props.globalPolicy, props.refusedForm)}${deleteForm(g, csrf)}${deleteRoleLink(g)}</div></td>
 </tr>`;
     })
     .join("");

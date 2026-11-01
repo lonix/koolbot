@@ -15,6 +15,7 @@ import {
 } from "@jest/globals";
 import type { Client } from "discord.js";
 import { JSDOM } from "jsdom";
+import { orderToken } from "../../src/web/reorder-view.js";
 import {
   startAdminHarness,
   stubRequireSession,
@@ -725,12 +726,20 @@ describe("POST /role-groups/:id/edit", () => {
 });
 
 describe("POST /role-groups/:id/move (#1616)", () => {
-  const move = (id: string, from: number, to: number, over = {}) =>
+  // The token the page was drawn with: the order of the ids it showed.
+  const move = (
+    id: string,
+    from: number,
+    to: number,
+    over: Record<string, string> = {},
+    shown: string[] = ["a", "b", "c"],
+  ) =>
     harness.post(`/role-groups/${id}/move`, {
       from: String(from),
       to: String(to),
       count: "3",
       scope: "role-groups",
+      order: orderToken(shown),
       ...over,
     });
 
@@ -761,6 +770,35 @@ describe("POST /role-groups/:id/move (#1616)", () => {
     const res = await move(id, from, to, over);
     expect(svc.reorder).not.toHaveBeenCalled();
     expect(flashOf(res).type).toBe("warn");
+  });
+
+  it("moves nothing when other groups were reordered since the page was drawn", async () => {
+    // Drawn from [a, b, c]; the live order is [a, c, b]. The count and a's
+    // place still match, so only the order token can tell.
+    svc.list.mockResolvedValue([
+      group({ id: "a" }),
+      group({ id: "c" }),
+      group({ id: "b" }),
+    ]);
+    await mount();
+    const res = await move("a", 0, 1);
+    expect(svc.reorder).not.toHaveBeenCalled();
+    expect(flashOf(res).type).toBe("warn");
+    // The same form against the order it was drawn from is accepted.
+    svc.list.mockResolvedValue([
+      group({ id: "a" }),
+      group({ id: "b" }),
+      group({ id: "c" }),
+    ]);
+    await move("a", 0, 1);
+    expect(svc.reorder).toHaveBeenCalledWith("guild-1", ["b", "a", "c"]);
+  });
+
+  it("refuses a form without the order token", async () => {
+    await mount();
+    const res = await move("b", 1, 0, { order: "" });
+    expect(svc.reorder).not.toHaveBeenCalled();
+    expect(flashOf(res).type).toBe("err");
   });
 
   it("refuses a form it cannot read", async () => {

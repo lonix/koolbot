@@ -1,4 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
+import { orderToken } from "../../src/web/reorder-view.js";
 import {
   renderAdminFixPage,
   renderRoleDeletePage,
@@ -167,6 +168,7 @@ describe("renderRoleGroupsPage", () => {
     expect(html).toContain("> of 2</span>");
     expect(html).toContain('action="/admin/role-groups/a/move"');
     expect(html).toContain('name="scope" value="role-groups"');
+    expect(html).toContain(`name="order" value="${orderToken(["a", "b"])}"`);
     expect(html).toContain('id="reorder-status"');
     expect(html).toMatch(
       /value="0" class="kb-btn kb-btn--sm" disabled>Move up<span class="kb-visually-hidden">: A</,
@@ -242,6 +244,18 @@ describe("renderRoleGroupsPage", () => {
         renderRoleGroupsPage(props({ groups: [row(over)] })),
       ).not.toContain("/delete-role");
     }
+  });
+
+  it("keeps the actions on one line and the capability badges wrapping (#1616)", () => {
+    const html = renderRoleGroupsPage(
+      props({ groups: [row({ capabilities: ["admin", "staff"] })] }),
+    );
+    // Actions: non-wrapping, end-justified. Capabilities: the wrapping row.
+    expect(html).toContain(
+      '<td class="kb-actions"><div class="kb-row kb-row--nowrap">',
+    );
+    expect(html).toMatch(/<td><span class="kb-row"><span class="tag/);
+    expect(html).not.toContain('<td class="kb-actions"><div class="kb-row">');
   });
 
   it("lays the capability badges out as one wrapping row (#1616)", () => {
