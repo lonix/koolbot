@@ -66,7 +66,7 @@ export interface RemovedBotCandidate {
   reason: string;
   /** Channels with a member overwrite for the removed bot (what the plan removes). */
   overwriteChannels: CandidateChannel[];
-  /** Channels it mostly wrote to (needs channel ownership hints). */
+  /** Channels it mostly wrote to (needs the Server scan switch "Find channels a bot writes in"). */
   ownedChannels: CandidateOwnedChannel[];
   /** KoolBot features bound to a channel the bot touched. */
   boundFeatures: Array<{

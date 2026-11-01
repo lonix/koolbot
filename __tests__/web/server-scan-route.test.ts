@@ -124,6 +124,39 @@ describe("GET /adopt tabs", () => {
     );
   });
 
+  it("serves the switch as a plain GET form that works without JavaScript (#1630)", async () => {
+    scan.mockImplementation(async (_g, opts) => ({
+      ...busyScan(),
+      sampling: (opts as { sampleMessages: boolean }).sampleMessages
+        ? {
+            channelsRead: 3,
+            channelsPlanned: 9,
+            textChannels: 9,
+            channelLimit: 40,
+            stoppedAt: { id: "11", name: "staff", reason: "no-access" },
+          }
+        : null,
+    }));
+    // Off: the form is the whole mechanism; the script only hides its button.
+    const off = await text("/adopt?tab=bots");
+    expect(off).toContain('<form method="get" action="/admin/adopt"');
+    expect(off).toContain('<input type="hidden" name="tab" value="bots">');
+    expect(off).toContain('name="sample" value="1" aria-describedby');
+    expect(off).not.toContain(
+      'value="1" aria-describedby="scan-sample-help" checked',
+    );
+    expect(off).toContain("data-autosubmit-hide>Apply</button>");
+    expect(off).toContain("without bot message sampling");
+    // On: the same GET with sample=1 is what Apply sends.
+    const on = await text("/adopt?tab=bots&sample=1");
+    expect(on).toContain(
+      'value="1" aria-describedby="scan-sample-help" checked>',
+    );
+    expect(on).toContain("with bot message sampling");
+    expect(on).toContain("Read 3 channels of 9; stopped at");
+    expect(on).toContain("the bot cannot read its history");
+  });
+
   it("scans once for a run of tab clicks, and again on Scan again", async () => {
     await text("/adopt");
     await text("/adopt?tab=roles");
@@ -134,6 +167,17 @@ describe("GET /adopt tabs", () => {
     expect(scan).toHaveBeenCalledTimes(2);
     await text("/adopt?tab=bots");
     expect(scan).toHaveBeenCalledTimes(2);
+  });
+
+  it("scans again for the switch's own GET (?sample=1&refresh=1), not from the cache (#1630)", async () => {
+    await text("/adopt?sample=1");
+    await text("/adopt?tab=bots&sample=1");
+    expect(scan).toHaveBeenCalledTimes(1);
+    await text("/adopt?sample=1&refresh=1");
+    expect(scan).toHaveBeenCalledTimes(2);
+    expect(
+      (scan.mock.calls[1][1] as { sampleMessages: boolean }).sampleMessages,
+    ).toBe(true);
   });
 
   it("does not remember a failed scan", async () => {

@@ -1,5 +1,9 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import { ChannelType, PermissionsBitField } from "discord.js";
+import {
+  ChannelType,
+  PermissionFlagsBits,
+  PermissionsBitField,
+} from "discord.js";
 import { defaultConfig } from "../../src/services/config-schema.js";
 import { ConfigService } from "../../src/services/config-service.js";
 
@@ -103,7 +107,10 @@ function makeGuild(): { guild: any; write: jest.Mock } {
   const channels = new Map<string, any>(
     [cat, quotes, afk, news].map((c: any) => [
       c.id,
-      Object.assign(c, { isThread: () => false }),
+      Object.assign(c, {
+        isThread: () => false,
+        permissionsFor: () => ({ has: () => true }),
+      }),
     ]),
   );
   const me = {
@@ -527,6 +534,229 @@ describe("ServerScanService (#1019)", () => {
       botId: "dyno",
       share: 1,
     });
+  });
+});
+
+describe("ServerScanService message sampling report (#1630)", () => {
+  beforeEach(() => {
+    ServerScanService.reset();
+    mockDistinct.mockReset();
+    mockDistinct.mockResolvedValue(["r-low", null]);
+    jest.spyOn(ConfigService, "getInstance").mockReturnValue({
+      getAll: async () => [],
+    } as any);
+  });
+
+  const client = {
+    user: { id: "bot-1" },
+    options: { intents: { has: () => false } },
+  } as any;
+
+  const dynoMsg = (): any => ({
+    author: { id: "dyno", bot: true, tag: "Dyno#1" },
+    content: "must never be kept",
+  });
+  const tenMsgs = (): Map<string, any> =>
+    new Map(Array.from({ length: 10 }, (_, i) => [String(i), dynoMsg()]));
+
+  /** The test guild with `n` extra text channels (t1..tn), each readable. */
+  function guildWithTextChannels(
+    n: number,
+    fetchFor: (id: string) => Promise<Map<string, any>> = async () => new Map(),
+  ): any {
+    const { guild } = makeGuild();
+    guild.channels.cache.get("ch-quotes").messages = {
+      fetch: jest.fn(async () => tenMsgs()),
+    };
+    guild.channels.cache.get("ch-news").messages = {
+      fetch: jest.fn(async () => new Map()),
+    };
+    for (let i = 1; i <= n; i++) {
+      const id = `t${i}`;
+      guild.channels.cache.set(id, {
+        id,
+        name: `chat-${i}`,
+        type: ChannelType.GuildText,
+        rawPosition: 10 + i,
+        parentId: null,
+        permissionsLocked: false,
+        isThread: () => false,
+        permissionsFor: () => ({ has: () => true }),
+        permissionOverwrites: { cache: new Map() },
+        messages: { fetch: jest.fn(async () => fetchFor(id)) },
+      });
+    }
+    return guild;
+  }
+
+  it("reports no sampling when the switch is off", async () => {
+    const scan = await ServerScanService.getInstance(client).scanGuild(
+      guildWithTextChannels(2),
+    );
+    expect(scan.sampling).toBeNull();
+  });
+
+  it("reports full coverage when every channel was read", async () => {
+    const scan = await ServerScanService.getInstance(client).scanGuild(
+      guildWithTextChannels(2),
+      { sampleMessages: true },
+    );
+    expect(scan.sampling).toEqual({
+      channelsRead: 4,
+      channelsPlanned: 4,
+      textChannels: 4,
+      channelLimit: 40,
+      stoppedAt: null,
+    });
+  });
+
+  it("plans only as many channels as the server has, below the cap", async () => {
+    const scan = await ServerScanService.getInstance(client).scanGuild(
+      guildWithTextChannels(1),
+      { sampleMessages: true },
+    );
+    expect(scan.sampling?.channelsPlanned).toBe(3);
+    expect(scan.sampling?.channelLimit).toBe(40);
+  });
+
+  it("caps the channels read and says how many text channels there are", async () => {
+    const scan = await ServerScanService.getInstance(client).scanGuild(
+      guildWithTextChannels(5),
+      { sampleMessages: true, sampleChannelLimit: 3 },
+    );
+    expect(scan.sampling).toMatchObject({
+      channelsRead: 3,
+      channelsPlanned: 3,
+      textChannels: 7,
+      channelLimit: 3,
+      stoppedAt: null,
+    });
+  });
+
+  it.each([
+    [50001, "no-access"],
+    [50013, "no-access"],
+    [500, "failed"],
+    [undefined, "failed"],
+  ] as const)(
+    "stops at the first channel it cannot read (code %s -> %s) and says where",
+    async (code, reason) => {
+      const guild = guildWithTextChannels(3, async (id) => {
+        if (id === "t2") {
+          throw Object.assign(new Error("denied"), { code });
+        }
+        return new Map();
+      });
+      const scan = await ServerScanService.getInstance(client).scanGuild(
+        guild,
+        { sampleMessages: true },
+      );
+      // ch-quotes, ch-news and t1 were read; t2 failed; t3 was never asked.
+      expect(scan.sampling).toEqual({
+        channelsRead: 3,
+        channelsPlanned: 5,
+        textChannels: 5,
+        channelLimit: 40,
+        stoppedAt: { id: "t2", name: "chat-2", reason },
+      });
+      expect(
+        guild.channels.cache.get("t3").messages.fetch,
+      ).not.toHaveBeenCalled();
+      expect(scan.partial).toEqual([
+        "message sampling (stopped at the first channel it could not read)",
+      ]);
+      expect(
+        scan.channels.find((c) => c.id === "ch-quotes")!.ownerHint,
+      ).toMatchObject({ botId: "dyno" });
+    },
+  );
+
+  it("asks Discord not to cache the messages it reads (nothing kept in discord.js)", async () => {
+    const guild = guildWithTextChannels(1);
+    await ServerScanService.getInstance(client).scanGuild(guild, {
+      sampleMessages: true,
+    });
+    const fetches = ["ch-quotes", "ch-news", "t1"].map(
+      (id) => guild.channels.cache.get(id).messages.fetch,
+    );
+    for (const f of fetches) {
+      expect(f).toHaveBeenCalledTimes(1);
+      expect(f).toHaveBeenCalledWith({ limit: 25, cache: false });
+    }
+  });
+
+  /** Channel `t2` is visible to the bot; `history` says whether it may read it. */
+  function withHistory(history: boolean): any {
+    const guild = guildWithTextChannels(3);
+    const seen: string[] = [];
+    for (const id of ["t1", "t2", "t3"]) {
+      guild.channels.cache.get(id).permissionsFor = jest.fn((who: any) => {
+        seen.push(who?.id);
+        return {
+          has: (flags: bigint[]) =>
+            id !== "t2" ||
+            history ||
+            !flags.includes(PermissionFlagsBits.ReadMessageHistory),
+        };
+      });
+    }
+    guild.__seen = seen;
+    return guild;
+  }
+
+  it("stops at a visible channel whose history the bot may not read (Discord returns an empty list, not an error)", async () => {
+    const guild = withHistory(false);
+    const scan = await ServerScanService.getInstance(client).scanGuild(guild, {
+      sampleMessages: true,
+    });
+    expect(scan.sampling).toEqual({
+      channelsRead: 3,
+      channelsPlanned: 5,
+      textChannels: 5,
+      channelLimit: 40,
+      stoppedAt: { id: "t2", name: "chat-2", reason: "no-access" },
+    });
+    expect(
+      guild.channels.cache.get("t2").messages.fetch,
+    ).not.toHaveBeenCalled();
+    expect(
+      guild.channels.cache.get("t3").messages.fetch,
+    ).not.toHaveBeenCalled();
+    expect(guild.__seen[0]).toBe("bot-1");
+    // The same note as a failed read, so the page's "Not read" callout shows.
+    expect(scan.partial).toEqual([
+      "message sampling (stopped at the first channel it could not read)",
+    ]);
+  });
+
+  it("reads on when the bot may read the history (control)", async () => {
+    const guild = withHistory(true);
+    const scan = await ServerScanService.getInstance(client).scanGuild(guild, {
+      sampleMessages: true,
+    });
+    expect(scan.sampling).toMatchObject({
+      channelsRead: 5,
+      stoppedAt: null,
+    });
+    expect(guild.channels.cache.get("t3").messages.fetch).toHaveBeenCalled();
+    expect(scan.partial).toEqual([]);
+  });
+
+  it("does not throw or stop when the bot's own permissions cannot be resolved", async () => {
+    const guild = guildWithTextChannels(1);
+    guild.channels.cache.get("t1").permissionsFor = jest.fn(() => null);
+    const scan = await ServerScanService.getInstance(client).scanGuild(guild, {
+      sampleMessages: true,
+    });
+    expect(scan.sampling).toMatchObject({ channelsRead: 3, stoppedAt: null });
+  });
+
+  it("keeps nothing from the messages but the bot id, tag and share", async () => {
+    const scan = await ServerScanService.getInstance(client).scanGuild(
+      guildWithTextChannels(1),
+      { sampleMessages: true },
+    );
+    expect(JSON.stringify(scan)).not.toContain("must never be kept");
   });
 });
 
