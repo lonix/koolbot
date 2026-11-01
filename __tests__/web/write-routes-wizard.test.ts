@@ -152,6 +152,13 @@ afterEach(async () => {
   await harness.close();
 });
 
+/** The derived writes the last apply passed to the engine for that attempt only. */
+function lastDerived(): Record<string, unknown> {
+  const calls = mockApplyConfiguration.mock.calls as unknown as unknown[][];
+  expect(calls.length).toBeGreaterThan(0);
+  return calls[calls.length - 1][2] as Record<string, unknown>;
+}
+
 function lastAudit(): Record<string, unknown> {
   const calls = mockRecordAudit.mock.calls;
   expect(calls.length).toBeGreaterThan(0);
@@ -739,7 +746,7 @@ describe("POST /wizard/apply", () => {
     expect(mockApplyConfiguration).toHaveBeenCalled();
   });
 
-  it("explicitly disables every feature the admin did not tick", async () => {
+  it("explicitly disables every feature the admin did not tick, for this apply only", async () => {
     mockGetSession.mockReturnValue(
       wizardState(["quotes"], { "quotes.enabled": true }),
     );
@@ -750,15 +757,17 @@ describe("POST /wizard/apply", () => {
       revertFailedKeys: [],
     });
     await harness.post("/wizard/apply");
-    const disabled = mockAddConfiguration.mock.calls
-      .filter((c) => c[3] === false)
-      .map((c) => c[2]);
+    // Derived values go into this attempt's batch, never into the saved choices.
+    expect(
+      mockAddConfiguration.mock.calls.filter((c) => c[3] === false),
+    ).toEqual([]);
+    const derived = lastDerived();
     for (const feature of WIZARD_FEATURE_ORDER) {
       if (feature === "quotes") continue;
-      expect(disabled).toContain(`${feature}.enabled`);
+      expect(derived[`${feature}.enabled`]).toBe(false);
     }
     // Independent command gates go off with their feature.
-    expect(disabled).toContain("aka.enabled");
+    expect(derived["aka.enabled"]).toBe(false);
   });
 
   it("ends the session and lands on Settings after a successful apply", async () => {
@@ -775,7 +784,11 @@ describe("POST /wizard/apply", () => {
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.path).toBe("/admin/settings");
     expect(flash.type).toBe("ok");
-    expect(flash.msg).toBe("Wizard applied 1 setting.");
+    // The chosen setting plus the off switch of every unticked feature, as
+    // when those were saved into the session before the apply.
+    expect(flash.msg).toBe(
+      `Wizard applied ${1 + Object.keys(lastDerived()).length} settings.`,
+    );
     expect(mockEndSession).toHaveBeenCalledWith(
       session.discordUserId,
       session.guildId,
@@ -906,15 +919,50 @@ describe("a feature turned off while a part that needs it stays on (#1622)", () 
       cascadeOff: "voicetracking.announcements.enabled",
     });
     expect(mockApplyConfiguration).toHaveBeenCalledTimes(1);
-    const off = mockAddConfiguration.mock.calls
-      .filter((c) => c[3] === false)
-      .map((c) => c[2]);
-    expect(off).toContain("voicetracking.announcements.enabled");
+    expect(lastDerived()["voicetracking.announcements.enabled"]).toBe(false);
     expect(res.headers.get("location")).toContain("/admin/settings");
     expect(lastAudit()).toMatchObject({
       result: "success",
       details: { cascadeOff: ["voicetracking.announcements.enabled"] },
     });
+  });
+
+  it("keeps a failed attempt's turn-offs out of the session and plans again on retry", async () => {
+    // Attempt 1: confirmed, then the engine throws.
+    mockApplyConfiguration.mockRejectedValueOnce(new Error("mongo down"));
+    const failed = await harness.post("/wizard/apply", {
+      cascadeOff: "voicetracking.announcements.enabled",
+    });
+    expect(failed.headers.get("location")).toContain("step=confirm");
+    expect(mockEndSession).not.toHaveBeenCalled();
+    expect(
+      mockAddConfiguration.mock.calls.filter((c) => c[3] === false),
+    ).toEqual([]);
+    expect(lastDerived()["voicetracking.announcements.enabled"]).toBe(false);
+
+    // Back on Review the dependents and the switch are offered again.
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).toContain('name="cascadeOff"');
+
+    // The admin turned the recap off themselves in the meantime: the retry
+    // needs no cascade and must not turn off anything more.
+    mockConfigGetBoolean.mockImplementation(
+      async (key) => key === "voicetracking.enabled",
+    );
+    mockApplyConfiguration.mockClear();
+    mockRecordAudit.mockClear();
+    const retried = await harness.post("/wizard/apply");
+    expect(retried.headers.get("location")).toContain("/admin/settings");
+    expect(
+      lastDerived()["voicetracking.announcements.enabled"],
+    ).toBeUndefined();
+    expect(lastAudit()).toMatchObject({
+      result: "success",
+      details: { cascadeOff: [] },
+    });
+    expect(
+      mockAddConfiguration.mock.calls.filter((c) => c[3] === false),
+    ).toEqual([]);
   });
 
   it("refuses a confirmation that no longer matches what is on", async () => {

@@ -849,13 +849,14 @@ export function createWizardRouter(client: Client): Router {
       // so re-running the wizard is the supported way to turn things off.
       // Without this, unchecked features would silently retain their
       // pre-existing enabled state.
+      // Values this attempt adds on its own go into its batch only (#1622):
+      // the off switch for every unticked feature, and the dependents a
+      // confirmed cascade turns off. They are never saved into the wizard
+      // session, so an attempt that fails leaves the admin's choices as they
+      // were and Review plans the cascade again from what is on at that time.
+      const derived: Record<string, unknown> = {};
       for (const gate of wizardOffGates(state.selectedFeatures)) {
-        wizard.addConfiguration(
-          session.discordUserId,
-          session.guildId,
-          gate,
-          false,
-        );
+        derived[gate] = false;
       }
 
       const confirmFailure = (text: string): void => {
@@ -935,14 +936,7 @@ export function createWizardRouter(client: Client): Router {
         );
         return;
       }
-      for (const key of cascadeOff) {
-        wizard.addConfiguration(
-          session.discordUserId,
-          session.guildId,
-          key,
-          false,
-        );
-      }
+      for (const key of cascadeOff) derived[key] = false;
 
       // Role access (#1321) goes first: it is the part that can be undone, so
       // a failure further on can put it back. It is checked against the live
@@ -1081,12 +1075,16 @@ export function createWizardRouter(client: Client): Router {
       };
 
       const pendingKeys = [
-        ...new Set([...Object.keys(state.configuration), ...cascadeOff]),
+        ...new Set([
+          ...Object.keys(state.configuration),
+          ...Object.keys(derived),
+        ]),
       ];
       try {
         const result = await wizard.applyConfiguration(
           session.discordUserId,
           session.guildId,
+          derived,
         );
         await recordAudit(session, {
           action: "wizard.apply",

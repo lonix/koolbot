@@ -20,6 +20,9 @@ export interface WizardDependencyReview {
   }[];
 }
 
+/** The first step of the wizard, with the current choices discarded on the next start. */
+const WIZARD_RESTART_HREF = "/admin/wizard?reset=1";
+
 /** The id of the Apply form, so the confirm switch can sit outside it. */
 export const WIZARD_APPLY_FORM_ID = "wizard-apply-form";
 
@@ -57,11 +60,15 @@ export function renderDependencyReview(
 
   if (review.blockers.length > 0) {
     const items = review.blockers
-      .map((b) =>
-        b.direction === "enable"
-          ? `<li>Turning on ${settingRef(b.key, false)} needs ${refList(b.related)} turned on too. Go back to its step and switch ${b.related.length === 1 ? "it" : "them"} on, or leave ${settingRef(b.key, false)} off.</li>`
-          : `<li>Turning off ${settingRef(b.key, false)} needs ${refList(b.related)} turned off first.</li>`,
-      )
+      .map((b) => {
+        const it = b.related.length === 1 ? "it" : "them";
+        return b.direction === "enable"
+          ? // No wizard step exists for a feature that was not chosen, and
+            // switching it on in All settings does not help: Apply turns off
+            // every feature that was not chosen. Say what does work.
+            `<li>Turning on ${settingRef(b.key, false)} needs ${refList(b.related)} turned on too, and turning ${it} on in All settings does not help, because Apply turns off every feature that was not chosen. <a href="${WIZARD_RESTART_HREF}">Restart the wizard</a> and choose ${it} on the first step (this starts your choices over), or go back to the step for ${settingRef(b.key, false)} and leave it off.</li>`
+          : `<li>Turning off ${settingRef(b.key, false)} needs ${refList(b.related)} turned off first. Go back to ${b.related.length === 1 ? "its" : "their"} step and switch ${it} off, or keep ${settingRef(b.key, false)} on.</li>`;
+      })
       .join("");
     parts.push(
       `<div class="kb-callout kb-callout--err" role="alert">${toneIcon("err")}<div class="kb-callout__body"><p class="kb-callout__title">These settings can't be applied together</p><ul>${items}</ul><p class="kb-callout__text">Nothing is changed until this is fixed. Your other choices are kept.</p></div></div>`,
@@ -81,8 +88,8 @@ export function renderDependencyReview(
     parts.push(
       `<div class="kb-callout kb-callout--warn" role="status">${toneIcon("warn")}<div class="kb-callout__body"><p class="kb-callout__title">Some parts need a feature you are turning off</p><ul>${items}</ul><p class="kb-callout__text">Apply stops here until you confirm turning ${review.cascadeKeys.length === 1 ? "it" : "them"} off below.</p></div></div>
 <div class="kb-settings"><div class="kb-setting">
-  <div><p class="kb-setting__name" id="cascade-name">Turn these off in the same apply</p><p class="kb-setting__desc" id="cascade-desc">${names}</p></div>
-  <div class="kb-setting__control"><label class="kb-switch"><input type="checkbox" role="switch" name="cascadeOff" value="${escapeHtml(review.fingerprint)}" form="${WIZARD_APPLY_FORM_ID}" aria-labelledby="cascade-name" aria-describedby="cascade-desc"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Turn ${review.cascadeKeys.length === 1 ? "it" : "them"} off too</label></div>
+  <div><p class="kb-setting__name">Turn these off in the same apply</p><p class="kb-setting__desc" id="cascade-desc">${names}</p></div>
+  <div class="kb-setting__control"><label class="kb-switch"><input type="checkbox" role="switch" name="cascadeOff" value="${escapeHtml(review.fingerprint)}" form="${WIZARD_APPLY_FORM_ID}" aria-describedby="cascade-desc"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Turn ${review.cascadeKeys.length === 1 ? "it" : "them"} off too</label></div>
 </div></div>`,
     );
   }
