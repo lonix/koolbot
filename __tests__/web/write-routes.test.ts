@@ -7,7 +7,8 @@
  * in `__tests__/web/admin-harness.ts` (#849).
  */
 
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, jest, afterEach } from "@jest/globals";
+import { EventEmitter } from "node:events";
 import {
   coerceConfigValue,
   findSectionMasterKey,
@@ -23,7 +24,11 @@ import {
   flashRedirectQuery,
   INVALID_KEYS_MAX,
 } from "../../src/web/routes/write/helpers.js";
-import { createWriteRouter } from "../../src/web/write-routes.js";
+import {
+  createWriteRouter,
+  invalidateCommandSyncAfterWrite,
+} from "../../src/web/write-routes.js";
+import { CommandManager } from "../../src/services/command-manager.js";
 import type { WizardApplyResult } from "../../src/services/wizard-service.js";
 import {
   BOOTSTRAP_VARS,
@@ -992,16 +997,17 @@ describe("createWriteRouter (#850)", () => {
 
   it("keeps the shared middleware ahead of every domain router", () => {
     const { stack } = buildRouter();
-    // requireSession → admin-role check → requireCsrf, then the sub-routers.
+    // requireSession → admin-role check → requireCsrf → the command-sync cache
+    // invalidation (#1638), then the sub-routers.
     expect(stack[0].handle).toBe(requireSession);
-    expect(stack.slice(0, 3).every((l) => !l.route && !l.handle.stack)).toBe(
+    expect(stack.slice(0, 4).every((l) => !l.route && !l.handle.stack)).toBe(
       true,
     );
-    expect(stack.slice(3).every((l) => !l.route && !!l.handle.stack)).toBe(
+    expect(stack.slice(4).every((l) => !l.route && !!l.handle.stack)).toBe(
       true,
     );
     // The adoption rate limits plus every domain module, each mounted once.
-    expect(stack.length - 3).toBe(27);
+    expect(stack.length - 4).toBe(27);
   });
 
   it("exposes the same route surface as before the split", () => {
@@ -1125,5 +1131,81 @@ describe("createWriteRouter (#850)", () => {
         "POST /wizard/step/:n",
       ].sort(),
     );
+  });
+});
+
+describe("invalidateCommandSyncAfterWrite (#1638)", () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  const run = (
+    getInstance: () => unknown,
+    method = "POST",
+  ): { next: jest.Mock; res: EventEmitter } => {
+    jest
+      .spyOn(CommandManager, "getInstance")
+      .mockImplementation(getInstance as never);
+    const next = jest.fn();
+    const res = new EventEmitter();
+    invalidateCommandSyncAfterWrite({} as never)(
+      { method } as never,
+      res as never,
+      next,
+    );
+    return { next, res };
+  };
+
+  it("drops the cached sync check once an admin write has been answered, not before", () => {
+    const invalidate = jest.fn();
+    const { next, res } = run(() => ({ invalidateCommandSync: invalidate }));
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(invalidate).not.toHaveBeenCalled();
+    res.emit("finish");
+    expect(invalidate).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["GET", "HEAD", "OPTIONS"])(
+    "leaves the cache alone for a %s, which the write router sees before the read-only pages",
+    (method) => {
+      const invalidate = jest.fn();
+      const { next, res } = run(
+        () => ({ invalidateCommandSync: invalidate }),
+        method,
+      );
+      expect(next).toHaveBeenCalledTimes(1);
+      res.emit("finish");
+      expect(invalidate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["POST", "PUT", "PATCH", "DELETE"])(
+    "still clears it after a %s",
+    (method) => {
+      const invalidate = jest.fn();
+      const { res } = run(
+        () => ({ invalidateCommandSync: invalidate }),
+        method,
+      );
+      res.emit("finish");
+      expect(invalidate).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("never breaks a write when the command manager cannot be reached", () => {
+    const { next, res } = run(() => {
+      throw new Error("not initialised");
+    });
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(() => res.emit("finish")).not.toThrow();
+  });
+
+  it("is mounted on the write router", () => {
+    const router = createWriteRouter(
+      {} as never,
+      ((_q, _s, n) => n()) as never,
+    );
+    const names = (
+      router as unknown as { stack: Array<{ handle: { name: string } }> }
+    ).stack.map((l) => l.handle.name);
+    expect(names).toContain("invalidateCommandSyncAfterWrite");
   });
 });

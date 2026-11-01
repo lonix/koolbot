@@ -28,6 +28,12 @@ a failed query says it could not be read instead of showing an empty week. *Feat
 to Z). The right column also holds the *Version* panel with its *Check now* button, the one form on the page, which sets nothing. The alert icons use
 the markup from `feature-page.ts` until the shared icon helper (#1369) replaces it.
 
+**As built (#1638).** *Needs you* has one more source: the slash-command check (`CommandManager.checkCommandSync`, read with the same 2.5 s limit). When the
+registered commands differ from the ones the switched-on features need, the first row names what to add, remove and update (at most five names, then "and N
+more"), says what members see, and links to All settings (`/admin/settings#commands-sync`), where Reload commands is: the Dashboard stays read-only. When the
+check could not be made the row says *Not checked* with the reason (`kb-badge--info`, info icon), never "in sync". The row is first so the six-row cut does not
+hide it. All settings shows the same state beside its button as a `kb-status` word (*In sync*, *Out of sync*, *Not checked*) and one sentence.
+
 ### EventsPage
 
 The pattern for every feature page (#1301), shown on Events.

@@ -177,3 +177,77 @@ export function commandListsMatch(
     return false;
   }
 }
+
+/** Which commands differ between what the bot wants and what Discord has (#1638). */
+export interface CommandListDiff {
+  /** In the desired list, missing in Discord: a feature was switched on. */
+  added: string[];
+  /** In Discord, not in the desired list: switched off or retired. */
+  removed: string[];
+  /** In both, with different options, descriptions or settings. */
+  changed: string[];
+}
+
+/**
+ * Name the commands that differ, using the same projection as
+ * `commandListsMatch` and one `compareExtras` decision for the whole list, so
+ * the two never disagree about what "changed" means. Commands are keyed by
+ * type and name; the names returned are the plain command names, sorted.
+ *
+ * Read-only and never throws: a list it cannot read (not arrays, a command
+ * without a name, a duplicate) returns `null`, which callers treat as
+ * "unknown", never as "in sync".
+ */
+export function diffCommandLists(
+  desired: unknown,
+  registered: unknown,
+): CommandListDiff | null {
+  try {
+    if (!Array.isArray(desired) || !Array.isArray(registered)) return null;
+    const sent = JSON.parse(
+      JSON.stringify(desired, (_k, v) =>
+        typeof v === "bigint" ? v.toString() : v,
+      ),
+    ) as Json[];
+    const compareExtras = sent.some(
+      (c) =>
+        isRecord(c) &&
+        (c.contexts !== undefined || c.integration_types !== undefined),
+    );
+    const index = (list: Json[]): Map<string, Json> | null => {
+      const out = new Map<string, Json>();
+      for (const c of list) {
+        if (!isRecord(c) || typeof c.name !== "string") return null;
+        const key = `${String(c.type ?? 1)}:${c.name}`;
+        if (out.has(key)) return null;
+        out.set(
+          key,
+          JSON.stringify(sortedKeys(projectCommand(c, compareExtras))),
+        );
+      }
+      return out;
+    };
+    const want = index(sent);
+    const have = index(registered as Json[]);
+    if (!want || !have) return null;
+    const nameOf = (key: string): string => key.slice(key.indexOf(":") + 1);
+    const byName = (a: string, b: string): number => a.localeCompare(b);
+    const added: string[] = [];
+    const changed: string[] = [];
+    for (const [key, projection] of want) {
+      const other = have.get(key);
+      if (other === undefined) added.push(nameOf(key));
+      else if (other !== projection) changed.push(nameOf(key));
+    }
+    const removed = [...have.keys()]
+      .filter((key) => !want.has(key))
+      .map(nameOf);
+    return {
+      added: added.sort(byName),
+      removed: removed.sort(byName),
+      changed: changed.sort(byName),
+    };
+  } catch {
+    return null;
+  }
+}

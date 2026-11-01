@@ -87,6 +87,8 @@ import {
 } from "./adopt-view.js";
 import { cachedScan, peekLastScan, scanCacheKey } from "./server-scan-cache.js";
 import { loadDashboardData } from "./dashboard-data.js";
+import { readCommandSync } from "./command-sync-read.js";
+import { CommandManager } from "../services/command-manager.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { VersionCheckService } from "../services/version-check-service.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
@@ -1143,6 +1145,10 @@ export function createReadOnlyRouter(
         },
         // Cached for 30 s and never throws; a page is not held up for it.
         permissions: () => checkBotPermissions(client, guildId),
+        // One Discord GET at most a minute, shared by every hit; read-only
+        // (#1638). Throws are caught by the source's own wrapper.
+        commandSync: () =>
+          CommandManager.getInstance(client).checkCommandSync(),
         // Only a scan that has already finished, kept for the Dashboard's own
         // retention (#1415): it never starts one (a scan is a round of Discord
         // reads and spends the scan limiter).
@@ -1424,9 +1430,14 @@ export function createReadOnlyRouter(
             groups,
           });
 
+      // Read-only and cached; "Not checked" (null) when it cannot answer in
+      // time, never "in sync" (#1638).
+      const commandSync = await readCommandSync(client);
+
       res.type("text/html").send(
         renderSettingsPage({
           ...common,
+          commandSync,
           settingsUnavailable,
           permissionNotices,
           groups,

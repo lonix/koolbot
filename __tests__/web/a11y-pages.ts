@@ -59,6 +59,8 @@ import {
   UPDATE_AVAILABLE,
   busyDashboard,
   calmDashboard,
+  notCheckedDashboard,
+  outOfSyncDashboard,
 } from "./dashboard-fixtures.js";
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
 import { busyScan } from "./server-scan-fixtures.js";
@@ -1244,6 +1246,26 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The slash-command row: commands to add, remove and update, linking to
+      // All settings (#1638).
+      name: "Dashboard with commands out of sync",
+      html: renderDashboardPage({
+        ...COMMON,
+        data: outOfSyncDashboard(),
+        version: UPDATE_AVAILABLE,
+      }),
+    },
+    {
+      // The slash-command check could not be made: Not checked, with the
+      // reason (#1638).
+      name: "Dashboard with commands not checked",
+      html: renderDashboardPage({
+        ...COMMON,
+        data: notCheckedDashboard(),
+        version: UPDATE_AVAILABLE,
+      }),
+    },
+    {
       // The destructive section and the typed-name confirmation (#1184).
       name: "Role group deletion review",
       html: renderRoleDeletePage({
@@ -1687,6 +1709,37 @@ export function adminPages(): A11yPage[] {
         guildId: "g1",
         guildName: "Test Guild",
         flash: FLASH,
+      }),
+    },
+    {
+      // The slash-command state next to Reload commands (#1638): commands to add,
+      // remove and update.
+      name: "Settings (commands out of sync)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: [{ category: "voicechannels", rows: SETTING_ROWS }],
+        guildId: "g1",
+        guildName: "Test Guild",
+        commandSync: {
+          state: "out-of-sync",
+          checkedAt: 0,
+          added: ["lfg", "poll"],
+          removed: ["event"],
+          changed: ["quote"],
+        },
+      }),
+    },
+    {
+      // The check could not be made, and the state it shows when all is well (#1638).
+      name: "Settings (commands not checked)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: [{ category: "voicechannels", rows: SETTING_ROWS }],
+        guildId: "g1",
+        guildName: "Test Guild",
+        commandSync: null,
       }),
     },
     {

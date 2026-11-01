@@ -9,6 +9,8 @@ import {
   UPDATE_AVAILABLE,
   busyDashboard,
   calmDashboard,
+  notCheckedDashboard,
+  outOfSyncDashboard,
 } from "./dashboard-fixtures.js";
 
 const page = (
@@ -203,5 +205,58 @@ describe("DashboardPage", () => {
     const html = page(d);
     expect(html).not.toContain("<img");
     expect(html).not.toContain('onerror="1"');
+  });
+});
+
+describe("the slash-command row (#1638)", () => {
+  it("names what to add, remove and update, and links to All settings with no button of its own", () => {
+    const html = page(outOfSyncDashboard());
+    expect(html).toContain('id="p-needs"');
+    expect(html).toContain(
+      "Slash commands are out of sync: 2 to add (/lfg, /poll), 1 to remove (/event), 1 to update (/quote)",
+    );
+    expect(html).toContain("Members don&#39;t see /lfg, /poll in Discord yet.");
+    expect(html).toContain("Members still see /event in Discord.");
+    expect(html).toContain(
+      '<span class="kb-badge kb-badge--warn">Out of sync</span>',
+    );
+    expect(html).toContain(
+      '<a class="kb-btn kb-btn--sm" href="/admin/settings#commands-sync">Open All settings</a>',
+    );
+    // The Dashboard is read-only: no form posts to the reload route.
+    expect(html).not.toContain("/admin/settings/reload");
+    expect(html).not.toContain("Reload commands</button>");
+    expect(html).not.toContain("kb-btn--primary");
+  });
+
+  it("says Not checked with the reason when the check could not be made", () => {
+    const html = page(notCheckedDashboard());
+    expect(html).toContain("Slash commands could not be checked");
+    expect(html).toContain("Not checked: Discord did not answer.");
+    expect(html).toContain(
+      '<span class="kb-badge kb-badge--info">Not checked</span>',
+    );
+    expect(html).not.toContain("out of sync");
+    expect(html).not.toContain("in sync</");
+  });
+
+  it("adds no row, and no Needs you panel, when the commands are in sync", () => {
+    const html = page(calmDashboard());
+    expect(html).not.toContain("Slash commands");
+    expect(html).not.toContain("Needs you");
+  });
+
+  it("escapes a command name", () => {
+    const d = outOfSyncDashboard();
+    d.needsYou = [
+      {
+        ...d.needsYou[0],
+        title: '<img src=x onerror="1">',
+        detail: '"><script>1</script>',
+      },
+    ];
+    const html = page(d);
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<script>1");
   });
 });

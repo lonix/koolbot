@@ -89,3 +89,12 @@ export const COMMAND_CONFIGS: readonly CommandConfig[] = [
   // Derived gate (no `me.enabled` key): Web UI on and a /me/* surface on (#1016)
   { name: "me", configKey: null, isEnabled: isMeCommandEnabled, file: "me" },
 ];
+
+/**
+ * The config keys that gate a command (#1638): flipping one changes which slash
+ * commands should exist. Derived from `COMMAND_CONFIGS`, so a new command is
+ * covered by its registry entry. A derived gate (`/me`) has no key of its own.
+ */
+export const COMMAND_GATING_KEYS: ReadonlySet<string> = new Set(
+  COMMAND_CONFIGS.flatMap((c) => (c.configKey ? [c.configKey] : [])),
+);
