@@ -1137,4 +1137,54 @@ describe("VoiceChannelManager - lobby moved out of its category (issue #1636)", 
       expect(stranger.delete).not.toHaveBeenCalled();
     });
   });
+  describe("rooms inside the category with a waiting room (issue #1670)", () => {
+    function link(main: any, waiting: any): void {
+      (manager as any).waitingRooms.set(main.id, waiting.id);
+      (manager as any).waitingRoomToMain.set(waiting.id, main.id);
+    }
+
+    // The two in-category paths of the sweep: an owned (managed) room, and a
+    // room the bot does not recognise as owned (the "unmanaged" loop).
+    const paths: Array<[string, (room: any) => void]> = [
+      [
+        "empty-managed filter",
+        (room) => (manager as any).userChannels.set("owner-1", room),
+      ],
+      ["unmanaged loop", () => undefined],
+    ];
+
+    it.each(paths)(
+      "keeps an empty main room while someone is in its waiting room (%s)",
+      async (_label, own) => {
+        add("lobby-id", LOBBY_NAME, true);
+        const room = add("room-1", "Someone's Room", true);
+        own(room);
+        const waiting = add("wait-1", "Waiting", true);
+        waiting.members.set("m1", { user: { bot: false } });
+        link(room, waiting);
+
+        await manager.cleanupEmptyChannels();
+
+        expect(room.delete).not.toHaveBeenCalled();
+        expect(waiting.delete).not.toHaveBeenCalled();
+        expect((manager as any).waitingRooms.get(room.id)).toBe(waiting.id);
+      },
+    );
+
+    it.each(paths)(
+      "deletes an empty main room and its empty waiting room together (control, %s)",
+      async (_label, own) => {
+        add("lobby-id", LOBBY_NAME, true);
+        const room = add("room-1", "Someone's Room", true);
+        own(room);
+        const waiting = add("wait-1", "Waiting", true);
+        link(room, waiting);
+
+        await manager.cleanupEmptyChannels();
+
+        expect(room.delete).toHaveBeenCalled();
+        expect(waiting.delete).toHaveBeenCalled();
+      },
+    );
+  });
 });
