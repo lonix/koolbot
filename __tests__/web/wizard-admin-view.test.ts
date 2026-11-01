@@ -373,6 +373,47 @@ describe("renderWizardDonePage never calls a permission unneeded that something 
     expect(cell(one)).not.toContain(refOf("welcome-post").feature);
   });
 
+  it("keeps the Announcements permissions needed when it is on with no schedule (a message sent once picks its channel), and not needed when it is off", () => {
+    const check = (
+      id: string,
+      flagged: boolean,
+    ): BotPermissionReport["checks"][number] => ({
+      feature: refOf(id),
+      kind: "permission",
+      enabled: false,
+      outcome: "unchecked",
+      target: null,
+      missing: [],
+      ...(flagged ? { needsServerWide: true } : {}),
+    });
+    const ids = [
+      "announcements-post",
+      "announcements-embed",
+      "announcements-mentions",
+    ];
+    const on = renderWizardDonePage({
+      ...base,
+      report: reportWith(ids.map((id) => check(id, true))),
+    });
+    const { before, folded } = split(on);
+    for (const name of [
+      "Embed Links",
+      "Mention @everyone, @here and All Roles",
+      "Send Messages",
+    ]) {
+      expect(before).toContain(name);
+      expect(folded).not.toContain(name);
+    }
+    expect(before).toContain(refOf("announcements-mentions").area);
+    const off = renderWizardDonePage({
+      ...base,
+      report: reportWith(ids.map((id) => check(id, false))),
+    });
+    const control = split(off);
+    expect(control.folded).toContain("Mention @everyone, @here and All Roles");
+    expect(control.before).not.toContain("Mention @everyone");
+  });
+
   it("does not claim that every other permission is not needed, and says what the list is", () => {
     const html = renderWizardDonePage({ ...base, report: reportWith([]) });
     const main = mainOf(html);

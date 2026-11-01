@@ -81,9 +81,10 @@ export interface FeatureRequirement {
    */
   targetOptional?: boolean;
   /**
-   * With the optional channel empty the feature still posts, in the channel the
-   * command ran in (looking for group), so it needs its permissions wherever it
-   * runs. The check reports it as not checked, and says so with `needsServerWide`.
+   * With the optional channel empty (or no schedule naming one) the feature
+   * still posts, in the channel the command ran in (looking for group) or the
+   * one the admin picks when sending once (announcements), so it needs its
+   * permissions wherever it runs. The check reports it as not checked, and says so with `needsServerWide`.
    */
   postsInInvokingChannel?: boolean;
   /**
@@ -493,6 +494,7 @@ const scheduleRequirements: FeatureRequirement[] = [
     needs: [PERM.viewChannel, PERM.sendMessages],
     enabledKey: "announcements.enabled",
     schedules: "announcements",
+    postsInInvokingChannel: true,
     effect:
       "Scheduled announcements are not posted in this channel. A scheduled run logs the error in the bot's log only; Post now and Send once show it.",
     fix: "Give the bot's role View Channel and Send Messages, and make sure the channel does not deny them.",
@@ -506,6 +508,7 @@ const scheduleRequirements: FeatureRequirement[] = [
     needs: [PERM.embedLinks],
     enabledKey: "announcements.enabled",
     schedules: "announcements",
+    postsInInvokingChannel: true,
     scheduleWhen: "embed",
     effect:
       "Scheduled announcements with an embed are not posted in this channel. A scheduled run logs the error in the bot's log only; Post now and Send once show it.",
@@ -520,6 +523,7 @@ const scheduleRequirements: FeatureRequirement[] = [
     needs: [PERM.mentionEveryone],
     enabledKey: "announcements.enabled",
     schedules: "announcements",
+    postsInInvokingChannel: true,
     scheduleWhen: "mentions",
     effect:
       "The announcement is still posted, but an @everyone, an @here or a role that members cannot mention themselves does not notify anyone. Nothing tells you.",

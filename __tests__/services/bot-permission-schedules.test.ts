@@ -238,6 +238,41 @@ describe("when the entries are in use", () => {
   });
 });
 
+describe("an announcement sent once picks its channel at use time (#1617)", () => {
+  const flagged = (report: Awaited<ReturnType<typeof run>>): string[] =>
+    report.checks.filter((c) => c.needsServerWide).map((c) => c.feature.id);
+
+  it("says Announcements is on and needs its permissions wherever it posts when no schedule names a channel", async () => {
+    settings = { "announcements.enabled": true };
+    const report = await run([]);
+    expect(flagged(report).sort()).toEqual([
+      "announcements-embed",
+      "announcements-mentions",
+      "announcements-post",
+    ]);
+    // Still not checked and not a verdict: the Bot permissions page is unchanged.
+    for (const id of SCHEDULE_IDS) {
+      expect(entry(report, id).every((e) => !e.enabled)).toBe(true);
+    }
+    expect(report.notes).toEqual([]);
+  });
+
+  it("also says it for the entry no schedule applies to (no embed) while a schedule exists", async () => {
+    settings = { "announcements.enabled": true };
+    announcementRows = [row("a")];
+    const report = await run([text("a", BASE)]);
+    expect(flagged(report)).toContain("announcements-embed");
+    expect(flagged(report)).not.toContain("announcements-post");
+  });
+
+  it("says nothing while Announcements is off, and nothing for polls (a poll posts only from a schedule)", async () => {
+    settings = { "polls.enabled": true };
+    announcementRows = [row("a")];
+    const report = await run([text("a")]);
+    expect(flagged(report)).toEqual([]);
+  });
+});
+
 describe("scheduled announcements", () => {
   beforeEach(() => {
     settings = { "announcements.enabled": true };

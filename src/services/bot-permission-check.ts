@@ -119,8 +119,8 @@ export interface FeatureCheck {
   /**
    * The feature is switched on and posts in whichever channel it is used in, so
    * no channel is fixed and nothing is checked (`enabled` is false), yet it needs
-   * its permissions wherever it runs (looking for group with no channel set,
-   * #1617). Only the Setup wizard's narrowing step reads it, so it never calls
+   * its permissions wherever it runs (looking for group with no channel set, an
+   * announcement sent once with no schedule, #1617). Only the Setup wizard's narrowing step reads it, so it never calls
    * such a permission unneeded.
    */
   needsServerWide?: boolean;
@@ -674,7 +674,7 @@ export async function checkBotPermissions(
       ];
       if (r.schedules) {
         const source = r.schedules;
-        const off = (): void => {
+        const off = (useTimeChannel = false): void => {
           checks.push({
             feature: ref(r),
             kind: "permission",
@@ -682,6 +682,11 @@ export async function checkBotPermissions(
             outcome: "unchecked",
             target: null,
             missing: [],
+            // Switched on, but no schedule names a channel: a post the admin
+            // sends once picks its channel then (#1617).
+            ...(useTimeChannel && r.postsInInvokingChannel
+              ? { needsServerWide: true }
+              : {}),
           });
         };
         // Nothing is read while the feature is off.
@@ -718,7 +723,7 @@ export async function checkBotPermissions(
         // No schedule (or none this entry applies to): nothing posts, so the
         // entry is not in use, with no note.
         if (channels.length === 0) {
-          off();
+          off(true);
           continue;
         }
         units = channels.map((c) => ({

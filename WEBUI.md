@@ -1556,7 +1556,8 @@ a refused apply gets the usual `wizard.apply` audit entry (stage `administrator`
 After a successful apply the wizard ends on `/admin/wizard/done` (also after the Event host role was started, with a link to
 `/admin/role-groups?job=…`): an optional **Narrow the bot's permissions** step. It lists the permissions the switched-on features
 need (the same list as **Bot permissions**, plus a feature that is on but posts in whichever channel it is used in, such as
-Looking for group with no channel set) with the features that need each, then **Used, but not checked here**: the permissions
+Looking for group with no channel set, or Announcements with no schedule, whose message sent once picks its channel) with the features that need each,
+then **Used, but not checked here**: the permissions
 KoolBot's code uses that **Bot permissions** does not check (Ban Members for `/ban`, Timeout Members for `/timeout`, and the
 rest of its list), named with what each is for and never called unneeded, because they cannot be tied to a switched-on feature.
 It folds the checked permissions only switched-off features would use, and gives the four steps to swap Administrator for the
