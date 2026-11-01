@@ -2215,8 +2215,17 @@ restarts, so the note is not reposted.
 `METRICS_ENABLED` and `METRICS_TOKEN` are also `.env`-only but are not listed
 on the Bootstrap page.
 
-These are visible on the Web UI's **Bootstrap** page (secrets show as configured or unset only).
+These are visible on the Web UI's **Environment** page (secrets show as configured or unset only).
 Edit them in `.env` and restart the bot to change them.
+
+`WEBUI_INACTIVITY_TIMEOUT_MINUTES` is the length of the sliding window: a
+session ends when that long passes without a real request. A page load, a form
+save and a running job's status check count; the top bar's countdown check, a
+mouse move and a key press do not. `WEBUI_SESSION_LIFETIME_HOURS` is the hard cap
+from sign-in, whatever the activity. The **Your session** panel on the
+**Environment** page shows both as they apply, with when the session was issued
+and when the previous request was. [WEBUI.md](WEBUI.md#what-counts-as-activity)
+lists what counts and what does not.
 
 ---
 

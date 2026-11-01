@@ -687,6 +687,19 @@ says "Guild commands unchanged ... skipping bulk overwrite". If the comparison f
    - Connect
    - View Channel
 
+### A lobby moved out of its category
+
+KoolBot puts a lobby that was moved out of the voice category back, and never creates a second one while the real one exists.
+
+1. Open **Voice Channels** in the Web UI. If the status line shows **The lobby is outside the voice category**, the bot could not move it back.
+2. Give the bot role **Manage Channels**, or move the lobby back into the category in Discord. The warning clears by itself.
+3. If you keep moving the lobby on purpose, the bot puts it back once, then logs a warning and waits ten minutes before trying again.
+   To keep a lobby elsewhere, change `voicechannels.category_id` instead.
+
+A lobby configured with `voicechannels.lobby.channel_id` is found wherever it lives. A lobby found only by name is found when KoolBot created it
+(or, until the bot restarts, when it was moved while the bot was running). When the bot cannot read its record of the lobby (the database is down), it
+creates no lobby until it can, and logs why.
+
 ### Voice Channels Not Being Deleted
 
 **Symptoms:**

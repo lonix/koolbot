@@ -12,6 +12,7 @@ import {
   AuthenticatedRequest,
   clearSessionCookie,
   createSessionMiddleware,
+  createSessionPingHandler,
   writeSessionCookie,
 } from "./session.js";
 import {
@@ -166,6 +167,13 @@ export function createWebRouter(client: Client): Router {
   // first run the read-only middleware's session refresh; CSRF is checked
   // inside the write router. Same-shape paths (POST vs. GET) avoid
   // ordering ambiguity, but we keep the explicit precedence.
+  //
+  // The session ping comes first of all (#1635). The write router starts with
+  // `requireSession`, which renews the session, so a ping that waited for the
+  // read-only router would be renewed here and the banner's own polling would
+  // keep an idle session alive. The ping validates the cookie itself and
+  // never writes one.
+  router.get("/session/ping", createSessionPingHandler());
   router.use(createWriteRouter(client, requireSession));
 
   // Read-only admin pages (Dashboard, Bootstrap, Settings, Permissions,

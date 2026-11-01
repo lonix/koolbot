@@ -551,6 +551,7 @@ export class ConfigService {
    */
   public async findDependencyIssues(
     pending: Record<string, unknown>,
+    options: { strict?: boolean } = {},
   ): Promise<DependencyIssue[]> {
     // Resolve the live state of every dependency/dependent the batch touches
     // but doesn't itself set; keys inside the batch are judged from `pending`.
@@ -564,7 +565,15 @@ export class ConfigService {
     const snapshot = new Map<keyof ConfigSchema, boolean>();
     for (const relatedKey of needed) {
       if (hasOwn(pending, relatedKey)) continue;
-      snapshot.set(relatedKey, await this.getBoolean(relatedKey, false));
+      // `strict` (the wizard apply, #1622): a failed read rejects, so an
+      // unreadable dependent that is on can't count as off and let a write
+      // through. Every other caller keeps the forgiving read.
+      snapshot.set(
+        relatedKey,
+        options.strict
+          ? await this.getBooleanStrict(relatedKey, false)
+          : await this.getBoolean(relatedKey, false),
+      );
     }
     return validateDependencies(pending, (k) => snapshot.get(k) ?? false);
   }

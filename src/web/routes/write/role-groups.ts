@@ -36,6 +36,7 @@ import { recordAudit } from "../../audit.js";
 import {
   ROLE_DELETE_REVIEW_MINUTES,
   ROLE_GROUP_CREATE_FORM,
+  ROLE_GROUP_REORDER_SCOPE,
   roleGroupBoxKey,
   roleGroupEditForm,
 } from "../../role-groups-views.js";
@@ -55,6 +56,7 @@ import {
   refuseForm,
   requireSessionContext,
 } from "./helpers.js";
+import { parseMoveRequest, planMove } from "./reorder.js";
 
 const PAGE = "/admin/role-groups";
 
@@ -223,29 +225,56 @@ export function createRoleGroupsRouter(client: Client): Router {
     }),
   );
 
+  // Move one group to a place in the rank list (#1616). Highest first, as the
+  // page shows it. A form drawn for another list length or place changes
+  // nothing; `reorder()` checks the ids against the stored groups again.
   router.post(
-    "/role-groups/reorder",
+    "/role-groups/:id/move",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
-      const groupId = getString(req, "groupId");
-      const direction = getString(req, "direction");
-      const list = await groups().list(session.guildId);
-      const i = list.findIndex((g) => g.id === groupId);
-      const j = direction === "up" ? i - 1 : direction === "down" ? i + 1 : -1;
-      if (i < 0 || j < 0 || j >= list.length) {
+      const id = String(req.params.id);
+      const move = parseMoveRequest(req);
+      // The order token is required here: count and place alone cannot tell
+      // that other groups were reordered since the page was drawn.
+      if (move === null || move.order === undefined) {
         flashRedirect(res, PAGE, {
           type: "err",
-          text: "That move isn't possible. Reload and try again.",
+          text: "That move could not be read. Reload the page and try again.",
         });
         return;
       }
-      const ids = list.map((g) => g.id);
-      [ids[i], ids[j]] = [ids[j], ids[i]];
-      const result = await groups().reorder(session.guildId, ids);
+      const ids = (await groups().list(session.guildId)).map((g) => g.id);
+      const plan = planMove(ids, id, move);
+      if (
+        move.scope !== ROLE_GROUP_REORDER_SCOPE ||
+        plan.kind === "stale" ||
+        plan.kind === "out-of-range"
+      ) {
+        await recordAudit(session, {
+          action: "role-groups.reorder",
+          targetId: id,
+          details: { from: move.from, to: move.to },
+          result: "failure",
+          errorMessage: plan.kind === "moved" ? "stale" : plan.kind,
+        });
+        flashRedirect(res, PAGE, {
+          type: "warn",
+          text: "The list changed since this page was drawn, so nothing was moved. The page now shows the current order.",
+        });
+        return;
+      }
+      if (plan.kind === "unchanged") {
+        flashRedirect(res, PAGE, {
+          type: "ok",
+          text: "That group is already at that place.",
+        });
+        return;
+      }
+      const result = await groups().reorder(session.guildId, plan.ids);
       await recordAudit(session, {
         action: "role-groups.reorder",
-        targetId: groupId,
-        details: { direction },
+        targetId: id,
+        details: { from: move.from, to: move.to },
         result: result.ok ? "success" : "failure",
         errorMessage: result.ok ? null : result.error,
       });

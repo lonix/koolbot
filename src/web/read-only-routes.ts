@@ -87,6 +87,8 @@ import {
 } from "./adopt-view.js";
 import { cachedScan, peekLastScan, scanCacheKey } from "./server-scan-cache.js";
 import { loadDashboardData } from "./dashboard-data.js";
+import { readCommandSync } from "./command-sync-read.js";
+import { CommandManager } from "../services/command-manager.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { VersionCheckService } from "../services/version-check-service.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
@@ -179,6 +181,7 @@ import { BOOTSTRAP_VARS, bootstrapDisplay } from "./bootstrap-vars.js";
 import { getEnv, getEnvConfigValue } from "../config/env.js";
 import {
   createSessionPingHandler,
+  getInactivityWindowMs,
   requireAdminRoleMiddleware,
   type AuthenticatedRequest,
 } from "./session.js";
@@ -1068,6 +1071,9 @@ export function createReadOnlyRouter(
   // session's `act` timestamp — otherwise polling every 30s would keep
   // an idle session alive forever, defeating the inactivity window.
   // The handler runs its own (non-mutating) cookie + DB validation.
+  // `createWebRouter` also mounts the ping before the write router (#1635),
+  // whose `requireSession` would otherwise reach it first; this copy serves
+  // the router when it is mounted alone.
   router.get("/session/ping", createSessionPingHandler());
 
   router.use(requireSession);
@@ -1143,6 +1149,10 @@ export function createReadOnlyRouter(
         },
         // Cached for 30 s and never throws; a page is not held up for it.
         permissions: () => checkBotPermissions(client, guildId),
+        // One Discord GET at most a minute, shared by every hit; read-only
+        // (#1638). Throws are caught by the source's own wrapper.
+        commandSync: () =>
+          CommandManager.getInstance(client).checkCommandSync(),
         // Only a scan that has already finished, kept for the Dashboard's own
         // retention (#1415): it never starts one (a scan is a round of Discord
         // reads and spends the scan limiter).
@@ -1209,7 +1219,20 @@ export function createReadOnlyRouter(
         category,
         rows,
       }));
-      res.type("text/html").send(renderBootstrapPage({ ...common, groups }));
+      const session = req.webSession;
+      res.type("text/html").send(
+        renderBootstrapPage({
+          ...common,
+          groups,
+          session: session && {
+            issuedAt: session.issuedAt,
+            previousActivityAt: session.previousActivityAt,
+            now: session.lastActivityAt,
+            windowMs: getInactivityWindowMs(),
+            expiresAt: session.expiresAt,
+          },
+        }),
+      );
     }),
   );
 
@@ -1424,9 +1447,14 @@ export function createReadOnlyRouter(
             groups,
           });
 
+      // Read-only and cached; "Not checked" (null) when it cannot answer in
+      // time, never "in sync" (#1638).
+      const commandSync = await readCommandSync(client);
+
       res.type("text/html").send(
         renderSettingsPage({
           ...common,
+          commandSync,
           settingsUnavailable,
           permissionNotices,
           groups,
@@ -2676,6 +2704,7 @@ export function createReadOnlyRouter(
       let categoryFound = false;
       let totalManaged = 0;
       let totalEmpty = 0;
+      let lobbyOutsideCategory = false;
       // Category picker options for the editable `voicechannels.category_id`
       // control (#705). Derived from the same guild fetch that builds the
       // managed-channel table below, so the page fetches the guild/channels
@@ -2722,6 +2751,8 @@ export function createReadOnlyRouter(
             .filter((c) => c.type === ChannelType.GuildVoice)
             .sort((a, b) => a.name.localeCompare(b.name));
           totalManaged = voice.length;
+          lobbyOutsideCategory =
+            (await manager.getMisplacedLobbies(guild)).length > 0;
           // Runtime lobby detection ignores names once the configured ID
           // resolves to a channel in the category, so label the same way.
           const lobbyIdResolves =
@@ -2778,6 +2809,7 @@ export function createReadOnlyRouter(
           categoryChannels,
           voiceChannels,
           managedOnly,
+          lobbyOutsideCategory,
           flash: readFlash(req),
         }),
       );

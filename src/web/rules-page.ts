@@ -140,7 +140,7 @@ export interface RulesPageProps extends RulesPageData {
   flash?: FlashMessage | null;
 }
 
-const JOB_SCRIPT = (jobId: string): string =>
+export const JOB_SCRIPT = (jobId: string): string =>
   `(function(){var id=${JSON.stringify(jobId)};var el=document.getElementById('rules-job');` +
   "function tick(){fetch('/admin/role-groups/job/'+encodeURIComponent(id),{credentials:'same-origin'})" +
   ".then(function(r){return r.json()}).then(function(j){" +

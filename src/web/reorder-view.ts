@@ -9,7 +9,21 @@
  */
 
 import { escapeHtml } from "./html.js";
+import { createHash } from "node:crypto";
 import { icon } from "./icons.js";
+
+/**
+ * A short fingerprint of the order a list was drawn in (its ids, top to
+ * bottom). A move form posts it as `order`; the route compares it with the
+ * live list, so a move from a page whose order has changed moves nothing even
+ * when the count and the row's own place still match (#1616).
+ */
+export function orderToken(ids: readonly string[]): string {
+  return createHash("sha256")
+    .update(JSON.stringify(ids))
+    .digest("hex")
+    .slice(0, 16);
+}
 
 export interface ReorderCellOptions {
   /** Where the move form posts, for example `/admin/notices/<id>/move`. */
@@ -22,6 +36,8 @@ export interface ReorderCellOptions {
   index: number;
   /** How many rows the list has. */
   count: number;
+  /** {@link orderToken} of the list as drawn; omit for a list that only checks count and place. */
+  orderToken?: string;
   /** What the row is called, for the button names ("Move up: Welcome"). */
   label: string;
 }
@@ -44,7 +60,7 @@ export function renderReorderCell(o: ReorderCellOptions): string {
   return `<div class="kb-reorder">
 <span class="kb-reorder__handle" data-reorder-handle>${icon("grip-vertical")}</span>
 <span class="kb-reorder__place">${o.index + 1}<span class="kb-visually-hidden"> of ${o.count}</span></span>
-<form method="POST" action="${escapeHtml(o.action)}" class="kb-reorder__form" data-reorder-form>${o.csrfInput}<input type="hidden" name="from" value="${o.index}"><input type="hidden" name="count" value="${o.count}"><input type="hidden" name="scope" value="${escapeHtml(o.scope)}">${move("Move up", o.index - 1, o.index === 0)}${move("Move down", o.index + 1, o.index >= o.count - 1)}</form>
+<form method="POST" action="${escapeHtml(o.action)}" class="kb-reorder__form" data-reorder-form>${o.csrfInput}<input type="hidden" name="from" value="${o.index}"><input type="hidden" name="count" value="${o.count}"><input type="hidden" name="scope" value="${escapeHtml(o.scope)}">${o.orderToken === undefined ? "" : `<input type="hidden" name="order" value="${escapeHtml(o.orderToken)}">`}${move("Move up", o.index - 1, o.index === 0)}${move("Move down", o.index + 1, o.index >= o.count - 1)}</form>
 </div>`;
 }
 

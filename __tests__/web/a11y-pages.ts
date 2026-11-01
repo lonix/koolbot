@@ -59,6 +59,8 @@ import {
   UPDATE_AVAILABLE,
   busyDashboard,
   calmDashboard,
+  notCheckedDashboard,
+  outOfSyncDashboard,
 } from "./dashboard-fixtures.js";
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
 import { busyScan } from "./server-scan-fixtures.js";
@@ -1244,6 +1246,26 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The slash-command row: commands to add, remove and update, linking to
+      // All settings (#1638).
+      name: "Dashboard with commands out of sync",
+      html: renderDashboardPage({
+        ...COMMON,
+        data: outOfSyncDashboard(),
+        version: UPDATE_AVAILABLE,
+      }),
+    },
+    {
+      // The slash-command check could not be made: Not checked, with the
+      // reason (#1638).
+      name: "Dashboard with commands not checked",
+      html: renderDashboardPage({
+        ...COMMON,
+        data: notCheckedDashboard(),
+        version: UPDATE_AVAILABLE,
+      }),
+    },
+    {
       // The destructive section and the typed-name confirmation (#1184).
       name: "Role group deletion review",
       html: renderRoleDeletePage({
@@ -1678,6 +1700,14 @@ export function adminPages(): A11yPage[] {
       name: "Bootstrap",
       html: renderBootstrapPage({
         ...COMMON,
+        // The "Your session" panel (#1635), so axe and the UI preview see it.
+        session: {
+          issuedAt: Date.UTC(2026, 10, 1, 3, 59),
+          previousActivityAt: Date.UTC(2026, 10, 1, 8, 45),
+          now: Date.UTC(2026, 10, 1, 8, 59),
+          windowMs: 30 * 60 * 1000,
+          expiresAt: new Date(Date.UTC(2026, 10, 2, 3, 59)),
+        },
         groups: [
           {
             category: "Discord",
@@ -1718,6 +1748,37 @@ export function adminPages(): A11yPage[] {
         guildId: "g1",
         guildName: "Test Guild",
         flash: FLASH,
+      }),
+    },
+    {
+      // The slash-command state next to Reload commands (#1638): commands to add,
+      // remove and update.
+      name: "Settings (commands out of sync)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: [{ category: "voicechannels", rows: SETTING_ROWS }],
+        guildId: "g1",
+        guildName: "Test Guild",
+        commandSync: {
+          state: "out-of-sync",
+          checkedAt: 0,
+          added: ["lfg", "poll"],
+          removed: ["event"],
+          changed: ["quote"],
+        },
+      }),
+    },
+    {
+      // The check could not be made, and the state it shows when all is well (#1638).
+      name: "Settings (commands not checked)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        groups: [{ category: "voicechannels", rows: SETTING_ROWS }],
+        guildId: "g1",
+        guildName: "Test Guild",
+        commandSync: null,
       }),
     },
     {
@@ -2430,6 +2491,62 @@ export function adminPages(): A11yPage[] {
         selection: { admin: [], staff: [], host: [] },
         options: null,
         gaps: [],
+      }),
+    },
+    {
+      name: "Setup wizard confirm, a feature turned off with parts that need it",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [["voicetracking.enabled", false]],
+        metadata: {
+          "voicetracking.enabled": {
+            description: "Track time spent in voice channels.",
+            category: "voicetracking",
+          },
+        },
+        dependencies: {
+          cascade: [
+            {
+              key: "voicetracking.enabled",
+              dependents: [
+                "voicetracking.announcements.enabled",
+                "achievements.enabled",
+              ],
+            },
+          ],
+          cascadeKeys: [
+            "achievements.enabled",
+            "voicetracking.announcements.enabled",
+          ],
+          fingerprint:
+            "achievements.enabled,voicetracking.announcements.enabled",
+          blockers: [],
+        },
+      }),
+    },
+    {
+      name: "Setup wizard confirm, settings that cannot be applied together",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [["achievements.enabled", true]],
+        metadata: {
+          "achievements.enabled": {
+            description: "Award achievements.",
+            category: "achievements",
+          },
+        },
+        dependencies: {
+          cascade: [],
+          cascadeKeys: [],
+          fingerprint: "",
+          blockers: [
+            {
+              key: "achievements.enabled",
+              direction: "enable",
+              related: ["voicetracking.enabled"],
+            },
+          ],
+        },
       }),
     },
     {
@@ -4246,6 +4363,67 @@ export function adminPages(): A11yPage[] {
         flash: FLASH,
       }),
     })),
+    {
+      name: "Voice channels (lobby outside the category)",
+      html: renderVoiceChannelsPage({
+        ...COMMON,
+        enabled: true,
+        lobbyOutsideCategory: true,
+        controlPanelEnabled: true,
+        categoryName: "Voice Channels",
+        lobbyName: "Lobby",
+        offlineLobbyName: "Offline",
+        prefix: "",
+        totalManaged: 2,
+        totalEmpty: 1,
+        categoryFound: true,
+        channels: [
+          {
+            name: "Lobby",
+            isLobby: true,
+            isLive: false,
+            memberCount: 0,
+            customName: null,
+            channelId: "v1",
+          },
+          {
+            name: "Alice's channel",
+            isLobby: false,
+            isLive: true,
+            memberCount: 3,
+            customName: "Alice's channel",
+            channelId: "v2",
+          },
+        ],
+        settingRows: [
+          ...SETTING_ROWS.slice(0, 4),
+          {
+            key: "voicechannels.channel.prefix",
+            label: "Per-user channel name prefix",
+            current: "🎮",
+            defaultValue: "",
+            type: "string",
+            description:
+              "Prefix prepended to dynamically created voice channel names.",
+            category: "voicechannels",
+            format: "affix",
+          },
+          {
+            key: "voicechannels.channel.suffix",
+            label: "Per-user channel name suffix",
+            current: "",
+            defaultValue: "",
+            type: "string",
+            description:
+              "Suffix appended to dynamically created voice channel names.",
+            category: "voicechannels",
+            format: "affix",
+          },
+        ],
+        categoryChannels: CATEGORIES,
+        flash: FLASH,
+      }),
+    },
     ...[true, false].map((enabled) => ({
       name: enabled ? "Digest" : "Digest (feature off)",
       html: renderDigestPage({

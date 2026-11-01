@@ -52,7 +52,7 @@ export interface AdoptionHistoryPageProps {
   jobId?: string | null;
 }
 
-const JOB_SCRIPT = (jobId: string): string =>
+export const JOB_SCRIPT = (jobId: string): string =>
   `(function(){var id=${JSON.stringify(jobId)};var el=document.getElementById('ah-job');` +
   `function tick(){fetch('${HISTORY_PATH}/job/'+encodeURIComponent(id),{credentials:'same-origin'})` +
   ".then(function(r){return r.json()}).then(function(j){" +

@@ -1,4 +1,5 @@
 import {
+  commandSyncRows,
   dashboardFeatures,
   type DashboardData,
 } from "../../src/web/dashboard-data.js";
@@ -30,6 +31,7 @@ export function calmDashboard(): DashboardData {
       },
     },
     permissions: { state: "ok", value: { problems: 0, unchecked: 0 } },
+    commandSync: { state: "ok", value: { state: "in-sync", checkedAt: 0 } },
     needsYou: [],
     scanReadAt: null,
     voice: {
@@ -46,6 +48,37 @@ export function calmDashboard(): DashboardData {
       "quotes.enabled": true,
       "polls.enabled": false,
     }),
+  };
+}
+
+/** Commands to add, remove and update: the slash-command row alone (#1638). */
+export function outOfSyncDashboard(): DashboardData {
+  const added = ["lfg", "poll"];
+  const removed = ["event"];
+  const changed = ["quote"];
+  return {
+    ...calmDashboard(),
+    commandSync: {
+      state: "ok",
+      value: { state: "out-of-sync", checkedAt: 0, added, removed, changed },
+    },
+    needsYou: commandSyncRows({
+      state: "ok",
+      value: { state: "out-of-sync", checkedAt: 0, added, removed, changed },
+    }),
+  };
+}
+
+/** Discord did not answer: the row says Not checked, never in sync (#1638). */
+export function notCheckedDashboard(): DashboardData {
+  const commandSync: DashboardData["commandSync"] = {
+    state: "ok",
+    value: { state: "unknown", checkedAt: 0, reason: "Discord did not answer" },
+  };
+  return {
+    ...calmDashboard(),
+    commandSync,
+    needsYou: commandSyncRows(commandSync),
   };
 }
 

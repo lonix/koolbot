@@ -22,6 +22,9 @@ import { PROTECTED_KEYS } from "../../bootstrap-vars.js";
 import { recordAudit } from "../../audit.js";
 import { findUnknownShortcodes } from "../../../utils/emoji-shortcodes.js";
 import { getDisplayedRemainingMs } from "../../admin-layout.js";
+import { COMMAND_GATING_KEYS } from "../../../services/command-registry.js";
+import { commandSyncFlashNote } from "../../command-sync-text.js";
+import { rereadCommandSync } from "../../command-sync-read.js";
 import {
   renderImportDiffPage,
   readSettingField,
@@ -405,7 +408,14 @@ export function createSettingsRouter(client: Client): Router {
           deleted > 0
             ? `, ${deleted} orphan key${deleted === 1 ? "" : "s"} removed`
             : "";
-        const reloadNote = " You may need to Reload commands.";
+        // What the commands need is read, not guessed (#1638): the cached check
+        // is dropped and Discord is read again, with the Dashboard's time limit.
+        // Only when something was written; a reset that landed nothing changed
+        // nothing, so it reads nothing.
+        const reloadNote =
+          failed.length === 0 || landed > 0
+            ? commandSyncFlashNote(await rereadCommandSync(client))
+            : "";
         // Re-arm every scheduled job from the defaults just written (#1013);
         // only the command list still needs a manual reload. Not diffed: a
         // key with no stored row may have been running on an env fallback,
@@ -738,17 +748,22 @@ export function createSettingsRouter(client: Client): Router {
       // that page (disabled banner, Status card, nav badge, action buttons)
       // describing the old state, so the AJAX save reloads it. The Settings
       // page itself renders nothing else from these values and keeps the
-      // in-place flash. A key whose metadata sets `reloadOnSave` also
+      // in-place flash, apart from the command-gating keys below. A key whose metadata sets `reloadOnSave` also
       // reloads: the rest of the page renders from its value (#1090).
       const reload =
-        redirectTo !== "/admin/settings" &&
-        (changedKeys.some((k) => k.endsWith(".enabled")) ||
-          applied.some(
-            (a) =>
-              unknownBefore.has(a.key) ||
-              settingsMetadata[a.key as keyof typeof settingsMetadata]
-                ?.reloadOnSave === true,
-          ));
+        redirectTo === "/admin/settings"
+          ? // All settings keeps its in-place flash, except after a key that
+            // gates a slash command: the status line beside Reload commands
+            // (#1638) would still describe the old state, so the page reloads
+            // and reads it again.
+            changedKeys.some((k) => COMMAND_GATING_KEYS.has(k))
+          : changedKeys.some((k) => k.endsWith(".enabled")) ||
+            applied.some(
+              (a) =>
+                unknownBefore.has(a.key) ||
+                settingsMetadata[a.key as keyof typeof settingsMetadata]
+                  ?.reloadOnSave === true,
+            );
       const rearmNote = rearmFailureNote(rearmFailed);
       const label = category || "section";
       if (failed.length === 0) {

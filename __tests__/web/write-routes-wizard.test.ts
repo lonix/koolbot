@@ -31,10 +31,19 @@ const mockRecordAudit = jest.fn(async () => undefined);
 const mockGetSession = jest.fn<() => unknown>();
 const mockCreateSession = jest.fn();
 const mockAddConfiguration = jest.fn();
+const mockRemoveConfiguration = jest.fn();
 const mockApplyConfiguration = jest.fn<() => Promise<unknown>>();
 const mockEndSession = jest.fn();
 const mockConfigGetAll = jest.fn<() => Promise<unknown>>(async () => []);
 const mockConfigGet = jest.fn(async () => null);
+const mockConfigGetBoolean = jest.fn<(key: string) => Promise<boolean>>(
+  async () => false,
+);
+// The strict read the dependency check gates writes on; by default it answers
+// like the forgiving one, so a test makes it reject to simulate a failed read.
+const mockConfigGetBooleanStrict = jest.fn<
+  (key: string, defaultValue?: boolean) => Promise<boolean>
+>(async (key) => mockConfigGetBoolean(key));
 const mockConfigGetStringStrict = jest.fn(
   async (_key: string, defaultValue: string = ""): Promise<string> =>
     defaultValue,
@@ -63,6 +72,7 @@ jest.unstable_mockModule("../../src/services/wizard-service.js", () => ({
       getSession: mockGetSession,
       createSession: mockCreateSession,
       addConfiguration: mockAddConfiguration,
+      removeConfiguration: mockRemoveConfiguration,
       applyConfiguration: mockApplyConfiguration,
       endSession: mockEndSession,
       getConfiguration: (): undefined => undefined,
@@ -77,7 +87,8 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
       getStringStrict: mockConfigGetStringStrict,
       getString: jest.fn(async () => ""),
       getNumber: jest.fn(async () => 0),
-      getBoolean: jest.fn(async () => false),
+      getBoolean: mockConfigGetBoolean,
+      getBooleanStrict: mockConfigGetBooleanStrict,
       getAll: mockConfigGetAll,
       registerReloadCallback: jest.fn(),
     }),
@@ -136,6 +147,10 @@ beforeEach(async () => {
         : [],
     );
   mockConfigGetAll.mockImplementation(async () => []);
+  mockConfigGetBoolean.mockImplementation(async () => false);
+  mockConfigGetBooleanStrict.mockImplementation(async (key) =>
+    mockConfigGetBoolean(key),
+  );
   harness = await startAdminHarness([
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
@@ -147,6 +162,13 @@ beforeEach(async () => {
 afterEach(async () => {
   await harness.close();
 });
+
+/** The derived writes the last apply passed to the engine for that attempt only. */
+function lastDerived(): Record<string, unknown> {
+  const calls = mockApplyConfiguration.mock.calls as unknown as unknown[][];
+  expect(calls.length).toBeGreaterThan(0);
+  return calls[calls.length - 1][2] as Record<string, unknown>;
+}
 
 function lastAudit(): Record<string, unknown> {
   const calls = mockRecordAudit.mock.calls;
@@ -735,7 +757,7 @@ describe("POST /wizard/apply", () => {
     expect(mockApplyConfiguration).toHaveBeenCalled();
   });
 
-  it("explicitly disables every feature the admin did not tick", async () => {
+  it("explicitly disables every feature the admin did not tick, for this apply only", async () => {
     mockGetSession.mockReturnValue(
       wizardState(["quotes"], { "quotes.enabled": true }),
     );
@@ -746,15 +768,17 @@ describe("POST /wizard/apply", () => {
       revertFailedKeys: [],
     });
     await harness.post("/wizard/apply");
-    const disabled = mockAddConfiguration.mock.calls
-      .filter((c) => c[3] === false)
-      .map((c) => c[2]);
+    // Derived values go into this attempt's batch, never into the saved choices.
+    expect(
+      mockAddConfiguration.mock.calls.filter((c) => c[3] === false),
+    ).toEqual([]);
+    const derived = lastDerived();
     for (const feature of WIZARD_FEATURE_ORDER) {
       if (feature === "quotes") continue;
-      expect(disabled).toContain(`${feature}.enabled`);
+      expect(derived[`${feature}.enabled`]).toBe(false);
     }
     // Independent command gates go off with their feature.
-    expect(disabled).toContain("aka.enabled");
+    expect(derived["aka.enabled"]).toBe(false);
   });
 
   it("ends the session and lands on Settings after a successful apply", async () => {
@@ -771,7 +795,11 @@ describe("POST /wizard/apply", () => {
     const flash = parseFlashRedirect(res.headers.get("location"));
     expect(flash.path).toBe("/admin/settings");
     expect(flash.type).toBe("ok");
-    expect(flash.msg).toBe("Wizard applied 1 setting.");
+    // The chosen setting plus the off switch of every unticked feature, as
+    // when those were saved into the session before the apply.
+    expect(flash.msg).toBe(
+      `Wizard applied ${1 + Object.keys(lastDerived()).length} settings.`,
+    );
     expect(mockEndSession).toHaveBeenCalledWith(
       session.discordUserId,
       session.guildId,
@@ -807,15 +835,304 @@ describe("POST /wizard/apply", () => {
     });
   });
 
-  it("ends the session and flashes when applyConfiguration threw", async () => {
+  it("keeps the session and returns to Review when applyConfiguration threw (#1622)", async () => {
     mockGetSession.mockReturnValue(wizardState(["quotes"], {}));
     mockApplyConfiguration.mockRejectedValue(new Error("mongo down"));
     const res = await harness.post("/wizard/apply");
-    const flash = parseFlashRedirect(res.headers.get("location"));
-    expect(flash.path).toBe("/admin/settings");
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("/admin/wizard?");
+    expect(location).toContain("step=confirm");
+    const flash = parseFlashRedirect(location);
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("mongo down");
-    expect(mockEndSession).toHaveBeenCalled();
+    expect(flash.msg).not.toContain("Wizard failed");
+    expect(mockEndSession).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      result: "failure",
+      errorMessage: "mongo down",
+    });
+  });
+});
+
+/**
+ * #1622: Voice Tracking is not ticked (so Apply writes it off) while the
+ * weekly recap that needs it stays on. Before the fix Review showed nothing
+ * and Apply threw after the session had been ended.
+ */
+/**
+ * Revisiting a step and switching its master off must not leave the earlier
+ * staged children behind: the planner would take a stale `true` for the admin's
+ * choice and block Apply instead of offering the cascade (#1622).
+ */
+describe("switching a feature's master off on a revisited step (#1622)", () => {
+  type Choices = Record<string, unknown>;
+  let state: { selectedFeatures: string[]; configuration: Choices };
+
+  beforeEach(() => {
+    mockConfigGetBoolean.mockImplementation(
+      async (key) =>
+        key === "voicetracking.announcements.enabled" ||
+        key === "voicetracking.enabled",
+    );
+    mockApplyConfiguration.mockResolvedValue({
+      success: true,
+      appliedKeys: [],
+      rolledBackKeys: [],
+      revertFailedKeys: [],
+    });
+    state = {
+      selectedFeatures: ["voicetracking", "quotes"],
+      configuration: {
+        "voicetracking.enabled": true,
+        "voicetracking.announcements.enabled": true,
+        "voicetracking.stats.top.enabled": true,
+        "voicetracking.seen.enabled": true,
+        "quotes.enabled": true,
+      },
+    };
+    mockGetSession.mockImplementation(() => state);
+    mockAddConfiguration.mockImplementation((...a: unknown[]) => {
+      state.configuration[a[2] as string] = a[3];
+    });
+    mockRemoveConfiguration.mockImplementation((...a: unknown[]) => {
+      delete state.configuration[a[2] as string];
+    });
+  });
+
+  it("clears that feature's staged children and nothing else, so Review offers the cascade", async () => {
+    await harness.post("/wizard/step/0", {});
+    expect(state.configuration).toEqual({
+      "voicetracking.enabled": false,
+      "quotes.enabled": true,
+    });
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).toContain('name="cascadeOff"');
+    expect(html).not.toContain("These settings can't be applied together");
+    expect(html).not.toMatch(/<button[^>]*btn-primary[^>]*disabled/);
+
+    const res = await harness.post("/wizard/apply", {
+      cascadeOff: "voicetracking.announcements.enabled",
+    });
+    expect(res.headers.get("location")).toContain("/admin/settings");
+    expect(lastDerived()["voicetracking.announcements.enabled"]).toBe(false);
+    expect(lastAudit()).toMatchObject({
+      result: "success",
+      details: { cascadeOff: ["voicetracking.announcements.enabled"] },
+    });
+  });
+
+  it("keeps a staged false and clears only the staged true children", async () => {
+    state.configuration["voicetracking.stats.top.enabled"] = false;
+    state.configuration["voicetracking.seen.enabled"] = false;
+    await harness.post("/wizard/step/0", {});
+    expect(state.configuration).toEqual({
+      "voicetracking.enabled": false,
+      "voicetracking.stats.top.enabled": false,
+      "voicetracking.seen.enabled": false,
+      "quotes.enabled": true,
+    });
+  });
+
+  it("keeps an explicit command disable (aka.enabled=false) when Name history's master is switched off", async () => {
+    state.selectedFeatures = ["namehistory"];
+    state.configuration = {
+      "namehistory.enabled": true,
+      "aka.enabled": false,
+    };
+    await harness.post("/wizard/step/0", {});
+    expect(state.configuration).toEqual({
+      "namehistory.enabled": false,
+      "aka.enabled": false,
+    });
+  });
+
+  it("needs no cascade when the cleared child has no live value", async () => {
+    mockConfigGetBoolean.mockImplementation(
+      async (key) => key === "voicetracking.enabled",
+    );
+    await harness.post("/wizard/step/0", {});
+    expect(state.configuration["voicetracking.announcements.enabled"]).toBe(
+      undefined,
+    );
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).not.toContain('name="cascadeOff"');
+    expect(html).not.toContain("These settings can't be applied together");
+  });
+
+  it("keeps the children staged while the master stays on", async () => {
+    await harness.post("/wizard/step/0", {
+      "value_voicetracking.enabled": "true",
+    });
+    expect(mockRemoveConfiguration).not.toHaveBeenCalled();
+    expect(state.configuration["voicetracking.enabled"]).toBe(true);
+  });
+});
+
+describe("a feature turned off while a part that needs it stays on (#1622)", () => {
+  const recapOn = (key: string): boolean =>
+    key === "voicetracking.announcements.enabled" ||
+    key === "voicetracking.enabled";
+
+  beforeEach(() => {
+    mockConfigGetBoolean.mockImplementation(async (key) => recapOn(key));
+    mockGetSession.mockReturnValue(
+      wizardState(["quotes"], { "quotes.enabled": true }),
+    );
+    mockApplyConfiguration.mockResolvedValue({
+      success: true,
+      appliedKeys: [],
+      rolledBackKeys: [],
+      revertFailedKeys: [],
+    });
+  });
+
+  it("Review names the parts, links each one and offers to turn them off", async () => {
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).toContain("Some parts need a feature you are turning off");
+    expect(html).toContain("Voice Tracking enabled");
+    expect(html).toContain(
+      '<span class="kb-mono">voicetracking.enabled</span>',
+    );
+    expect(html).toContain(
+      '<a href="/admin/settings#section-voicetracking">Scheduled weekly recap enabled</a>',
+    );
+    expect(html).not.toContain("`");
+    expect(html).toContain(
+      'name="cascadeOff" value="voicetracking.announcements.enabled"',
+    );
+    expect(html).toContain('form="wizard-apply-form"');
+    expect(html).not.toMatch(/<button[^>]*btn-primary[^>]*disabled/);
+  });
+
+  it("Review shows nothing about it when nothing depends on what is turned off", async () => {
+    mockConfigGetBoolean.mockImplementation(async () => false);
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).not.toContain("need a feature you are turning off");
+  });
+
+  it("refuses an unconfirmed apply back to Review, keeping the session and writing nothing", async () => {
+    const res = await harness.post("/wizard/apply");
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("step=confirm");
+    const flash = parseFlashRedirect(location);
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("Nothing was applied");
+    expect(flash.msg).not.toContain("`");
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    expect(mockEndSession).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      result: "failure",
+      details: {
+        stage: "dependencies",
+        cascadeKeys: ["voicetracking.announcements.enabled"],
+        reason: "not-confirmed",
+      },
+    });
+    const cascaded = mockAddConfiguration.mock.calls
+      .filter((c) => c[2] === "voicetracking.announcements.enabled")
+      .map((c) => c[3]);
+    expect(cascaded).toEqual([]);
+  });
+
+  it("turns the parts off in the same apply once the admin confirmed them", async () => {
+    const res = await harness.post("/wizard/apply", {
+      cascadeOff: "voicetracking.announcements.enabled",
+    });
+    expect(mockApplyConfiguration).toHaveBeenCalledTimes(1);
+    expect(lastDerived()["voicetracking.announcements.enabled"]).toBe(false);
+    expect(res.headers.get("location")).toContain("/admin/settings");
+    expect(lastAudit()).toMatchObject({
+      result: "success",
+      details: { cascadeOff: ["voicetracking.announcements.enabled"] },
+    });
+  });
+
+  it("refuses the apply when a dependent cannot be read, writing nothing and keeping the session", async () => {
+    // The forgiving read would count the unreadable recap as off and let the
+    // apply through; the strict read refuses.
+    mockConfigGetBooleanStrict.mockRejectedValue(new Error("mongo down"));
+    const res = await harness.post("/wizard/apply", {
+      cascadeOff: "voicetracking.announcements.enabled",
+    });
+    expect(res.headers.get("location")).toContain("step=confirm");
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    expect(mockEndSession).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      result: "failure",
+      details: { stage: "dependencies" },
+    });
+  });
+
+  it("keeps a failed attempt's turn-offs out of the session and plans again on retry", async () => {
+    // Attempt 1: confirmed, then the engine throws.
+    mockApplyConfiguration.mockRejectedValueOnce(new Error("mongo down"));
+    const failed = await harness.post("/wizard/apply", {
+      cascadeOff: "voicetracking.announcements.enabled",
+    });
+    expect(failed.headers.get("location")).toContain("step=confirm");
+    expect(mockEndSession).not.toHaveBeenCalled();
+    expect(
+      mockAddConfiguration.mock.calls.filter((c) => c[3] === false),
+    ).toEqual([]);
+    expect(lastDerived()["voicetracking.announcements.enabled"]).toBe(false);
+
+    // Back on Review the dependents and the switch are offered again.
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).toContain('name="cascadeOff"');
+
+    // The admin turned the recap off themselves in the meantime: the retry
+    // needs no cascade and must not turn off anything more.
+    mockConfigGetBoolean.mockImplementation(
+      async (key) => key === "voicetracking.enabled",
+    );
+    mockApplyConfiguration.mockClear();
+    mockRecordAudit.mockClear();
+    const retried = await harness.post("/wizard/apply");
+    expect(retried.headers.get("location")).toContain("/admin/settings");
+    expect(
+      lastDerived()["voicetracking.announcements.enabled"],
+    ).toBeUndefined();
+    expect(lastAudit()).toMatchObject({
+      result: "success",
+      details: { cascadeOff: [] },
+    });
+    expect(
+      mockAddConfiguration.mock.calls.filter((c) => c[3] === false),
+    ).toEqual([]);
+  });
+
+  it("refuses a confirmation that no longer matches what is on", async () => {
+    await harness.post("/wizard/apply", { cascadeOff: "something.else" });
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      details: { reason: "out-of-date" },
+    });
+  });
+
+  it("follows the chain: turning off Voice Tracking also needs what needs Achievements", async () => {
+    mockConfigGetBoolean.mockImplementation(
+      async (key) =>
+        key === "voicetracking.enabled" ||
+        key === "achievements.enabled" ||
+        key === "celebrations.enabled",
+    );
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).toContain('<span class="kb-mono">achievements.enabled</span>');
+    expect(html).toContain('<span class="kb-mono">celebrations.enabled</span>');
+  });
+
+  it("blocks Apply on Review when a chosen enable needs something that stays off", async () => {
+    mockGetSession.mockReturnValue(
+      wizardState(["achievements"], { "achievements.enabled": true }),
+    );
+    mockConfigGetBoolean.mockImplementation(async () => false);
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).toContain("These settings can't be applied together");
+    expect(html).toMatch(/<button[^>]*btn-primary[^>]*disabled/);
+    const res = await harness.post("/wizard/apply");
+    expect(res.headers.get("location")).toContain("step=confirm");
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    expect(mockEndSession).not.toHaveBeenCalled();
   });
 });
 

@@ -814,6 +814,58 @@ Or rotate `WEBUI_SESSION_SECRET` in `.env` and restart — that
 invalidates every signed cookie and every outstanding magic link as a
 side effect, since the HMAC key changes.
 
+### What counts as activity
+
+This section is for admins who want to know why a session is still open, or
+why it ended. Every request that passes the session check writes a new
+cookie with the time of that request (`act`), so the inactivity window starts
+again. Opening a page, saving a form and every request a page makes while a job
+runs all count. Nothing in the browser counts by itself: a mouse move or a key
+press does not reach the server, and the countdown in the top bar never extends
+a session.
+
+| What the page sends | Renews the session? |
+| --- | --- |
+| A page load, a form save, a confirm step, a button such as **Check now** | Yes |
+| The countdown's check (`/admin/session/ping`, `/me/session/ping`), every 30 seconds | No. It is answered before the session check and writes no cookie. |
+| The job status check (`/admin/role-groups/job/<id>`, `/admin/adopt/history/job/<id>`) on the six pages that run a job | Yes, every 1.5 seconds, and only while the job is still `running`. The check stops on `done`, `failed`, an unknown job, a sign-in page or a network error. |
+| The top bar countdown and the "Current time" line on the timezone card of **My preferences** | No. They run in the browser only. |
+
+No other page polls, reloads itself or refreshes by meta tag. A test
+(`__tests__/web/session-renewal-sources.test.ts`) fails when a new
+timer-driven request appears, so this table is revisited with it.
+
+> [!NOTE]
+> A tab you left alone for hours still shows its old page. That is not a
+> session. The page is only a picture of the last load; the next click makes a
+> request, and the server answers 401 after the window. When the page wakes
+> (the tab is shown again or the browser restores it from its cache), the
+> countdown checks the clock and asks the server at once, and sends the browser
+> to the sign-in page if the session has ended.
+
+To see what a session is doing, open **Environment** and read **Your session**:
+
+- **Signed in:** when the session was issued.
+- **Previous request:** when the request before this page was. This page is a
+  request too and has just renewed the session, so only the one before it shows
+  what kept the session alive.
+- **Inactivity window:** `WEBUI_INACTIVITY_TIMEOUT_MINUTES`.
+- **Hard cap:** the latest time the session can last, from
+  `WEBUI_SESSION_LIFETIME_HOURS`.
+
+With `DEBUG=true` the bot also writes one line each time a session is renewed
+(method, path, and time since the previous request) and each time one is
+refused (the cause, the path, and for inactivity the idle time against the
+window). The path has no query string, and any segment that looks like an id (a
+Discord user or guild id, an event id, a UUID, a long token) is written as
+`:id`. The lines never contain the cookie, the session id, a user id or the
+secret.
+
+Over plain `http` (a `WEBUI_BASE_URL` that starts with `http://`) the cookie is
+named `koolbot_session`, has no `Secure` flag, and expires in the browser
+after the inactivity window (`Max-Age`), renewed on every request. Over
+`https` it is named `__Host-koolbot_session` and has `Secure`.
+
 ---
 
 ## Prometheus / OpenMetrics endpoint
@@ -952,6 +1004,22 @@ scan found for up to 30 minutes after it finished, each row saying how long ago 
 read (for example "Found by a Server scan 12 minutes ago"), and the Server scan page is where
 you run a new one. The scan page itself still shares one scan for a minute (#1415).
 
+**Slash commands out of sync** (#1638). Switching a feature on or off changes which slash commands should exist, but Discord only
+learns that when the commands are reloaded. The Dashboard and **All settings** therefore compare the commands Discord has registered with
+the ones the switched-on features need, and say what differs. The check reads Discord once (a read, never a write), is reused for 60
+seconds, and starts again after a reload or any save in the admin pages.
+
+- On the **Dashboard**, **Needs you** gets a first row, for example "Slash commands are out of sync: 2 to add (/poll, /lfg), 1 to remove (/event)",
+  with one sentence on what members see and an **Open All settings** button. The Dashboard has no **Reload commands** button of its own.
+- When the check could not be made (Discord did not answer, or it took longer than the Dashboard's time limit), the row says **Not checked** with the
+  reason. A check that did not run is never shown as in sync, and never as out of sync.
+- On **All settings**, a status line next to **Reload commands** says **In sync**, **Out of sync** with the same names, or **Not checked**.
+- A save on **All settings** that switches on or off a feature with a slash command reloads the page, so the status line is read again
+  instead of keeping the old state.
+- After **Reset all to defaults**, the message states what the check found instead of "You may need to Reload commands".
+
+The check changes nothing: **Reload commands** is still the only way to apply the difference.
+
 The Dashboard's **Version** panel (#1029) shows the running version
 next to the latest KoolBot release, with its state: _up to date_, _update
 available_ (with the kind: major, minor or patch), or _couldn't check_. It also
@@ -1079,6 +1147,15 @@ sure the lobby exists. Turn on **Only clean up channels KoolBot created**
 (`voicechannels.cleanup.managed_only`, #1032) when the category is an existing,
 shared one: startup, periodic and forced cleanup then delete only empty channels
 KoolBot created itself, and the card also lets you pick the lobby channel by ID.
+
+A lobby or offline lobby that someone moves out of the voice category is put back (#1636): the bot notices the move,
+moves the channel back into the category without changing its permissions or disconnecting anyone inside, and logs
+who moved it when the audit log says. It does this once per move. If the lobby is moved out again within ten minutes,
+the bot logs a warning naming who did it and leaves the channel alone; the periodic health check tries again after
+that. When the move back fails (the bot lacks **Manage Channels**) the status line shows a warning chip, **The lobby
+is outside the voice category**, that links to **Channel Manager**, and the **errors** log channel gets one post. The
+chip is read from the live server, so it is gone as soon as the lobby is back. The bot never creates a second lobby
+while the real one exists outside the category. Temporary rooms moved out of the category are still cleaned up when empty.
 
 The **Reaction Roles** page offers two ways to add a mapping (#813). _Create a
 reaction role_ mints a brand-new Discord role and posts a picker message; the
@@ -1414,6 +1491,17 @@ only as monospace helper text. The cascade-disable behaviour and the
 _"Requires X enabled"_ dependency hints/locks (including cross-feature targets
 that live on another wizard step) carry over as well, so the two surfaces stay
 in lockstep and can't drift apart.
+
+**Review** also checks the feature dependencies (`dependsOn`, #663) on the batch Apply will write: your choices plus the off
+switch for every feature you did not tick (#1622). When a feature goes off while a part that needs it stays on (Voice Tracking
+off with the scheduled weekly recap still on, and the chain behind it: Achievements, then what needs Achievements), a warning
+callout lists each pair, "Turning off Voice Tracking also needs Scheduled weekly recap turned off", with the setting names linked to
+All settings. A switch, _Turn them off too_, confirms the extra turn-offs; Apply stops with a message back on Review until it is on,
+and then writes them in the same apply (the audit entry lists them as `cascadeOff`). Nothing is switched off without that confirmation,
+and the Settings page and every other write path still block instead of cascading. A choice that cannot be fixed by turning something
+off (turning a feature on while what it needs stays off) shows an error callout with links, and Apply is disabled. Whatever makes an
+apply refuse, including an unexpected error, returns to Review with the session and all your choices kept; the flash is plain text and the
+callout carries the names and links.
 
 The wizard runs **Features, Access, Channels, Review** (#1321), with a step indicator on every page. The **Access**
 step comes right after you pick features and maps Discord roles to who can do what: one card each for Admins
@@ -1799,7 +1887,13 @@ every feature keeps its current behaviour.
 - **Bots.** When a `bot` group exists, bots not yet holding its role are listed in the plan and
   added to the shared role on apply; their own managed roles are untouched. Listing bots needs the
   Server Members intent; without it the page says so and plans no bot grants.
-- **Deleting a group** unlinks it by default and keeps the Discord role. Deleting the role too (#1184)
+- **Order and row actions (#1616).** The first column is the ReorderList: a drag handle, the place ("1 of 4" for a screen reader) and
+  **Move up** / **Move down** buttons named for the group, with the first group's Move up and the last group's Move down disabled. Each
+  button posts to `/admin/role-groups/<id>/move`, so it works without JavaScript; a form drawn for a list that has changed since
+  moves nothing. The last column holds **Edit** (a row disclosure that opens the form in place), **Delete group, keep role** and,
+  where the role can be deleted, the review link below.
+- **Deleting a group** unlinks it by default and keeps the Discord role. **Delete group, keep role** asks first in a dialog that lists
+  what happens; without JavaScript the button posts straight to the same route. Deleting the role too (#1184)
   goes through the standard flow: **Review deleting the group and its Discord role** opens a preview
   at `/admin/role-groups/<id>/delete-role` with the shared adoption diff, where the delete is listed
   in its own **Destructive steps** section. To apply it you type the role's name. The approval text
@@ -3524,6 +3618,9 @@ as the other admin pages. It edits structure only; permission overwrites stay in
 - **Create** a text channel, voice channel or category. Per-channel basics: name, topic (text), user limit and
   bitrate in kbps (voice), and the parent category. New channels get no overrides of their own.
 - **Edit** the same fields, including moving a channel to another category (permissions are not rewritten on a move).
+  A channel KoolBot keeps in its category (the voice lobby and offline lobby, temporary voice channels and ticket
+  channels) can't be moved to another category here: the save is refused and names why, because the voice feature
+  would put a moved lobby straight back (#1636).
   Only fields you changed are sent to Discord, so a no-op save never spends a rename. A field posted back as the
   form showed it (a name, a topic, a bitrate shown rounded to whole kbps) counts as unchanged and is never rewritten.
   The form remembers what it displayed: only fields you changed are saved, and if a field you changed was altered

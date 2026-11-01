@@ -11,7 +11,7 @@
  * `unavailable` (see `dashboard-data.ts`) and says so in its own card; a value
  * that could not be read is never drawn as 0. Every dynamic value is escaped.
  *
- * Icons: only the alert icon is used, from the shared helper (`icons.ts`).
+ * Icons: the alert icon and, for a check that could not run, the info icon, from the shared helper (`icons.ts`).
  */
 
 import { icon } from "./icons.js";
@@ -322,10 +322,16 @@ const SEVERITY_BADGE: Record<NeedsYouRow["severity"], string> = {
   blocker: badge("Blocker", "off"),
   warning: badge("Warning", "warn"),
   missing: badge("Missing", "warn"),
+  // The slash-command check (#1638); wording is a proposal for the owner.
+  sync: badge("Out of sync", "warn"),
+  unchecked: badge("Not checked", "info"),
 };
 
 function needsYouRow(r: NeedsYouRow): string {
-  return `<li>${icon("triangle-alert")}<span class="kb-list__main"><span>${escapeHtml(r.title)}</span><span class="kb-muted">${escapeHtml(r.detail)}</span></span>${SEVERITY_BADGE[r.severity]}<a class="kb-btn kb-btn--sm" href="${escapeHtml(r.href)}">${escapeHtml(r.action)}</a></li>`;
+  // A check that could not run is not a fault: the info icon, not the alert.
+  const mark =
+    r.severity === "unchecked" ? icon("info") : icon("triangle-alert");
+  return `<li>${mark}<span class="kb-list__main"><span>${escapeHtml(r.title)}</span><span class="kb-muted">${escapeHtml(r.detail)}</span></span>${SEVERITY_BADGE[r.severity]}<a class="kb-btn kb-btn--sm" href="${escapeHtml(r.href)}">${escapeHtml(r.action)}</a></li>`;
 }
 
 /** Hidden (empty string) when nothing needs the admin. */

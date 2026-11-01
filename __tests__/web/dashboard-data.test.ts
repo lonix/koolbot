@@ -19,6 +19,7 @@ import {
   ROLE_ABOVE_BOT,
   type BotPermissionReport,
 } from "../../src/services/bot-permission-check.js";
+import type { CommandSyncReport } from "../../src/services/command-manager.js";
 import { busyScan } from "./server-scan-fixtures.js";
 
 const ref = (feature: string): never =>
@@ -63,6 +64,7 @@ function sources(over: Partial<DashboardSources> = {}): DashboardSources {
     }),
     permissions: async () => report(),
     recentScan: () => null,
+    commandSync: async () => ({ state: "in-sync", checkedAt: 0 }),
     now: () => READ_AT + 12 * 60_000 + 30_000,
     voiceTrackingEnabled: () => false,
     voiceWeek: async () => {
@@ -425,5 +427,139 @@ describe("uncheckedFeatures", () => {
         }),
       ),
     ).toBe(2);
+  });
+});
+
+describe("the slash-command sync row under Needs you (#1638)", () => {
+  const outOfSync = (
+    over: Partial<Extract<CommandSyncReport, { state: "out-of-sync" }>> = {},
+  ): CommandSyncReport => ({
+    state: "out-of-sync",
+    checkedAt: 0,
+    added: ["lfg", "poll"],
+    removed: ["event"],
+    changed: [],
+    ...over,
+  });
+
+  it("adds no row, and reads in-sync, when the commands match", async () => {
+    const d = await loadDashboardData(sources());
+    expect(d.commandSync).toEqual({
+      state: "ok",
+      value: { state: "in-sync", checkedAt: 0 },
+    });
+    expect(d.needsYou).toEqual([]);
+  });
+
+  it("adds one row that names what differs and links to All settings", async () => {
+    const d = await loadDashboardData(
+      sources({ commandSync: async () => outOfSync() }),
+    );
+    expect(d.needsYou).toEqual([
+      {
+        severity: "sync",
+        title:
+          "Slash commands are out of sync: 2 to add (/lfg, /poll), 1 to remove (/event)",
+        detail:
+          "Members don't see /lfg, /poll in Discord yet. Members still see /event in Discord. Reload commands on All settings applies the change.",
+        href: "/admin/settings#commands-sync",
+        action: "Open All settings",
+      },
+    ]);
+  });
+
+  it("words only the parts that exist and counts changed commands", async () => {
+    const d = await loadDashboardData(
+      sources({
+        commandSync: async () =>
+          outOfSync({ added: [], removed: [], changed: ["quote"] }),
+      }),
+    );
+    expect(d.needsYou[0].title).toBe(
+      "Slash commands are out of sync: 1 to update (/quote)",
+    );
+    expect(d.needsYou[0].detail).toContain(
+      "/quote still shows its old options or description.",
+    );
+  });
+
+  it("lists at most five names and counts the rest", async () => {
+    const d = await loadDashboardData(
+      sources({
+        commandSync: async () =>
+          outOfSync({
+            added: ["a", "b", "c", "d", "e", "f", "g"],
+            removed: [],
+          }),
+      }),
+    );
+    expect(d.needsYou[0].title).toContain(
+      "7 to add (/a, /b, /c, /d, /e and 2 more)",
+    );
+  });
+
+  it("is the first row, ahead of permission problems", async () => {
+    const d = await loadDashboardData(
+      sources({
+        commandSync: async () => outOfSync(),
+        permissions: async () =>
+          report({
+            problems: [
+              {
+                permission: "Manage Roles",
+                target: server,
+                features: [ref("quotes")],
+              } as never,
+            ],
+          }),
+      }),
+    );
+    expect(d.needsYou.map((r) => r.severity)).toEqual(["sync", "missing"]);
+  });
+
+  it("says Not checked, with the reason, when the check is unknown", async () => {
+    const d = await loadDashboardData(
+      sources({
+        commandSync: async () => ({
+          state: "unknown",
+          checkedAt: 0,
+          reason: "Discord did not answer",
+        }),
+      }),
+    );
+    expect(d.needsYou).toEqual([
+      expect.objectContaining({
+        severity: "unchecked",
+        title: "Slash commands could not be checked",
+        detail:
+          "Not checked: Discord did not answer. Whether the commands are in sync is not known.",
+        href: "/admin/settings#commands-sync",
+      }),
+    ]);
+  });
+
+  it("says Not checked, never out of sync, when the check is slow or throws", async () => {
+    const slow = await loadDashboardData(sources({ commandSync: never }));
+    expect(slow.commandSync.state).toBe("unavailable");
+    expect(slow.needsYou[0]).toMatchObject({ severity: "unchecked" });
+    expect(slow.needsYou[0].detail).toContain(
+      "Not checked: the check took too long",
+    );
+    expect(slow.needsYou[0].title).not.toContain("out of sync");
+    const thrown = await loadDashboardData(
+      sources({
+        commandSync: async () => {
+          throw new Error("DiscordAPIError: raw");
+        },
+      }),
+    );
+    expect(thrown.needsYou[0].detail).not.toContain("DiscordAPIError");
+    expect(thrown.needsYou[0].detail).toContain("Not checked");
+  });
+
+  it("is bounded by the per-source limit like every other source", async () => {
+    const started = Date.now();
+    await loadDashboardData(sources({ commandSync: never }));
+    expect(Date.now() - started).toBeLessThan(2_000);
   });
 });

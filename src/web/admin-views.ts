@@ -26,6 +26,8 @@ import {
   REVIEW_JOB_NOTE,
 } from "../utils/moderation-labels.js";
 import { icon } from "./icons.js";
+import { commandSyncStatus } from "./command-sync-text.js";
+import type { CommandSyncReport } from "../services/command-manager.js";
 import {
   REORDER_SCRIPT,
   REORDER_STATUS_HTML,
@@ -146,6 +148,12 @@ import { ROLE_GROUP_SETTING_KEYS } from "../services/role-group-access.js";
 import { renderDashboardBody, renderVersionCard } from "./dashboard-view.js";
 import type { DashboardData } from "./dashboard-data.js";
 import { renderAccessReview, renderWizardSteps } from "./wizard-access-view.js";
+import {
+  WIZARD_APPLY_FORM_ID,
+  dependencyReviewBlocksApply,
+  renderDependencyReview,
+  type WizardDependencyReview,
+} from "./wizard-dependencies-view.js";
 import type { HostReview } from "../services/wizard-host-role.js";
 import {
   renderPermissionNotice,
@@ -154,6 +162,10 @@ import {
   type PermissionNotice,
 } from "./permission-notice.js";
 import type { AccessChange, AccessGap } from "../services/wizard-access.js";
+import {
+  renderSessionPanel,
+  type SessionDiagnostics,
+} from "./session-panel.js";
 
 interface CommonProps {
   csrfToken: string;
@@ -260,6 +272,8 @@ export function renderDashboardPage(props: DashboardProps): string {
 // ---------- Bootstrap ----------
 
 export interface BootstrapProps extends CommonProps {
+  /** The signed-in session's real state, shown first (#1635). */
+  session?: SessionDiagnostics;
   groups: Array<{
     category: string;
     rows: Array<{
@@ -300,7 +314,7 @@ export function renderBootstrapPage(props: BootstrapProps): string {
 <h1>Environment</h1>
 <p class="subtitle">Process startup variables loaded from <code>.env</code>. Read-only — change them by editing <code>.env</code> and restarting the bot.</p>
 <div class="notice info">Secrets are shown as configured or unset only, never any part of their value. Never edited from the WebUI, never written to MongoDB.</div>
-${sections}
+${props.session ? `${renderSessionPanel(props.session)}\n` : ""}${sections}
 `;
   return renderAdminPage({
     title: "Environment",
@@ -488,6 +502,12 @@ export interface SettingsProps extends CommonProps {
    * overwrite the real stored values.
    */
   settingsUnavailable?: boolean;
+  /**
+   * The read-only slash-command check (#1638), shown next to Reload commands.
+   * `null` means it could not be made ("Not checked"); omitted means the
+   * caller did not ask, and nothing is shown.
+   */
+  commandSync?: CommandSyncReport | null;
 }
 
 /**
@@ -1864,6 +1884,15 @@ export function renderSettingsPage(props: SettingsProps): string {
   }
 </div>`;
 
+  const syncStatus =
+    props.commandSync === undefined
+      ? null
+      : commandSyncStatus(props.commandSync);
+  const commandSyncHtml = syncStatus
+    ? `
+<div class="kb-statusline" id="commands-sync" role="status"><span class="kb-status kb-status--${syncStatus.tone}">${escapeHtml(syncStatus.label)}</span><span>${escapeHtml(syncStatus.text)}</span></div>`
+    : "";
+
   const pickers = {
     textChannels: props.textChannels,
     voiceChannels: props.voiceChannels,
@@ -1987,7 +2016,7 @@ export function renderSettingsPage(props: SettingsProps): string {
 <h1>All settings</h1>
 <p class="subtitle">All DB-backed configuration, grouped by feature. Mirrors <code>SETTINGS.md</code> and <code>config-service.ts</code>.</p>
 ${renderFlash(props.flash, SETTINGS_FLASH_ID)}
-${actionBar}
+${actionBar}${commandSyncHtml}
 ${
   props.settingsUnavailable
     ? `<div class="card">${renderSettingsUnavailableNotice()}</div>`
@@ -2648,6 +2677,8 @@ export interface WizardConfirmPageProps extends CommonProps {
   accessFingerprint?: string;
   /** The plan for creating the Event host role (#1365), when it was chosen. */
   hostRole?: HostReview | null;
+  /** What turning features off needs or refuses (#1622); null when it could not be checked. */
+  dependencies?: WizardDependencyReview | null;
   flash?: FlashMessage | null;
 }
 
@@ -2671,24 +2702,28 @@ export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
           )
           .join("");
 
+  // Empty (no blank line, no form id) when there is nothing to say, so a Review
+  // without dependency conflicts renders exactly as before (#1622).
+  const dependencyReview = renderDependencyReview(props.dependencies);
+  const dependencyHtml = dependencyReview ? `${dependencyReview}\n` : "";
   const body = `
 ${renderWizardSteps("review")}
 <h1>Review configuration</h1>
 <p class="subtitle">The following settings will be applied when you click <strong>Apply</strong>.</p>
 ${renderFlash(props.flash)}
 ${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGaps ?? [], hostRole)}
-<div class="card">
+${dependencyHtml}<div class="card">
   <table>
     <thead><tr><th scope="col">Key</th><th scope="col">New value</th><th scope="col">Description</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
 </div>
 <div class="actions">
-  <form method="POST" action="/admin/wizard/apply">
+  <form method="POST" action="/admin/wizard/apply"${dependencyHtml ? ` id="${WIZARD_APPLY_FORM_ID}"` : ""}>
     <input type="hidden" name="_csrf" value="${csrf}">
     ${props.accessFingerprint ? `<input type="hidden" name="accessFingerprint" value="${escapeHtml(props.accessFingerprint)}">` : ""}
     ${hostRole?.planId ? `<input type="hidden" name="hostPlanId" value="${escapeHtml(hostRole.planId)}">` : ""}
-    <button type="submit" class="btn btn-primary"${nothingToApply || props.accessProblem || (hostRole && hostRole.problems.length > 0) ? " disabled" : ""}>Apply</button>
+    <button type="submit" class="btn btn-primary"${nothingToApply || props.accessProblem || (hostRole && hostRole.problems.length > 0) || dependencyReviewBlocksApply(props.dependencies) ? " disabled" : ""}>Apply</button>
   </form>
   <form method="POST" action="/admin/wizard/cancel">
     <input type="hidden" name="_csrf" value="${csrf}">
@@ -5653,6 +5688,11 @@ export interface VoiceChannelsProps extends CommonProps {
    * KoolBot created, so the page words the cleanup actions accordingly.
    */
   managedOnly?: boolean;
+  /**
+   * The lobby sits outside the managed category and KoolBot has not (yet) put
+   * it back, for instance because it lacks Manage Channels (#1636).
+   */
+  lobbyOutsideCategory?: boolean;
   flash?: FlashMessage | null;
 }
 
@@ -5862,6 +5902,9 @@ export function renderFeatureSettingsCard(
 </div>`;
 }
 
+/** Channel manager (`CHANNELS_PATH` in channel-manager-view.ts, which imports this module). */
+const CHANNEL_MANAGER_HREF = "/admin/channels";
+
 export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const rows = props.channels
@@ -5917,6 +5960,15 @@ ${renderStatusLine({
             ? undefined
             : settingHref("voicechannels.category_id"),
         },
+    ...(props.categoryFound && props.lobbyOutsideCategory
+      ? [
+          {
+            text: "The lobby is outside the voice category",
+            warn: true,
+            href: CHANNEL_MANAGER_HREF,
+          },
+        ]
+      : []),
     {
       // A configured name, not a looked-up channel: it is a voice room by
       // definition, and may simply not exist yet, so it is never "unavailable".

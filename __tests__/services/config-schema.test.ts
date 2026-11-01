@@ -7,6 +7,8 @@ import {
   getDependents,
   isEnabledValue,
   validateDependencies,
+  planDisableCascade,
+  dependencyGraphKeys,
   REWIND_RETENTION_MIN_DAYS,
   type ConfigSchema,
 } from "../../src/services/config-schema.js";
@@ -334,6 +336,110 @@ describe("Config Schema", () => {
       expect(isEnabledValue(0)).toBe(false);
       expect(isEnabledValue(null)).toBe(false);
       expect(isEnabledValue(undefined)).toBe(false);
+    });
+  });
+
+  describe("dependency messages and the disable cascade (#1622)", () => {
+    const on =
+      (...keys: string[]) =>
+      (k: string) =>
+        keys.includes(k);
+
+    it("writes plain text: label first, key in parentheses, no markdown backticks", () => {
+      const [issue] = validateDependencies(
+        { "voicetracking.enabled": false },
+        on("voicetracking.announcements.enabled"),
+      );
+      expect(issue.message).toContain(
+        '"Voice Tracking enabled" (voicetracking.enabled)',
+      );
+      expect(issue.message).not.toContain("`");
+      const [enable] = validateDependencies(
+        { "achievements.enabled": true },
+        on(),
+      );
+      expect(enable.message).not.toContain("`");
+    });
+
+    it("reports direction and the related keys for a page to link", () => {
+      const [disable] = validateDependencies(
+        { "voicetracking.enabled": false },
+        on("voicetracking.announcements.enabled"),
+      );
+      expect(disable).toMatchObject({
+        direction: "disable",
+        related: ["voicetracking.announcements.enabled"],
+      });
+      const [enable] = validateDependencies(
+        { "achievements.enabled": true },
+        on(),
+      );
+      expect(enable).toMatchObject({
+        direction: "enable",
+        related: ["voicetracking.enabled"],
+      });
+    });
+
+    it.each([
+      [
+        "a direct dependent that is on",
+        { "voicetracking.enabled": false },
+        ["voicetracking.announcements.enabled"],
+        ["voicetracking.announcements.enabled"],
+      ],
+      [
+        "the whole chain, not only the first level",
+        { "voicetracking.enabled": false },
+        ["achievements.enabled", "celebrations.enabled"],
+        ["achievements.enabled", "celebrations.enabled"],
+      ],
+      [
+        "nothing when the dependents are already off",
+        { "voicetracking.enabled": false },
+        [],
+        [],
+      ],
+      [
+        "nothing for a key being turned on",
+        { "voicetracking.enabled": true },
+        ["achievements.enabled"],
+        [],
+      ],
+      [
+        "nothing for a dependent the batch sets itself (that stays a refusal)",
+        { "voicetracking.enabled": false, "achievements.enabled": true },
+        ["achievements.enabled"],
+        [],
+      ],
+    ])("cascades %s", (_name, pending, live, expected) => {
+      const { keys } = planDisableCascade(pending, on(...live));
+      expect(keys).toEqual([...expected].sort());
+    });
+
+    it("leaves what the cascade cannot settle to the refusal", () => {
+      const pending = {
+        "voicetracking.enabled": false,
+        "achievements.enabled": true,
+      };
+      const live = on("achievements.enabled");
+      // Both ends of the contradiction are refused; nothing is cascaded.
+      expect(validateDependencies(pending, live).map((i) => i.key)).toEqual([
+        "voicetracking.enabled",
+        "achievements.enabled",
+      ]);
+    });
+
+    it("lists every key on either end of a dependsOn edge, and only those", () => {
+      const keys = dependencyGraphKeys();
+      expect(keys).toEqual(
+        expect.arrayContaining([
+          "voicetracking.enabled",
+          "voicetracking.announcements.enabled",
+          "celebrations.enabled",
+          "moderation.raid.enabled",
+        ]),
+      );
+      expect(keys).not.toContain("quotes.enabled");
     });
   });
 
