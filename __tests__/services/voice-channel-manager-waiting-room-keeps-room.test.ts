@@ -225,46 +225,66 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
       expect((manager as any).userChannels.get("owner-id")).toBe(newRoom);
     });
 
-    it("does not delete while the waiting-room links are unknown, and retries", async () => {
+    it("skips at once while the links are unknown, restores in the background, then applies the guard", async () => {
       setup(true);
       (manager as any).waitingRoomLinksRestored = false;
-      // The links are not in memory (the startup read failed): the waiting
-      // room cannot be seen from the main room.
       (manager as any).waitingRooms.clear();
+      const restore = deferred<boolean>();
       const ensure = jest
         .spyOn(manager as any, "ensureWaitingRoomLinks")
-        .mockResolvedValue(false as never);
+        .mockImplementation((() => restore.promise) as never);
+      // Both calls return although the restore never finishes, delete
+      // nothing, and start ONE restore between them.
       await (manager as any).cleanupEmptyChannel(main as VoiceChannel);
       await (manager as any).cleanupUserChannel("owner-id");
-      expect(ensure).toHaveBeenCalled();
       expect(main.delete).not.toHaveBeenCalled();
+      expect(ensure).toHaveBeenCalledTimes(1);
 
-      // The retry succeeds: links are back, the guard applies.
-      ensure.mockImplementation((async () => {
-        (manager as any).waitingRooms.set(main.id, waiting.id);
-        return true;
-      }) as never);
+      // The restore completes: links are back and the guard applies.
+      (manager as any).waitingRooms.set(main.id, waiting.id);
+      (manager as any).waitingRoomLinksRestored = true;
+      restore.resolve(true);
+      await flush();
       await (manager as any).cleanupEmptyChannel(main as VoiceChannel);
-      expect(main.delete).not.toHaveBeenCalled(); // waiter is still waiting
+      expect(main.delete).not.toHaveBeenCalled(); // the waiter is still waiting
       waiting.members = makeMembers([]);
       await (manager as any).cleanupEmptyChannel(main as VoiceChannel);
       expect(main.delete).toHaveBeenCalledTimes(1);
     });
 
-    it("keeps everything when someone joins the waiting room during the links check", async () => {
+    it("a failed background restore is logged and a later call retries it", async () => {
       setup(false);
-      const gate = deferred<boolean>();
-      jest
+      (manager as any).waitingRoomLinksRestored = false;
+      const ensure = jest
         .spyOn(manager as any, "ensureWaitingRoomLinks")
-        .mockReturnValue(gate.promise as never);
+        .mockRejectedValueOnce(new Error("mongo down") as never)
+        .mockResolvedValue(false as never);
+      await (manager as any).cleanupEmptyChannel(main as VoiceChannel);
+      await flush();
+      await (manager as any).cleanupEmptyChannel(main as VoiceChannel);
+      await flush();
+      expect(ensure).toHaveBeenCalledTimes(2);
+      expect(main.delete).not.toHaveBeenCalled();
+    });
+
+    it("keeps a replacement waiting room's links when the old one's cleanup finishes", async () => {
+      setup(false);
+      const slow = deferred();
+      waiting.delete = jest.fn().mockReturnValue(slow.promise);
       const run = (manager as any).cleanupEmptyChannel(main as VoiceChannel);
       await flush();
-      waiting.members = makeMembers([waiter]); // arrives during the await
-      gate.resolve(true);
+      // The owner removed the old waiting room and made a new one meanwhile.
+      (manager as any).waitingRoomToMain.delete("waiting-id");
+      (manager as any).waitingRooms.set("main-id", "replacement-id");
+      (manager as any).waitingRoomToMain.set("replacement-id", "main-id");
+      slow.resolve();
       await run;
-      expect(main.delete).not.toHaveBeenCalled();
-      expect(waiting.delete).not.toHaveBeenCalled();
-      expect(waiter.voice.disconnect).not.toHaveBeenCalled();
+      expect((manager as any).waitingRooms.get("main-id")).toBe(
+        "replacement-id",
+      );
+      expect((manager as any).waitingRoomToMain.get("replacement-id")).toBe(
+        "main-id",
+      );
     });
 
     it("keeps the room when someone joins it while the waiting room is deleted (cleanupEmptyChannel)", async () => {
@@ -358,6 +378,33 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
       expect(main.delete).not.toHaveBeenCalled();
       expect(waiting.delete).not.toHaveBeenCalled();
       expect(l.delete).not.toHaveBeenCalled();
+    });
+
+    it("deletes nothing while the waiting-room links are unknown", async () => {
+      setup(false);
+      (manager as any).waitingRoomLinksRestored = false;
+      await manager.deleteEmptyChannelsOnShutdown(
+        main.guild,
+        categoryOf(main, waiting),
+        "Lobby",
+      );
+      expect(main.delete).not.toHaveBeenCalled();
+      expect(waiting.delete).not.toHaveBeenCalled();
+    });
+
+    it("stops when the links are cleared mid-sweep (destroy during the shutdown timeout)", async () => {
+      setup(false);
+      // Deleting the first channel is when destroy() clears the links.
+      main.delete = jest.fn().mockImplementation(async () => {
+        (manager as any).waitingRoomLinksRestored = false;
+      });
+      await manager.deleteEmptyChannelsOnShutdown(
+        main.guild,
+        categoryOf(main, waiting),
+        "Lobby",
+      );
+      expect(main.delete).toHaveBeenCalledTimes(1);
+      expect(waiting.delete).not.toHaveBeenCalled();
     });
 
     it("control: deletes an empty room and an empty waiting room, never the lobby", async () => {

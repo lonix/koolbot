@@ -1272,6 +1272,8 @@ export class VoiceChannelManager {
    * false until a restore succeeds, so every deleting pass retries it (#1085).
    */
   private waitingRoomLinksRestored = false;
+  /** A background links restore started by a live cleanup (#1673), if any. */
+  private linksRestoreInFlight: Promise<boolean> | null = null;
 
   /**
    * Idempotent gate for every pass that may delete channels (startup sweeps and
@@ -1386,6 +1388,15 @@ export class VoiceChannelManager {
     lobbyChannelName: string,
   ): Promise<void> {
     for (const channel of category.children.cache.values()) {
+      // Links unknown (the startup restore failed) or already cleared by
+      // destroy(): nothing is deleted. Checked on every pass because the
+      // loop awaits Discord between channels.
+      if (!this.waitingRoomLinksRestored) {
+        logger.warn(
+          "Waiting-room links not known; skipping the shutdown channel sweep",
+        );
+        return;
+      }
       if (
         channel.type === ChannelType.GuildVoice &&
         channel.members.size === 0 &&
@@ -1948,8 +1959,12 @@ export class VoiceChannelManager {
       }
       await this.forgetManagedChannel(waitingRoomId);
 
-      this.waitingRooms.delete(channelId);
-      this.waitingRoomToMain.delete(waitingRoomId);
+      if (this.waitingRooms.get(channelId) === waitingRoomId) {
+        this.waitingRooms.delete(channelId);
+      }
+      if (this.waitingRoomToMain.get(waitingRoomId) === channelId) {
+        this.waitingRoomToMain.delete(waitingRoomId);
+      }
 
       logger.info(`Removed waiting room for channel ${channelId}`);
     } catch (error) {
@@ -2891,8 +2906,22 @@ export class VoiceChannelManager {
    * link and would let an empty room go while someone waits in its waiting
    * room. Unknown means "do not delete now": the 5-minute sweep retries (#1673).
    */
-  private async waitingRoomLinksKnown(guild: Guild): Promise<boolean> {
-    return this.ensureWaitingRoomLinks(guild);
+  private waitingRoomLinksKnown(guild: Guild): boolean {
+    if (this.waitingRoomLinksRestored) return true;
+    // Not awaited: the voice tracker gets the same event right after the
+    // manager returns, and a slow Mongo retry must not delay it. The sweep and
+    // later events pick the restored links up.
+    if (!this.linksRestoreInFlight) {
+      this.linksRestoreInFlight = this.ensureWaitingRoomLinks(guild)
+        .catch((error) => {
+          logger.error("Error restoring waiting-room links:", error);
+          return false;
+        })
+        .finally(() => {
+          this.linksRestoreInFlight = null;
+        });
+    }
+    return false;
   }
 
   private async cleanupUserChannel(userId: string): Promise<void> {
@@ -2907,7 +2936,7 @@ export class VoiceChannelManager {
     // disconnect them (#1673). The room goes once the waiting room is empty
     // too: the next cleanup pass (the 5-minute sweep) finds it empty. Unknown
     // links count as "in use" until they are restored.
-    if (!(await this.waitingRoomLinksKnown(channel.guild))) return;
+    if (!this.waitingRoomLinksKnown(channel.guild)) return;
     // No await between this check and the waiting-room delete below.
     if (
       channel.members.size !== 0 ||
@@ -3001,7 +3030,7 @@ export class VoiceChannelManager {
 
       // Someone waiting for this room keeps it alive (#1673). Unknown links
       // count as "in use" until they are restored.
-      if (!(await this.waitingRoomLinksKnown(channel.guild))) return;
+      if (!this.waitingRoomLinksKnown(channel.guild)) return;
       // No await between this check and the waiting-room delete below.
       if (
         channel.members.size !== 0 ||
@@ -3033,8 +3062,14 @@ export class VoiceChannelManager {
             return;
           }
         }
-        this.waitingRooms.delete(channel.id);
-        this.waitingRoomToMain.delete(waitingRoomId);
+        // Only links that still name the waiting room just deleted: the owner
+        // may have removed it and made a new one while the delete was pending.
+        if (this.waitingRooms.get(channel.id) === waitingRoomId) {
+          this.waitingRooms.delete(channel.id);
+        }
+        if (this.waitingRoomToMain.get(waitingRoomId) === channel.id) {
+          this.waitingRoomToMain.delete(waitingRoomId);
+        }
         await this.forgetManagedChannel(waitingRoomId).catch(() => undefined);
         // Someone may have joined the room meanwhile: it stays.
         if (channel.members.size !== 0) {
@@ -4648,5 +4683,6 @@ export class VoiceChannelManager {
     this.waitingRooms.clear();
     this.waitingRoomToMain.clear();
     this.waitingRoomLinksRestored = false;
+    this.linksRestoreInFlight = null;
   }
 }
