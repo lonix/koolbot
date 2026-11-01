@@ -95,7 +95,7 @@ describe("role group pickers on Settings and the wizard (#1023)", () => {
       groupRoles: GROUP_ROLES,
       enabledByKey: {},
       stepIndex: 0,
-      totalSteps: 1,
+      featureKeys: ["quotes"],
       featureKey: "quotes",
       settingKeys: ["quotes.delete_roles"],
       currentValues: { "quotes.delete_roles": "group:g1" },

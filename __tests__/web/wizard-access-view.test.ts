@@ -5,25 +5,96 @@ import {
   renderAccessReview,
   renderWizardAccessPage,
   renderWizardSteps,
+  renderWizardSubSteps,
 } from "../../src/web/wizard-access-view.js";
 
 describe("renderWizardSteps", () => {
-  it("lists Features, Access, Channels and Review in order", () => {
+  it("lists Choose features, Access, Features and Review in order (#1620)", () => {
     const html = renderWizardSteps("features");
-    const labels = [...html.matchAll(/<li[^>]*>(?:<a[^>]*>)?([A-Za-z]+)/g)].map(
+    const labels = [...html.matchAll(/<li[^>]*>(?:<a[^>]*>)?([^<]+)/g)].map(
       (m) => m[1],
     );
-    expect(labels).toEqual(["Features", "Access", "Channels", "Review"]);
+    expect(labels).toEqual(["Choose features", "Access", "Features", "Review"]);
   });
 
   it("marks the current step and links the finished ones back", () => {
-    const html = renderWizardSteps("channels");
-    expect(html).toContain('<li aria-current="step">Channels</li>');
+    const html = renderWizardSteps("settings");
+    expect(html).toContain('<li aria-current="step">Features</li>');
     expect(html).toContain(
       '<li class="is-done"><a href="/admin/wizard?step=access">Access</a></li>',
     );
-    expect(html).toContain('<li class="is-done"><a href="/admin/wizard">');
+    expect(html).toContain(
+      '<li class="is-done"><a href="/admin/wizard">Choose features</a></li>',
+    );
     expect(html).toContain("<li>Review</li>");
+  });
+
+  it("keeps the first step's route and links the third step to the first feature page", () => {
+    const html = renderWizardSteps("review");
+    expect(html).toContain('<a href="/admin/wizard">Choose features</a>');
+    expect(html).toContain('<a href="/admin/wizard?step=0">Features</a>');
+    expect(html).toContain('<li aria-current="step">Review</li>');
+  });
+});
+
+describe("renderWizardSubSteps (#1620)", () => {
+  const items = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ label: `Feature ${i + 1}` }));
+  const names = [
+    { label: "Voice Channels" },
+    { label: "Name history" },
+    { label: "Polls" },
+  ];
+
+  it("says where the admin is as text, once", () => {
+    const html = renderWizardSubSteps(names, 1);
+    expect(html).toContain(
+      '<p class="kb-substeps__label">Feature 2 of 3: Name history</p>',
+    );
+    expect(html).not.toMatch(/Step \d/);
+  });
+
+  it("marks only the current feature with aria-current, links finished ones back, leaves the rest plain", () => {
+    const html = renderWizardSubSteps(names, 1);
+    expect(html.match(/aria-current="step"/g)).toHaveLength(1);
+    expect(html).toContain('<li aria-current="step">');
+    expect(html).toContain(
+      '<li class="is-done"><a class="kb-substeps__mark" href="/admin/wizard?step=0" title="Voice Channels"><span class="kb-visually-hidden">Voice Channels, done</span></a></li>',
+    );
+    expect(html.match(/<a /g)).toHaveLength(1);
+    expect(html).toContain('<span class="kb-visually-hidden">Polls</span>');
+  });
+
+  it.each([
+    [0, "Feature 1 of 3: Voice Channels", 0],
+    [1, "Feature 2 of 3: Name history", 1],
+    [2, "Feature 3 of 3: Polls", 2],
+  ])("position %i reads %s with %i finished", (at, text, done) => {
+    const html = renderWizardSubSteps(names, at);
+    expect(html).toContain(`>${text}</p>`);
+    expect(html.match(/class="is-done"/g) ?? []).toHaveLength(done);
+    expect(html.match(/<li/g)).toHaveLength(3);
+  });
+
+  it("draws nothing for one feature: there is nothing to count", () => {
+    expect(renderWizardSubSteps(items(1), 0)).toBe("");
+    expect(renderWizardSubSteps([], 0)).toBe("");
+  });
+
+  it("draws one marker per feature for 14 features, in one row that shrinks", () => {
+    const html = renderWizardSubSteps(items(14), 6);
+    expect(html.match(/<li/g)).toHaveLength(14);
+    expect(html).toContain(">Feature 7 of 14: Feature 7</p>");
+  });
+
+  it("escapes feature names", () => {
+    const html = renderWizardSubSteps(
+      [{ label: "<b>x</b>" }, { label: 'a"b' }],
+      0,
+    );
+    expect(html).not.toContain("<b>");
+    expect(html).toContain("&lt;b&gt;x&lt;/b&gt;");
+    expect(html).toContain("a&quot;b");
   });
 });
 
@@ -330,5 +401,19 @@ describe("Picker inside an AccessCard (#1547)", () => {
     expect(css).toMatch(/\.kb-access__card \.kb-picker \{ min-width: 0; \}/);
     // Sizing elsewhere is unchanged.
     expect(css).toMatch(/\n\.kb-picker \{[^}]*min-width: 18rem/);
+  });
+});
+
+describe("the sub-bar proposal CSS (#1620)", () => {
+  it("takes every size from a token: no literal rem or px in the .kb-substeps rules", () => {
+    const css = readFileSync(
+      new URL("../../docs/design/kb.css", import.meta.url),
+      "utf8",
+    );
+    const rules = css.split("\n").filter((l) => l.startsWith(".kb-substeps"));
+    expect(rules.length).toBeGreaterThan(4);
+    for (const rule of rules) {
+      expect(rule).not.toMatch(/\d(?:\.\d+)?(?:rem|px|em)\b/);
+    }
   });
 });

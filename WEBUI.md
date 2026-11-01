@@ -1503,7 +1503,10 @@ off (turning a feature on while what it needs stays off) shows an error callout 
 apply refuse, including an unexpected error, returns to Review with the session and all your choices kept; the flash is plain text and the
 callout carries the names and links.
 
-The wizard runs **Features, Access, Channels, Review** (#1321), with a step indicator on every page. The **Access**
+The wizard runs **Choose features, Access, Features, Review** (#1321, renamed in #1620), with a step indicator on every page. **Features** is one
+page per feature you chose, with its settings (channel settings are ordinary settings on the page of the feature that owns them; the wizard has no step of its
+own for channels). When you chose more than one feature, a row of markers under the step indicator shows which feature page you are on, and reads
+"Feature 2 of 3: Name history"; finished features link back. The **Access**
 step comes right after you pick features and maps Discord roles to who can do what: one card each for Admins
 (`/config`), Moderators and Event hosts (`/me`), with what they can and cannot do and a searchable role picker (the same one as All settings, #1547), and a
 Members card that points to Command permissions to narrow `/me`. Re-running the wizard shows the current mapping.

@@ -106,7 +106,7 @@ Progress through the Setup wizard: done steps show a check, the current one is o
 
 **Markup.** `ol.kb-steps-bar` → one `li` per step (`is-done` for finished ones). Steps are links back once done.
 
-The wizard's steps: **Features** → **Access** → **Channels** → **Review**.
+The wizard's steps: **Choose features** → **Access** → **Features** → **Review**.
 
 ## Actions
 

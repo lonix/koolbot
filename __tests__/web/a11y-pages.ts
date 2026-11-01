@@ -2127,7 +2127,7 @@ export function adminPages(): A11yPage[] {
         ...COMMON,
         ...PICKERS,
         stepIndex: 0,
-        totalSteps: 1,
+        featureKeys: ["welcome"],
         featureKey: "welcome",
         settingKeys: ["welcome.enabled", "welcome.roles_message_id"],
         currentValues: {
@@ -2227,7 +2227,7 @@ export function adminPages(): A11yPage[] {
         ...COMMON,
         ...PICKERS,
         stepIndex: 0,
-        totalSteps: 1,
+        featureKeys: ["events"],
         featureKey: "events",
         settingKeys: [
           "events.enabled",
@@ -2417,7 +2417,7 @@ export function adminPages(): A11yPage[] {
         ...COMMON,
         ...PICKERS,
         stepIndex: 0,
-        totalSteps: 2,
+        featureKeys: ["voicechannels", "polls"],
         featureKey: "voicechannels",
         settingKeys: ["voicechannels.enabled", "voicechannels.category_id"],
         currentValues: {
@@ -2431,6 +2431,36 @@ export function adminPages(): A11yPage[] {
         },
         enabledByKey: { "voicechannels.enabled": true },
         flash: FLASH,
+      }),
+    },
+    {
+      name: "Setup wizard step, middle of 3 features",
+      html: renderWizardStepPage({
+        ...COMMON,
+        ...PICKERS,
+        stepIndex: 1,
+        featureKeys: ["voicechannels", "quotes", "polls"],
+        featureKey: "quotes",
+        settingKeys: ["quotes.enabled", "quotes.cooldown"],
+        currentValues: { "quotes.enabled": true },
+        metadata: {},
+        defaultValues: { "quotes.enabled": false },
+        enabledByKey: { "quotes.enabled": true },
+      }),
+    },
+    {
+      name: "Setup wizard step, last of 3 features",
+      html: renderWizardStepPage({
+        ...COMMON,
+        ...PICKERS,
+        stepIndex: 2,
+        featureKeys: ["voicechannels", "quotes", "polls"],
+        featureKey: "polls",
+        settingKeys: ["polls.enabled", "polls.cooldown_days"],
+        currentValues: { "polls.enabled": true },
+        metadata: {},
+        defaultValues: { "polls.enabled": false },
+        enabledByKey: { "polls.enabled": true },
       }),
     },
     {

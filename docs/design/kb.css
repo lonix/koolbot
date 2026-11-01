@@ -623,6 +623,16 @@ fieldset[data-groups-section] { border: 0; margin: 0; padding: 0; min-width: 0; 
 .kb-steps-bar li[aria-current="step"] { color: var(--text); border-color: var(--primary); }
 .kb-steps-bar li[aria-current="step"]::before { background: var(--primary); color: var(--on-primary); }
 
+/* ---------- Sub-steps (wizard Features step) — PROPOSAL #1620, not final until the owner approves ---------- */
+.kb-substeps { display: flex; flex-direction: column; gap: var(--space-1); margin: var(--space-3) 0; }
+.kb-substeps__label { margin: 0; font-size: var(--type-description-size); font-weight: 600; color: var(--text-secondary); }
+.kb-substeps__bar { display: flex; list-style: none; margin: 0; padding: 0; gap: var(--space-1); }
+.kb-substeps__bar li { flex: 1 1 0; min-width: 0; }
+.kb-substeps__mark { display: flex; align-items: center; height: var(--space-6); }
+.kb-substeps__mark::before { content: ""; flex: 1; height: var(--space-2); border-radius: var(--radius-pill); background: var(--control); }
+.kb-substeps__bar li.is-done .kb-substeps__mark::before { background: var(--ok-text); }
+.kb-substeps__bar li[aria-current="step"] .kb-substeps__mark::before { background: var(--primary); }
+
 /* ---------- Discord embed (a sketch of how a bot message reads; not Discord's own UI) ---------- */
 .kb-embed { --accent: var(--embed-brand); display: grid; grid-template-columns: 4px 1fr; max-width: 32rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; font-size: var(--type-description-size); line-height: 1.45; }
 .kb-embed::before { content: ""; background: var(--accent); }

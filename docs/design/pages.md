@@ -148,7 +148,7 @@ from the game. The footer line says how a missing game gets added: each game is 
 
 The Setup wizard's Access step: who can do what, before any channel is set up.
 
-- Steps: Features → **Access** → Channels → Review.
+- Steps: Choose features → **Access** → Features → Review.
 - One AccessCard per scope: Admins (`/config`), Moderators, Event hosts and Members (all `/me`). Each maps Discord roles through a Picker, or offers
   to create the role (*Create @Event host*), and writes a role group with the matching capability.
 - A callout warns when a switched-on feature has nobody to run it ("Events is on and nobody can host yet").

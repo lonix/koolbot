@@ -26,13 +26,19 @@ import type {
  * `docs/design/components.md` (AccessCard, Steps).
  */
 
-export type WizardStepId = "features" | "access" | "channels" | "review";
+/**
+ * The wizard's four steps (#1620). `features` is choosing which features to turn
+ * on (labelled "Choose features"); `settings` is the run of per-feature pages
+ * (labelled "Features"). The wizard has no channel step: channel settings are
+ * ordinary settings on the feature page that owns them.
+ */
+export type WizardStepId = "features" | "access" | "settings" | "review";
 
 const STEPS: ReadonlyArray<{ id: WizardStepId; label: string; href: string }> =
   [
-    { id: "features", label: "Features", href: "/admin/wizard" },
+    { id: "features", label: "Choose features", href: "/admin/wizard" },
     { id: "access", label: "Access", href: "/admin/wizard?step=access" },
-    { id: "channels", label: "Channels", href: "/admin/wizard?step=0" },
+    { id: "settings", label: "Features", href: "/admin/wizard?step=0" },
     { id: "review", label: "Review", href: "/admin/wizard?step=confirm" },
   ];
 
@@ -49,6 +55,35 @@ export function renderWizardSteps(current: WizardStepId): string {
     return `<li>${escapeHtml(s.label)}</li>`;
   }).join("");
   return `<ol class="kb-steps-bar" aria-label="Setup wizard steps">${items}</ol>`;
+}
+
+/**
+ * The sub-progress bar of the Features step (#1620): one marker per chosen
+ * feature, with the position as text ("Feature 2 of 3: Name history"). Finished
+ * features link back to their page. The marker of the page being shown carries
+ * `aria-current="step"`; the main bar keeps its own. A single feature draws
+ * nothing, because there is nothing to count. PROPOSAL: not in the manual until
+ * the owner approves it.
+ */
+export function renderWizardSubSteps(
+  items: ReadonlyArray<{ label: string }>,
+  current: number,
+): string {
+  if (items.length < 2) return "";
+  const marks = items
+    .map((item, i) => {
+      const label = escapeHtml(item.label);
+      if (i < current) {
+        return `<li class="is-done"><a class="kb-substeps__mark" href="/admin/wizard?step=${i}" title="${label}"><span class="kb-visually-hidden">${label}, done</span></a></li>`;
+      }
+      const mark = `<span class="kb-substeps__mark" title="${label}"><span class="kb-visually-hidden">${label}</span></span>`;
+      return i === current
+        ? `<li aria-current="step">${mark}</li>`
+        : `<li>${mark}</li>`;
+    })
+    .join("");
+  const at = items[current]?.label ?? "";
+  return `<div class="kb-substeps"><p class="kb-substeps__label">${escapeHtml(`Feature ${current + 1} of ${items.length}: ${at}`)}</p><ol class="kb-substeps__bar" aria-label="Features to set up">${marks}</ol></div>`;
 }
 
 const CHECK_ICON = icon("check");
@@ -253,7 +288,7 @@ ${members}
   </div>
   <div class="actions">
     <button type="submit" class="kb-btn kb-btn--primary"${options === null ? " disabled" : ""}>Save access and continue</button>
-    <a href="/admin/wizard" class="kb-btn kb-btn--ghost">Back to features</a>
+    <a href="/admin/wizard" class="kb-btn kb-btn--ghost">Back to Choose features</a>
   </div>
 </form>
 </div>
