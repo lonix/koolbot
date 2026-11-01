@@ -736,6 +736,16 @@ export function createChannelManagerRouter(
       if (direction !== "up" && direction !== "down") {
         return refuse("Choose up or down.");
       }
+      // The neighbour the button was drawn for is required: without it there
+      // is nothing to compare with the live order, so a request that left it
+      // out would move a channel on a position it never confirmed. The page
+      // posts an empty string when a button has no neighbour.
+      const expected = ctx.body.neighbor;
+      if (typeof expected !== "string") {
+        return refuse(
+          "That move could not be read. Reload the page and try again.",
+        );
+      }
       if (!canMove(ctx.channels, target, direction)) {
         return refuse(
           `"${target.name}" is already ${direction === "up" ? "first" : "last"}.`,
@@ -744,9 +754,8 @@ export function createChannelManagerRouter(
       // The button was drawn for a particular neighbour. If the order changed
       // since the page was shown, the same click would move it somewhere the
       // admin didn't see, so refuse and let them look again.
-      const expected = ctx.body.neighbor;
       const live = neighbourOf(ctx.channels, target, direction);
-      if (typeof expected === "string" && expected !== (live?.id ?? "")) {
+      if (expected !== (live?.id ?? "")) {
         return refuse(
           `The order around "${target.name}" changed since you opened this page. Nothing was moved; reload and try again.`,
           { targetId: target.id, details: { direction, stale: true } },
