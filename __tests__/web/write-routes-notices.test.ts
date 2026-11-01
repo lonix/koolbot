@@ -25,6 +25,7 @@ import {
   type AdminHarness,
 } from "./admin-harness.js";
 import { refusal } from "./refused-form-test-utils.js";
+import { orderToken } from "../../src/web/reorder-view.js";
 
 const mockRecordAudit = jest.fn(async () => undefined);
 const mockConfigGetBoolean = jest.fn<() => Promise<boolean>>();
@@ -539,18 +540,21 @@ describe("POST /notices/:id/move", () => {
       category: "general",
     });
   }
+  // `shown` is the order the page was drawn in; `null` posts no token.
   const move = (
     id: string,
     from: number,
     to: number,
     count = 4,
     scope = "general",
+    shown: string[] | null = [ID_A, ID_B, ID_C, ID_D],
   ): Promise<Awaited<ReturnType<AdminHarness["post"]>>> =>
     harness.post(`/notices/${id}/move`, {
       from: String(from),
       to: String(to),
       count: String(count),
       scope,
+      ...(shown === null ? {} : { order: orderToken(shown) }),
     });
   const written = (): Array<{ id: unknown; order: number }> =>
     (
@@ -693,6 +697,45 @@ describe("POST /notices/:id/move", () => {
     stored();
     const res = await move(ID_B, 1, 1);
     expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockNoticeBulkWrite).not.toHaveBeenCalled();
+  });
+
+  it("moves nothing when other notices were reordered since the page was drawn (#1669)", async () => {
+    // Drawn from [A, B, C, D]; the live order is [A, C, B, D]. The count and
+    // A's place still match, so only the order token can tell.
+    mockNoticeFind.mockResolvedValue(
+      [ID_A, ID_C, ID_B, ID_D].map((id, i) => ({ _id: id, order: i })),
+    );
+    mockNoticeFindById.mockResolvedValue({
+      _id: ID_A,
+      title: "First",
+      category: "general",
+    });
+    const res = await move(ID_A, 0, 1);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("warn");
+    expect(flash.msg).toContain("nothing was moved");
+    expect(mockNoticeBulkWrite).not.toHaveBeenCalled();
+    // The same form against the order it was drawn from is accepted.
+    stored();
+    mockNoticeFindById.mockResolvedValue({
+      _id: ID_A,
+      title: "First",
+      category: "general",
+    });
+    mockNoticeBulkWrite.mockResolvedValue({ matchedCount: 2 });
+    const ok = await move(ID_A, 0, 1);
+    expect(parseFlashRedirect(ok.headers.get("location")).type).toBe("ok");
+    expect(mockNoticeBulkWrite).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a form without the order token, before any DB lookup (#1669)", async () => {
+    stored();
+    const res = await move(ID_B, 1, 0, 4, "general", null);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("could not be read");
+    expect(mockNoticeFindById).not.toHaveBeenCalled();
     expect(mockNoticeBulkWrite).not.toHaveBeenCalled();
   });
 

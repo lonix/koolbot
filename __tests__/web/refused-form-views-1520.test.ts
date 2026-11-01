@@ -315,8 +315,9 @@ describe("the Presence add and import forms", () => {
     const invalid = d.querySelectorAll('[aria-invalid="true"]');
     expect(invalid).toHaveLength(1);
     expect(invalid[0].id).toBe("bot-status-add-multiple-text");
-    // Order is not a field any more (#1540).
-    expect(d.querySelector("[name=order]")).toBeNull();
+    // Order is not a field any more (#1540); the hidden `order` of a move
+    // form is the order token (#1669).
+    expect(d.querySelector("[name=order]:not([type=hidden])")).toBeNull();
   });
 
   it("opens the Import / export section of the refused pool, with the typed list", () => {

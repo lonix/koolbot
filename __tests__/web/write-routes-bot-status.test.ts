@@ -25,6 +25,7 @@ import {
   type AdminHarness,
 } from "./admin-harness.js";
 import { refusal } from "./refused-form-test-utils.js";
+import { orderToken } from "../../src/web/reorder-view.js";
 import {
   BOT_STATUS_POOLS,
   BOT_STATUS_POOL_META,
@@ -496,18 +497,21 @@ describe("POST /bot-status/entry/:id/move", () => {
     );
     mockFindById.mockResolvedValue(ownedEntry({ _id: "e-b" }));
   }
+  // `shown` is the order the page was drawn in; `null` posts no token.
   const move = (
     id: string,
     from: number,
     to: number,
     count = 3,
     scope = "single",
+    shown: string[] | null = ids,
   ): Promise<Awaited<ReturnType<AdminHarness["post"]>>> =>
     harness.post(`/bot-status/entry/${id}/move`, {
       from: String(from),
       to: String(to),
       count: String(count),
       scope,
+      ...(shown === null ? {} : { order: orderToken(shown) }),
     });
   const written = (): Array<{ id: unknown; order: number }> =>
     (
@@ -630,6 +634,37 @@ describe("POST /bot-status/entry/:id/move", () => {
     stored();
     const res = await move("e-b", 1, 1);
     expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockBulkWrite).not.toHaveBeenCalled();
+  });
+
+  it("moves nothing when other entries were reordered since the page was drawn (#1669)", async () => {
+    // Drawn from [e-a, e-b, e-c]; the live order is [e-a, e-c, e-b]. The count
+    // and e-a's place still match, so only the order token can tell.
+    mockFind.mockResolvedValue(
+      ["e-a", "e-c", "e-b"].map((id, i) => ({ _id: id, order: i })),
+    );
+    mockFindById.mockResolvedValue(ownedEntry({ _id: "e-a" }));
+    const res = await move("e-a", 0, 1);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("warn");
+    expect(flash.msg).toContain("nothing was moved");
+    expect(mockBulkWrite).not.toHaveBeenCalled();
+    // The same form against the order it was drawn from is accepted.
+    stored();
+    mockFindById.mockResolvedValue(ownedEntry({ _id: "e-a" }));
+    mockBulkWrite.mockResolvedValue({ matchedCount: 2 });
+    const ok = await move("e-a", 0, 1);
+    expect(parseFlashRedirect(ok.headers.get("location")).type).toBe("ok");
+    expect(mockBulkWrite).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a form without the order token, before any DB lookup (#1669)", async () => {
+    stored();
+    const res = await move("e-b", 1, 0, 3, "single", null);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("could not be read");
+    expect(mockFindById).not.toHaveBeenCalled();
     expect(mockBulkWrite).not.toHaveBeenCalled();
   });
 

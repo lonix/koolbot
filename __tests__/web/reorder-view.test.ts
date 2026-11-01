@@ -17,6 +17,7 @@ import {
 import {
   REORDER_SCRIPT,
   REORDER_STATUS_HTML,
+  orderToken,
   renderReorderCell,
   reorderListAttrs,
   reorderRowAttrs,
@@ -191,8 +192,21 @@ describe("the Notices page", () => {
   });
 
   it("has no Order number box anywhere: not inline, not in Edit, not in Create", () => {
-    expect(d.querySelector("[name=order]")).toBeNull();
+    // The hidden `order` field is the order token (#1669), not a box to type in.
+    expect(d.querySelector("[name=order]:not([type=hidden])")).toBeNull();
     expect(d.body.textContent).not.toContain("lower posts first");
+  });
+
+  it("posts each list's order token with every move form (#1669)", () => {
+    const lists = d.querySelectorAll("tbody[data-reorder-list]");
+    const tokens = (list: Element): string[] =>
+      Array.from(list.querySelectorAll("form[data-reorder-form]")).map(
+        (f) =>
+          f.querySelector<HTMLInputElement>("input[name=order]")?.value ?? "",
+      );
+    const general = orderToken(["n0", "n1", "n2"]);
+    expect(tokens(lists[0])).toEqual([general, general, general]);
+    expect(tokens(lists[1])).toEqual([orderToken(["r0"])]);
   });
 
   it("says a new order shows in the channel after Resync notices to channel", () => {
@@ -223,7 +237,18 @@ describe("the Presence page", () => {
       rows[1].querySelector("form[data-reorder-form]")?.getAttribute("action"),
     ).toBe("/admin/bot-status/entry/e1/move");
     expect(buttons(rows[0])[0].disabled).toBe(true);
-    expect(d.querySelector("[name=order]")).toBeNull();
+    expect(d.querySelector("[name=order]:not([type=hidden])")).toBeNull();
+  });
+
+  it("posts the pool's order token with every move form (#1669)", () => {
+    const token = orderToken(["e0", "e1", "e2"]);
+    const posted = Array.from(
+      d.querySelectorAll("tbody[data-reorder-list] form[data-reorder-form]"),
+    ).map(
+      (f) =>
+        f.querySelector<HTMLInputElement>("input[name=order]")?.value ?? "",
+    );
+    expect(posted).toEqual([token, token, token]);
   });
 
   it("says the bot picks at random, so the order only shapes the list and its export", () => {
