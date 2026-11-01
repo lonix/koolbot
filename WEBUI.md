@@ -3434,10 +3434,13 @@ writes to Discord. Since #1323 it opens on an **Overview**: the verdict (ready, 
 Readiness, Roles, Channels and Other bots, what needs fixing, and suggestions that each link to the page that acts
 (Channel claims, Voice channels, and the voice tracking settings). Readiness and permission detail link to **Bot permissions** instead of
 repeating its table. The inventories are tabs (`?tab=roles`, `channels`, `bots`, `discord`; an unknown value is the
-Overview), plain links that work without JavaScript. The **Channel ownership hints** switch in the header is a GET form
-and the only form on the page. The tabs share one scan for a minute per admin and hints setting, so clicking through them
+Overview), plain links that work without JavaScript. The **Find channels a bot writes in** switch in the header is a GET form
+and the only form on the page. It applies as soon as you change it (a small script submits the form and hides
+**Apply**); without JavaScript, **Apply** does the same. The tabs share one scan for a minute per admin and switch setting, so clicking through them
 does not rescan Discord, and a tab click served from that scan does not count against the page's rate limit, which
-only counts scans that start. The header says when Discord was read and **Scan again** bypasses the cache.
+only counts scans that start. The header says when Discord was read and whether this scan used the switch ("with bot
+message sampling" or "without"). When the sampling stopped early it also says how many channels it read and where it
+stopped ("Read 12 channels of 40; stopped at #staff, the bot cannot read its history"). **Scan again** bypasses the cache.
 The **Channels** tab lists the channels as Discord does: those outside a category first, then each category in
 capitals with its channels under it (text before voice). Each row shows what uses the channel (green chips), what it
 looks like it could be (for example _looks like Quotes_), Discord's own flags and **Custom permissions** when it is
@@ -3445,7 +3448,7 @@ not synced to its category; its overwrites open on demand. **Claim** appears on 
 one feature that fits that kind of channel (Quotes, Voice stats, Birthdays, Tickets category, Looking for group,
 Moderation log, Notices, Reaction roles, Voice lobby), never on a channel Discord uses for rules, system messages
 or public updates, and opens **Channel claims** with the channel and feature filled in. The filters (`?filter=used`,
-`claimable` or `custom`; anything else is _All_) are plain links that keep the tab and the ownership hints. All of
+`claimable` or `custom`; anything else is _All_) are plain links that keep the tab and the switch. All of
 it is links: the tab still has no write route. What follows describes the data each tab shows.
 It lists **roles** (position, colour, cached member count, `managed` flag,
 whether KoolBot can manage the role, and which feature uses it), **categories and channels** (type, parent,
@@ -3458,9 +3461,14 @@ handles (Community, rules/system/public-updates channels, Onboarding prompts and
 AFK channel, webhook-fed and followed channels (reading webhooks needs the Manage Webhooks permission; without
 it the scan warns that these marks are missing instead of showing none, and never edits a webhook), role-gated
 categories, the server's channel naming convention and native scheduled events. The scan never pages through the member list: role member counts come from the
-cache (a `+` marks a possibly low count unless the GuildMembers intent is on). **Channel ownership
-hints** (`?sample=1`) additionally samples recent message authors to spot channels one bot posts in; it costs a
-REST call per channel, so it is off by default. The same data is available to code as
+cache (a `+` marks a possibly low count unless the GuildMembers intent is on). **Find channels a bot writes
+in** (`?sample=1`) additionally samples recent message authors to spot channels one bot posts in. It reads the
+last 25 messages of up to 40 text channels (the first 40 in the order Discord lists them), costs a REST call per
+channel and needs Read Message History, so it is off by default. A channel is marked when one bot wrote at least
+60% of its messages and it has at least 5. If the bot cannot read a channel, the scan stops there and the header says
+so. Only the bot's id, name and share are kept, in the scan result that the page caches for a minute; message
+content is not stored or logged. The marks show on the **Channels** tab (they suggest a channel to **Claim**) and in
+the **Other bots** report. The same data is available to code as
 `ServerScanService.scan()`, whose `scanned` member is the `ScannedState` the adoption planner diffs against.
 
 **Bot replacement report** (a section of `/admin/adopt`, #1026) compares the bots found in the guild with a static catalogue
@@ -3469,7 +3477,7 @@ sent to any outside service. Each catalogued bot gets a summary (_Can fully repl
 overlap_ or _Keep_), a table of its capabilities with KoolBot's coverage (**Full**, **Partial** with what is missing,
 **Planned** with the issue link, **Not covered**, or **Keep** with the reason), whether the matching KoolBot feature is
 currently enabled, and numbered switch-over steps with a link to the right page. A _Left over when it is removed_ list shows
-the bot's locked integration role, channels it mostly writes to (needs channel ownership hints), channels with a
+the bot's locked integration role, channels it mostly writes to (needs **Find channels a bot writes in**, which the list links to), channels with a
 member-specific overwrite for the bot, and KoolBot features already bound to its channels. A combined view groups
 capabilities KoolBot covers, capabilities several bots provide (so one of them may already be free to remove) and
 capabilities nothing covers, and lists which bots you could consider removing after the switch. A bot that is not in the catalogue is
@@ -3482,7 +3490,7 @@ out of date, and carries an _unverified entry_ note until the entry records what
 **Clean up after a removed bot** (`/admin/adopt/cleanup`, #1179, part of the server-adoption work #1017) is the part that
 comes after you have removed a bot in Discord yourself. KoolBot never removes another bot, and the page never does.
 The **Other bots** tab lists _Removed bots with leftovers_ (the ones the scan itself settles) and links to the page: a bot
-that is no longer in the server but whose catalogue id, a channel it mostly wrote to (needs channel ownership hints) or a
+that is no longer in the server but whose catalogue id, a channel it mostly wrote to (needs **Find channels a bot writes in**, linked on the page) or a
 member-specific permission overwrite still shows up in the scan. The scan's member cache is not trusted as proof that an
 account has left or is still here: a cached bot without an integration role, and a bare overwrite for an unknown account
 (which may be a current member), are only listed on the cleanup page after Discord has confirmed, with a forced lookup,

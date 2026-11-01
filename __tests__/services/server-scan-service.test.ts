@@ -530,6 +530,145 @@ describe("ServerScanService (#1019)", () => {
   });
 });
 
+describe("ServerScanService message sampling report (#1630)", () => {
+  beforeEach(() => {
+    ServerScanService.reset();
+    mockDistinct.mockReset();
+    mockDistinct.mockResolvedValue(["r-low", null]);
+    jest.spyOn(ConfigService, "getInstance").mockReturnValue({
+      getAll: async () => [],
+    } as any);
+  });
+
+  const client = {
+    user: { id: "bot-1" },
+    options: { intents: { has: () => false } },
+  } as any;
+
+  const dynoMsg = (): any => ({
+    author: { id: "dyno", bot: true, tag: "Dyno#1" },
+    content: "must never be kept",
+  });
+  const tenMsgs = (): Map<string, any> =>
+    new Map(Array.from({ length: 10 }, (_, i) => [String(i), dynoMsg()]));
+
+  /** The test guild with `n` extra text channels (t1..tn), each readable. */
+  function guildWithTextChannels(
+    n: number,
+    fetchFor: (id: string) => Promise<Map<string, any>> = async () => new Map(),
+  ): any {
+    const { guild } = makeGuild();
+    guild.channels.cache.get("ch-quotes").messages = {
+      fetch: jest.fn(async () => tenMsgs()),
+    };
+    guild.channels.cache.get("ch-news").messages = {
+      fetch: jest.fn(async () => new Map()),
+    };
+    for (let i = 1; i <= n; i++) {
+      const id = `t${i}`;
+      guild.channels.cache.set(id, {
+        id,
+        name: `chat-${i}`,
+        type: ChannelType.GuildText,
+        rawPosition: 10 + i,
+        parentId: null,
+        permissionsLocked: false,
+        isThread: () => false,
+        permissionOverwrites: { cache: new Map() },
+        messages: { fetch: jest.fn(async () => fetchFor(id)) },
+      });
+    }
+    return guild;
+  }
+
+  it("reports no sampling when the switch is off", async () => {
+    const scan = await ServerScanService.getInstance(client).scanGuild(
+      guildWithTextChannels(2),
+    );
+    expect(scan.sampling).toBeNull();
+  });
+
+  it("reports full coverage when every channel was read", async () => {
+    const scan = await ServerScanService.getInstance(client).scanGuild(
+      guildWithTextChannels(2),
+      { sampleMessages: true },
+    );
+    expect(scan.sampling).toEqual({
+      channelsRead: 4,
+      channelsPlanned: 4,
+      textChannels: 4,
+      channelLimit: 40,
+      stoppedAt: null,
+    });
+  });
+
+  it("plans only as many channels as the server has, below the cap", async () => {
+    const scan = await ServerScanService.getInstance(client).scanGuild(
+      guildWithTextChannels(1),
+      { sampleMessages: true },
+    );
+    expect(scan.sampling?.channelsPlanned).toBe(3);
+    expect(scan.sampling?.channelLimit).toBe(40);
+  });
+
+  it("caps the channels read and says how many text channels there are", async () => {
+    const scan = await ServerScanService.getInstance(client).scanGuild(
+      guildWithTextChannels(5),
+      { sampleMessages: true, sampleChannelLimit: 3 },
+    );
+    expect(scan.sampling).toMatchObject({
+      channelsRead: 3,
+      channelsPlanned: 3,
+      textChannels: 7,
+      channelLimit: 3,
+      stoppedAt: null,
+    });
+  });
+
+  it.each([
+    [50001, "no-access"],
+    [50013, "no-access"],
+    [500, "failed"],
+    [undefined, "failed"],
+  ] as const)(
+    "stops at the first channel it cannot read (code %s -> %s) and says where",
+    async (code, reason) => {
+      const guild = guildWithTextChannels(3, async (id) => {
+        if (id === "t2") {
+          throw Object.assign(new Error("denied"), { code });
+        }
+        return new Map();
+      });
+      const scan = await ServerScanService.getInstance(client).scanGuild(
+        guild,
+        { sampleMessages: true },
+      );
+      // ch-quotes, ch-news and t1 were read; t2 failed; t3 was never asked.
+      expect(scan.sampling).toEqual({
+        channelsRead: 3,
+        channelsPlanned: 5,
+        textChannels: 5,
+        channelLimit: 40,
+        stoppedAt: { id: "t2", name: "chat-2", reason },
+      });
+      expect(
+        guild.channels.cache.get("t3").messages.fetch,
+      ).not.toHaveBeenCalled();
+      expect(
+        scan.channels.find((c) => c.id === "ch-quotes")!.ownerHint,
+      ).toMatchObject({ botId: "dyno" });
+    },
+  );
+
+  it("keeps nothing from the messages but the bot id, tag and share", async () => {
+    const scan = await ServerScanService.getInstance(client).scanGuild(
+      guildWithTextChannels(1),
+      { sampleMessages: true },
+    );
+    expect(JSON.stringify(scan)).not.toContain("must never be kept");
+  });
+});
+
 describe("mapFeatureBindings", () => {
   it("maps channel, category, role and tier keys to features", () => {
     const m = mapFeatureBindings({

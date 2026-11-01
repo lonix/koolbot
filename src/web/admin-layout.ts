@@ -20,6 +20,7 @@ import {
 } from "./setting-pickers.js";
 import { groupRowsScript } from "./event-group-form.js";
 import { getInactivityWindowMs } from "./session.js";
+import { AUTO_SUBMIT_SCRIPT } from "./auto-submit.js";
 import { CONFIRM_LINK_SCRIPT } from "./confirm-fetch.js";
 import {
   CONFIRM_SCRIPT,
@@ -1094,6 +1095,10 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     // Confirmation links (#1536): only on a page that has one.
     ...(opts.body.includes("data-confirm-link=")
       ? [`${scriptTag(CONFIRM_LINK_SCRIPT)}`]
+      : []),
+    // A switch that applies on change (#1630): only on a page that has one.
+    ...(opts.body.includes("data-autosubmit")
+      ? [`${scriptTag(AUTO_SUBMIT_SCRIPT)}`]
       : []),
     `${scriptTag(CRON_PICKER_SCRIPT)}`,
     `${scriptTag(CASCADE_DISABLE_SCRIPT)}`,

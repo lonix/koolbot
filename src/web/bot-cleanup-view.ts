@@ -104,7 +104,7 @@ function renderPicker(p: BotCleanupPageProps): string {
         )
       : "");
   if (list.length === 0) {
-    return `${note}<div class="kb-empty"><p class="kb-empty__title">No removed bot found.</p><p class="kb-empty__text">Remove the bot in Discord first. Bots that were removed show up here when a permission overwrite, a catalogue id or a channel it wrote to still points at them. Turn on channel ownership hints on the <a href="/admin/adopt?sample=1&amp;tab=bots">Server scan</a> to also find channels a removed bot wrote to.</p></div>`;
+    return `${note}<div class="kb-empty"><p class="kb-empty__title">No removed bot found.</p><p class="kb-empty__text">Remove the bot in Discord first. Bots that were removed show up here when a permission overwrite, a catalogue id or a channel it wrote to still points at them. ${p.sampled ? "" : `Turn on <a href="/admin/adopt?sample=1&amp;tab=bots">Find channels a bot writes in</a> on the Server scan to also find channels a removed bot wrote to.`}</p></div>`;
   }
   const rows = list
     .map(

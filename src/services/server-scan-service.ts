@@ -28,6 +28,17 @@ import {
   type RoleState,
   type ScannedState,
 } from "./server-adoption-planner.js";
+import {
+  SAMPLE_CHANNEL_LIMIT,
+  SAMPLE_MESSAGES_PER_CHANNEL,
+  SAMPLE_MIN_MESSAGES,
+  SAMPLE_OWNER_SHARE,
+  type ScanSampling,
+} from "./server-scan-sampling.js";
+export type {
+  SamplingStopReason,
+  ScanSampling,
+} from "./server-scan-sampling.js";
 
 /**
  * Read-only guild scanner (#1019). `ServerScanService.scan()` inventories a
@@ -269,14 +280,22 @@ export interface ServerScan {
   webhooks: ScanWebhooks;
   /** Parts of the scan that could not be read, and why. */
   partial: string[];
+  /**
+   * What the bot message sampling did (#1630). `null` when it was off for this
+   * scan. Absent on a scan built by older code or a fixture.
+   */
+  sampling?: ScanSampling | null;
 }
+
+/** Discord error codes for Missing Access and Missing Permissions. */
+const DISCORD_NO_ACCESS_CODES: readonly number[] = [50001, 50013];
 
 export interface ScanOptions {
   /** The admin running the adoption; their roles feed `ScannedState`. */
   adminUserId?: string;
   /** Sample recent message authors for channel ownership hints. */
   sampleMessages?: boolean;
-  /** Cap on channels sampled when `sampleMessages` is on. Default 40. */
+  /** Cap on channels sampled when `sampleMessages` is on. Default {@link SAMPLE_CHANNEL_LIMIT}. */
   sampleChannelLimit?: number;
 }
 
@@ -739,9 +758,9 @@ export class ServerScanService {
     const bots = this.collectBots(guild, roles, channels, botUserId);
 
     // ----- Owner hints (opt-in) -----
-    if (options.sampleMessages) {
-      await this.sampleOwners(guild, channels, options, note);
-    }
+    const sampling = options.sampleMessages
+      ? await this.sampleOwners(guild, channels, options, note)
+      : null;
 
     // ----- Readiness -----
     const membersIntent = this.hasMembersIntent();
@@ -798,6 +817,7 @@ export class ServerScanService {
       suggestions,
       webhooks,
       partial,
+      sampling,
     };
   }
 
@@ -1063,23 +1083,37 @@ export class ServerScanService {
     }
   }
 
-  /** Sample recent authors: flag channels one bot dominates. */
+  /**
+   * Sample recent authors: flag channels one bot dominates. Reads the last 25
+   * messages of up to `sampleChannelLimit` text channels and keeps only the
+   * bot's id, tag and share; message content is never stored or logged.
+   * Returns what it covered, so the page can say so (#1630).
+   */
   private async sampleOwners(
     guild: Guild,
     channels: ScanChannel[],
     options: ScanOptions,
     note: (what: string, err: unknown) => void,
-  ): Promise<void> {
-    const limit = options.sampleChannelLimit ?? 40;
-    const textChannels = channels
-      .filter((c) => c.kind === "text")
-      .slice(0, limit);
+  ): Promise<ScanSampling> {
+    const limit = options.sampleChannelLimit ?? SAMPLE_CHANNEL_LIMIT;
+    const allText = channels.filter((c) => c.kind === "text");
+    const textChannels = allText.slice(0, limit);
+    const sampling: ScanSampling = {
+      channelsRead: 0,
+      channelsPlanned: textChannels.length,
+      textChannels: allText.length,
+      channelLimit: limit,
+      stoppedAt: null,
+    };
     for (const ch of textChannels) {
       const live = guild.channels.cache.get(ch.id);
       if (!live || !("messages" in live)) continue;
       try {
-        const msgs = await live.messages.fetch({ limit: 25 });
-        if (msgs.size < 5) continue;
+        const msgs = await live.messages.fetch({
+          limit: SAMPLE_MESSAGES_PER_CHANNEL,
+        });
+        sampling.channelsRead += 1;
+        if (msgs.size < SAMPLE_MIN_MESSAGES) continue;
         const counts = new Map<string, { n: number; tag: string }>();
         for (const m of msgs.values()) {
           if (!m.author.bot) continue;
@@ -1090,7 +1124,7 @@ export class ServerScanService {
         let top: [string, { n: number; tag: string }] | null = null;
         for (const entry of counts)
           if (!top || entry[1].n > top[1].n) top = entry;
-        if (top && top[1].n / msgs.size >= 0.6) {
+        if (top && top[1].n / msgs.size >= SAMPLE_OWNER_SHARE) {
           ch.ownerHint = {
             botId: top[0],
             botTag: top[1].tag,
@@ -1098,10 +1132,23 @@ export class ServerScanService {
           };
         }
       } catch (e) {
-        note(`message sample for ${ch.id}`, e);
+        note(
+          "message sampling (stopped at the first channel it could not read)",
+          e,
+        );
+        const code = (e as { code?: unknown } | null)?.code;
+        sampling.stoppedAt = {
+          id: ch.id,
+          name: ch.name,
+          reason:
+            typeof code === "number" && DISCORD_NO_ACCESS_CODES.includes(code)
+              ? "no-access"
+              : "failed",
+        };
         break; // permission-style failures repeat; stop rather than spam REST
       }
     }
+    return sampling;
   }
 
   private buildSuggestions(

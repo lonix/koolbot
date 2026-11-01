@@ -13,6 +13,13 @@ import type {
   ScanSeverity,
   ServerScan,
 } from "../services/server-scan-service.js";
+import {
+  SAMPLE_CHANNEL_LIMIT,
+  SAMPLE_MESSAGES_PER_CHANNEL,
+  SAMPLE_MIN_MESSAGES,
+  SAMPLE_OWNER_SHARE,
+  type ScanSampling,
+} from "../services/server-scan-sampling.js";
 import { claimKeyFor, featureTarget } from "../services/channel-claims.js";
 import {
   channelMention,
@@ -37,7 +44,7 @@ import {
  * that acts) and a tab per inventory: roles, channels, other bots and what
  * Discord handles itself. The tabs are plain links to `?tab=`, so they work
  * without JavaScript. The page has no write routes: its only form is a GET
- * that switches the ownership hints, and every dynamic value is escaped.
+ * that switches the message sampling, and every dynamic value is escaped.
  */
 
 const DOCS =
@@ -86,7 +93,7 @@ export interface AdoptPageProps {
   /** Null when the scan failed outright. */
   scan: ServerScan | null;
   error?: string;
-  /** Channel ownership hints (reads recent messages) are on. */
+  /** The "Find channels a bot writes in" switch is on (message sampling, `?sample=1`). */
   sampled: boolean;
   tab: ScanTab;
   /** Channels tab: which channels to list. Defaults to all. */
@@ -230,10 +237,42 @@ function attentionCount(scan: ServerScan): number {
 
 // ---- header and tabs --------------------------------------------------------
 
+/** What the sampling stopped on, in words. */
+const SAMPLING_STOP_REASON: Record<
+  NonNullable<ScanSampling["stoppedAt"]>["reason"],
+  string
+> = {
+  "no-access": "the bot cannot read its history",
+  failed: "Discord returned an error",
+};
+
+/** The switch's one line, then the rules behind More (#1630). */
+function renderSamplingHelp(scan: ScanSampling | null): string {
+  const limit = scan?.channelLimit ?? SAMPLE_CHANNEL_LIMIT;
+  const share = Math.round(SAMPLE_OWNER_SHARE * 100);
+  const thisScan =
+    scan && scan.textChannels > scan.channelsPlanned
+      ? ` This scan read the first ${scan.channelsPlanned} of ${scan.textChannels} text channels.`
+      : "";
+  return `<div>
+      <p class="kb-help" id="scan-sample-help">Reads the last ${SAMPLE_MESSAGES_PER_CHANNEL} messages in up to ${limit} text channels and keeps only which bot wrote them. Needs Read Message History. Slower. Turning it on or off scans again.</p>
+      <details class="kb-disclosure kb-disclosure--inline"><summary>More</summary><div class="kb-disclosure__body"><p class="kb-help">A channel is marked as one a bot writes in when one bot wrote at least ${share}% of its last ${SAMPLE_MESSAGES_PER_CHANNEL} messages, and the channel has at least ${SAMPLE_MIN_MESSAGES}. The first ${limit} text channels, in the order Discord lists them, are read; any beyond that are not.${thisScan} If the bot cannot read a channel, the scan stops there and says so, so Discord is not asked again and again.</p><p class="kb-help">The marks appear on the Channels tab, where they suggest a channel to claim, and in what is left when a bot is removed. Only the bot's name and its share are kept, in this scan, which is shared for a minute. What members wrote is not kept or logged.</p></div></details>
+    </div>`;
+}
+
 function renderHeader(scan: ServerScan | null, props: AdoptPageProps): string {
   const name = escapeHtml(scan?.guildName ?? "this server");
+  const sampling = scan?.sampling ?? null;
+  const stopped = sampling?.stoppedAt ?? null;
+  const stoppedChannel = stopped
+    ? (scan?.channels.find((c) => c.id === stopped.id) ?? null)
+    : null;
   const meta = scan
-    ? `<p class="kb-pagehead__meta"><span>Read from Discord ${escapeHtml(scannedLabel(scan.scannedAt))}</span><span>Ownership hints read recent messages, so they are slower.</span></p>`
+    ? `<p class="kb-pagehead__meta"><span>Read from Discord ${escapeHtml(scannedLabel(scan.scannedAt))}, ${sampling ? "with" : "without"} bot message sampling</span>${
+        sampling && stopped
+          ? `<span>Read ${plural(sampling.channelsRead, "channel", "channels")} of ${sampling.channelsPlanned}; stopped at ${namedChannelMention(stopped.name, stoppedChannel?.typeName)}, ${SAMPLING_STOP_REASON[stopped.reason]}</span>`
+          : ""
+      }</p>`
     : "";
   const filter = props.tab === "channels" ? (props.filter ?? "all") : "all";
   const tabField =
@@ -243,10 +282,12 @@ function renderHeader(scan: ServerScan | null, props: AdoptPageProps): string {
     (filter === "all"
       ? ""
       : `<input type="hidden" name="filter" value="${escapeHtml(filter)}">`);
+  // One decision, applied on change with JavaScript (`data-autosubmit`); the
+  // Apply button is the same form without it and is hidden by the script.
   const hints = scan
-    ? `<form method="get" action="${SCAN_PAGE}" class="kb-toolbar__end">${tabField}
-      <label class="kb-switch"><input type="checkbox" role="switch" name="sample" value="1"${props.sampled ? " checked" : ""}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Channel ownership hints</label>
-      <button type="submit" class="kb-btn kb-btn--sm">Apply</button>
+    ? `<form method="get" action="${SCAN_PAGE}" class="kb-toolbar__end" data-autosubmit>${tabField}
+      <label class="kb-switch"><input type="checkbox" role="switch" name="sample" value="1" aria-describedby="scan-sample-help"${props.sampled ? " checked" : ""}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Find channels a bot writes in</label>
+      <button type="submit" class="kb-btn kb-btn--sm" data-autosubmit-hide>Apply</button>
     </form>
     <a class="kb-btn kb-btn--sm" href="${escapeHtml(
       scanHref(props.tab, props.sampled, {
@@ -259,7 +300,7 @@ function renderHeader(scan: ServerScan | null, props: AdoptPageProps): string {
   <div class="kb-pagehead__text">
     <h1 class="kb-pagehead__title">Server scan</h1>
     <p class="kb-pagehead__sub">A read-only inventory of ${name}. Nothing here changes Discord or KoolBot settings; each suggestion links to the page that acts on it.</p>
-    ${meta}
+    ${meta}${scan ? renderSamplingHelp(sampling) : ""}
   </div>
   <div class="kb-pagehead__actions">${hints}</div>
 </header>`;
@@ -739,7 +780,7 @@ function renderCapabilityRow(c: ReportCapability): string {
   return `<tr><th scope="row">${escapeHtml(c.label)}</th><td>${renderCoverage(c)}</td><td>${feature}</td><td>${state}</td><td>${steps}</td></tr>`;
 }
 
-function renderLeftovers(card: BotCard): string {
+function renderLeftovers(card: BotCard, scan: ServerScan): string {
   const l = card.leftovers;
   const items: string[] = [];
   if (card.roleNames.length) {
@@ -762,9 +803,13 @@ function renderLeftovers(card: BotCard): string {
       `${namedChannelMention(b.channel, b.typeName)} is bound to ${escapeHtml(b.features.join(", "))}.`,
     );
   }
+  // Channels it mostly writes in are only known when the scan sampled messages.
+  const sampleNote = scan.sampling
+    ? ""
+    : `<p class="kb-muted">Channels it mostly writes in are not listed. <a href="${escapeHtml(scanHref("bots", true))}">Find channels a bot writes in</a> to add them.</p>`;
   return items.length
-    ? `<h4>Left over when it is removed</h4><ul>${items.map((i) => `<li>${i}</li>`).join("")}</ul>`
-    : `<h4>Left over when it is removed</h4><p class="kb-muted">Nothing found. This report never touches channels or overwrites.</p>`;
+    ? `<h4>Left over when it is removed</h4><ul>${items.map((i) => `<li>${i}</li>`).join("")}</ul>${sampleNote}`
+    : `<h4>Left over when it is removed</h4><p class="kb-muted">Nothing found. This report never touches channels or overwrites.</p>${sampleNote}`;
 }
 
 function renderBotCard(card: BotCard, scan: ServerScan): string {
@@ -804,7 +849,7 @@ function renderBotCard(card: BotCard, scan: ServerScan): string {
   <p><strong>${escapeHtml(card.summary)}</strong></p>
   <dl class="kb-kv"><dt>Integration role</dt><dd>${card.roleNames.map((n) => roleMention(n)).join(" ") || "—"}</dd><dt>Channels with overwrites</dt><dd>${overwrites}</dd></dl>
   ${body}
-  ${disclosure("Left over when it is removed", "", renderLeftovers(card))}
+  ${disclosure("Left over when it is removed", "", renderLeftovers(card, scan))}
   </div>
 </section>`;
 }

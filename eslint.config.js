@@ -88,6 +88,7 @@ export default [
     // DOM globals axe needs. Everything else stays on the node environment.
     files: [
       '__tests__/web/a11y-*.ts',
+      '__tests__/web/auto-submit.test.ts',
       '__tests__/web/confirm-script.test.ts',
       '__tests__/web/confirm-dialog.test.ts',
       '__tests__/web/confirm-fetch.test.ts',
