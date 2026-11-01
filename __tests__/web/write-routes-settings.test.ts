@@ -722,6 +722,58 @@ describe("saving a value the Re-post card depends on reloads the page (#1428)", 
   });
 });
 
+describe("All settings reloads when a save changes a command-gating key (#1638)", () => {
+  const save = async (
+    key: string,
+    value: string,
+    redirect?: string,
+  ): Promise<{ reload?: string }> => {
+    const res = await harness.post(
+      "/settings/save-section",
+      {
+        category: key.split(".")[0],
+        ...(redirect ? { redirect } : {}),
+        keys: [key],
+        [`value_${key}`]: value,
+      },
+      { json: true },
+    );
+    return (await res.json()) as { reload?: string };
+  };
+
+  it.each([
+    "quotes.enabled",
+    "lfg.enabled",
+    "reminders.enabled",
+    "tickets.enabled",
+    "moderation.raid.enabled",
+    "voicetracking.seen.enabled",
+  ])(
+    "reloads the page after %s flips, so the command state is read again",
+    async (key) => {
+      const body = await save(key, "true");
+      expect(body.reload).toContain("/admin/settings?");
+    },
+  );
+
+  it("does not reload for a key that gates no command", async () => {
+    expect((await save("quotes.cooldown", "30")).reload).toBeUndefined();
+    expect((await save("polls.enabled", "true")).reload).toBeUndefined();
+  });
+
+  it("does not reload when the gating key keeps its value", async () => {
+    mockConfigGet.mockImplementation(async (key) =>
+      key === "quotes.enabled" ? true : null,
+    );
+    expect((await save("quotes.enabled", "true")).reload).toBeUndefined();
+  });
+
+  it("a feature page keeps its own reload rules", async () => {
+    const body = await save("quotes.enabled", "true", "/admin/quotes");
+    expect(body.reload).toContain("/admin/quotes?");
+  });
+});
+
 describe("leaderboard tiers are hidden from All settings but not from export and import (#1428)", () => {
   const FREE_ROLE = "888888888888888888";
 

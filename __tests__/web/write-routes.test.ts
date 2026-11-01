@@ -1139,6 +1139,7 @@ describe("invalidateCommandSyncAfterWrite (#1638)", () => {
 
   const run = (
     getInstance: () => unknown,
+    method = "POST",
   ): { next: jest.Mock; res: EventEmitter } => {
     jest
       .spyOn(CommandManager, "getInstance")
@@ -1146,7 +1147,7 @@ describe("invalidateCommandSyncAfterWrite (#1638)", () => {
     const next = jest.fn();
     const res = new EventEmitter();
     invalidateCommandSyncAfterWrite({} as never)(
-      {} as never,
+      { method } as never,
       res as never,
       next,
     );
@@ -1161,6 +1162,33 @@ describe("invalidateCommandSyncAfterWrite (#1638)", () => {
     res.emit("finish");
     expect(invalidate).toHaveBeenCalledTimes(1);
   });
+
+  it.each(["GET", "HEAD", "OPTIONS"])(
+    "leaves the cache alone for a %s, which the write router sees before the read-only pages",
+    (method) => {
+      const invalidate = jest.fn();
+      const { next, res } = run(
+        () => ({ invalidateCommandSync: invalidate }),
+        method,
+      );
+      expect(next).toHaveBeenCalledTimes(1);
+      res.emit("finish");
+      expect(invalidate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["POST", "PUT", "PATCH", "DELETE"])(
+    "still clears it after a %s",
+    (method) => {
+      const invalidate = jest.fn();
+      const { res } = run(
+        () => ({ invalidateCommandSync: invalidate }),
+        method,
+      );
+      res.emit("finish");
+      expect(invalidate).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("never breaks a write when the command manager cannot be reached", () => {
     const { next, res } = run(() => {

@@ -48,7 +48,7 @@ import { createChannelManagerRouter } from "./routes/write/channel-manager.js";
 export * from "./routes/write/helpers.js";
 
 /**
- * After any admin write has been answered, forget the cached slash-command sync
+ * After any admin write (not a GET, HEAD or OPTIONS) has been answered, forget the cached slash-command sync
  * check (#1638): a settings save, a wizard apply or a feature page can change
  * which commands should exist, and the Reload commands route changes what
  * Discord has. This only clears a cache (the next read looks at Discord again);
@@ -57,7 +57,17 @@ export * from "./routes/write/helpers.js";
 export function invalidateCommandSyncAfterWrite(
   client: Client,
 ): RequestHandler {
-  return function invalidateCommandSyncAfterWrite(_req, res, next) {
+  return function invalidateCommandSyncAfterWrite(req, res, next) {
+    // The write router is mounted ahead of the read-only pages and passes GETs
+    // through, so a page view must not clear what that same view just cached.
+    if (
+      req.method === "GET" ||
+      req.method === "HEAD" ||
+      req.method === "OPTIONS"
+    ) {
+      next();
+      return;
+    }
     res.once("finish", () => {
       try {
         CommandManager.getInstance(client).invalidateCommandSync();

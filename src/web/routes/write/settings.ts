@@ -22,6 +22,7 @@ import { PROTECTED_KEYS } from "../../bootstrap-vars.js";
 import { recordAudit } from "../../audit.js";
 import { findUnknownShortcodes } from "../../../utils/emoji-shortcodes.js";
 import { getDisplayedRemainingMs } from "../../admin-layout.js";
+import { COMMAND_GATING_KEYS } from "../../../services/command-registry.js";
 import { commandSyncFlashNote } from "../../command-sync-text.js";
 import { rereadCommandSync } from "../../command-sync-read.js";
 import {
@@ -747,17 +748,22 @@ export function createSettingsRouter(client: Client): Router {
       // that page (disabled banner, Status card, nav badge, action buttons)
       // describing the old state, so the AJAX save reloads it. The Settings
       // page itself renders nothing else from these values and keeps the
-      // in-place flash. A key whose metadata sets `reloadOnSave` also
+      // in-place flash, apart from the command-gating keys below. A key whose metadata sets `reloadOnSave` also
       // reloads: the rest of the page renders from its value (#1090).
       const reload =
-        redirectTo !== "/admin/settings" &&
-        (changedKeys.some((k) => k.endsWith(".enabled")) ||
-          applied.some(
-            (a) =>
-              unknownBefore.has(a.key) ||
-              settingsMetadata[a.key as keyof typeof settingsMetadata]
-                ?.reloadOnSave === true,
-          ));
+        redirectTo === "/admin/settings"
+          ? // All settings keeps its in-place flash, except after a key that
+            // gates a slash command: the status line beside Reload commands
+            // (#1638) would still describe the old state, so the page reloads
+            // and reads it again.
+            changedKeys.some((k) => COMMAND_GATING_KEYS.has(k))
+          : changedKeys.some((k) => k.endsWith(".enabled")) ||
+            applied.some(
+              (a) =>
+                unknownBefore.has(a.key) ||
+                settingsMetadata[a.key as keyof typeof settingsMetadata]
+                  ?.reloadOnSave === true,
+            );
       const rearmNote = rearmFailureNote(rearmFailed);
       const label = category || "section";
       if (failed.length === 0) {
