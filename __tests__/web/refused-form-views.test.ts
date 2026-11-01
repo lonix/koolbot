@@ -70,6 +70,7 @@ describe("a form that was not refused", () => {
       expect(html).not.toMatch(/<(input|select|textarea)[^>]*aria-invalid/);
       expect(html).not.toContain('class="kb-field__error"');
       expect(html).not.toContain('class="helper edit-details" open');
+      expect(html).not.toContain('class="kb-disclosure" open');
     }
   });
 
@@ -155,7 +156,7 @@ describe("a refused Polls edit form", () => {
       },
     });
     const doc = new JSDOM(html).window.document;
-    const open = Array.from(doc.querySelectorAll("details.edit-details")).map(
+    const open = Array.from(doc.querySelectorAll("details.kb-disclosure")).map(
       (d) => d.hasAttribute("open"),
     );
     // Two schedule rows, then two question rows: only the second question.

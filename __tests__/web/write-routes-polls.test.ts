@@ -370,8 +370,8 @@ describe("POST /polls/schedules/:id/{edit,delete,toggle,test}", () => {
     expect(r.invalidIds).toEqual(["poll-schedule-edit-sched-1-cron"]);
     // The details element holding the refused form is open, or the marked
     // field would be hidden and could not take focus.
-    expect(r.html).toContain(
-      '<details class="helper edit-details" open><summary>Edit</summary>',
+    expect(r.html).toMatch(
+      /<details class="kb-disclosure" open><summary>[^]*?Edit<\/summary>/,
     );
     const doc = new JSDOM(r.html).window.document;
     expect(
@@ -670,8 +670,8 @@ describe("POST /polls/items/:id/{edit,delete,toggle}", () => {
     expect(r.errorLines["poll-item-edit-item-1-answers-error"]).toBe(
       "Give 2 to 10 answers, one in each box.",
     );
-    expect(r.html).toContain(
-      '<details class="helper edit-details" open><summary>Edit</summary>',
+    expect(r.html).toMatch(
+      /<details class="kb-disclosure" open><summary>[^]*?Edit<\/summary>/,
     );
     expect(r.html).toContain('value="only-one"');
     expect(mockUpdatePollItem).not.toHaveBeenCalled();
