@@ -108,6 +108,39 @@ Progress through the Setup wizard: done steps show a check, the current one is o
 
 The wizard's steps: **Choose features** → **Access** → **Features** → **Review**.
 
+### SubSteps
+
+Progress through the feature pages of the Setup wizard's **Features** step: a label that says the position, and one marker per chosen feature. It sits
+directly under the Steps bar and above the page title, so the two bars read together.
+
+**Markup.** Shown for page 2 of 3 (`renderWizardSubSteps()` in `src/web/wizard-access-view.ts`):
+
+```html
+<div class="kb-substeps">
+  <p class="kb-substeps__label">Feature 2 of 3: Quote System</p>
+  <ol class="kb-substeps__bar" aria-label="Features to set up">
+    <li class="is-done"><a class="kb-substeps__mark" href="/admin/wizard?step=0" title="Voice Channels"><span class="kb-visually-hidden">Voice Channels, done</span></a></li>
+    <li aria-current="step"><span class="kb-substeps__mark" title="Quote System"><span class="kb-visually-hidden">Quote System</span></span></li>
+    <li><span class="kb-substeps__mark" title="Polls"><span class="kb-visually-hidden">Polls</span></span></li>
+  </ol>
+</div>
+```
+
+| State | Look | Words |
+| --- | --- | --- |
+| Done | A link back to that feature's page, bar in `ok-text` | "Voice Channels, done" |
+| Current | Bar in `primary`, `aria-current="step"` on the `li` | The visible label, and the marker's name |
+| Upcoming | Bar in `control`, no link | The feature name |
+
+- **Screen reader.** The label is plain text: "Feature 2 of 3: Quote System". Only the sub-bar's current marker carries `aria-current="step"`; the Steps bar
+  keeps its own, so a feature page has two. The list is named "Features to set up".
+- **Not colour alone.** Every marker has its name as hidden text and as a `title`, and the visible label says the position.
+- **One feature draws nothing:** no label and no bar, because there is nothing to count. The page title already names the feature.
+- **Many features share one row.** Each marker is `flex: 1 1 0` with `min-width: 0`, so 14 or 19 markers shrink to share the width and never wrap or
+  overflow. The marker is `space-6` high (a 24px target) with a bar of `space-2`, centred with flex. Sizes come from tokens only; a test pins that no
+  `.kb-substeps` rule has a literal size.
+- **A feature with no settings keeps its marker and label.** The count is the chosen features, not their settings.
+
 ## Actions
 
 ### Button
