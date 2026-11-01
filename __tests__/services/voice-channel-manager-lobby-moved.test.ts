@@ -585,6 +585,190 @@ describe("VoiceChannelManager - lobby moved out of its category (issue #1636)", 
     });
   });
 
+  describe("one repair per move, even with concurrent triggers (review round 2, finding 1)", () => {
+    function deferredSetParent(lobby: any): { release: () => void } {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      lobby.setParent.mockImplementation(async (p: string) => {
+        await gate;
+        lobby.parentId = p;
+        category.children.cache.set(lobby.id, lobby);
+        return lobby;
+      });
+      return { release };
+    }
+    const flush = (): Promise<void> =>
+      new Promise((resolve) => setTimeout(resolve, 0));
+
+    it("the move event and ensureLobbyChannelExists send ONE setParent", async () => {
+      settings["voicechannels.lobby.channel_id"] = "lobby-id";
+      const lobby = add("lobby-id", LOBBY_NAME, true);
+      const gate = deferredSetParent(lobby);
+      const move = moveOut(lobby);
+
+      const first = manager.handleChannelMoved(move.before, move.after, null);
+      const second = manager.ensureLobbyChannelExists(guild);
+      await flush();
+      gate.release();
+      await Promise.all([first, second]);
+
+      expect(lobby.setParent).toHaveBeenCalledTimes(1);
+      expect(createMock).not.toHaveBeenCalled();
+    });
+
+    it("the move event and checkLobbyHealth send ONE setParent", async () => {
+      settings["voicechannels.lobby.channel_id"] = "lobby-id";
+      const lobby = add("lobby-id", LOBBY_NAME, true);
+      const gate = deferredSetParent(lobby);
+      const move = moveOut(lobby);
+
+      const first = manager.handleChannelMoved(move.before, move.after, null);
+      const second = (manager as any).checkLobbyHealth();
+      await flush();
+      gate.release();
+      await Promise.all([first, second]);
+
+      expect(lobby.setParent).toHaveBeenCalledTimes(1);
+    });
+
+    it("a failed first attempt still counts toward the back-off", async () => {
+      settings["voicechannels.lobby.channel_id"] = "lobby-id";
+      const lobby = add("lobby-id", LOBBY_NAME, true);
+      lobby.setParent.mockRejectedValue(new Error("Missing Permissions"));
+      const move = moveOut(lobby);
+
+      await manager.handleChannelMoved(move.before, move.after, null);
+      await manager.ensureLobbyChannelExists(guild);
+
+      expect(lobby.setParent).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not send a request when the channel is already back in the category", async () => {
+      settings["voicechannels.lobby.channel_id"] = "lobby-id";
+      const lobby = add("lobby-id", LOBBY_NAME, true);
+      const move = moveOut(lobby);
+      // An admin moved it back before the repair started.
+      lobby.parentId = CATEGORY_ID;
+      category.children.cache.set(lobby.id, lobby);
+
+      await manager.handleChannelMoved(move.before, move.after, null);
+
+      expect(lobby.setParent).not.toHaveBeenCalled();
+    });
+
+    it("two concurrent ensureLobbyChannelExists calls create ONE lobby", async () => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const realCreate = createMock.getMockImplementation() as (
+        o: any,
+      ) => Promise<any>;
+      createMock.mockImplementation(async (o: any) => {
+        await gate;
+        return realCreate(o);
+      });
+
+      const first = manager.ensureLobbyChannelExists(guild);
+      const second = manager.ensureLobbyChannelExists(guild);
+      await flush();
+      release();
+      await Promise.all([first, second]);
+
+      expect(createMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("Force VC cleanup racing the ensure path", () => {
+    it("ends with exactly one lobby in the category", async () => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const realCreate = createMock.getMockImplementation() as (
+        o: any,
+      ) => Promise<any>;
+      createMock.mockImplementation(async (o: any) => {
+        await gate;
+        return realCreate(o);
+      });
+
+      const forced = manager.ensureLobbyChannels(guild);
+      const ensured = manager.ensureLobbyChannelExists(guild);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      release();
+      await Promise.all([forced, ensured]);
+
+      const lobbies = [...category.children.cache.values()].filter(
+        (c: any) => c.name === LOBBY_NAME,
+      );
+      expect(lobbies).toHaveLength(1);
+    });
+  });
+
+  describe("a lobby whose record is still being saved (review round 2, finding 2)", () => {
+    it("is not duplicated when the registry reads empty before the write is flushed", async () => {
+      const lobby = add("pending-lobby", LOBBY_NAME, false);
+      (manager as any).pendingManagedChannels.set("pending-lobby", {
+        guildId: GUILD_ID,
+        kind: "lobby",
+      });
+
+      expect(await manager.ensureLobbyChannelExists(guild)).toBe(true);
+
+      expect(createMock).not.toHaveBeenCalled();
+      expect(lobby.parentId).toBe(CATEGORY_ID);
+    });
+
+    it("is found even while the database is not ready", async () => {
+      const lobby = add("pending-lobby", LOBBY_NAME, false);
+      (manager as any).pendingManagedChannels.set("pending-lobby", {
+        guildId: GUILD_ID,
+        kind: "lobby",
+      });
+      (manager as any).isDbReady.mockReturnValue(false);
+
+      expect(await manager.ensureLobbyChannelExists(guild)).toBe(true);
+
+      expect(createMock).not.toHaveBeenCalled();
+      expect(lobby.parentId).toBe(CATEGORY_ID);
+    });
+
+    it("is put back in managed-only mode during a database outage", async () => {
+      settings["voicechannels.cleanup.managed_only"] = true;
+      const lobby = add("pending-lobby", LOBBY_NAME, true);
+      (manager as any).pendingManagedChannels.set("pending-lobby", {
+        guildId: GUILD_ID,
+        kind: "lobby",
+      });
+      (manager as any).isDbReady.mockReturnValue(false);
+      const { before, after } = moveOut(lobby);
+
+      await manager.handleChannelMoved(before, after, null);
+
+      expect(lobby.parentId).toBe(CATEGORY_ID);
+    });
+
+    it("ignores a pending entry of another guild or another kind", async () => {
+      add("other-guild-lobby", LOBBY_NAME, false);
+      add("pending-room", LOBBY_NAME, false);
+      (manager as any).pendingManagedChannels.set("other-guild-lobby", {
+        guildId: "someone-else",
+        kind: "lobby",
+      });
+      (manager as any).pendingManagedChannels.set("pending-room", {
+        guildId: GUILD_ID,
+        kind: "channel",
+      });
+
+      expect(await manager.ensureLobbyChannelExists(guild)).toBe(true);
+
+      expect(createMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("a lobby recognised during a live move is remembered (review 3)", () => {
     it("keeps the chip and creates nothing after a failed move back, with no registry row", async () => {
       const lobby = add("name-lobby", LOBBY_NAME, true);
@@ -751,6 +935,48 @@ describe("VoiceChannelManager - lobby moved out of its category (issue #1636)", 
 
       await manager.cleanupEmptyChannels();
 
+      expect(lobby.delete).not.toHaveBeenCalled();
+    });
+
+    it("deletes an empty room known only from the persisted ownership rows (restoration failed at startup)", async () => {
+      add("lobby-id", LOBBY_NAME, true);
+      const room = add("room-9", "🎮 Persisted room", false);
+      (
+        mockModel("VoiceChannelOwnership").find as jest.Mock<any>
+      ).mockResolvedValue([{ channelId: "room-9", ownerId: "owner-9" }]);
+
+      await manager.cleanupEmptyChannels();
+
+      expect(room.delete).toHaveBeenCalled();
+    });
+
+    it("deletes an empty room known only from a recorded temporary-channel row", async () => {
+      add("lobby-id", LOBBY_NAME, true);
+      const room = add("room-8", "🎮 Recorded room", false);
+      recordedRows.push({
+        guildId: GUILD_ID,
+        channelId: "room-8",
+        kind: "channel",
+      });
+
+      await manager.cleanupEmptyChannels();
+
+      expect(room.delete).toHaveBeenCalled();
+    });
+
+    it("keeps a persisted room that has members, and never deletes a recorded lobby outside the category", async () => {
+      add("lobby-id", LOBBY_NAME, true);
+      const busy = add("room-7", "🎮 Busy", false);
+      busy.members.set("m1", { user: { bot: false } });
+      const lobby = add("recorded-lobby", LOBBY_NAME, false);
+      recordedRows.push(
+        { guildId: GUILD_ID, channelId: "room-7", kind: "channel" },
+        { guildId: GUILD_ID, channelId: "recorded-lobby", kind: "lobby" },
+      );
+
+      await manager.cleanupEmptyChannels();
+
+      expect(busy.delete).not.toHaveBeenCalled();
       expect(lobby.delete).not.toHaveBeenCalled();
     });
 
