@@ -1,5 +1,9 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import { ChannelType, PermissionsBitField } from "discord.js";
+import {
+  ChannelType,
+  PermissionFlagsBits,
+  PermissionsBitField,
+} from "discord.js";
 import { defaultConfig } from "../../src/services/config-schema.js";
 import { ConfigService } from "../../src/services/config-service.js";
 
@@ -103,7 +107,10 @@ function makeGuild(): { guild: any; write: jest.Mock } {
   const channels = new Map<string, any>(
     [cat, quotes, afk, news].map((c: any) => [
       c.id,
-      Object.assign(c, { isThread: () => false }),
+      Object.assign(c, {
+        isThread: () => false,
+        permissionsFor: () => ({ has: () => true }),
+      }),
     ]),
   );
   const me = {
@@ -574,6 +581,7 @@ describe("ServerScanService message sampling report (#1630)", () => {
         parentId: null,
         permissionsLocked: false,
         isThread: () => false,
+        permissionsFor: () => ({ has: () => true }),
         permissionOverwrites: { cache: new Map() },
         messages: { fetch: jest.fn(async () => fetchFor(id)) },
       });
@@ -659,6 +667,81 @@ describe("ServerScanService message sampling report (#1630)", () => {
       ).toMatchObject({ botId: "dyno" });
     },
   );
+
+  it("asks Discord not to cache the messages it reads (nothing kept in discord.js)", async () => {
+    const guild = guildWithTextChannels(1);
+    await ServerScanService.getInstance(client).scanGuild(guild, {
+      sampleMessages: true,
+    });
+    const fetches = ["ch-quotes", "ch-news", "t1"].map(
+      (id) => guild.channels.cache.get(id).messages.fetch,
+    );
+    for (const f of fetches) {
+      expect(f).toHaveBeenCalledTimes(1);
+      expect(f).toHaveBeenCalledWith({ limit: 25, cache: false });
+    }
+  });
+
+  /** Channel `t2` is visible to the bot; `history` says whether it may read it. */
+  function withHistory(history: boolean): any {
+    const guild = guildWithTextChannels(3);
+    const seen: string[] = [];
+    for (const id of ["t1", "t2", "t3"]) {
+      guild.channels.cache.get(id).permissionsFor = jest.fn((who: any) => {
+        seen.push(who?.id);
+        return {
+          has: (flags: bigint[]) =>
+            id !== "t2" ||
+            history ||
+            !flags.includes(PermissionFlagsBits.ReadMessageHistory),
+        };
+      });
+    }
+    guild.__seen = seen;
+    return guild;
+  }
+
+  it("stops at a visible channel whose history the bot may not read (Discord returns an empty list, not an error)", async () => {
+    const guild = withHistory(false);
+    const scan = await ServerScanService.getInstance(client).scanGuild(guild, {
+      sampleMessages: true,
+    });
+    expect(scan.sampling).toEqual({
+      channelsRead: 3,
+      channelsPlanned: 5,
+      textChannels: 5,
+      channelLimit: 40,
+      stoppedAt: { id: "t2", name: "chat-2", reason: "no-access" },
+    });
+    expect(
+      guild.channels.cache.get("t2").messages.fetch,
+    ).not.toHaveBeenCalled();
+    expect(
+      guild.channels.cache.get("t3").messages.fetch,
+    ).not.toHaveBeenCalled();
+    expect(guild.__seen[0]).toBe("bot-1");
+  });
+
+  it("reads on when the bot may read the history (control)", async () => {
+    const guild = withHistory(true);
+    const scan = await ServerScanService.getInstance(client).scanGuild(guild, {
+      sampleMessages: true,
+    });
+    expect(scan.sampling).toMatchObject({
+      channelsRead: 5,
+      stoppedAt: null,
+    });
+    expect(guild.channels.cache.get("t3").messages.fetch).toHaveBeenCalled();
+  });
+
+  it("does not throw or stop when the bot's own permissions cannot be resolved", async () => {
+    const guild = guildWithTextChannels(1);
+    guild.channels.cache.get("t1").permissionsFor = jest.fn(() => null);
+    const scan = await ServerScanService.getInstance(client).scanGuild(guild, {
+      sampleMessages: true,
+    });
+    expect(scan.sampling).toMatchObject({ channelsRead: 3, stoppedAt: null });
+  });
 
   it("keeps nothing from the messages but the bot id, tag and share", async () => {
     const scan = await ServerScanService.getInstance(client).scanGuild(

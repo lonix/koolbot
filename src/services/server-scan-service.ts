@@ -2,6 +2,7 @@ import {
   ChannelType,
   GatewayIntentBits,
   GuildScheduledEventEntityType,
+  PermissionFlagsBits,
   PermissionsBitField,
   WebhookType,
   type Client,
@@ -1108,9 +1109,28 @@ export class ServerScanService {
     for (const ch of textChannels) {
       const live = guild.channels.cache.get(ch.id);
       if (!live || !("messages" in live)) continue;
+      // Without Read Message History Discord answers a visible channel with an
+      // empty list, not an error, so check the bot's own permissions first.
+      // When they cannot be resolved, try the read and let Discord decide.
+      const mine = guild.members.me
+        ? live.permissionsFor(guild.members.me)
+        : null;
+      if (
+        mine &&
+        !mine.has([
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.ReadMessageHistory,
+        ])
+      ) {
+        sampling.stoppedAt = { id: ch.id, name: ch.name, reason: "no-access" };
+        break;
+      }
       try {
+        // `cache: false`: discord.js would otherwise keep the fetched messages
+        // (their content) in the channel's message cache.
         const msgs = await live.messages.fetch({
           limit: SAMPLE_MESSAGES_PER_CHANNEL,
+          cache: false,
         });
         sampling.channelsRead += 1;
         if (msgs.size < SAMPLE_MIN_MESSAGES) continue;
