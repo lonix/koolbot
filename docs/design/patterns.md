@@ -57,6 +57,11 @@ destructive steps last, each with a Dialog.
 Features → **Access** → Channels → Review. The Access step maps Discord roles to Admins, Moderators, Event hosts and Members with one AccessCard each,
 and warns when a switched-on feature has nobody to run it.
 
+Review also lists what turning a feature off needs (#1622): a warning Callout, "Turning off X also needs Y turned off", with the human name first, the key
+in `kb-mono` and each dependent linked to All settings, then a SettingRow whose Switch ("Turn them off too") confirms turning the dependents off in the
+same Apply. Without it Apply refuses back to Review. What cannot be fixed that way is an error Callout with links, and Apply is disabled. A refused Apply
+never ends the session.
+
 ## From the old classes
 
 | Old (`admin-layout.ts`, `user-layout.ts`) | Now |

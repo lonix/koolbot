@@ -234,6 +234,34 @@ describe("WizardService", () => {
       expect(mockConfigService.triggerReload).toHaveBeenCalledTimes(1);
     });
 
+    it("writes the derived values of one attempt without saving them into the session (#1622)", async () => {
+      const result = await service.applyConfiguration(mockUserId, mockGuildId, {
+        "voicetracking.announcements.enabled": false,
+        "quotes.enabled": false,
+      });
+      // Derived values win over the saved choice for that key and are written.
+      // Strict reads: an unreadable dependent must refuse the apply, not count as off.
+      expect(mockConfigService.findDependencyIssues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          "voicetracking.announcements.enabled": false,
+          "quotes.enabled": false,
+        }),
+        { strict: true },
+      );
+      expect(result.appliedKeys).toContain(
+        "voicetracking.announcements.enabled",
+      );
+      expect(cache.get("quotes.enabled")).toBe(false);
+      // The session still holds exactly what the admin chose.
+      expect(
+        service.getSession(mockUserId, mockGuildId)?.configuration,
+      ).toEqual({
+        "quotes.enabled": true,
+        "quotes.channel_id": "123",
+        "quotes.delete_roles": "role-1",
+      });
+    });
+
     it("stores each key under its declared category, not its prefix", async () => {
       service.addConfiguration(mockUserId, mockGuildId, "aka.enabled", true);
       await service.applyConfiguration(mockUserId, mockGuildId);

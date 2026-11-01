@@ -972,10 +972,15 @@ export function coerceToSchemaType(
   return raw;
 }
 
-/** Human-friendly reference to a key: `"Label" (`dotted.key`)`. */
+/**
+ * Human-friendly reference to a key: `"Label" (dotted.key)`. Plain text: the
+ * message is shown in flashes, which carry no markdown, so the key has no
+ * backticks. Pages that can style it (the wizard Review) draw the key in mono
+ * themselves from {@link DependencyCascade} instead of parsing this text.
+ */
 function describeKey(key: keyof ConfigSchema): string {
   const label = settingsMetadata[key]?.label;
-  return label ? `"${label}" (\`${key}\`)` : `\`${key}\``;
+  return label ? `"${label}" (${key})` : key;
 }
 
 function describeList(keys: (keyof ConfigSchema)[]): string {
@@ -991,6 +996,13 @@ function describeList(keys: (keyof ConfigSchema)[]): string {
 export interface DependencyIssue {
   key: keyof ConfigSchema;
   message: string;
+  /**
+   * Which way it failed and with what, so a page can draw the key in mono and
+   * link each related setting instead of parsing `message` (#1622): `enable`,
+   * `related` are the requirements still off; `disable`, the dependents still on.
+   */
+  direction: "enable" | "disable";
+  related: (keyof ConfigSchema)[];
 }
 
 /**
@@ -1046,6 +1058,8 @@ export function validateDependencies(
       if (unmet.length > 0) {
         issues.push({
           key,
+          direction: "enable",
+          related: unmet,
           message: `Cannot enable ${describeKey(key)}: requires ${describeList(
             unmet,
           )} to be enabled. Enable ${unmet.length === 1 ? "it" : "them"} first.`,
@@ -1058,6 +1072,8 @@ export function validateDependencies(
       if (blockers.length > 0) {
         issues.push({
           key,
+          direction: "disable",
+          related: blockers,
           message: `Cannot disable ${describeKey(key)}: ${describeList(
             blockers,
           )} still ${
@@ -1068,6 +1084,68 @@ export function validateDependencies(
     }
   }
   return issues;
+}
+
+/**
+ * What turning off one key drags with it (#1622): `dependents` are the keys
+ * that depend on `key`, directly or through each other, and are on today.
+ */
+export interface DependencyCascade {
+  key: keyof ConfigSchema;
+  dependents: (keyof ConfigSchema)[];
+}
+
+/** Every key that is on either end of a `dependsOn` edge. */
+export function dependencyGraphKeys(): (keyof ConfigSchema)[] {
+  const keys = new Set<keyof ConfigSchema>();
+  for (const key of Object.keys(settingsMetadata) as (keyof ConfigSchema)[]) {
+    const deps = settingsMetadata[key].dependsOn;
+    if (!deps || deps.length === 0) continue;
+    keys.add(key);
+    for (const dep of deps) keys.add(dep);
+  }
+  return [...keys];
+}
+
+/**
+ * The reverse direction of {@link validateDependencies}, made explicit
+ * (#1622): for each key the batch turns off, the dependents that are on and
+ * would have to go off with it, followed through the whole chain (voice
+ * tracking, then achievements, then what needs achievements). Nothing is
+ * decided here and nothing is written: a caller that offers the cascade shows
+ * it and writes the `false` values only once the admin has confirmed them,
+ * so the block-rather-than-cascade rule of #663 still holds for every write
+ * path that does not ask.
+ *
+ * A dependent the batch sets itself is left alone: the admin chose that value,
+ * so if it is on, {@link validateDependencies} still refuses the batch.
+ */
+export function planDisableCascade(
+  pending: Record<string, unknown>,
+  resolveCurrent: (key: keyof ConfigSchema) => boolean,
+): { cascade: DependencyCascade[]; keys: (keyof ConfigSchema)[] } {
+  const all = new Set<keyof ConfigSchema>();
+  const cascade: DependencyCascade[] = [];
+  for (const rawKey of Object.keys(pending)) {
+    if (!hasOwn(settingsMetadata, rawKey)) continue;
+    if (isEnabledValue(pending[rawKey])) continue;
+    const root = rawKey as keyof ConfigSchema;
+    const found: (keyof ConfigSchema)[] = [];
+    const queue: (keyof ConfigSchema)[] = [root];
+    for (let i = 0; i < queue.length; i++) {
+      for (const dependent of getDependents(queue[i])) {
+        if (dependent === root || found.includes(dependent)) continue;
+        if (hasOwn(pending, dependent)) continue;
+        if (!resolveCurrent(dependent)) continue;
+        found.push(dependent);
+        queue.push(dependent);
+      }
+    }
+    if (found.length === 0) continue;
+    cascade.push({ key: root, dependents: found });
+    for (const key of found) all.add(key);
+  }
+  return { cascade, keys: [...all].sort() };
 }
 
 /**

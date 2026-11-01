@@ -224,6 +224,22 @@ export class WizardService {
     return this.updateSession(userId, guildId, state);
   }
 
+  /**
+   * Drop a staged choice, so the key reads its live value again (#1622).
+   * Returns false when there is no session; a key that was not staged is a no-op.
+   */
+  removeConfiguration(userId: string, guildId: string, key: string): boolean {
+    const state = this.getSession(userId, guildId);
+    if (!state) {
+      return false;
+    }
+    if (!hasOwn(state.configuration, key)) {
+      return true;
+    }
+    delete state.configuration[key];
+    return this.updateSession(userId, guildId, state);
+  }
+
   /** Remember the Access step's picks until the review step applies them. */
   setAccess(
     userId: string,
@@ -311,10 +327,13 @@ export class WizardService {
    * config reload still runs so services on registered reload callbacks pick
    * up what actually persisted rather than silently lagging behind the DB,
    * and the returned result names the keys left in effect.
+   *
+   * `derived` is merged over the saved choices for this attempt only.
    */
   async applyConfiguration(
     userId: string,
     guildId: string,
+    derived: Record<string, unknown> = {},
   ): Promise<WizardApplyResult> {
     const state = this.getSession(userId, guildId);
     if (!state) {
@@ -328,20 +347,29 @@ export class WizardService {
       };
     }
 
+    // The batch is the admin's saved choices plus `derived`: values this one
+    // attempt adds on its own (the off switch for unticked features, the
+    // dependents a confirmed cascade turns off, #1622). They are never saved
+    // into the session, so a failed attempt leaves the choices as they were.
+    const batch: Record<string, unknown> = {
+      ...state.configuration,
+      ...derived,
+    };
+
     // Validate the whole proposed batch against the feature dependency graph
     // (#663) before writing anything. Validating the batch (rather than each
     // key in isolation) lets an operator enable a feature and its dependency
     // together in one wizard run. A violation aborts the apply with an
     // operator-friendly message so the caller can surface it; partial writes
     // are avoided because nothing has been persisted yet.
-    const issues = await this.configService.findDependencyIssues(
-      state.configuration,
-    );
+    const issues = await this.configService.findDependencyIssues(batch, {
+      strict: true,
+    });
     if (issues.length > 0) {
       throw new DependencyError(issues);
     }
 
-    const entries = Object.entries(state.configuration);
+    const entries = Object.entries(batch);
     logger.info(
       `Applying wizard configuration for user ${userId}: ${entries.length} settings`,
     );
@@ -352,7 +380,7 @@ export class WizardService {
     // left behind with a wizard-supplied value.
     const priorRows = new Map<string, IConfig>();
     for (const row of await this.configService.getAll()) {
-      if (hasOwn(state.configuration, row.key)) {
+      if (hasOwn(batch, row.key)) {
         priorRows.set(row.key, row);
       }
     }
@@ -429,7 +457,7 @@ export class WizardService {
         // updated it after the snapshot; rolling back would clobber their
         // newer value, so leave it and report the key as not reverted.
         const current = await this.configService.get(key);
-        if (current !== state.configuration[key]) {
+        if (current !== batch[key]) {
           revertFailedKeys.push(key);
           logger.warn(
             `Skipping rollback of wizard setting ${key}: it was changed concurrently after this apply wrote it`,

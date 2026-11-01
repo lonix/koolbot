@@ -86,6 +86,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
       getString: jest.fn(async () => ""),
       getNumber: jest.fn(async () => 0),
       getBoolean: mockGetBoolean,
+      getBooleanStrict: mockGetBoolean,
       getAll: jest.fn(async () => []),
       registerReloadCallback: jest.fn(),
     }),

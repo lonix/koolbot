@@ -2402,6 +2402,62 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Setup wizard confirm, a feature turned off with parts that need it",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [["voicetracking.enabled", false]],
+        metadata: {
+          "voicetracking.enabled": {
+            description: "Track time spent in voice channels.",
+            category: "voicetracking",
+          },
+        },
+        dependencies: {
+          cascade: [
+            {
+              key: "voicetracking.enabled",
+              dependents: [
+                "voicetracking.announcements.enabled",
+                "achievements.enabled",
+              ],
+            },
+          ],
+          cascadeKeys: [
+            "achievements.enabled",
+            "voicetracking.announcements.enabled",
+          ],
+          fingerprint:
+            "achievements.enabled,voicetracking.announcements.enabled",
+          blockers: [],
+        },
+      }),
+    },
+    {
+      name: "Setup wizard confirm, settings that cannot be applied together",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [["achievements.enabled", true]],
+        metadata: {
+          "achievements.enabled": {
+            description: "Award achievements.",
+            category: "achievements",
+          },
+        },
+        dependencies: {
+          cascade: [],
+          cascadeKeys: [],
+          fingerprint: "",
+          blockers: [
+            {
+              key: "achievements.enabled",
+              direction: "enable",
+              related: ["voicetracking.enabled"],
+            },
+          ],
+        },
+      }),
+    },
+    {
       name: "Setup wizard confirm",
       html: renderWizardConfirmPage({
         ...COMMON,

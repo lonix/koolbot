@@ -1415,6 +1415,17 @@ _"Requires X enabled"_ dependency hints/locks (including cross-feature targets
 that live on another wizard step) carry over as well, so the two surfaces stay
 in lockstep and can't drift apart.
 
+**Review** also checks the feature dependencies (`dependsOn`, #663) on the batch Apply will write: your choices plus the off
+switch for every feature you did not tick (#1622). When a feature goes off while a part that needs it stays on (Voice Tracking
+off with the scheduled weekly recap still on, and the chain behind it: Achievements, then what needs Achievements), a warning
+callout lists each pair, "Turning off Voice Tracking also needs Scheduled weekly recap turned off", with the setting names linked to
+All settings. A switch, _Turn them off too_, confirms the extra turn-offs; Apply stops with a message back on Review until it is on,
+and then writes them in the same apply (the audit entry lists them as `cascadeOff`). Nothing is switched off without that confirmation,
+and the Settings page and every other write path still block instead of cascading. A choice that cannot be fixed by turning something
+off (turning a feature on while what it needs stays off) shows an error callout with links, and Apply is disabled. Whatever makes an
+apply refuse, including an unexpected error, returns to Review with the session and all your choices kept; the flash is plain text and the
+callout carries the names and links.
+
 The wizard runs **Features, Access, Channels, Review** (#1321), with a step indicator on every page. The **Access**
 step comes right after you pick features and maps Discord roles to who can do what: one card each for Admins
 (`/config`), Moderators and Event hosts (`/me`), with what they can and cannot do and a searchable role picker (the same one as All settings, #1547), and a
