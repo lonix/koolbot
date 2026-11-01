@@ -52,6 +52,25 @@ const EMPTY_PICKERS = {
   enabledByKey: {} as Record<string, boolean>,
 };
 
+// The features the admin chose, in order, for the wizard step page (#1620).
+const STEP_FEATURES = [
+  "voicechannels",
+  "quotes",
+  "polls",
+  "namehistory",
+  "moderation",
+  "events",
+  "digest",
+  "birthdays",
+  "welcome",
+  "rules",
+  "reminders",
+  "tickets",
+  "lfg",
+  "notices",
+];
+const stepKeys = (n: number): string[] => STEP_FEATURES.slice(0, n);
+
 describe("renderVersionCard (#1029)", () => {
   const latest = {
     version: "v2.1.0",
@@ -4412,7 +4431,7 @@ describe("renderWizardStepPage", () => {
       ...COMMON,
       ...EMPTY_PICKERS,
       stepIndex: 0,
-      totalSteps: 2,
+      featureKeys: stepKeys(2),
       featureKey: "voicechannels",
       settingKeys: [
         "voicechannels.enabled",
@@ -4450,7 +4469,7 @@ describe("renderWizardStepPage", () => {
         },
       },
     });
-    expect(html).toContain("Step 1 of 2");
+    expect(html).not.toMatch(/Step \d+ of \d+/);
     expect(html).toContain('action="/admin/wizard/step/0"');
     // Human-readable label shown; the raw dotted key is demoted to monospace
     // helper text rather than used as the field label (#702).
@@ -4482,7 +4501,7 @@ describe("renderWizardStepPage", () => {
         { id: "chan-2", name: "announcements", type: ChannelType.GuildText },
       ],
       stepIndex: 0,
-      totalSteps: 1,
+      featureKeys: stepKeys(1),
       featureKey: "reactionroles",
       settingKeys: [
         "reactionroles.enabled",
@@ -4542,7 +4561,7 @@ describe("renderWizardStepPage", () => {
       ],
       roles: [{ id: "role-1", name: "Moderator" }],
       stepIndex: 0,
-      totalSteps: 1,
+      featureKeys: stepKeys(1),
       featureKey: "reactionroles",
       settingKeys: [
         "reactionroles.message_channel_id",
@@ -4609,7 +4628,7 @@ describe("renderWizardStepPage", () => {
       ...COMMON,
       ...EMPTY_PICKERS,
       stepIndex: 0,
-      totalSteps: 1,
+      featureKeys: stepKeys(1),
       featureKey: "leaderboard_roles",
       settingKeys: ["leaderboard_roles.period"],
       currentValues: { "leaderboard_roles.period": "month" },
@@ -4643,7 +4662,7 @@ describe("renderWizardStepPage", () => {
       ...COMMON,
       ...EMPTY_PICKERS,
       stepIndex: 0,
-      totalSteps: 1,
+      featureKeys: stepKeys(1),
       featureKey: "leaderboard_roles",
       settingKeys: ["leaderboard_roles.period"],
       currentValues: { "leaderboard_roles.period": "month" },
@@ -4685,7 +4704,7 @@ describe("renderWizardStepPage", () => {
       ...COMMON,
       ...EMPTY_PICKERS,
       stepIndex: 0,
-      totalSteps: 1,
+      featureKeys: stepKeys(1),
       featureKey: "leaderboard_roles",
       settingKeys: ["leaderboard_roles.period"],
       currentValues: { "leaderboard_roles.period": "fortnight" },
@@ -4715,7 +4734,7 @@ describe("renderWizardStepPage", () => {
       ...COMMON,
       ...EMPTY_PICKERS,
       stepIndex: 0,
-      totalSteps: 1,
+      featureKeys: stepKeys(1),
       featureKey: "quotes",
       settingKeys: [],
       currentValues: {},
@@ -4735,7 +4754,7 @@ describe("renderWizardStepPage", () => {
       ...COMMON,
       ...EMPTY_PICKERS,
       stepIndex: 1,
-      totalSteps: 2,
+      featureKeys: stepKeys(2),
       featureKey: "polls",
       settingKeys: [],
       currentValues: {},
@@ -4746,12 +4765,101 @@ describe("renderWizardStepPage", () => {
     expect(html).not.toContain("Next →");
   });
 
+  describe("progress (#1620)", () => {
+    const page = (stepIndex: number, featureKeys: string[]) =>
+      renderWizardStepPage({
+        ...COMMON,
+        ...EMPTY_PICKERS,
+        stepIndex,
+        featureKeys,
+        featureKey: featureKeys[stepIndex],
+        settingKeys: [],
+        currentValues: {},
+        defaultValues: {},
+        metadata: {},
+      });
+
+    it("shows one progress bar, with Features current, and one sub-progress bar", () => {
+      const html = page(1, ["voicechannels", "quotes", "polls"]);
+      expect(html.match(/class="kb-steps-bar"/g)).toHaveLength(1);
+      expect(html.match(/class="kb-substeps"/g)).toHaveLength(1);
+      expect(html).toContain('<li aria-current="step">Features</li>');
+      expect(html).toContain("Feature 2 of 3: Quote System");
+    });
+
+    it("has no second step counter: only the sub-bar counts the feature pages", () => {
+      const html = page(1, ["voicechannels", "quotes", "polls"]);
+      expect(html).not.toMatch(/Step \d+ of \d+/);
+      expect(html.match(/ of 3/g)).toHaveLength(1);
+      // Two aria-current: the main bar's step and the sub-bar's feature.
+      expect(html.match(/aria-current="step"/g)).toHaveLength(2);
+    });
+
+    it("keeps the heading to the feature's name", () => {
+      const html = page(1, ["voicechannels", "quotes", "polls"]);
+      expect(html).toMatch(/<h1>Quote System<\/h1>/);
+    });
+
+    it("draws no sub-bar for a single feature", () => {
+      const html = page(0, ["quotes"]);
+      expect(html).not.toContain("kb-substeps");
+      expect(html.match(/aria-current="step"/g)).toHaveLength(1);
+    });
+
+    it("keeps working with 14 features", () => {
+      const html = page(13, STEP_FEATURES);
+      expect(html).toContain("Feature 14 of 14: Notices");
+      const bar = html.match(
+        /<ol class="kb-substeps__bar"[^>]*>(.*?)<\/ol>/s,
+      )?.[1];
+      expect(bar?.match(/<li[ >]/g)).toHaveLength(14);
+      expect(html).toContain("Review →");
+    });
+
+    it("falls back to the key for a feature without a label, as the heading does", () => {
+      const html = page(1, ["voicechannels", "namehistory", "polls"]);
+      expect(html).toContain("Feature 2 of 3: namehistory");
+      expect(html).toMatch(/<h1>namehistory<\/h1>/);
+    });
+
+    it("keeps the tier editor note, the sub-bar and the right button for leaderboard roles", () => {
+      const keys = ["voicechannels", "leaderboard_roles"];
+      const last = page(1, keys);
+      expect(last).toContain("Feature 2 of 2: Leaderboard Roles");
+      expect(last).toContain("tier editor");
+      expect(last).toContain("Review →");
+      expect(last).toContain('href="/admin/wizard?step=0"');
+      const first = page(0, ["leaderboard_roles", "polls"]);
+      expect(first).toContain("tier editor");
+      expect(first).toContain("Next →");
+    });
+
+    it("names the first step Choose features in the back links", () => {
+      const html = page(0, ["quotes", "polls"]);
+      expect(html).toContain("← Back to Choose features");
+      expect(html).not.toContain("← Back to features");
+      const unavailable = renderWizardStepPage({
+        ...COMMON,
+        ...EMPTY_PICKERS,
+        stepIndex: 0,
+        featureKeys: ["quotes", "polls"],
+        featureKey: "quotes",
+        settingKeys: [],
+        currentValues: {},
+        defaultValues: {},
+        metadata: {},
+        settingsUnavailable: true,
+      });
+      expect(unavailable).toContain("← Back to Choose features");
+    });
+  });
+
   it("links the first step back to the Access step (#485, #1321)", () => {
     const html = renderWizardStepPage({
       ...COMMON,
       ...EMPTY_PICKERS,
       stepIndex: 0,
-      totalSteps: 3,
+      featureKeys: stepKeys(3),
       featureKey: "quotes",
       settingKeys: [],
       currentValues: {},
@@ -4768,7 +4876,7 @@ describe("renderWizardStepPage", () => {
       ...COMMON,
       ...EMPTY_PICKERS,
       stepIndex: 2,
-      totalSteps: 3,
+      featureKeys: stepKeys(3),
       featureKey: "quotes",
       settingKeys: [],
       currentValues: {},
@@ -4784,7 +4892,7 @@ describe("renderWizardStepPage", () => {
       ...COMMON,
       ...EMPTY_PICKERS,
       stepIndex: 0,
-      totalSteps: 1,
+      featureKeys: stepKeys(1),
       featureKey: "voicetracking",
       settingKeys: [
         "voicetracking.enabled",
@@ -4839,7 +4947,7 @@ describe("renderWizardStepPage", () => {
       ...COMMON,
       ...EMPTY_PICKERS,
       stepIndex: 0,
-      totalSteps: 1,
+      featureKeys: stepKeys(1),
       featureKey: "achievements",
       settingKeys: ["achievements.enabled"],
       currentValues: { "achievements.enabled": false },
@@ -5957,7 +6065,7 @@ describe("Wizard step accessibility (#854)", () => {
       ...COMMON,
       ...EMPTY_PICKERS,
       stepIndex: 0,
-      totalSteps: 1,
+      featureKeys: stepKeys(1),
       featureKey: "voicetracking",
       settingKeys: ["voicetracking.seen_retention_days"],
       currentValues: { "voicetracking.seen_retention_days": 2 },

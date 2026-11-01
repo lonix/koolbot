@@ -147,7 +147,11 @@ import type { VersionCheckSnapshot } from "../services/version-check-service.js"
 import { ROLE_GROUP_SETTING_KEYS } from "../services/role-group-access.js";
 import { renderDashboardBody, renderVersionCard } from "./dashboard-view.js";
 import type { DashboardData } from "./dashboard-data.js";
-import { renderAccessReview, renderWizardSteps } from "./wizard-access-view.js";
+import {
+  renderAccessReview,
+  renderWizardSteps,
+  renderWizardSubSteps,
+} from "./wizard-access-view.js";
 import {
   WIZARD_APPLY_FORM_ID,
   dependencyReviewBlocksApply,
@@ -2457,7 +2461,8 @@ ${renderWizardSteps("features")}
 
 export interface WizardStepPageProps extends CommonProps {
   stepIndex: number;
-  totalSteps: number;
+  /** The features the admin chose, in page order; `featureKeys[stepIndex]` is this page (#1620). */
+  featureKeys: string[];
   featureKey: string;
   settingKeys: string[];
   currentValues: Record<string, unknown>;
@@ -2620,9 +2625,8 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
     props.featureKey === "leaderboard_roles"
       ? `\n  <p class="muted">Which roles each rank earns is set in the tier editor on the <a href="/admin/leaderboard-roles">Leaderboard Roles</a> page, once you have applied the wizard.</p>`
       : "";
-  const stepLabel = `Step ${props.stepIndex + 1} of ${props.totalSteps}`;
   const nextLabel =
-    props.stepIndex + 1 < props.totalSteps ? "Next →" : "Review →";
+    props.stepIndex + 1 < props.featureKeys.length ? "Next →" : "Review →";
 
   // A "← Previous" link appears on every step after the first. It's a plain
   // GET back to the prior step — the wizard session already holds the saved
@@ -2633,9 +2637,16 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
     props.stepIndex >= 1 ? props.stepIndex - 1 : "access"
   }" class="btn">← Previous</a>`;
 
+  const subSteps = renderWizardSubSteps(
+    props.featureKeys.map((fk) => ({
+      label: WIZARD_FEATURE_LABELS[fk]?.name ?? fk,
+    })),
+    props.stepIndex,
+  );
+  const subStepsHtml = subSteps ? `${subSteps}\n` : "";
   const body = `
-${renderWizardSteps("channels")}
-<h1>${escapeHtml(info.name)} <span class="muted" style="font-size:1rem">${escapeHtml(stepLabel)}</span></h1>
+${renderWizardSteps("settings")}
+${subStepsHtml}<h1>${escapeHtml(info.name)}</h1>
 <p class="subtitle">${escapeHtml(info.desc)}</p>
 ${renderFlash(props.flash)}
 ${
@@ -2643,7 +2654,7 @@ ${
     ? `<div class="card">${renderSettingsUnavailableNotice()}</div>
 <div class="actions">
   ${previousButton}
-  <a href="/admin/wizard" class="btn">← Back to features</a>
+  <a href="/admin/wizard" class="btn">← Back to Choose features</a>
 </div>`
     : `<form method="POST" action="/admin/wizard/step/${props.stepIndex}" data-cascade-scope>
   <input type="hidden" name="_csrf" value="${csrf}">
@@ -2651,7 +2662,7 @@ ${
   <div class="actions">
     <button type="submit" class="btn btn-primary">${nextLabel}</button>
     ${previousButton}
-    <a href="/admin/wizard" class="btn">← Back to features</a>
+    <a href="/admin/wizard" class="btn">← Back to Choose features</a>
   </div>
 </form>`
 }

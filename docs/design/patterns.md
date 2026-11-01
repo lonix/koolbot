@@ -54,7 +54,7 @@ destructive steps last, each with a Dialog.
 
 ## Setup wizard
 
-Features → **Access** → Channels → Review. The Access step maps Discord roles to Admins, Moderators, Event hosts and Members with one AccessCard each,
+Choose features → **Access** → Features → Review. The Access step maps Discord roles to Admins, Moderators, Event hosts and Members with one AccessCard each,
 and warns when a switched-on feature has nobody to run it.
 
 Review also lists what turning a feature off needs (#1622): a warning Callout, "Turning off X also needs Y turned off", with the human name first, the key
