@@ -3932,6 +3932,15 @@ export class VoiceChannelManager {
             continue;
           }
 
+          // Deleting the room also deletes its linked waiting room, so a
+          // member waiting there keeps it (#1670).
+          if (this.linkedWaitingRoomOccupied(guild, channel.id)) {
+            logger.debug(
+              `Skipping empty channel with an occupied waiting room: ${channel.name}`,
+            );
+            continue;
+          }
+
           // Delete empty unmanaged channels
           await channel.delete("Bot cleanup - unmanaged channel");
           // Reconcile any leftover in-memory tracking for this channel
@@ -3963,7 +3972,9 @@ export class VoiceChannelManager {
           !(
             !managedChannelIds.has(channel.id) && this.isFreshChannel(channel)
           ) &&
-          channel.members.size === 0,
+          channel.members.size === 0 &&
+          // Deleting the room also deletes its waiting room (#1670).
+          !this.linkedWaitingRoomOccupied(guild, channel.id),
       );
 
       for (const channel of emptyManagedChannels.values()) {
