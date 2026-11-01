@@ -15,6 +15,7 @@ import {
 } from "@jest/globals";
 import type { Client } from "discord.js";
 import { JSDOM } from "jsdom";
+import { orderToken } from "../../src/web/reorder-view.js";
 import {
   startAdminHarness,
   stubRequireSession,
@@ -624,7 +625,7 @@ describe("a refused Role groups form (#1523)", () => {
     });
     expect(res.status).toBe(422);
     const html = await res.text();
-    expect(html).toContain("<details open><summary>Edit</summary>");
+    expect(html).toContain('<details class="kb-disclosure" open><summary>');
     expect(lines(html)).toEqual({
       "role-group-edit-g1-colour-error": "Colour must look like #RRGGBB.",
     });
@@ -724,29 +725,111 @@ describe("POST /role-groups/:id/edit", () => {
   });
 });
 
-describe("POST /role-groups/reorder", () => {
-  it("swaps a group with its neighbour", async () => {
+describe("POST /role-groups/:id/move (#1616)", () => {
+  // The token the page was drawn with: the order of the ids it showed.
+  const move = (
+    id: string,
+    from: number,
+    to: number,
+    over: Record<string, string> = {},
+    shown: string[] = ["a", "b", "c"],
+  ) =>
+    harness.post(`/role-groups/${id}/move`, {
+      from: String(from),
+      to: String(to),
+      count: "3",
+      scope: "role-groups",
+      order: orderToken(shown),
+      ...over,
+    });
+
+  it("moves a group to the place the form names", async () => {
     await mount();
-    await harness.post("/role-groups/reorder", {
-      groupId: "b",
-      direction: "up",
-    });
+    const res = await move("b", 1, 0);
     expect(svc.reorder).toHaveBeenCalledWith("guild-1", ["b", "a", "c"]);
-    await harness.post("/role-groups/reorder", {
-      groupId: "b",
-      direction: "down",
-    });
-    expect(svc.reorder).toHaveBeenLastCalledWith("guild-1", ["a", "c", "b"]);
+    expect(flashOf(res).type).toBe("ok");
+    await move("a", 0, 2);
+    expect(svc.reorder).toHaveBeenLastCalledWith("guild-1", ["b", "c", "a"]);
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "role-groups.reorder",
+        targetId: "b",
+        result: "success",
+      }),
+    );
   });
 
-  it("refuses moves off the ends", async () => {
+  it.each([
+    ["a stale count", { count: "4" }, "b", 1, 0],
+    ["another place than the row holds", {}, "b", 0, 1],
+    ["a place past the end", {}, "b", 1, 3],
+    ["another list", { scope: "notices" }, "b", 1, 0],
+  ])("moves nothing for %s", async (_name, over, id, from, to) => {
+    await mount();
+    const res = await move(id, from, to, over);
+    expect(svc.reorder).not.toHaveBeenCalled();
+    expect(flashOf(res).type).toBe("warn");
+  });
+
+  it("moves nothing when other groups were reordered since the page was drawn", async () => {
+    // Drawn from [a, b, c]; the live order is [a, c, b]. The count and a's
+    // place still match, so only the order token can tell.
+    svc.list.mockResolvedValue([
+      group({ id: "a" }),
+      group({ id: "c" }),
+      group({ id: "b" }),
+    ]);
+    await mount();
+    const res = await move("a", 0, 1);
+    expect(svc.reorder).not.toHaveBeenCalled();
+    expect(flashOf(res).type).toBe("warn");
+    // The same form against the order it was drawn from is accepted.
+    svc.list.mockResolvedValue([
+      group({ id: "a" }),
+      group({ id: "b" }),
+      group({ id: "c" }),
+    ]);
+    await move("a", 0, 1);
+    expect(svc.reorder).toHaveBeenCalledWith("guild-1", ["b", "a", "c"]);
+  });
+
+  it("refuses a form without the order token", async () => {
+    await mount();
+    const res = await move("b", 1, 0, { order: "" });
+    expect(svc.reorder).not.toHaveBeenCalled();
+    expect(flashOf(res).type).toBe("err");
+  });
+
+  it("refuses a form it cannot read", async () => {
+    await mount();
+    const res = await harness.post("/role-groups/b/move", { to: "0" });
+    expect(svc.reorder).not.toHaveBeenCalled();
+    expect(flashOf(res).type).toBe("err");
+  });
+
+  it("says so when the group is already at that place", async () => {
+    await mount();
+    const res = await move("b", 1, 1);
+    expect(svc.reorder).not.toHaveBeenCalled();
+    expect(flashOf(res).type).toBe("ok");
+  });
+
+  it("reports a refused reorder", async () => {
+    svc.reorder.mockResolvedValue({ ok: false, error: "Out of date" });
+    await mount();
+    const res = await move("b", 1, 0);
+    expect(flashOf(res)).toMatchObject({ type: "err", msg: "Out of date" });
+  });
+
+  it("no longer serves the old arrow-button route", async () => {
     await mount();
     const res = await harness.post("/role-groups/reorder", {
-      groupId: "a",
+      groupId: "b",
       direction: "up",
     });
-    expect(flashOf(res).type).toBe("err");
     expect(svc.reorder).not.toHaveBeenCalled();
+    expect(res.status).not.toBe(200);
   });
 });
 

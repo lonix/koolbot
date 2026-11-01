@@ -10,6 +10,15 @@ import {
   renderFlash,
   type FlashMessage,
 } from "./admin-views.js";
+import { icon } from "./icons.js";
+import {
+  REORDER_SCRIPT,
+  REORDER_STATUS_HTML,
+  orderToken,
+  renderReorderCell,
+  reorderListAttrs,
+  reorderRowAttrs,
+} from "./reorder-view.js";
 import { formView, type FormView, type RefusedForm } from "./form-errors.js";
 import { renderAdoptionDiff } from "./adoption-diff.js";
 import { roleMention } from "./discord-labels.js";
@@ -106,6 +115,9 @@ export interface RoleGroupsPageProps {
 
 /** Form id of the Add group form (#1523). */
 export const ROLE_GROUP_CREATE_FORM = "role-group-create";
+
+/** The list the move form names: one rank list per server (#1616). */
+export const ROLE_GROUP_REORDER_SCOPE = "role-groups";
 
 /** Form id of one group's Edit form (#1523). */
 export const roleGroupEditForm = (groupId: string): string =>
@@ -233,8 +245,8 @@ function editForm(
 ): string {
   const f = formView(refused, roleGroupEditForm(g.id));
   const locked = g.gateOnly || g.roleLock !== null;
-  return `<details${f.open()}><summary>Edit</summary>
-<form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/edit" class="stack">
+  return `<details class="kb-disclosure"${f.open()}><summary>${icon("chevron-right", { className: "kb-chev" })}Edit<span class="kb-visually-hidden">: ${escapeHtml(g.name)}</span></summary>
+<div class="kb-disclosure__body"><form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/edit" class="stack">
 ${csrf}
 <label>Name <input type="text" name="name" value="${escapeHtml(f.value("name", g.name))}" maxlength="100" required${f.attrs("name")}></label>${f.error("name")}
 <fieldset><legend>Capabilities</legend>${capabilityChecks(g.capabilities, g.gateOnly, f)}${f.error("capability")}
@@ -250,7 +262,7 @@ ${renderColourField(f, "colour", "Colour", formatColour(g.colour), "Leave as it 
 }
 <label>When its Discord role changes <select name="syncPolicy">${syncPolicyOptions(g.syncPolicy, globalPolicy, f)}</select></label>
 <button type="submit" class="btn">Save group</button>
-</form></details>`;
+</form></div></details>`;
 }
 
 /** The options of the sync-policy select; a refused form keeps the chosen one. */
@@ -266,22 +278,36 @@ function syncPolicyOptions(
   ).join("")}`;
 }
 
+/**
+ * Delete is a Dialog trigger (#1616): the consequences are listed in the
+ * dialog, not in the row. Without JavaScript the button posts to the same
+ * route, which only ever keeps the Discord role.
+ */
 function deleteForm(g: RoleGroupRow, csrf: string): string {
-  const canDeleteRole = g.roleId !== null && !g.roleMissing && !g.gateOnly;
-  // Deleting the Discord role too is a separate, reviewed step (#1184): the
-  // link opens the plan preview, where the role is deleted only after its
-  // name is typed.
-  const roleOption = canDeleteRole
-    ? `<p><a class="btn btn-danger" href="/admin/role-groups/${escapeHtml(g.id)}/delete-role">Review deleting the group and its Discord role…</a></p>`
-    : "";
-  return `<details><summary>Delete</summary>
-<form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/delete" class="stack">
+  const name = escapeHtml(g.name);
+  return `<form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/delete" class="kb-row" data-confirm="Delete the group ${name}?"${confirmListAttr(
+    [
+      "The group is removed from KoolBot, with its capabilities and its place in the rank.",
+      "Its Discord role is kept, and so are its members.",
+      "Features that used this group for a capability stop counting its members.",
+    ],
+  )}>
 ${csrf}
 <input type="hidden" name="roleAction" value="keep">
-<p class="muted">Removes the group and keeps its Discord role.</p>
-<button type="submit" class="btn btn-danger">Delete group, keep role</button>
-</form>
-${roleOption}</details>`;
+<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger" aria-label="Delete group, keep role: ${name}">Delete group, keep role</button>
+</form>`;
+}
+
+/**
+ * Deleting the Discord role too is a separate, reviewed step (#1184): the
+ * link opens the plan preview, where the role is deleted only after its name
+ * is typed. It stays a link next to the Delete button.
+ */
+function deleteRoleLink(g: RoleGroupRow): string {
+  const canDeleteRole = g.roleId !== null && !g.roleMissing && !g.gateOnly;
+  return canDeleteRole
+    ? `<a class="kb-btn kb-btn--sm" href="/admin/role-groups/${escapeHtml(g.id)}/delete-role">Review deleting the group and its Discord role…<span class="kb-visually-hidden">: ${escapeHtml(g.name)}</span></a>`
+    : "";
 }
 
 /** How long a role-deletion review can be applied after it was shown. */
@@ -359,31 +385,29 @@ function renderGroups(props: RoleGroupsPageProps, csrf: string): string {
   if (props.groups.length === 0) {
     return `<div class="empty">No groups yet. Groups are optional: with none, every feature keeps its current behaviour.</div>`;
   }
-  const last = props.groups.length - 1;
+  const shownOrder = orderToken(props.groups.map((g) => g.id));
   const rows = props.groups
     .map((g, i) => {
-      const move = (dir: "up" | "down", disabled: boolean): string =>
-        `<form method="POST" action="/admin/role-groups/reorder" class="inline-form">${csrf}<input type="hidden" name="groupId" value="${escapeHtml(g.id)}"><input type="hidden" name="direction" value="${dir}"><button type="submit" class="btn" aria-label="Move ${escapeHtml(g.name)} ${dir}"${disabled ? " disabled" : ""}>${dir === "up" ? "↑" : "↓"}</button></form>`;
       const caps = g.capabilities.length
-        ? g.capabilities
+        ? `<span class="kb-row">${g.capabilities
             .map(
               (c) =>
                 `<span class="tag tag-info">${escapeHtml(capabilityLabel(c))}</span>`,
             )
-            .join(" ")
+            .join("")}</span>`
         : `<span class="muted">none (gating only)</span>`;
-      return `<tr>
-<td>${i + 1}</td>
+      return `<tr${reorderRowAttrs(`role-group-${g.id}`, g.name)}>
+<td>${renderReorderCell({ action: `/admin/role-groups/${g.id}/move`, scope: ROLE_GROUP_REORDER_SCOPE, csrfInput: csrf, index: i, count: props.groups.length, orderToken: shownOrder, label: g.name })}</td>
 <th scope="row"><strong>${escapeHtml(g.name)}</strong></th>
 <td>${roleCell(g)}${driftCell(g)}${g.unlinked || g.roleMissing ? relinkForm(g, csrf, props.roleOptions) : ""}</td>
 <td>${g.memberCount === null ? `<span class="muted">?</span>` : g.memberCount}</td>
 <td>${caps}</td>
-<td>${move("up", i === 0)} ${move("down", i === last)}</td>
-<td>${editForm(g, csrf, props.globalPolicy, props.refusedForm)} ${deleteForm(g, csrf)}</td>
+<td class="kb-actions"><div class="kb-row kb-row--nowrap">${editForm(g, csrf, props.globalPolicy, props.refusedForm)}${deleteForm(g, csrf)}${deleteRoleLink(g)}</div></td>
 </tr>`;
     })
     .join("");
-  return `<table><thead><tr><th scope="col">Rank</th><th scope="col">Group</th><th scope="col">Role</th><th scope="col">Members</th><th scope="col">Capabilities</th><th scope="col">Order</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>
+  return `<table class="kb-table"><thead><tr><th scope="col">Rank</th><th scope="col">Group</th><th scope="col">Role</th><th scope="col">Members</th><th scope="col">Capabilities</th><th scope="col"><span class="kb-visually-hidden">Actions</span></th></tr></thead><tbody${reorderListAttrs("Role groups")}>${rows}</tbody></table>
+${REORDER_STATUS_HTML}
 <p class="muted">Listed highest first: a group ranks above the ones below it, and role positions in Discord follow this order when applied. Member counts come from Discord without loading every member.</p>`;
 }
 
@@ -635,6 +659,7 @@ ${renderDriftSummary(props)}
 </div>
 <p class="muted">The server owner and members with the Administrator permission always count as <code>admin</code>, with or without a group.</p>
 ${scriptTag(PRESET_SCRIPT)}
+${props.groups.length > 0 ? scriptTag(REORDER_SCRIPT) : ""}
 ${props.jobId ? `${scriptTag(JOB_SCRIPT(props.jobId))}` : ""}
 `;
   return renderAdminPage({
