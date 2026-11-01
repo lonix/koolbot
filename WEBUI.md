@@ -1799,7 +1799,13 @@ every feature keeps its current behaviour.
 - **Bots.** When a `bot` group exists, bots not yet holding its role are listed in the plan and
   added to the shared role on apply; their own managed roles are untouched. Listing bots needs the
   Server Members intent; without it the page says so and plans no bot grants.
-- **Deleting a group** unlinks it by default and keeps the Discord role. Deleting the role too (#1184)
+- **Order and row actions (#1616).** The first column is the ReorderList: a drag handle, the place ("1 of 4" for a screen reader) and
+  **Move up** / **Move down** buttons named for the group, with the first group's Move up and the last group's Move down disabled. Each
+  button posts to `/admin/role-groups/<id>/move`, so it works without JavaScript; a form drawn for a list that has changed since
+  moves nothing. The last column holds **Edit** (a row disclosure that opens the form in place), **Delete group, keep role** and,
+  where the role can be deleted, the review link below.
+- **Deleting a group** unlinks it by default and keeps the Discord role. **Delete group, keep role** asks first in a dialog that lists
+  what happens; without JavaScript the button posts straight to the same route. Deleting the role too (#1184)
   goes through the standard flow: **Review deleting the group and its Discord role** opens a preview
   at `/admin/role-groups/<id>/delete-role` with the shared adoption diff, where the delete is listed
   in its own **Destructive steps** section. To apply it you type the role's name. The approval text

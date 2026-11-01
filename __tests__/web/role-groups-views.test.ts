@@ -3,6 +3,7 @@ import {
   renderAdminFixPage,
   renderRoleDeletePage,
   renderRoleGroupsPage,
+  roleGroupEditForm,
   type RoleGroupRow,
   type RoleGroupsPageProps,
 } from "../../src/web/role-groups-views.js";
@@ -154,15 +155,102 @@ describe("renderRoleGroupsPage", () => {
     expect(html).toContain("locked: at or above the bot");
   });
 
-  it("disables the first up and last down buttons", () => {
+  it("draws the Order column as a ReorderList: place, named buttons, disabled ends (#1616)", () => {
     const html = renderRoleGroupsPage(
       props({
         groups: [row({ id: "a", name: "A" }), row({ id: "b", name: "B" })],
       }),
     );
-    expect(html).toMatch(/aria-label="Move A up" disabled/);
-    expect(html).toMatch(/aria-label="Move B down" disabled/);
-    expect(html).not.toMatch(/aria-label="Move A down" disabled/);
+    expect(html).toContain("<tbody data-reorder-list");
+    expect(html).toContain('data-reorder-row data-reorder-label="A"');
+    expect(html).toContain('class="kb-reorder__place">1<span');
+    expect(html).toContain("> of 2</span>");
+    expect(html).toContain('action="/admin/role-groups/a/move"');
+    expect(html).toContain('name="scope" value="role-groups"');
+    expect(html).toContain('id="reorder-status"');
+    expect(html).toMatch(
+      /value="0" class="kb-btn kb-btn--sm" disabled>Move up<span class="kb-visually-hidden">: A</,
+    );
+    expect(html).toMatch(
+      /value="2" class="kb-btn kb-btn--sm" disabled>Move down<span class="kb-visually-hidden">: B</,
+    );
+    expect(html).not.toMatch(
+      /value="1" class="kb-btn kb-btn--sm" disabled>Move down/,
+    );
+    // The old arrow buttons and their route are gone.
+    expect(html).not.toContain("/admin/role-groups/reorder");
+  });
+
+  it("puts the row actions in a nowrap kb-actions cell (#1616)", () => {
+    const html = renderRoleGroupsPage(
+      props({ groups: [row({ id: "a" }), row({ id: "b", name: "B" })] }),
+    );
+    expect(html).toContain('<table class="kb-table">');
+    const rows = html.match(/<td class="kb-actions">/g) ?? [];
+    expect(rows).toHaveLength(2);
+    // Edit is the manual's row disclosure with a chevron; no bare summary.
+    expect(html).not.toMatch(/<summary>(Edit|Delete)<\/summary>/);
+    const edits = html.match(
+      /<details class="kb-disclosure"[^>]*><summary><svg[^>]*class="[^"]*kb-chev"[^>]*>.*?<\/svg>Edit<span class="kb-visually-hidden">: /g,
+    );
+    expect(edits).toHaveLength(2);
+    // One summary per row: Delete is a button, not a second disclosure.
+    expect(html.match(/<summary>/g) ?? []).toHaveLength(2);
+  });
+
+  it("keeps a refused edit form open (#1616)", () => {
+    const html = renderRoleGroupsPage(
+      props({
+        groups: [row({ id: "g1" })],
+        refusedForm: {
+          formId: roleGroupEditForm("g1"),
+          values: { name: "x" },
+          errors: { name: "Too short" },
+        },
+      }),
+    );
+    expect(html).toMatch(/<details class="kb-disclosure" open>/);
+  });
+
+  it("Delete is a Dialog trigger with a consequence list and a danger button (#1616)", () => {
+    const html = renderRoleGroupsPage(props());
+    const form = html.match(
+      /<form method="POST" action="\/admin\/role-groups\/g1\/delete"[^>]*>/,
+    );
+    expect(form).not.toBeNull();
+    expect(form![0]).toContain('data-confirm="Delete the group Mods?"');
+    expect(form![0]).toContain("data-confirm-list=");
+    expect(form![0]).not.toContain("data-confirm-tone");
+    expect(html).toContain(
+      '<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger" aria-label="Delete group, keep role: Mods">Delete group, keep role</button>',
+    );
+    // No explanation paragraph is left in the row.
+    expect(html).not.toContain("Removes the group and keeps its Discord role.");
+  });
+
+  it("offers the Discord-role review only for a deletable role, as a link (#1616)", () => {
+    const withRole = renderRoleGroupsPage(props());
+    expect(withRole).toContain(
+      '<a class="kb-btn kb-btn--sm" href="/admin/role-groups/g1/delete-role">Review deleting the group and its Discord role…',
+    );
+    for (const over of [
+      { roleMissing: true },
+      { gateOnly: true },
+      { roleId: null, roleName: null },
+    ]) {
+      expect(
+        renderRoleGroupsPage(props({ groups: [row(over)] })),
+      ).not.toContain("/delete-role");
+    }
+  });
+
+  it("lays the capability badges out as one wrapping row (#1616)", () => {
+    const html = renderRoleGroupsPage(
+      props({ groups: [row({ capabilities: ["admin", "staff"] })] }),
+    );
+    expect(html).toMatch(
+      /<td><span class="kb-row"><span class="tag tag-info">Admin<\/span><span class="tag tag-info">Moderator<\/span><\/span><\/td>/,
+    );
   });
 
   it("offers Apply only for a clean plan with operations", () => {

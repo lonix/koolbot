@@ -164,6 +164,8 @@ a.kb-tile:hover, a.kb-tile:focus-visible { background: var(--surface-alt); borde
 .kb-table tbody tr:last-child > * { border-bottom: 0; }
 .kb-table .kb-num { text-align: right; font-variant-numeric: tabular-nums; }
 .kb-table td.kb-actions { text-align: right; white-space: nowrap; }
+/* PROPOSAL (#1616): a row disclosure opens its form inside the nowrap cell; the form reads left-aligned and wraps. */
+.kb-table td.kb-actions .kb-disclosure__body { min-width: 22rem; text-align: left; white-space: normal; }
 
 /* ---------- List rows (feature status list) ---------- */
 .kb-list { list-style: none; margin: 0; padding: 0; }
