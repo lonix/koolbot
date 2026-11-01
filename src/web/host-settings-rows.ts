@@ -45,7 +45,7 @@ export interface SettingRowOptions {
   /** Id prefix: the name and the line get `<id>-name` and `<id>-desc`. */
   id: string;
   name: string;
-  /** The one line under the name. */
+  /** The one line under the name; empty draws no line (the Role groups permission rows, which have no text of Discord's to reuse). */
   line: string;
   /** The control (its markup names the row through `<id>-name`). */
   control: string;
@@ -68,7 +68,7 @@ export function renderSettingRow(o: SettingRowOptions): string {
     : `<p class="kb-setting__name" id="${escapeHtml(nameId)}">${name}</p>`;
   const extra = `${o.fields ?? ""}${renderMore(o.more ?? "")}${o.nested ? `<div class="kb-nested">${o.nested}</div>` : ""}`;
   return `<div class="kb-setting">
-<div>${nameHtml}<p class="kb-setting__desc" id="${escapeHtml(o.id)}-desc">${escapeHtml(o.line)}</p></div>
+<div>${nameHtml}${o.line ? `<p class="kb-setting__desc" id="${escapeHtml(o.id)}-desc">${escapeHtml(o.line)}</p>` : ""}</div>
 <div class="kb-setting__control">${o.control}</div>${extra ? `\n<div class="kb-setting__extra">${extra}</div>` : ""}
 </div>`;
 }

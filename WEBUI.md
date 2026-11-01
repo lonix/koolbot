@@ -1849,7 +1849,7 @@ every feature keeps its current behaviour.
   server's roles, with its member count) or by a _new role_ the engine creates when the plan is
   applied. Rank is edited with the ↑ / ↓ buttons; the list is shown highest first, and role
   positions in Discord follow it when applied. **Presets** (Admin, Moderator, Helper, Event host, VIP, Bots)
-  pre-fill the permission and capability boxes, which stay editable. The **Event host** preset ticks only the
+  pre-fill the permission and capability switches, which stay editable. The **Event host** preset ticks only the
   Event host capability and no Discord permission, and adds nobody.
 - **Capabilities** are what features query instead of hard-coding role ids: `admin`, `staff`
   (shown as **Moderator** in the UI; the stored key stays `staff`; `admin` implies it), `host` (shown as
@@ -1860,6 +1860,17 @@ every feature keeps its current behaviour.
   role). The guild owner and members with the Administrator permission always count as `admin`,
   with or without a group. Developers: use `RoleGroupService.getGroupsWith(guildId, "staff")`,
   `memberHasCapability(member, "staff")` and `memberIsAtOrAbove(member, groupId)`.
+- **The Add group and Edit forms use switches (#1615).** Each capability is a setting row: its name and one line
+  on the left (the same text as the Access step of the setup wizard), a switch with its _On_ or _Off_ text on the
+  right. A gate-only group's capability switches are disabled, and a line beside them says why. The Discord
+  permissions are switch rows too, with the names the **Bot permissions** page uses, in folds that follow the groups
+  of Discord's role editor: **General server permissions**, **Membership**, **Text channels**, **Voice channels**,
+  **Stage channels**, **Apps**, **Events** and **Advanced**, which ends with **Administrator** under a warning. A
+  permission Discord adds later appears in a last fold, **Other**, so it is never left out. Each fold says how many of
+  its permissions are on (_Text channels, 3 on_) and is closed unless one is on; a refused form keeps every fold
+  open. Without JavaScript every fold is open, and every switch posts as before: the field is still `perm`, and the
+  stored permission bits do not change. The _Set the role's permissions to the selection below_ switch is a setting
+  row as well.
 - **Linking an existing role never moves anyone.** Its current holders keep it, and its
   permissions and colour are left alone unless you explicitly tick _Set the role's permissions_
   or enter a colour. Large cosmetic groups work: counts come from Discord without loading members.

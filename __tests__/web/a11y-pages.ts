@@ -728,6 +728,59 @@ const ROLE_GROUPS_REFUSED_BASE = {
   globalPolicy: "flag",
 } as const;
 
+/**
+ * The Role groups form with its permission switches in each state (#1615): a
+ * group open (one has a permission on), the quiet groups folded the way the page
+ * script leaves them, a powerful permission on, and a gate-only group whose
+ * capability switches are disabled.
+ */
+function roleGroupsPermissionPages(): A11yPage[] {
+  const group = ROLE_GROUPS_REFUSED_BASE.groups[0];
+  const bits = (...b: bigint[]): string =>
+    b.reduce((a, c) => a | c, 0n).toString();
+  const page = (over: Partial<typeof group>): string =>
+    renderRoleGroupsPage({
+      ...ROLE_GROUPS_REFUSED_BASE,
+      groups: [{ ...group, ...over } as never],
+    });
+  // What `PRESET_SCRIPT` does on load: fold every group with nothing on.
+  const folded = (html: string): string =>
+    html.replace(
+      /(<details class="kb-disclosure" data-perm-group="[a-z]+") open>(<summary>(?:(?!<\/summary>).)*?, none on<\/span><\/summary>)/g,
+      "$1>$2",
+    );
+  const mod = bits(
+    PermissionFlagsBits.ModerateMembers,
+    PermissionFlagsBits.SendMessages,
+  );
+  return [
+    {
+      name: "Role groups (permission groups open, no JavaScript)",
+      html: page({ permissions: mod }),
+    },
+    {
+      name: "Role groups (permission groups folded, one open)",
+      html: folded(page({ permissions: mod })),
+    },
+    {
+      name: "Role groups (powerful permissions on)",
+      html: folded(
+        page({
+          permissions: bits(
+            PermissionFlagsBits.Administrator,
+            PermissionFlagsBits.ManageGuild,
+            PermissionFlagsBits.ManageRoles,
+          ),
+        }),
+      ),
+    },
+    {
+      name: "Role groups (gate-only group, switches disabled)",
+      html: page({ gateOnly: true, capabilities: [], permissions: null }),
+    },
+  ];
+}
+
 function channelManagerPages(): A11yPage[] {
   const base = {
     ...COMMON,
@@ -3665,6 +3718,7 @@ export function adminPages(): A11yPage[] {
         },
       }),
     },
+    ...roleGroupsPermissionPages(),
     {
       // A previewed plan the admin can apply: Apply plan is the view's one primary (#1512).
       name: "Role groups (previewed plan)",

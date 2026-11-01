@@ -19,7 +19,18 @@ import {
   reorderListAttrs,
   reorderRowAttrs,
 } from "./reorder-view.js";
-import { formView, type FormView, type RefusedForm } from "./form-errors.js";
+import {
+  formView,
+  type FormControlAttrs,
+  type FormView,
+  type RefusedForm,
+} from "./form-errors.js";
+import { renderSwitch } from "./setting-controls.js";
+import { renderSettingRow } from "./host-settings-rows.js";
+import {
+  ADMINISTRATOR_FLAG,
+  groupPermissionRows,
+} from "./role-group-permission-groups.js";
 import { renderAdoptionDiff } from "./adoption-diff.js";
 import { roleMention } from "./discord-labels.js";
 import {
@@ -133,47 +144,160 @@ export const roleGroupBoxKey = (
   value: string,
 ): string => `${kind}-${value}`;
 
-const PERMISSION_NAMES = Object.keys(PermissionsBitField.Flags);
+/** The attributes of a Field's control from a form view (id, and the error link when refused). */
+function controlAttrs(c: FormControlAttrs): string {
+  return ` id="${escapeHtml(c.id)}"${
+    c.invalid
+      ? ` aria-invalid="true" aria-describedby="${escapeHtml(c.describedBy ?? "")}"`
+      : c.describedBy
+        ? ` aria-describedby="${escapeHtml(c.describedBy)}"`
+        : ""
+  }`;
+}
 
-function permissionChecks(bits: string | null, f: FormView): string {
+/**
+ * The line under each capability: the Access step's own text
+ * (`wizard-access-view.ts`) where it has one, and the form's existing
+ * sentence for the Bot capability.
+ */
+const CAPABILITY_LINES: Record<string, string> = {
+  admin: "Change every setting and run the setup wizard",
+  staff: "Read the moderation log and cases in the Web UI",
+  host: "Run the host panel: teams, moves, clan tags",
+  bot: "Only ever matches bot accounts",
+};
+
+const ADMINISTRATOR_CALLOUT = `<div class="kb-callout kb-callout--warn"><div class="kb-callout__body"><p class="kb-callout__title">Administrator gives every other permission as well.</p><p class="kb-callout__text">A role that has it can do everything on the server, and channel permissions no longer limit it. Switch it on only when that is the point.</p></div></div>`;
+
+/**
+ * The Switch rows of the Discord permissions, in the groups of Discord's role
+ * editor (#1615). Every group is `open` in the markup, so without JavaScript
+ * nothing is hidden; `PRESET_SCRIPT` folds the groups with nothing on. A refused
+ * form keeps them all open (`data-keep-open`) so focus can reach any control.
+ */
+function permissionSettings(bits: string | null, f: FormView): string {
+  // `has(bit, false)`: a stored Administrator bit must not tick every other switch
+  // (`has` answers true for all of them otherwise), or saving would grant them all.
   const set = new PermissionsBitField(BigInt(bits ?? "0"));
-  return PERMISSION_NAMES.map((name) => {
-    const flag = PermissionsBitField.Flags[
-      name as keyof typeof PermissionsBitField.Flags
-    ] as bigint;
-    const on = f.checked(roleGroupBoxKey("perm", name), set.has(flag));
-    return `<label class="check"><input type="checkbox" name="perm" value="${escapeHtml(name)}"${on ? " checked" : ""}> ${escapeHtml(name)}</label>`;
-  }).join(" ");
+  return groupPermissionRows()
+    .map((group) => {
+      let onCount = 0;
+      const rows = group.rows.map((r) => {
+        const on = f.checked(
+          roleGroupBoxKey("perm", r.key),
+          set.has(r.bit, false),
+        );
+        if (on) onCount += 1;
+        const rowId = f.id(`perm-${r.key}`);
+        const row = renderSettingRow({
+          id: rowId,
+          name: r.name,
+          line: "",
+          control: renderSwitch("perm", on, {
+            id: `${rowId}-input`,
+            labelledBy: `${rowId}-name`,
+            onValue: r.key,
+          }),
+        });
+        return r.key === ADMINISTRATOR_FLAG
+          ? `${ADMINISTRATOR_CALLOUT}\n${row}`
+          : row;
+      });
+      return `<details class="kb-disclosure" data-perm-group="${escapeHtml(group.key)}"${f.refused ? " data-keep-open" : ""} open><summary>${icon("chevron-right", { className: "kb-chev" })}${escapeHtml(group.title)}<span class="rg-perm-count">, ${onCount > 0 ? `${onCount} on` : "none on"}</span></summary>
+<div class="kb-disclosure__body"><div class="kb-settings__group">
+${rows.join("\n")}
+</div></div></details>`;
+    })
+    .join("\n");
 }
 
-function capabilityChecks(
+/**
+ * The Capabilities rows: a SettingRow with a Switch each. A gate-only group's
+ * switches are disabled, and `help` (HTML) says why beside them.
+ */
+function capabilitySettings(
   caps: readonly string[],
-  disabled: boolean,
+  gateOnly: boolean,
   f: FormView,
+  help: string,
 ): string {
-  return ROLE_GROUP_CAPABILITIES.map((c, i) => {
+  const titleId = `${f.id("capabilities")}-title`;
+  const helpId = `${f.id("capability")}-help`;
+  const rows = ROLE_GROUP_CAPABILITIES.map((c, i) => {
+    const rowId = f.id(`capability-${c}`);
     const on = f.checked(roleGroupBoxKey("capability", c), caps.includes(c));
-    // The error belongs to the group of boxes; the first box carries it.
-    const refused = i === 0 ? f.attrs("capability") : "";
-    return `<label class="check"><input type="checkbox" name="capability" value="${c}"${on ? " checked" : ""}${disabled ? " disabled" : ""}${refused}> ${escapeHtml(capabilityLabel(c))}</label>`;
-  }).join(" ");
+    const describedBy = [`${rowId}-desc`, help ? helpId : ""]
+      .filter(Boolean)
+      .join(" ");
+    // The error belongs to the set of switches; the first one carries it.
+    const refused = i === 0 ? f.control("capability", describedBy) : null;
+    return renderSettingRow({
+      id: rowId,
+      name: capabilityLabel(c),
+      line: CAPABILITY_LINES[c] ?? "",
+      control: renderSwitch("capability", on, {
+        ...(refused ?? { describedBy }),
+        id: refused?.id ?? `${rowId}-input`,
+        labelledBy: `${rowId}-name`,
+        disabled: gateOnly,
+        onValue: c,
+      }),
+    });
+  }).join("\n");
+  return `<div class="kb-settings"><div class="kb-settings__group" role="group" aria-labelledby="${escapeHtml(titleId)}"><p class="kb-overline" id="${escapeHtml(titleId)}">Capabilities</p>
+${rows}
+</div></div>${f.error("capability")}${help ? `\n<p class="kb-help" id="${escapeHtml(helpId)}">${help}</p>` : ""}`;
 }
 
-const presetSelect = (): string =>
-  `<label>Start from a preset <select class="rg-preset"><option value="">(none)</option>${PERMISSION_PRESETS.map(
+/** The "set the role's permissions" Switch and the grouped permission switches under one overline. */
+function permissionsSection(
+  bits: string | null,
+  f: FormView,
+  intro: string,
+  editChecked: boolean,
+): string {
+  const titleId = `${f.id("permissions")}-title`;
+  const editId = f.id("editPermissions");
+  const edit = renderSettingRow({
+    id: editId,
+    name: "Set the role's permissions to the selection below",
+    line: "",
+    control: renderSwitch("editPermissions", editChecked, {
+      id: `${editId}-input`,
+      labelledBy: `${editId}-name`,
+      onValue: "1",
+    }),
+  });
+  return `<div class="kb-settings"><div class="kb-settings__group" role="group" aria-labelledby="${escapeHtml(titleId)}"><p class="kb-overline" id="${escapeHtml(titleId)}">Permissions</p>
+${intro ? `<p class="kb-help">${escapeHtml(intro)}</p>\n` : ""}${edit}
+</div></div>
+${permissionSettings(bits, f)}`;
+}
+
+const presetSelect = (f: FormView): string =>
+  `<div class="kb-field"><label class="kb-label" for="${escapeHtml(f.id("preset"))}">Start from a preset</label><select class="kb-select rg-preset" id="${escapeHtml(f.id("preset"))}"><option value="">(none)</option>${PERMISSION_PRESETS.map(
     (p) =>
       `<option value="${escapeHtml(p.key)}" data-permissions="${escapeHtml(new PermissionsBitField(BigInt(p.permissions)).toArray().join(","))}" data-capabilities="${escapeHtml(p.capabilities.join(","))}">${escapeHtml(p.label)}</option>`,
-  ).join("")}</select></label>`;
+  ).join("")}</select></div>`;
 
-// Progressive enhancement: a preset ticks its permission and capability boxes
+// Progressive enhancement: a preset ticks its permission and capability switches
 // (and the "set permissions" switch) so the admin can adjust them before saving.
+// The permission groups are all open in the markup; this folds the ones with
+// nothing on (a refused form keeps them open), and keeps each "N on" in step.
 const PRESET_SCRIPT =
-  "(function(){document.querySelectorAll('.rg-preset').forEach(function(sel){" +
+  "(function(){" +
+  "function count(d){var n=d.querySelectorAll('input[name=perm]:checked').length;" +
+  "var s=d.querySelector('.rg-perm-count');if(s)s.textContent=', '+(n?n+' on':'none on');return n}" +
+  "document.querySelectorAll('details[data-perm-group]').forEach(function(d){" +
+  "if(count(d)===0&&!d.hasAttribute('data-keep-open'))d.removeAttribute('open');" +
+  "d.addEventListener('change',function(){count(d)})});" +
+  "document.querySelectorAll('.rg-preset').forEach(function(sel){" +
   "sel.addEventListener('change',function(){var o=sel.selectedOptions[0];if(!o||!o.value)return;" +
   "var f=sel.closest('form');var perms=(o.dataset.permissions||'').split(',');" +
   "var caps=(o.dataset.capabilities||'').split(',');" +
   "f.querySelectorAll('input[name=perm]').forEach(function(c){c.checked=perms.indexOf(c.value)>=0});" +
   "f.querySelectorAll('input[name=capability]').forEach(function(c){if(!c.disabled)c.checked=caps.indexOf(c.value)>=0});" +
+  "f.querySelectorAll('details[data-perm-group]').forEach(function(d){if(count(d)>0)d.setAttribute('open','')});" +
   "var sw=f.querySelector('input[name=editPermissions]');if(sw)sw.checked=true})})})();";
 
 const POLICY_LABELS: Record<string, string> = {
@@ -245,23 +369,22 @@ function editForm(
 ): string {
   const f = formView(refused, roleGroupEditForm(g.id));
   const locked = g.gateOnly || g.roleLock !== null;
+  const capabilityHelp = `Features ask for capabilities instead of role ids. <strong>Admin</strong> also counts as <strong>Moderator</strong> and <strong>Event host</strong>. <strong>Event host</strong> lets members open the host panel of events they created, from <code>/me</code>; <strong>Moderator</strong> opens the moderation pages in <code>/me</code>; neither opens the admin console. <strong>Bot</strong> groups only ever match bot accounts.${g.gateOnly ? " Integration-managed roles become gate-only groups: they can be used for gating but never carry capabilities." : ""}`;
+  const nameControl = f.control("name");
   return `<details class="kb-disclosure"${f.open()}><summary>${icon("chevron-right", { className: "kb-chev" })}Edit<span class="kb-visually-hidden">: ${escapeHtml(g.name)}</span></summary>
-<div class="kb-disclosure__body"><form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/edit" class="stack">
+<div class="kb-disclosure__body"><form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/edit" class="kb-stack">
 ${csrf}
-<label>Name <input type="text" name="name" value="${escapeHtml(f.value("name", g.name))}" maxlength="100" required${f.attrs("name")}></label>${f.error("name")}
-<fieldset><legend>Capabilities</legend>${capabilityChecks(g.capabilities, g.gateOnly, f)}${f.error("capability")}
-<p class="muted">Features ask for capabilities instead of role ids. <strong>Admin</strong> also counts as <strong>Moderator</strong> and <strong>Event host</strong>. <strong>Event host</strong> lets members open the host panel of events they created, from <code>/me</code>; <strong>Moderator</strong> opens the moderation pages in <code>/me</code>; neither opens the admin console. <strong>Bot</strong> groups only ever match bot accounts.</p></fieldset>
+<div class="kb-field"><label class="kb-label" for="${escapeHtml(nameControl.id)}">Name</label><input class="kb-input" type="text" name="name" value="${escapeHtml(f.value("name", g.name))}" maxlength="100" required${controlAttrs(nameControl)}>${f.error("name")}</div>
+${capabilitySettings(g.capabilities, g.gateOnly, f, capabilityHelp)}
 ${
   locked
-    ? `<p class="muted">The role is ${g.gateOnly ? "integration-managed" : "locked"}, so its permissions and colour are not edited.</p>`
-    : `${presetSelect()}
-<fieldset><legend>Permissions${g.permissions === null ? " (currently left as they are)" : ""}</legend>
-<label class="check"><input type="checkbox" name="editPermissions" value="1"${f.checked("editPermissions", g.permissions !== null) ? " checked" : ""}> Set the role's permissions to the selection below</label>
-${permissionChecks(g.permissions, f)}</fieldset>
+    ? `<p class="kb-help">The role is ${g.gateOnly ? "integration-managed" : "locked"}, so its permissions and colour are not edited.</p>`
+    : `${presetSelect(f)}
+${permissionsSection(g.permissions, f, g.permissions === null ? "The permissions are currently left as they are." : "", f.checked("editPermissions", g.permissions !== null))}
 ${renderColourField(f, "colour", "Colour", formatColour(g.colour), "Leave as it is")}`
 }
-<label>When its Discord role changes <select name="syncPolicy">${syncPolicyOptions(g.syncPolicy, globalPolicy, f)}</select></label>
-<button type="submit" class="btn">Save group</button>
+<div class="kb-field"><label class="kb-label" for="${escapeHtml(f.id("syncPolicy"))}">When its Discord role changes</label><select class="kb-select" id="${escapeHtml(f.id("syncPolicy"))}" name="syncPolicy">${syncPolicyOptions(g.syncPolicy, globalPolicy, f)}</select></div>
+<div class="kb-row"><button type="submit" class="kb-btn">Save group</button></div>
 </form></div></details>`;
 }
 
@@ -451,18 +574,18 @@ function renderAddForm(props: RoleGroupsPageProps, csrf: string): string {
     pickedRole && !props.roleOptions.some((r) => r.id === pickedRole)
       ? `<option value="${escapeHtml(pickedRole)}" selected>Role ${escapeHtml(pickedRole)} (not found)</option>`
       : "";
-  return `<form method="POST" action="/admin/role-groups/create" class="stack">
+  const roleControl = f.control("roleId");
+  const nameControl = f.control("name");
+  return `<form method="POST" action="/admin/role-groups/create" class="kb-stack">
 ${csrf}
-<label>Backing role <select name="roleId"${f.attrs("roleId")}><option value="">Create a new role</option>${missingPicked}${options}</select></label>${f.error("roleId")}
-<p class="muted">Linking an existing role keeps its members and never changes its permissions unless you edit them. Integration-managed roles (Server Booster, subscriptions) become gate-only groups: they can be used for gating but are never edited.</p>
-<label>Name <input type="text" name="name" maxlength="100" placeholder="(a linked role's own name if empty)"${f.valueAttr("name")}${f.attrs("name")}></label>${f.error("name")}
-<fieldset><legend>Capabilities</legend>${capabilityChecks([], false, f)}${f.error("capability")}</fieldset>
-${presetSelect()}
-<fieldset><legend>Permissions (new roles; an existing role is left alone unless you tick below)</legend>
-<label class="check"><input type="checkbox" name="editPermissions" value="1"${f.checked("editPermissions") ? " checked" : ""}> Set the role's permissions to the selection below</label>
-${permissionChecks(null, f)}</fieldset>
+<div class="kb-field"><label class="kb-label" for="${escapeHtml(roleControl.id)}">Backing role</label><select class="kb-select" name="roleId"${controlAttrs(roleControl)}><option value="">Create a new role</option>${missingPicked}${options}</select>${f.error("roleId")}
+<p class="kb-help">Linking an existing role keeps its members and never changes its permissions unless you edit them. Integration-managed roles (Server Booster, subscriptions) become gate-only groups: they can be used for gating but are never edited.</p></div>
+<div class="kb-field"><label class="kb-label" for="${escapeHtml(nameControl.id)}">Name</label><input class="kb-input" type="text" name="name" maxlength="100" placeholder="(a linked role's own name if empty)"${f.valueAttr("name")}${controlAttrs(nameControl)}>${f.error("name")}</div>
+${capabilitySettings([], false, f, "")}
+${presetSelect(f)}
+${permissionsSection(null, f, "New roles get the selection below. An existing role is left alone unless you switch this on.", f.checked("editPermissions"))}
 ${renderColourField(f, "colour", "Colour", "", "No colour")}
-<button type="submit" class="${planCanApply(props) ? "btn" : "btn btn-primary"}">Add group</button>
+<div class="kb-row"><button type="submit" class="${planCanApply(props) ? "kb-btn" : "kb-btn kb-btn--primary"}">Add group</button></div>
 </form>`;
 }
 

@@ -430,6 +430,28 @@ describe("a refused Role groups form (#1523)", () => {
   });
 
   // A browser without JavaScript posts what the page rendered (the box ticked, the swatch grey).
+  // The switches post the stored bit string unchanged (#1615): what a browser
+  // sends back from the refused page is what the route turns into the same bits.
+  it("posts the same permission bits from the rendered switches as were sent, aliases included", async () => {
+    await mount();
+    const sent = [
+      "Administrator",
+      "ManageGuildExpressions",
+      "UseExternalApps",
+      "ModerateMembers",
+    ];
+    const refused = await harness.post("/role-groups/create", {
+      name: "x",
+      colour: "bad",
+      editPermissions: "1",
+      perm: sent,
+    });
+    const body = renderedFormBody(await refused.text(), "/role-groups/create");
+    const posted = ([] as string[]).concat(body.perm ?? []);
+    expect(permissionsFromNames(posted)).toBe(permissionsFromNames(sent));
+    expect(posted).toHaveLength(sent.length);
+  });
+
   it("creates a group with no colour from an untouched Add form, and keeps the colour of an untouched Edit form", async () => {
     await mount();
     const refused = await harness.post("/role-groups/create", {

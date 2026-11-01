@@ -96,9 +96,14 @@ function groupFormValues(req: Parameters<typeof getString>[0]): FormValues {
       values[roleGroupBoxKey("capability", c)] = "1";
     }
   }
-  for (const p of Object.keys(PermissionsBitField.Flags)) {
+  // A name that shares its bit with an alias (ManageEmojisAndStickers and
+  // ManageGuildExpressions) ticks the one switch the form draws for that bit.
+  const flags = PermissionsBitField.Flags as Record<string, bigint>;
+  for (const p of Object.keys(flags)) {
     if (toArray(body["perm"]).includes(p)) {
-      values[roleGroupBoxKey("perm", p)] = "1";
+      for (const q of Object.keys(flags)) {
+        if (flags[q] === flags[p]) values[roleGroupBoxKey("perm", q)] = "1";
+      }
     }
   }
   return values;
