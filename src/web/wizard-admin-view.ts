@@ -71,6 +71,6 @@ export function renderAdministratorContinue(
   if (check.state !== "missing") return "";
   return `<div class="kb-settings"><div class="kb-setting">
   <div><p class="kb-setting__name">Continue without Administrator</p><p class="kb-setting__desc" id="admin-continue-desc">Apply stops here until you switch this on. Creating roles, channels and categories may then fail.</p></div>
-  <div class="kb-setting__control"><label class="kb-switch"><input type="checkbox" role="switch" name="${ADMIN_CONTINUE_FIELD}" value="1" form="${escapeHtml(applyFormId)}" aria-describedby="admin-continue-desc"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Apply without Administrator</label></div>
+  <div class="kb-setting__control"><label class="kb-switch"><input type="checkbox" role="switch" name="${ADMIN_CONTINUE_FIELD}" value="1" form="${escapeHtml(applyFormId)}" aria-describedby="admin-continue-desc"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Continue without Administrator</label></div>
 </div></div>`;
 }

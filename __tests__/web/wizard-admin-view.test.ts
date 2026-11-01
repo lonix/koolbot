@@ -108,6 +108,8 @@ describe("renderAdministratorContinue", () => {
     expect(html).toContain('name="continueWithoutAdmin"');
     expect(html).toContain('form="apply-form"');
     expect(html).toContain('aria-describedby="admin-continue-desc"');
+    // The control announces itself by the owner's term, the one the callout and the refusal use.
+    expect(html).toMatch(/<\/span>Continue without Administrator<\/label>/);
     expect(renderAdministratorContinue({ state: "has" }, "f")).toBe("");
     expect(
       renderAdministratorContinue({ state: "unknown", reason: "x" }, "f"),
