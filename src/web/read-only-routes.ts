@@ -2676,6 +2676,7 @@ export function createReadOnlyRouter(
       let categoryFound = false;
       let totalManaged = 0;
       let totalEmpty = 0;
+      let lobbyOutsideCategory = false;
       // Category picker options for the editable `voicechannels.category_id`
       // control (#705). Derived from the same guild fetch that builds the
       // managed-channel table below, so the page fetches the guild/channels
@@ -2722,6 +2723,8 @@ export function createReadOnlyRouter(
             .filter((c) => c.type === ChannelType.GuildVoice)
             .sort((a, b) => a.name.localeCompare(b.name));
           totalManaged = voice.length;
+          lobbyOutsideCategory =
+            (await manager.getMisplacedLobbies(guild)).length > 0;
           // Runtime lobby detection ignores names once the configured ID
           // resolves to a channel in the category, so label the same way.
           const lobbyIdResolves =
@@ -2778,6 +2781,7 @@ export function createReadOnlyRouter(
           categoryChannels,
           voiceChannels,
           managedOnly,
+          lobbyOutsideCategory,
           flash: readFlash(req),
         }),
       );

@@ -4215,6 +4215,67 @@ export function adminPages(): A11yPage[] {
         flash: FLASH,
       }),
     })),
+    {
+      name: "Voice channels (lobby outside the category)",
+      html: renderVoiceChannelsPage({
+        ...COMMON,
+        enabled: true,
+        lobbyOutsideCategory: true,
+        controlPanelEnabled: true,
+        categoryName: "Voice Channels",
+        lobbyName: "Lobby",
+        offlineLobbyName: "Offline",
+        prefix: "",
+        totalManaged: 2,
+        totalEmpty: 1,
+        categoryFound: true,
+        channels: [
+          {
+            name: "Lobby",
+            isLobby: true,
+            isLive: false,
+            memberCount: 0,
+            customName: null,
+            channelId: "v1",
+          },
+          {
+            name: "Alice's channel",
+            isLobby: false,
+            isLive: true,
+            memberCount: 3,
+            customName: "Alice's channel",
+            channelId: "v2",
+          },
+        ],
+        settingRows: [
+          ...SETTING_ROWS.slice(0, 4),
+          {
+            key: "voicechannels.channel.prefix",
+            label: "Per-user channel name prefix",
+            current: "🎮",
+            defaultValue: "",
+            type: "string",
+            description:
+              "Prefix prepended to dynamically created voice channel names.",
+            category: "voicechannels",
+            format: "affix",
+          },
+          {
+            key: "voicechannels.channel.suffix",
+            label: "Per-user channel name suffix",
+            current: "",
+            defaultValue: "",
+            type: "string",
+            description:
+              "Suffix appended to dynamically created voice channel names.",
+            category: "voicechannels",
+            format: "affix",
+          },
+        ],
+        categoryChannels: CATEGORIES,
+        flash: FLASH,
+      }),
+    },
     ...[true, false].map((enabled) => ({
       name: enabled ? "Digest" : "Digest (feature off)",
       html: renderDigestPage({

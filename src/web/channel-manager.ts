@@ -519,6 +519,37 @@ export function deleteVerdict(
 }
 
 /**
+ * The protection reasons that tie a channel to its category: the voice lobby
+ * and temporary rooms (KoolBot puts a moved lobby back and cleans up by
+ * category), and ticket channels. Other reasons (a `*_id` setting naming a
+ * text channel, an event's announcement channel) do not care where the
+ * channel lives.
+ */
+const CATEGORY_BOUND_REASON =
+  /the voice lobby|\(managed by Voice Channels\)|\(Tickets, ticket|voicechannels\.lobby\.channel_id/;
+
+/**
+ * May this channel move to another category? A channel KoolBot places in a
+ * category for a feature (the voice lobby, temporary rooms, ticket channels)
+ * is refused with the reason, as a delete is (#1636): the voice service puts a
+ * moved lobby straight back, so the move would only be undone.
+ */
+export function moveVerdict(
+  target: ManagedChannelView,
+  protection: ReadonlyMap<string, string[]>,
+): DeleteVerdict {
+  const reasons = (protection.get(target.id) ?? []).filter((r) =>
+    CATEGORY_BOUND_REASON.test(r),
+  );
+  if (reasons.length === 0) return { ok: true };
+  return {
+    ok: false,
+    reasons,
+    message: `KoolBot manages "${target.name}": it is ${reasons.join("; ")}. It has to stay in its category, so it can't be moved here. Change that in Settings first, then move the channel in Discord if you still want it elsewhere.`,
+  };
+}
+
+/**
  * Binds a delete confirmation to the channel as the admin saw it: its id, type,
  * name and parent, and for a category the channels inside it. The confirmation
  * page carries this in its `confirm` field and the delete re-computes it from

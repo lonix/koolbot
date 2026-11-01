@@ -805,6 +805,79 @@ describe("POST /channels/:id/edit", () => {
     expect(mockEdit.mock.calls[0][0]).toMatchObject({ parent_id: null });
   });
 
+  it.each([
+    ["the voice lobby", "the voice lobby (managed by Voice Channels)"],
+    [
+      "the lobby found by name",
+      "the voice lobby, found by name (voicechannels.lobby.name / voicechannels.lobby.offlinename)",
+    ],
+    [
+      "the lobby configured by id",
+      "the voicechannels.lobby.channel_id setting",
+    ],
+    [
+      "a temporary voice channel",
+      "a temporary voice channel (managed by Voice Channels)",
+    ],
+    ["a ticket channel", "a support ticket channel (Tickets, ticket t1)"],
+  ])(
+    "refuses to move %s to another category, naming why (#1636)",
+    async (_label, reason) => {
+      const OTHER = "100000000000000050";
+      channels.push(view(OTHER, { kind: "category", name: "Other" }));
+      protection = new Map([[VOICE, [reason]]]);
+      await mount();
+      const res = await harness.post(`/channels/${VOICE}/edit`, {
+        name: "Hangout",
+        parent: OTHER,
+      });
+      const r = await refusal(res);
+      expect(r.lines[`channel-edit-${VOICE}-parent-error`]).toContain(reason);
+      expect(mockEdit).not.toHaveBeenCalled();
+    },
+  );
+
+  it("still lets an admin rename a managed voice channel without moving it", async () => {
+    protection = new Map([
+      [VOICE, ["the voice lobby (managed by Voice Channels)"]],
+    ]);
+    await mount();
+    await harness.post(`/channels/${VOICE}/edit`, {
+      name: "Hangout 2",
+      parent: CAT,
+    });
+    expect(mockEdit.mock.calls[0][0]).toMatchObject({ name: "Hangout 2" });
+  });
+
+  it("still lets an admin move a channel that is managed for a reason that does not care where it lives", async () => {
+    const OTHER = "100000000000000050";
+    channels.push(view(OTHER, { kind: "category", name: "Other" }));
+    protection = new Map([[TEXT, ["the quotes.channel_id setting"]]]);
+    await mount();
+    await harness.post(`/channels/${TEXT}/edit`, {
+      name: "general",
+      topic: "hi",
+      parent: OTHER,
+    });
+    expect(mockEdit.mock.calls[0][0]).toMatchObject({ parent_id: OTHER });
+  });
+
+  it("refuses a move when KoolBot can't tell whether it manages the channel", async () => {
+    const OTHER = "100000000000000050";
+    channels.push(view(OTHER, { kind: "category", name: "Other" }));
+    protectionFails = true;
+    await mount();
+    const res = await harness.post(`/channels/${VOICE}/edit`, {
+      name: "Hangout",
+      parent: OTHER,
+    });
+    const r = await refusal(res);
+    expect(r.lines[`channel-edit-${VOICE}-parent-error`]).toContain(
+      "Couldn't verify",
+    );
+    expect(mockEdit).not.toHaveBeenCalled();
+  });
+
   it("does nothing when nothing changed", async () => {
     await mount();
     const res = await harness.post(`/channels/${TEXT}/edit`, {

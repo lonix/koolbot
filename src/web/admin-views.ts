@@ -5653,6 +5653,11 @@ export interface VoiceChannelsProps extends CommonProps {
    * KoolBot created, so the page words the cleanup actions accordingly.
    */
   managedOnly?: boolean;
+  /**
+   * The lobby sits outside the managed category and KoolBot has not (yet) put
+   * it back, for instance because it lacks Manage Channels (#1636).
+   */
+  lobbyOutsideCategory?: boolean;
   flash?: FlashMessage | null;
 }
 
@@ -5862,6 +5867,9 @@ export function renderFeatureSettingsCard(
 </div>`;
 }
 
+/** Channel manager (`CHANNELS_PATH` in channel-manager-view.ts, which imports this module). */
+const CHANNEL_MANAGER_HREF = "/admin/channels";
+
 export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const rows = props.channels
@@ -5917,6 +5925,15 @@ ${renderStatusLine({
             ? undefined
             : settingHref("voicechannels.category_id"),
         },
+    ...(props.categoryFound && props.lobbyOutsideCategory
+      ? [
+          {
+            text: "The lobby is outside the voice category",
+            warn: true,
+            href: CHANNEL_MANAGER_HREF,
+          },
+        ]
+      : []),
     {
       // A configured name, not a looked-up channel: it is a voice room by
       // definition, and may simply not exist yet, so it is never "unavailable".
