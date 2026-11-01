@@ -10,7 +10,6 @@ import {
   Routes,
   TextChannel,
   Partials,
-  AuditLogEvent,
 } from "discord.js";
 import { env, getMissingRequiredEnv } from "./config/env.js";
 import logger, { isDebugMode } from "./utils/logger.js";
@@ -28,6 +27,7 @@ import { startComponentAudit } from "./utils/component-audit.js";
 import { runNameToIdMigrations } from "./services/name-id-migrator.js";
 import { runReactionRoleMigrations } from "./services/reaction-role-migrator.js";
 import { CommandManager } from "./services/command-manager.js";
+import { findChannelUpdateExecutor } from "./utils/audit-executor.js";
 import {
   VoiceChannelManager,
   resolveManagedCategory,
@@ -1430,29 +1430,22 @@ client.on(Events.ChannelUpdate, async (oldChannel, newChannel) => {
       );
 
       // Try to identify who renamed the channel by checking audit logs
-      try {
-        const auditLogs = await newChannel.guild.fetchAuditLogs({
-          type: AuditLogEvent.ChannelUpdate,
-          limit: 1,
-        });
-
-        const entry = auditLogs.entries.first();
-        if (
-          entry &&
-          entry.targetId === newChannel.id &&
-          Date.now() - entry.createdTimestamp < 5000
-        ) {
-          const executor = entry.executor;
-          logger.info(
-            `Channel renamed by: ${sanitizeForLog(executor?.displayName || executor?.username) || "Unknown"} (${executor?.id || "Unknown"})`,
-          );
-        }
-      } catch (auditError) {
-        logger.debug(
-          "Could not fetch audit logs for channel rename:",
-          auditError,
+      const executor = await findChannelUpdateExecutor(
+        newChannel.guild,
+        newChannel.id,
+      );
+      if (executor) {
+        logger.info(
+          `Channel renamed by: ${sanitizeForLog(executor.name) || "Unknown"} (${executor.id})`,
         );
       }
+    }
+
+    // A lobby moved out of the managed category is put back (#1636). The
+    // manager decides whether the channel is one it looks after and only then
+    // asks the audit log who moved it.
+    if (oldChannel.parentId !== newChannel.parentId) {
+      await voiceChannelManager.handleChannelMoved(oldChannel, newChannel);
     }
   } catch (error) {
     logger.error("Error handling channel update:", error);

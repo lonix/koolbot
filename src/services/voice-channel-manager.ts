@@ -27,6 +27,9 @@ import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { ConfigService } from "./config-service.js";
+import { DiscordLogger } from "./discord-logger.js";
+import { embedColor } from "../utils/embed-style.js";
+import { findChannelUpdateExecutor } from "../utils/audit-executor.js";
 import { PERM } from "./bot-permission-registry.js";
 import { VoiceChannelOwnership } from "../models/voice-channel-ownership.js";
 import { Event } from "../models/event.js";
@@ -93,6 +96,33 @@ export async function resolveManagedCategory(
   const ch = guild.channels.cache.get(id);
   if (!ch || ch.type !== ChannelType.GuildCategory) return null;
   return ch as CategoryChannel;
+}
+
+/**
+ * After KoolBot puts a lobby back into the managed category it will not do it
+ * again for this long (#1636). An admin who keeps moving it out is warned about
+ * and left alone instead of fought in a loop; the next periodic health check
+ * after the window tries once more.
+ */
+export const LOBBY_MOVE_BACK_BACKOFF_MS = 10 * 60 * 1000;
+
+/**
+ * The voice channel `voicechannels.lobby.channel_id` points at, wherever it
+ * lives in the guild (inside the managed category or not). Unlike
+ * `resolveConfiguredLobbyId` it does not require the category, so the code that
+ * puts a moved lobby back, and the code that must not create a second lobby,
+ * can find it.
+ */
+export async function findConfiguredLobbyChannel(
+  guild: Guild | null | undefined,
+): Promise<VoiceChannel | null> {
+  const id = (
+    await configService.getString("voicechannels.lobby.channel_id", "")
+  ).trim();
+  if (!id || !guild?.channels?.cache) return null;
+  const channel = guild.channels.cache.get(id);
+  if (!channel || channel.type !== ChannelType.GuildVoice) return null;
+  return channel as VoiceChannel;
 }
 
 /**
@@ -556,6 +586,337 @@ export class VoiceChannelManager {
     return this.waitingRoomToMain.has(channelId);
   }
 
+  /** When KoolBot last put each lobby back into the category, by channel id (#1636). */
+  private lobbyMoveBackAt: Map<string, { at: number; ok: boolean }> = new Map();
+  /** Lobby repairs in flight, by channel id: one request per channel at a time. */
+  private lobbyRepairs: Map<string, Promise<"moved" | "backoff" | "failed">> =
+    new Map();
+  /**
+   * Lobbies recognised during a live move that are still outside the category
+   * (by id, in memory only). A reused name-only lobby may have no registry row,
+   * so without this a failed repair loses it. Pruned when the channel is back
+   * in the category, gone, or another lobby is in place.
+   */
+  private movedLobbyIds: Set<string> = new Set();
+  /** Lobbies whose failed move back was already posted to the log channel. */
+  private lobbyMoveNotified: Set<string> = new Set();
+
+  /**
+   * Lobbies that sit outside the managed category and must be put back rather
+   * than replaced (#1636). One model for "which channel is THE lobby when it
+   * is not in the category": the channel the lobby id points at; a lobby
+   * recognised in a live move that is still outside (kept in memory in
+   * `movedLobbyIds`); and, when the category holds no lobby by name, the
+   * lobby channels KoolBot recorded when it created them. A channel that
+   * merely carries the lobby's name elsewhere in the guild is never taken for
+   * the lobby.
+   *
+   * `verified` is false when nothing was found AND the registry could not be
+   * read (read failure or database not ready): the absence of a lobby is then
+   * unknown, so callers must not create one.
+   */
+  private async findMisplacedLobbies(
+    guild: Guild,
+    category: CategoryChannel,
+  ): Promise<{ lobbies: VoiceChannel[]; verified: boolean }> {
+    const configured = await findConfiguredLobbyChannel(guild);
+    if (configured) {
+      return {
+        lobbies: configured.parentId === category.id ? [] : [configured],
+        verified: true,
+      };
+    }
+    const lobbyName = await this.getLobbyChannelName();
+    const offlineNames = await resolveOfflineLobbyNames((key, def) =>
+      configService.getString(key, def),
+    );
+    const inCategory = [lobbyName, ...offlineNames].some((name) =>
+      this.findLobbyByName(category, name),
+    );
+    if (inCategory) {
+      // A lobby is in place: nothing to put back, and a remembered one is stale.
+      this.movedLobbyIds.clear();
+      return { lobbies: [], verified: true };
+    }
+    const found = new Map<string, VoiceChannel>();
+    for (const id of [...this.movedLobbyIds]) {
+      const channel = guild.channels.cache.get(id);
+      if (
+        !channel ||
+        channel.type !== ChannelType.GuildVoice ||
+        channel.parentId === category.id
+      ) {
+        this.movedLobbyIds.delete(id);
+      } else {
+        found.set(id, channel as VoiceChannel);
+      }
+    }
+    // Lobbies KoolBot created whose record is still being saved are known in
+    // memory; the registry cannot show them yet, so an empty read is not proof.
+    for (const [id, pending] of this.pendingManagedChannels) {
+      if (pending.guildId !== guild.id || pending.kind !== "lobby") continue;
+      const channel = guild.channels.cache.get(id);
+      if (
+        channel &&
+        channel.type === ChannelType.GuildVoice &&
+        channel.parentId !== category.id &&
+        !this.isTrackedRoom(id)
+      ) {
+        found.set(id, channel as VoiceChannel);
+      }
+    }
+    if (!this.isDbReady()) {
+      logger.warn(
+        "Database not ready: cannot tell whether the lobby was recorded outside the voice category",
+      );
+      return { lobbies: [...found.values()], verified: found.size > 0 };
+    }
+    try {
+      const rows = await ManagedVoiceChannel.find({
+        guildId: guild.id,
+        kind: "lobby",
+      });
+      for (const row of rows) {
+        const channel = guild.channels.cache.get(row.channelId);
+        if (
+          channel &&
+          channel.type === ChannelType.GuildVoice &&
+          channel.parentId !== category.id &&
+          !this.isTrackedRoom(channel.id)
+        ) {
+          found.set(channel.id, channel as VoiceChannel);
+        }
+      }
+      return { lobbies: [...found.values()], verified: true };
+    } catch (error) {
+      logger.error("Error loading recorded lobby channels:", error);
+      return { lobbies: [...found.values()], verified: found.size > 0 };
+    }
+  }
+
+  /**
+   * The lobbies currently outside the managed category, for the Voice channels
+   * page (#1636). Read from live guild state, so it is right after a restart.
+   */
+  public async getMisplacedLobbies(guild: Guild): Promise<VoiceChannel[]> {
+    const category = await resolveManagedCategory(guild);
+    if (!category) return [];
+    return (await this.findMisplacedLobbies(guild, category)).lobbies;
+  }
+
+  /**
+   * Move a lobby back into the managed category (#1636). `setParent` changes
+   * the parent only: members inside stay connected, and `lockPermissions` is
+   * off so the lobby keeps its own permission overwrites. At most once per
+   * back-off window per channel; a failure is logged and posted to the log
+   * channel once, so it is never silent.
+   */
+  private putLobbyBack(
+    channel: VoiceChannel,
+    category: CategoryChannel,
+    who?: string,
+  ): Promise<"moved" | "backoff" | "failed"> {
+    // Triggers (the move event, the health check, a cleanup) that arrive while
+    // a repair is in flight share its result instead of sending another one.
+    const inFlight = this.lobbyRepairs.get(channel.id);
+    if (inFlight) return inFlight;
+    const repair = this.repairLobby(channel, category, who).finally(() => {
+      this.lobbyRepairs.delete(channel.id);
+    });
+    this.lobbyRepairs.set(channel.id, repair);
+    return repair;
+  }
+
+  private async repairLobby(
+    channel: VoiceChannel,
+    category: CategoryChannel,
+    who?: string,
+  ): Promise<"moved" | "backoff" | "failed"> {
+    // Every check up to the first await is synchronous, and the back-off is
+    // recorded before the request goes out, so a failed attempt counts too.
+    // The live channel, not the (possibly stale) object the caller holds. A
+    // repair that already finished (a health check, another trigger) is done:
+    // no request, and no warning.
+    const live = channel.guild?.channels?.cache?.get(channel.id) ?? channel;
+    if ("parentId" in live && live.parentId === category.id) {
+      this.lobbyMoveNotified.delete(channel.id);
+      return "moved";
+    }
+    const last = this.lobbyMoveBackAt.get(channel.id);
+    if (last && Date.now() - last.at < LOBBY_MOVE_BACK_BACKOFF_MS) {
+      logger.warn(
+        `Lobby ${sanitizeForLog(channel.name)} (${channel.id}) was moved out of the voice category again${who ? ` by ${who}` : ""}; not moving it back again within ${Math.round(LOBBY_MOVE_BACK_BACKOFF_MS / 60000)} minutes`,
+      );
+      await this.notifyLobbyNotPlaced(
+        channel,
+        category,
+        last.ok
+          ? "KoolBot already moved it back once a moment ago, so it is leaving it where it is for now."
+          : "KoolBot could not move it back a moment ago, so it is not trying again for now. Give the bot Manage Channels, or move it back yourself.",
+        who,
+      );
+      return "backoff";
+    }
+    const attempt = { at: Date.now(), ok: false };
+    this.lobbyMoveBackAt.set(channel.id, attempt);
+    try {
+      await channel.setParent(category.id, {
+        lockPermissions: false,
+        reason: "Lobby moved out of the voice category - putting it back",
+      });
+      attempt.ok = true;
+      this.lobbyMoveNotified.delete(channel.id);
+      const inside = channel.members?.filter((m) => !m.user.bot).size ?? 0;
+      logger.info(
+        `Moved lobby ${sanitizeForLog(channel.name)} (${channel.id}) back into the voice category${inside > 0 ? `; ${inside} member(s) inside stayed connected` : ""}`,
+      );
+      return "moved";
+    } catch (error) {
+      logger.error(
+        `Could not move lobby ${sanitizeForLog(channel.name)} (${channel.id}) back into the voice category:`,
+        error,
+      );
+      await this.notifyLobbyNotPlaced(
+        channel,
+        category,
+        "KoolBot could not move it back. Give the bot Manage Channels, or move it back yourself.",
+        who,
+      );
+      return "failed";
+    }
+  }
+
+  /** One log-channel post per lobby until it is back in the category (#1636). */
+  private async notifyLobbyNotPlaced(
+    channel: VoiceChannel,
+    category: CategoryChannel,
+    description: string,
+    who?: string,
+  ): Promise<void> {
+    if (this.lobbyMoveNotified.has(channel.id)) return;
+    // Set before the send so concurrent callers post once; cleared when the
+    // post did not go out, so a later attempt retries.
+    this.lobbyMoveNotified.add(channel.id);
+    let posted = false;
+    try {
+      posted = await DiscordLogger.getInstance(this.client).logToChannel(
+        "errors",
+        {
+          title: "The lobby is outside the voice category",
+          description: `<#${channel.id}> is not in <#${category.id}>. ${description}`,
+          color: embedColor("warn"),
+          fields: who ? [{ name: "Moved by", value: who, inline: true }] : [],
+          footer: "KoolBot · Voice channels",
+        },
+      );
+    } catch (error) {
+      logger.error("Could not post the misplaced lobby warning:", error);
+    }
+    if (!posted) this.lobbyMoveNotified.delete(channel.id);
+  }
+
+  /**
+   * A lobby or offline lobby was moved out of the managed category: put it
+   * back (#1636). Called from the ChannelUpdate handler with the audit log's
+   * executor when it names one. Only the channel's own move out of the
+   * category counts, so the bot's own move back (a move into it) is ignored.
+   */
+  public async handleChannelMoved(
+    oldChannel: { parentId?: string | null },
+    newChannel: VoiceChannel,
+    executor?: { id: string; name?: string | null } | null,
+  ): Promise<void> {
+    try {
+      if (!(await configService.getBoolean("voicechannels.enabled", false))) {
+        return;
+      }
+      const guild = newChannel.guild;
+      if (!guild) return;
+      const category = await resolveManagedCategory(guild);
+      if (!category) return;
+      if (newChannel.parentId === category.id) {
+        // Back in the category (by hand or by the bot): a later move out is a
+        // new problem and gets its own post. Never a reason to repair.
+        this.lobbyMoveNotified.delete(newChannel.id);
+        this.movedLobbyIds.delete(newChannel.id);
+        return;
+      }
+      if (oldChannel.parentId !== category.id) return;
+      const tracked = this.isTrackedRoom(newChannel.id);
+      if (
+        !tracked &&
+        !(await this.isLobbyOrOfflineLobby(guild, category, newChannel))
+      ) {
+        return;
+      }
+      // Remember a recognised lobby before the audit log lookup (a REST call),
+      // so a health check or the chip that runs meanwhile already knows it.
+      if (!tracked) this.movedLobbyIds.add(newChannel.id);
+      // Only a channel KoolBot looks after is worth an audit log lookup.
+      const mover =
+        executor === undefined
+          ? await findChannelUpdateExecutor(guild, newChannel.id)
+          : executor;
+      if (mover && mover.id === this.client.user?.id) {
+        this.movedLobbyIds.delete(newChannel.id);
+        return;
+      }
+      const who = mover
+        ? `${sanitizeForLog(mover.name) || "Unknown"} (${mover.id})`
+        : undefined;
+
+      if (tracked) {
+        logger.info(
+          `Temporary voice room ${sanitizeForLog(newChannel.name)} (${newChannel.id}) was moved out of the voice category${who ? ` by ${who}` : ""}; it is cleaned up when empty wherever it is`,
+        );
+        return;
+      }
+      logger.info(
+        `Lobby ${sanitizeForLog(newChannel.name)} (${newChannel.id}) was moved out of the voice category${who ? ` by ${who}` : ""}; putting it back`,
+      );
+      // Remember it before the repair: if that fails or hits the back-off, the
+      // health check and the page's chip must still know this lobby.
+      if ((await this.putLobbyBack(newChannel, category, who)) === "moved") {
+        this.movedLobbyIds.delete(newChannel.id);
+      }
+    } catch (error) {
+      logger.error("Error handling a moved voice channel:", error);
+    }
+  }
+
+  /**
+   * Is this the lobby or offline lobby? By id when configured; otherwise by
+   * (online or offline) name, and in managed-only mode only when KoolBot
+   * created it, as every other name match in that mode.
+   */
+  private async isLobbyOrOfflineLobby(
+    guild: Guild,
+    category: CategoryChannel,
+    channel: VoiceChannel,
+  ): Promise<boolean> {
+    const configured = await findConfiguredLobbyChannel(guild);
+    if (configured) return configured.id === channel.id;
+    const read = (key: string, def?: string): Promise<string> =>
+      configService.getString(key, def);
+    const names = [
+      await resolveLobbyChannelName(read),
+      ...(await resolveOfflineLobbyNames(read)),
+    ];
+    if (!names.includes(channel.name)) return false;
+    // A lobby KoolBot just created whose record is still being saved is ours
+    // even while the database cannot say so.
+    if (this.pendingManagedChannels.get(channel.id)?.kind === "lobby") {
+      return true;
+    }
+    // A temporary room known only from persisted rows (ownership restoration
+    // failed at startup) is a room, whatever it was renamed to.
+    if ((await this.loadPersistedRoomIds(guild)).has(channel.id)) return false;
+    if (await this.isManagedOnly()) {
+      return this.isTrackedManagedChannel(guild, category, channel.id);
+    }
+    return true;
+  }
+
   /**
    * Find a voice channel in the managed category by exact name, never
    * returning a member room. Used by the name-based lobby fallback so a
@@ -997,6 +1358,18 @@ export class VoiceChannelManager {
     } catch (error) {
       logger.error("Error pruning stale waiting room records:", error);
     }
+  }
+
+  /** Is anyone in the waiting room linked to this main room? */
+  private linkedWaitingRoomOccupied(guild: Guild, mainId: string): boolean {
+    const waitingId = this.waitingRooms.get(mainId);
+    if (!waitingId) return false;
+    const waiting = guild.channels.cache.get(waitingId);
+    return (
+      !!waiting &&
+      waiting.type === ChannelType.GuildVoice &&
+      (waiting as VoiceChannel).members.size > 0
+    );
   }
 
   /** A restored waiting room whose main channel still has members. */
@@ -3065,6 +3438,14 @@ export class VoiceChannelManager {
    * ensured. Errors are logged, never thrown.
    */
   public async ensureLobbyChannelExists(guild: Guild): Promise<boolean> {
+    // Startup, the health check, cleanup and Force VC cleanup all end up here:
+    // one at a time, so two of them never both see "no lobby" and create one.
+    return this.roomLock.run(`lobby:${guild.id}`, () =>
+      this.ensureLobbyChannelExistsLocked(guild),
+    );
+  }
+
+  private async ensureLobbyChannelExistsLocked(guild: Guild): Promise<boolean> {
     try {
       const lobbyName = await this.getLobbyChannelName();
       const offlineLobbyName = await configService.getString(
@@ -3080,6 +3461,40 @@ export class VoiceChannelManager {
         return false;
       }
 
+      // A lobby that was moved out of the category is put back, never
+      // replaced: a second lobby would leave two channels acting as triggers
+      // (#1636).
+      const { lobbies: misplaced, verified } = await this.findMisplacedLobbies(
+        guild,
+        category,
+      );
+      if (misplaced.length === 0 && !verified) {
+        logger.error(
+          "Could not check whether the lobby sits outside the voice category (the lobby record could not be read); not creating a lobby until it can be checked",
+        );
+        return false;
+      }
+      if (misplaced.length > 0) {
+        const lobby = misplaced[0];
+        logger.warn(
+          `Lobby ${sanitizeForLog(lobby.name)} (${lobby.id}) is outside the voice category; moving it back instead of creating a second lobby`,
+        );
+        if ((await this.putLobbyBack(lobby, category)) !== "moved") {
+          return false;
+        }
+        if (lobby.name === lobbyName) return true;
+        try {
+          await lobby.setName(lobbyName, "Lobby moved back - renaming online");
+          return true;
+        } catch (error) {
+          logger.error(
+            "Failed to rename the lobby after moving it back:",
+            error,
+          );
+          return false;
+        }
+      }
+
       // First, try to find an existing online lobby (by ID when configured)
       const lobbyById = await this.getLobbyChannelById(guild);
       // Once the ID resolves the name fallback is off, so a foreign channel
@@ -3089,6 +3504,19 @@ export class VoiceChannelManager {
           ? lobbyById
           : undefined
         : this.findLobbyByName(category, lobbyName);
+      if (!lobbyById) {
+        const sameName = category.children.cache.filter(
+          (c) =>
+            c.type === ChannelType.GuildVoice &&
+            c.name === lobbyName &&
+            !this.isTrackedRoom(c.id),
+        );
+        if (sameName.size > 1 && existingLobby) {
+          logger.warn(
+            `${sameName.size} channels in the voice category carry the lobby name; using ${existingLobby.id}. Delete the others or set voicechannels.lobby.channel_id to pick the lobby.`,
+          );
+        }
+      }
 
       if (existingLobby) {
         logger.debug(`Lobby channel already exists: ${existingLobby.name}`);
@@ -3167,6 +3595,14 @@ export class VoiceChannelManager {
         return false;
       }
 
+      // A lobby that sits outside the category (or whose record cannot be
+      // read) is handled by the non-destructive path: put back, never
+      // deleted and re-created next to the original (#1636).
+      const outside = await this.findMisplacedLobbies(guild, category);
+      if (outside.lobbies.length > 0 || !outside.verified) {
+        return this.ensureLobbyChannelExists(guild);
+      }
+
       // A lobby configured by ID is kept (and renamed online if needed), never
       // deleted and re-created: that would change its ID and orphan the config.
       const lobbyById = await this.getLobbyChannelById(guild);
@@ -3193,81 +3629,124 @@ export class VoiceChannelManager {
         return this.ensureLobbyChannelExists(guild);
       }
 
-      // Find ALL lobby channels (including duplicates and offline ones) by
-      // their exact configured names, never by a "Lobby" substring and never
-      // a member room: a room named "Lobby party" is not the lobby (#1148).
-      const offlineLobbyName = await configService.getString(
-        "voicechannels.lobby.offlinename",
-        "🔴 Lobby",
-      );
-      const allLobbyChannels = category.children.cache.filter(
-        (channel): channel is VoiceChannel =>
-          channel.type === ChannelType.GuildVoice &&
-          (channel.name === lobbyName || channel.name === offlineLobbyName) &&
-          !this.isTrackedRoom(channel.id),
-      );
-
-      // Check if there's an offline lobby that we can rename back to online
-      const offlineLobbyChannel = allLobbyChannels.find(
-        (channel) => channel.name !== lobbyName,
-      );
-
-      if (offlineLobbyChannel) {
-        // Rename the offline lobby back to online instead of deleting it
-        try {
-          await offlineLobbyChannel.setName(
-            lobbyName,
-            "Bot starting up - renaming offline lobby",
-          );
-          logger.info(
-            `Renamed offline lobby channel back to online: ${lobbyName}`,
-          );
-          return true; // We're done, no need to create a new channel
-        } catch (error) {
-          logger.error(`Failed to rename offline lobby channel:`, error);
-          // Fall through to deletion if renaming fails
+      // The destructive rename, delete and create runs under the lock shared
+      // with ensureLobbyChannelExists and the health check (#1636).
+      return this.roomLock.run(`lobby:${guild.id}`, async () => {
+        // The early lookup ran before the lock: look again now. A lobby that
+        // moved out meanwhile is put back (or reported), never deleted or
+        // replaced.
+        const recheck = await this.findMisplacedLobbies(guild, category);
+        if (recheck.lobbies.length > 0 || !recheck.verified) {
+          return this.ensureLobbyChannelExistsLocked(guild);
         }
-      }
+        // Find ALL lobby channels (including duplicates and offline ones) by
+        // their exact configured names, never by a "Lobby" substring and never
+        // a member room: a room named "Lobby party" is not the lobby (#1148).
+        const offlineLobbyName = await configService.getString(
+          "voicechannels.lobby.offlinename",
+          "🔴 Lobby",
+        );
+        const allLobbyChannels = category.children.cache.filter(
+          (channel): channel is VoiceChannel =>
+            channel.type === ChannelType.GuildVoice &&
+            (channel.name === lobbyName || channel.name === offlineLobbyName) &&
+            !this.isTrackedRoom(channel.id),
+        );
 
-      // Remove ALL existing lobby channels first
-      for (const channel of allLobbyChannels.values()) {
-        try {
-          await channel.delete(
-            "Bot cleanup - removing duplicate lobby channels",
-          );
-          logger.info(`Removed duplicate lobby channel: ${channel.name}`);
-        } catch (error) {
-          logger.error(
-            `Failed to remove lobby channel ${channel.name}:`,
-            error,
-          );
+        // Check if there's an offline lobby that we can rename back to online
+        const offlineLobbyChannel = allLobbyChannels.find(
+          (channel) => channel.name !== lobbyName,
+        );
+
+        if (offlineLobbyChannel) {
+          // Rename the offline lobby back to online instead of deleting it
+          try {
+            await offlineLobbyChannel.setName(
+              lobbyName,
+              "Bot starting up - renaming offline lobby",
+            );
+            logger.info(
+              `Renamed offline lobby channel back to online: ${lobbyName}`,
+            );
+            return true; // We're done, no need to create a new channel
+          } catch (error) {
+            logger.error(`Failed to rename offline lobby channel:`, error);
+            // Fall through to deletion if renaming fails
+          }
         }
-      }
 
-      // Create exactly ONE lobby channel
-      try {
-        const newLobby = await guild.channels.create({
-          name: lobbyName,
-          type: ChannelType.GuildVoice,
-          parent: category,
-          permissionOverwrites: [
-            {
-              id: guild.roles.everyone.id,
-              allow: [...VOICE_ROOM_EVERYONE.allow],
-            },
-          ],
-        });
-        logger.info(`Created lobby channel: ${newLobby.name}`);
-        await this.recordManagedChannel(guild.id, newLobby.id, "lobby");
-        return true;
-      } catch (error) {
-        logger.error(`Failed to create lobby channel:`, error);
-        return false;
-      }
+        // Remove ALL existing lobby channels first
+        for (const channel of allLobbyChannels.values()) {
+          try {
+            await channel.delete(
+              "Bot cleanup - removing duplicate lobby channels",
+            );
+            logger.info(`Removed duplicate lobby channel: ${channel.name}`);
+          } catch (error) {
+            logger.error(
+              `Failed to remove lobby channel ${channel.name}:`,
+              error,
+            );
+          }
+        }
+
+        // Right before creating, look once more: the awaits above (renames,
+        // deletes) leave room for a lobby to move out.
+        const beforeCreate = await this.findMisplacedLobbies(guild, category);
+        if (beforeCreate.lobbies.length > 0 || !beforeCreate.verified) {
+          return this.ensureLobbyChannelExistsLocked(guild);
+        }
+
+        // Create exactly ONE lobby channel
+        try {
+          const newLobby = await guild.channels.create({
+            name: lobbyName,
+            type: ChannelType.GuildVoice,
+            parent: category,
+            permissionOverwrites: [
+              {
+                id: guild.roles.everyone.id,
+                allow: [...VOICE_ROOM_EVERYONE.allow],
+              },
+            ],
+          });
+          logger.info(`Created lobby channel: ${newLobby.name}`);
+          await this.recordManagedChannel(guild.id, newLobby.id, "lobby");
+          return true;
+        } catch (error) {
+          logger.error(`Failed to create lobby channel:`, error);
+          return false;
+        }
+      });
     } catch (error) {
       logger.error("Error ensuring lobby channels:", error);
       return false;
     }
+  }
+
+  /**
+   * IDs of the temporary rooms the database knows: persisted ownership rows
+   * and recorded channels of kind "channel". Never lobbies or waiting rooms.
+   * Empty when the database is not ready or a read fails (the in-memory rooms
+   * still apply).
+   */
+  private async loadPersistedRoomIds(guild: Guild): Promise<Set<string>> {
+    const ids = new Set<string>();
+    if (!this.isDbReady()) return ids;
+    try {
+      const [managed, owned] = await Promise.all([
+        ManagedVoiceChannel.find({ guildId: guild.id, kind: "channel" }),
+        VoiceChannelOwnership.find(
+          { guildId: guild.id },
+          { channelId: 1, ownerId: 1 },
+        ),
+      ]);
+      for (const row of managed) ids.add(row.channelId);
+      for (const row of owned) ids.add(row.channelId);
+    } catch (error) {
+      logger.error("Error loading persisted voice room ids:", error);
+    }
+    return ids;
   }
 
   /**
@@ -3500,6 +3979,54 @@ export class VoiceChannelManager {
         }
       }
 
+      // A temporary room an admin moved out of the category is no longer in
+      // category.children, so the loops above never see it. It is still ours
+      // by id: clean it up when empty, wherever it now lives (#1636).
+      // Tracked rooms are rooms whatever they are named (as in the category);
+      // the lobby is protected by its real id.
+      const outsideLobbyId = (await findConfiguredLobbyChannel(guild))?.id;
+      // Candidates: the rooms in memory, plus the rooms the database knows as
+      // temporary rooms (ownership rows and recorded channels, never the
+      // lobby or waiting rooms): ownership restoration at startup is not
+      // retried, so after a database outage the memory can miss a room.
+      const outsideCandidates = new Set<string>(
+        [...this.userChannels.values()].map((room) => room.id),
+      );
+      for (const id of await this.loadPersistedRoomIds(guild)) {
+        outsideCandidates.add(id);
+      }
+      for (const roomId of outsideCandidates) {
+        try {
+          const channel = guild.channels.cache.get(roomId) as
+            VoiceChannel | undefined;
+          if (
+            !channel ||
+            channel.type !== ChannelType.GuildVoice ||
+            channel.parentId === category.id ||
+            channel.id === lobbyChannelId ||
+            channel.id === outsideLobbyId ||
+            this.movedLobbyIds.has(channel.id) ||
+            eventChannelIds.has(channel.id) ||
+            this.isFreshChannel(channel) ||
+            this.waitingRoomToMain.has(channel.id) ||
+            channel.members.size > 0 ||
+            // Deleting the room also deletes its waiting room.
+            this.linkedWaitingRoomOccupied(guild, channel.id)
+          ) {
+            continue;
+          }
+          await channel.delete(
+            "Bot cleanup - empty managed channel outside the category",
+          );
+          await this.reconcileDeletedChannelState(channel.id);
+          logger.info(
+            `Deleted empty managed channel outside the category: ${sanitizeForLog(channel.name)}`,
+          );
+        } catch (error) {
+          logger.error(`Error deleting channel ${roomId}:`, error);
+        }
+      }
+
       // After cleanup, make sure a lobby channel still exists. When the lobby
       // name is changed via /config the old channel no longer matches the
       // configured name and is deleted above as "unmanaged"; without this the
@@ -3560,6 +4087,15 @@ export class VoiceChannelManager {
         logger.error(
           "voicechannels.category_id is not set or doesn't resolve — health check skipped",
         );
+        return;
+      }
+
+      // A lobby moved out of the category is put back (or reported), never
+      // replaced by a second one (#1636).
+      const misplaced = await this.findMisplacedLobbies(guild, category);
+      if (misplaced.lobbies.length > 0 || !misplaced.verified) {
+        // Moves it back, or (record unreadable) creates nothing and says so.
+        await this.ensureLobbyChannelExists(guild);
         return;
       }
 
@@ -3652,23 +4188,38 @@ export class VoiceChannelManager {
 
       if (!lobbyChannel) {
         logger.warn("Normal lobby not found, creating it...");
-        try {
-          const created = await guild.channels.create({
-            name: lobbyChannelName,
-            type: ChannelType.GuildVoice,
-            parent: category,
-            position: 0,
-          });
-          logger.info("Created normal lobby channel during health check");
-          if (created?.id) {
-            await this.recordManagedChannel(guild.id, created.id, "lobby");
+        // Under the same lock as ensureLobbyChannelExists, and looked for again
+        // inside it: another path may have created (or moved back) the lobby
+        // while this check was running.
+        await this.roomLock.run(`lobby:${guild.id}`, async () => {
+          const again =
+            (await this.getLobbyChannelById(guild)) ??
+            this.findLobbyByName(category, lobbyChannelName);
+          const outside = await this.findMisplacedLobbies(guild, category);
+          if (again || outside.lobbies.length > 0 || !outside.verified) {
+            logger.info(
+              "A lobby appeared while the health check ran; not creating another",
+            );
+            return;
           }
-        } catch (error) {
-          logger.error(
-            "Error creating normal lobby channel during health check:",
-            error,
-          );
-        }
+          try {
+            const created = await guild.channels.create({
+              name: lobbyChannelName,
+              type: ChannelType.GuildVoice,
+              parent: category,
+              position: 0,
+            });
+            logger.info("Created normal lobby channel during health check");
+            if (created?.id) {
+              await this.recordManagedChannel(guild.id, created.id, "lobby");
+            }
+          } catch (error) {
+            logger.error(
+              "Error creating normal lobby channel during health check:",
+              error,
+            );
+          }
+        });
       }
     } catch (error) {
       logger.error("Error during lobby health check:", error);

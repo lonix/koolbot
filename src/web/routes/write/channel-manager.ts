@@ -39,6 +39,7 @@ import {
   siblingsOf,
   confirmationToken,
   deleteVerdict,
+  moveVerdict,
   isSnowflake,
   resolveParent,
   validateBitrateKbps,
@@ -136,6 +137,32 @@ const POSTED_FIELDS = [
   "orig_bitrate_bps",
   "orig_parent",
 ] as const;
+
+/**
+ * Refuse moving a channel KoolBot places in its category (#1636). Adds the
+ * reason to the Category field and returns true when the move is refused; a
+ * failed protection lookup refuses too, as the delete does.
+ */
+async function moveRefusal(
+  guild: Guild,
+  channels: readonly ManagedChannelView[],
+  target: ManagedChannelView,
+  errors: FormErrors,
+): Promise<boolean> {
+  try {
+    const verdict = moveVerdict(target, await loadProtection(guild, channels));
+    if (verdict.ok) return false;
+    addFieldError(errors, "parent", verdict.message);
+  } catch (error) {
+    logger.warn("channel manager: protection check failed", error);
+    addFieldError(
+      errors,
+      "parent",
+      `Couldn't verify whether KoolBot manages "${target.name}", so it was not moved.`,
+    );
+  }
+  return true;
+}
 
 /**
  * What the form posted, as a refused form shows it: each known text field as
@@ -620,7 +647,9 @@ export function createChannelManagerRouter(
           else if (parent.value !== target.parentId) {
             if (liveParent !== baseline("parent", liveParent).trim()) {
               stale.push("category");
-            } else {
+            } else if (
+              !(await moveRefusal(ctx.guild, ctx.channels, target, errors))
+            ) {
               const room = checkCapacity(ctx.channels, {
                 parentId: parent.value,
                 creating: false,

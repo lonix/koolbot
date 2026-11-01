@@ -2382,6 +2382,32 @@ describe("renderVoiceChannelsPage settings card (#979)", () => {
       settingRows,
     });
 
+  it("warns, with a link to Channel manager, when the lobby is outside the category (#1636)", () => {
+    const html = renderVoiceChannelsPage({
+      ...COMMON,
+      enabled: true,
+      controlPanelEnabled: true,
+      categoryName: "Voice",
+      lobbyName: "Lobby",
+      offlineLobbyName: "Offline Lobby",
+      prefix: "🎮",
+      totalManaged: 0,
+      totalEmpty: 0,
+      channels: [],
+      categoryFound: true,
+      categoryChannels: [],
+      settingRows: [],
+      lobbyOutsideCategory: true,
+    });
+    expect(html).toMatch(
+      /<a class="kb-chip kb-chip--warn" href="\/admin\/channels">.*?The lobby is outside the voice category/,
+    );
+  });
+
+  it("shows no lobby warning when the lobby is in its category", () => {
+    expect(render(vcRows())).not.toContain("outside the voice category");
+  });
+
   it("renders an editable control for every voicechannels.* key", () => {
     const html = render(vcRows({ "voicechannels.category_id": "cat-1" }));
     for (const key of VC_KEYS) {

@@ -1096,6 +1096,15 @@ sure the lobby exists. Turn on **Only clean up channels KoolBot created**
 shared one: startup, periodic and forced cleanup then delete only empty channels
 KoolBot created itself, and the card also lets you pick the lobby channel by ID.
 
+A lobby or offline lobby that someone moves out of the voice category is put back (#1636): the bot notices the move,
+moves the channel back into the category without changing its permissions or disconnecting anyone inside, and logs
+who moved it when the audit log says. It does this once per move. If the lobby is moved out again within ten minutes,
+the bot logs a warning naming who did it and leaves the channel alone; the periodic health check tries again after
+that. When the move back fails (the bot lacks **Manage Channels**) the status line shows a warning chip, **The lobby
+is outside the voice category**, that links to **Channel Manager**, and the **errors** log channel gets one post. The
+chip is read from the live server, so it is gone as soon as the lobby is back. The bot never creates a second lobby
+while the real one exists outside the category. Temporary rooms moved out of the category are still cleaned up when empty.
+
 The **Reaction Roles** page offers two ways to add a mapping (#813). _Create a
 reaction role_ mints a brand-new Discord role and posts a picker message; the
 _Create a private category + channel_ checkbox is on by default (preserving the
@@ -3549,6 +3558,9 @@ as the other admin pages. It edits structure only; permission overwrites stay in
 - **Create** a text channel, voice channel or category. Per-channel basics: name, topic (text), user limit and
   bitrate in kbps (voice), and the parent category. New channels get no overrides of their own.
 - **Edit** the same fields, including moving a channel to another category (permissions are not rewritten on a move).
+  A channel KoolBot keeps in its category (the voice lobby and offline lobby, temporary voice channels and ticket
+  channels) can't be moved to another category here: the save is refused and names why, because the voice feature
+  would put a moved lobby straight back (#1636).
   Only fields you changed are sent to Discord, so a no-op save never spends a rename. A field posted back as the
   form showed it (a name, a topic, a bitrate shown rounded to whole kbps) counts as unchanged and is never rewritten.
   The form remembers what it displayed: only fields you changed are saved, and if a field you changed was altered
