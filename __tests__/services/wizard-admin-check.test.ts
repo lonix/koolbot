@@ -3,7 +3,7 @@
  * "unknown" whenever Discord cannot be read, never a guess.
  */
 import { describe, it, expect, jest } from "@jest/globals";
-import type { Client } from "discord.js";
+import { PermissionFlagsBits, type Client } from "discord.js";
 
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: {
@@ -21,7 +21,7 @@ jest.unstable_mockModule("../../src/services/bot-permission-check.js", () => ({
 const { checkBotAdministrator, administratorInviteUrl } =
   await import("../../src/services/wizard-admin-check.js");
 
-const ADMIN = 0x8n;
+const ADMIN: bigint = PermissionFlagsBits.Administrator;
 const member = (bits: bigint, roles = 2): unknown => ({
   permissions: { has: (b: bigint): boolean => (bits & b) === b },
   roles: { cache: { size: roles } },
@@ -135,7 +135,12 @@ describe("checkBotAdministrator reads the roles again on refresh", () => {
   } {
     let fresh = false;
     const me = {
-      permissions: { has: (b: bigint): boolean => fresh && (ADMIN & b) === b },
+      permissions: {
+        has: (bit: bigint): boolean => {
+          if (!fresh) return false;
+          return (ADMIN & bit) === bit;
+        },
+      },
       roles: { cache: { size: 2 } },
     };
     const guild = {
