@@ -1271,6 +1271,30 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
     for (const managedOnly of [false, true]) {
       const mode = managedOnly ? "managed-only" : "legacy";
 
+      it(`keeps an empty main room while someone is in its waiting room (${mode}, #1673)`, async () => {
+        settings["voicechannels.cleanup.managed_only"] = managedOnly;
+        markMigrated();
+        const { main, waiting } = await setupPair(0);
+        waiting.members.set("w-1", { id: "w-1", user: { bot: false } });
+
+        manager = newManager(); // restart
+        await manager.initialize(GUILD_ID);
+
+        expect(main.delete).not.toHaveBeenCalled();
+        expect(waiting.delete).not.toHaveBeenCalled();
+      });
+
+      it(`control: sweeps an empty main room with an empty waiting room (${mode}, #1673)`, async () => {
+        settings["voicechannels.cleanup.managed_only"] = managedOnly;
+        markMigrated();
+        const { main } = await setupPair(0);
+
+        manager = newManager(); // restart
+        await manager.initialize(GUILD_ID);
+
+        expect(main.delete).toHaveBeenCalled();
+      });
+
       it(`keeps an empty waiting room whose main channel is occupied (${mode})`, async () => {
         settings["voicechannels.cleanup.managed_only"] = managedOnly;
         markMigrated();

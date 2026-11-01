@@ -1244,6 +1244,8 @@ export class VoiceChannelManager {
         eventChannelIds.has(channel.id) ||
         channel.members.size !== 0 ||
         this.isLiveWaitingRoom(guild, channel.id) ||
+        // Someone waiting for this room keeps it (#1673).
+        this.linkedWaitingRoomOccupied(guild, channel.id) ||
         channel.id === lobbyId ||
         channel.name === lobbyName ||
         channel.name === offlineLobbyName
@@ -2048,6 +2050,7 @@ export class VoiceChannelManager {
           channel.type === ChannelType.GuildVoice &&
           channel.members.size === 0 &&
           !this.isLiveWaitingRoom(guild, channel.id) &&
+          !this.linkedWaitingRoomOccupied(guild, channel.id) &&
           channel.id !== lobbyChannelId &&
           channel.name !== lobbyChannelName &&
           channel.name !== offlineLobbyName
@@ -2376,16 +2379,57 @@ export class VoiceChannelManager {
     oldState: VoiceState,
     newState: VoiceState,
   ): Promise<void> {
+    // Voice channel management off: nothing on the live path acts (#1673's
+    // release step included).
     try {
-      // Check if voice channel management is enabled
       const isEnabled = await configService.getBoolean(
         "voicechannels.enabled",
         false,
       );
-      if (!isEnabled) {
-        return; // Voice channel management is disabled
-      }
+      if (!isEnabled) return;
+    } catch (error) {
+      logger.error("Error handling voice state update:", error);
+      return;
+    }
+    // The release step runs after the update was handled, even if that threw
+    // (the inner method logs its own errors).
+    try {
+      await this.handleVoiceStateUpdateInner(oldState, newState);
+    } finally {
+      await this.releaseRoomHeldByWaitingRoom(oldState, newState);
+    }
+  }
 
+  /**
+   * A room with someone in its waiting room is kept past the point where it
+   * empties (#1673). When the last person leaves that waiting room (they
+   * disconnect, switch channel or are admitted), the room's own cleanup has to
+   * run again or it would stay forever: the room's members did not change, so
+   * no other voice event points at it. Admitting someone leaves the room
+   * occupied, which the cleanup itself checks.
+   */
+  private async releaseRoomHeldByWaitingRoom(
+    oldState: VoiceState,
+    newState: VoiceState,
+  ): Promise<void> {
+    try {
+      const left = oldState.channel;
+      if (!left || left.id === newState.channel?.id) return;
+      const mainId = this.waitingRoomToMain.get(left.id);
+      if (!mainId) return;
+      const main = this.client.channels.cache.get(mainId);
+      if (!main || main.type !== ChannelType.GuildVoice) return;
+      await this.cleanupEmptyChannel(main as VoiceChannel);
+    } catch (error) {
+      logger.error("Error releasing a room held by its waiting room:", error);
+    }
+  }
+
+  private async handleVoiceStateUpdateInner(
+    oldState: VoiceState,
+    newState: VoiceState,
+  ): Promise<void> {
+    try {
       const member = newState.member;
       if (!member) {
         logger.error("No member found in voice state update");
@@ -2860,6 +2904,17 @@ export class VoiceChannelManager {
       return;
     }
 
+    // A room with someone in its waiting room is still in use: closing it
+    // would move that person into a room that is deleted straight after and
+    // disconnect them (#1673). The room goes once the waiting room is empty
+    // too (see releaseRoomHeldByWaitingRoom).
+    if (this.linkedWaitingRoomOccupied(channel.guild, channel.id)) {
+      logger.debug(
+        `Keeping empty voice channel ${sanitizeForLog(channel.name)}: its waiting room is occupied`,
+      );
+      return;
+    }
+
     const channelId = channel.id;
     const channelName = channel.name;
 
@@ -2908,6 +2963,11 @@ export class VoiceChannelManager {
     try {
       // Only clean up if the channel is empty
       if (channel.members.size !== 0) {
+        return;
+      }
+
+      // Someone waiting for this room keeps it alive (#1673).
+      if (this.linkedWaitingRoomOccupied(channel.guild, channel.id)) {
         return;
       }
 
