@@ -697,7 +697,8 @@ KoolBot puts a lobby that was moved out of the voice category back, and never cr
    To keep a lobby elsewhere, change `voicechannels.category_id` instead.
 
 A lobby configured with `voicechannels.lobby.channel_id` is found wherever it lives. A lobby found only by name is found when KoolBot created it
-(or when it was moved while the bot was running).
+(or, until the bot restarts, when it was moved while the bot was running). When the bot cannot read its record of the lobby (the database is down), it
+creates no lobby until it can, and logs why.
 
 ### Voice Channels Not Being Deleted
 

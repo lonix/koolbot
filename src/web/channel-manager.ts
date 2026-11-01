@@ -521,12 +521,17 @@ export function deleteVerdict(
 /**
  * The protection reasons that tie a channel to its category: the voice lobby
  * and temporary rooms (KoolBot puts a moved lobby back and cleans up by
- * category), and ticket channels. Other reasons (a `*_id` setting naming a
+ * category), and ticket channels. Every reason the voice feature gives names
+ * "Voice Channels", whether it comes from the registry, the ownership rows or
+ * the in-memory state (`getInMemoryManagedChannels`: "held in memory", "still
+ * being saved"), so a database that failed at creation and has recovered
+ * still protects the room. The reasons are the only thing the protection map
+ * carries, so this matches on that shared name. Other reasons (a `*_id` setting naming a
  * text channel, an event's announcement channel) do not care where the
  * channel lives.
  */
 const CATEGORY_BOUND_REASON =
-  /the voice lobby|\(managed by Voice Channels\)|\(Tickets, ticket|voicechannels\.lobby\.channel_id/;
+  /the voice lobby|Voice Channels[,)]|\(Tickets, ticket|voicechannels\.lobby\.channel_id/;
 
 /**
  * May this channel move to another category? A channel KoolBot places in a

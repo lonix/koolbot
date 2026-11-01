@@ -6,12 +6,7 @@ import {
   beforeEach,
   afterEach,
 } from "@jest/globals";
-import {
-  ChannelType,
-  Collection,
-  type Client,
-  type Guild,
-} from "discord.js";
+import { ChannelType, Collection, type Client, type Guild } from "discord.js";
 
 jest.mock("../../src/utils/logger.js");
 jest.mock("../../src/services/voice-channel-tracker.js");
@@ -494,6 +489,208 @@ describe("VoiceChannelManager - lobby moved out of its category (issue #1636)", 
     });
   });
 
+  describe("a registry that cannot be read is not an empty registry (review 1)", () => {
+    function recordedLobbyOutside(): any {
+      const lobby = add("recorded-lobby", LOBBY_NAME, false);
+      recordedRows.push({
+        guildId: GUILD_ID,
+        channelId: "recorded-lobby",
+        kind: "lobby",
+      });
+      return lobby;
+    }
+
+    it("ensureLobbyChannelExists creates nothing when the registry read fails", async () => {
+      recordedLobbyOutside();
+      (
+        mockModel("ManagedVoiceChannel").find as jest.Mock<any>
+      ).mockRejectedValue(new Error("db down"));
+
+      expect(await manager.ensureLobbyChannelExists(guild)).toBe(false);
+
+      expect(createMock).not.toHaveBeenCalled();
+    });
+
+    it("ensureLobbyChannelExists creates nothing while the database is not ready", async () => {
+      recordedLobbyOutside();
+      (manager as any).isDbReady.mockReturnValue(false);
+
+      expect(await manager.ensureLobbyChannelExists(guild)).toBe(false);
+
+      expect(createMock).not.toHaveBeenCalled();
+    });
+
+    it("checkLobbyHealth creates nothing when the registry read fails", async () => {
+      recordedLobbyOutside();
+      (
+        mockModel("ManagedVoiceChannel").find as jest.Mock<any>
+      ).mockRejectedValue(new Error("db down"));
+
+      await (manager as any).checkLobbyHealth();
+
+      expect(createMock).not.toHaveBeenCalled();
+    });
+
+    it("a verified empty registry still lets the lobby be created", async () => {
+      expect(await manager.ensureLobbyChannelExists(guild)).toBe(true);
+
+      expect(createMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("a lobby already in the category needs no registry read", async () => {
+      add("lobby-in", LOBBY_NAME, true);
+      (manager as any).isDbReady.mockReturnValue(false);
+
+      expect(await manager.ensureLobbyChannelExists(guild)).toBe(true);
+
+      expect(createMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Force VC cleanup (ensureLobbyChannels) follows the same rule", () => {
+    it("moves a lobby configured by id back instead of re-creating the lobby", async () => {
+      settings["voicechannels.lobby.channel_id"] = "lobby-id";
+      const lobby = add("lobby-id", LOBBY_NAME, false);
+
+      expect(await manager.ensureLobbyChannels(guild)).toBe(true);
+
+      expect(createMock).not.toHaveBeenCalled();
+      expect(lobby.delete).not.toHaveBeenCalled();
+      expect(lobby.parentId).toBe(CATEGORY_ID);
+    });
+
+    it("moves a recorded name-only lobby back instead of re-creating the lobby", async () => {
+      const lobby = add("recorded-lobby", LOBBY_NAME, false);
+      recordedRows.push({
+        guildId: GUILD_ID,
+        channelId: "recorded-lobby",
+        kind: "lobby",
+      });
+
+      expect(await manager.ensureLobbyChannels(guild)).toBe(true);
+
+      expect(createMock).not.toHaveBeenCalled();
+      expect(lobby.parentId).toBe(CATEGORY_ID);
+    });
+
+    it("creates nothing when the lobby record cannot be read", async () => {
+      add("recorded-lobby", LOBBY_NAME, false);
+      (
+        mockModel("ManagedVoiceChannel").find as jest.Mock<any>
+      ).mockRejectedValue(new Error("db down"));
+
+      expect(await manager.ensureLobbyChannels(guild)).toBe(false);
+
+      expect(createMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("a lobby recognised during a live move is remembered (review 3)", () => {
+    it("keeps the chip and creates nothing after a failed move back, with no registry row", async () => {
+      const lobby = add("name-lobby", LOBBY_NAME, true);
+      lobby.setParent.mockRejectedValue(new Error("Missing Permissions"));
+      const { before, after } = moveOut(lobby);
+      await manager.handleChannelMoved(before, after, null);
+
+      expect(
+        (await manager.getMisplacedLobbies(guild)).map((c) => c.id),
+      ).toEqual(["name-lobby"]);
+      await (manager as any).checkLobbyHealth();
+      expect(createMock).not.toHaveBeenCalled();
+    });
+
+    it("keeps it after a second move hits the back-off", async () => {
+      const lobby = add("name-lobby", LOBBY_NAME, true);
+      let move = moveOut(lobby);
+      await manager.handleChannelMoved(move.before, move.after, null);
+      now += 1000;
+      move = moveOut(lobby);
+      await manager.handleChannelMoved(move.before, move.after, null);
+
+      expect(
+        (await manager.getMisplacedLobbies(guild)).map((c) => c.id),
+      ).toEqual(["name-lobby"]);
+      await (manager as any).checkLobbyHealth();
+      expect(createMock).not.toHaveBeenCalled();
+    });
+
+    it("forgets it once it is back in the category", async () => {
+      const lobby = add("name-lobby", LOBBY_NAME, true);
+      const { before, after } = moveOut(lobby);
+      await manager.handleChannelMoved(before, after, null);
+
+      expect(lobby.parentId).toBe(CATEGORY_ID);
+      expect(await manager.getMisplacedLobbies(guild)).toEqual([]);
+    });
+
+    it("forgets it when the channel is gone, so the lobby can be created again", async () => {
+      const lobby = add("name-lobby", LOBBY_NAME, true);
+      lobby.setParent.mockRejectedValue(new Error("Missing Permissions"));
+      const { before, after } = moveOut(lobby);
+      await manager.handleChannelMoved(before, after, null);
+      guildChannels.delete("name-lobby");
+
+      expect(await manager.ensureLobbyChannelExists(guild)).toBe(true);
+
+      expect(createMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("the failure post and its marker (reviews 2 and 5)", () => {
+    it("retries the post after the logger returned false", async () => {
+      settings["voicechannels.lobby.channel_id"] = "lobby-id";
+      const lobby = add("lobby-id", LOBBY_NAME, true);
+      lobby.setParent.mockRejectedValue(new Error("Missing Permissions"));
+      logToChannel.mockResolvedValue(false);
+
+      for (let i = 0; i < 2; i++) {
+        const move = moveOut(lobby);
+        await manager.handleChannelMoved(move.before, move.after, null);
+        now += LOBBY_MOVE_BACK_BACKOFF_MS + 1;
+      }
+
+      expect(logToChannel).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries the post after the logger threw", async () => {
+      settings["voicechannels.lobby.channel_id"] = "lobby-id";
+      const lobby = add("lobby-id", LOBBY_NAME, true);
+      lobby.setParent.mockRejectedValue(new Error("Missing Permissions"));
+      logToChannel.mockRejectedValue(new Error("send failed"));
+
+      for (let i = 0; i < 2; i++) {
+        const move = moveOut(lobby);
+        await manager.handleChannelMoved(move.before, move.after, null);
+        now += LOBBY_MOVE_BACK_BACKOFF_MS + 1;
+      }
+
+      expect(logToChannel).toHaveBeenCalledTimes(2);
+    });
+
+    it("posts again after someone moved the lobby back by hand and then out again", async () => {
+      settings["voicechannels.lobby.channel_id"] = "lobby-id";
+      const lobby = add("lobby-id", LOBBY_NAME, true);
+      lobby.setParent.mockRejectedValue(new Error("Missing Permissions"));
+
+      let move = moveOut(lobby);
+      await manager.handleChannelMoved(move.before, move.after, null);
+      expect(logToChannel).toHaveBeenCalledTimes(1);
+
+      // An admin puts it back by hand: a move INTO the category.
+      const outside = { ...lobby, parentId: OTHER_CATEGORY_ID };
+      lobby.parentId = CATEGORY_ID;
+      category.children.cache.set(lobby.id, lobby);
+      await manager.handleChannelMoved(outside, lobby, null);
+      expect(lobby.setParent).toHaveBeenCalledTimes(1);
+
+      now += LOBBY_MOVE_BACK_BACKOFF_MS + 1;
+      move = moveOut(lobby);
+      await manager.handleChannelMoved(move.before, move.after, null);
+
+      expect(logToChannel).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe("what a moved lobby still does as a trigger", () => {
     it("a moved lobby configured by id still triggers by its name (unchanged, listed for the owner)", async () => {
       settings["voicechannels.lobby.channel_id"] = "lobby-id";
@@ -529,6 +726,32 @@ describe("VoiceChannelManager - lobby moved out of its category (issue #1636)", 
       await manager.cleanupEmptyChannels();
 
       expect(room.delete).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["the online lobby name", LOBBY_NAME],
+      ["the offline lobby name", OFFLINE_NAME],
+    ])(
+      "an owned room renamed to %s is still a room and is cleaned up when empty outside the category",
+      async (_label, name) => {
+        add("lobby-id", LOBBY_NAME, true);
+        const room = ownRoom("room-1", false);
+        room.name = name;
+
+        await manager.cleanupEmptyChannels();
+
+        expect(room.delete).toHaveBeenCalled();
+      },
+    );
+
+    it("never deletes the configured lobby by id, wherever it is", async () => {
+      settings["voicechannels.lobby.channel_id"] = "lobby-id";
+      const lobby = add("lobby-id", LOBBY_NAME, false);
+      (manager as any).userChannels.set("owner-1", lobby);
+
+      await manager.cleanupEmptyChannels();
+
+      expect(lobby.delete).not.toHaveBeenCalled();
     });
 
     it("never deletes a channel outside the category that is not a tracked room", async () => {

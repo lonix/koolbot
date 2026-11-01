@@ -820,6 +820,18 @@ describe("POST /channels/:id/edit", () => {
       "a temporary voice channel (managed by Voice Channels)",
     ],
     ["a ticket channel", "a support ticket channel (Tickets, ticket t1)"],
+    [
+      "a room the voice feature holds only in memory",
+      "a temporary voice channel (Voice Channels, held in memory)",
+    ],
+    [
+      "a room whose record is still being saved",
+      "a voice channel KoolBot just created whose record is still being saved (Voice Channels)",
+    ],
+    [
+      "a waiting room",
+      "a waiting room for a temporary voice channel (Voice Channels)",
+    ],
   ])(
     "refuses to move %s to another category, naming why (#1636)",
     async (_label, reason) => {
