@@ -78,7 +78,9 @@ function splitNeeded(report: BotPermissionReport): {
   };
   for (const r of rows) {
     if (r.status === "off") continue;
-    needed.set(r.label, []);
+    // One entry per permission: it can come back as several rows (different
+    // results in different places), and each row's features are merged.
+    if (!needed.has(r.label)) needed.set(r.label, []);
     for (const f of r.features) add(r.label, `${f.area}: ${f.feature}`);
   }
   for (const c of report.checks) {

@@ -215,6 +215,8 @@ describe("renderWizardDonePage", () => {
   });
 });
 
+type PermissionTargetLike = { kind: "channel"; id: string; name: string };
+
 describe("renderWizardDonePage never calls a permission unneeded that something uses", () => {
   const server = { kind: "server" as const, id: null, name: "Guild" };
   const refOf = (id: string): FeatureRef => {
@@ -322,6 +324,53 @@ describe("renderWizardDonePage never calls a permission unneeded that something 
     expect(before).toContain("/ban");
     expect(before).toContain("/timeout");
     expect(before).toContain("Used, but not checked here");
+  });
+
+  it("keeps every feature in the Needed by cell when one permission has several matrix rows", () => {
+    const channel = (id: string): PermissionTargetLike => ({
+      kind: "channel",
+      id,
+      name: id,
+    });
+    const check = (
+      id: string,
+      outcome: "ok" | "missing",
+      target: PermissionTargetLike,
+    ): BotPermissionReport["checks"][number] => ({
+      feature: refOf(id),
+      kind: "permission",
+      enabled: true,
+      outcome,
+      target,
+      missing: outcome === "missing" ? ["Send Messages"] : [],
+    });
+    // Send Messages is in place for one feature and missing for another, so the
+    // matrix gives it two non-off rows.
+    const two = renderWizardDonePage({
+      ...base,
+      report: reportWith([
+        check("quotes-post", "ok", channel("quotes")),
+        check("welcome-post", "missing", channel("welcome")),
+      ]),
+    });
+    const cell = (html: string): string => {
+      const main = mainOf(html);
+      const at = main.indexOf('<th scope="row">Send Messages</th>');
+      return main.slice(at, main.indexOf("</tr>", at));
+    };
+    const rowsFor =
+      mainOf(two).split('<th scope="row">Send Messages</th>').length - 1;
+    expect(rowsFor).toBe(1);
+    const both = cell(two);
+    expect(both).toContain(refOf("quotes-post").feature);
+    expect(both).toContain(refOf("welcome-post").feature);
+    // Control: one row, one feature.
+    const one = renderWizardDonePage({
+      ...base,
+      report: reportWith([check("quotes-post", "ok", channel("quotes"))]),
+    });
+    expect(cell(one)).toContain(refOf("quotes-post").feature);
+    expect(cell(one)).not.toContain(refOf("welcome-post").feature);
   });
 
   it("does not claim that every other permission is not needed, and says what the list is", () => {
