@@ -188,6 +188,7 @@ describe("VoiceChannelManager - lobby moved out of its category (issue #1636)", 
 
     const mockClient = {
       guilds: { fetch: jest.fn<any>().mockResolvedValue(guild) },
+      channels: { cache: guildChannels },
     } as unknown as Client;
     manager = VoiceChannelManager.getInstance(mockClient);
     jest.spyOn(manager as any, "isDbReady").mockReturnValue(true);
@@ -681,6 +682,126 @@ describe("VoiceChannelManager - lobby moved out of its category (issue #1636)", 
     });
   });
 
+  describe("Force VC cleanup re-checks right before it creates (review round 3, finding 1)", () => {
+    it("creates nothing when a name-only lobby moved out after the early lookup and the repair failed", async () => {
+      const lobby = add("recorded-lobby", LOBBY_NAME, true);
+      recordedRows.push({
+        guildId: GUILD_ID,
+        channelId: "recorded-lobby",
+        kind: "lobby",
+      });
+      lobby.setParent.mockRejectedValue(new Error("Missing Permissions"));
+      // The offline-name read happens after the early lookup and before the
+      // lock: the lobby is moved out right then.
+      const read = mockConfigService.getString as jest.Mock<any>;
+      const original = read.getMockImplementation() as (
+        k: string,
+        d?: string,
+      ) => Promise<string>;
+      let offlineReads = 0;
+      read.mockImplementation(async (key: string, def?: string) => {
+        // 1st read: the early lookup; 2nd: ensureLobbyChannels itself.
+        if (key === "voicechannels.lobby.offlinename" && ++offlineReads === 2) {
+          moveOut(lobby);
+        }
+        return original(key, def);
+      });
+
+      expect(await manager.ensureLobbyChannels(guild)).toBe(false);
+
+      expect(createMock).not.toHaveBeenCalled();
+      expect(lobby.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("a lobby repair that already finished is not warned about (review round 3, finding 3)", () => {
+    it("returns quietly when the handler resumes after the health path repaired it", async () => {
+      settings["voicechannels.lobby.channel_id"] = "lobby-id";
+      const lobby = add("lobby-id", LOBBY_NAME, true);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      (guild as any).fetchAuditLogs = jest.fn<any>(async () => {
+        await gate;
+        return { entries: { first: () => undefined } };
+      });
+      // The event carries a stale clone; the cache holds the live channel.
+      const before = { ...lobby, parentId: CATEGORY_ID };
+      lobby.parentId = OTHER_CATEGORY_ID;
+      category.children.cache.delete(lobby.id);
+      const stale = { ...lobby, parentId: OTHER_CATEGORY_ID };
+
+      const handler = manager.handleChannelMoved(before, stale as any);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(await manager.ensureLobbyChannelExists(guild)).toBe(true);
+      release();
+      await handler;
+
+      expect(lobby.setParent).toHaveBeenCalledTimes(1);
+      expect(logToChannel).not.toHaveBeenCalled();
+      const warned = (logger.warn as jest.Mock).mock.calls
+        .map((c) => String(c[0]))
+        .join("\n");
+      expect(warned).not.toContain("moved out of the voice category again");
+    });
+  });
+
+  describe("rooms known only from persisted rows are rooms, not lobbies (review round 3, finding 4)", () => {
+    it.each([
+      ["an ownership row", "ownership"],
+      ["a recorded temporary-channel row", "managed"],
+    ])(
+      "a persisted-only room named like the lobby and moved out is NOT put back (%s)",
+      async (_label, source) => {
+        const room = add("room-9", LOBBY_NAME, true);
+        if (source === "ownership") {
+          (
+            mockModel("VoiceChannelOwnership").find as jest.Mock<any>
+          ).mockResolvedValue([{ channelId: "room-9", ownerId: "owner-9" }]);
+        } else {
+          recordedRows.push({
+            guildId: GUILD_ID,
+            channelId: "room-9",
+            kind: "channel",
+          });
+        }
+        const { before, after } = moveOut(room);
+
+        await manager.handleChannelMoved(before, after, null);
+
+        expect(room.setParent).not.toHaveBeenCalled();
+      },
+    );
+
+    it("a lobby by id is still put back even if a stray ownership row names it (control)", async () => {
+      settings["voicechannels.lobby.channel_id"] = "lobby-id";
+      const lobby = add("lobby-id", LOBBY_NAME, true);
+      (
+        mockModel("VoiceChannelOwnership").find as jest.Mock<any>
+      ).mockResolvedValue([{ channelId: "other-room", ownerId: "owner-9" }]);
+      const { before, after } = moveOut(lobby);
+
+      await manager.handleChannelMoved(before, after, null);
+
+      expect(lobby.parentId).toBe(CATEGORY_ID);
+    });
+
+    it("a recorded lobby (kind lobby) is still put back (control)", async () => {
+      const lobby = add("recorded-lobby", LOBBY_NAME, true);
+      recordedRows.push({
+        guildId: GUILD_ID,
+        channelId: "recorded-lobby",
+        kind: "lobby",
+      });
+      const { before, after } = moveOut(lobby);
+
+      await manager.handleChannelMoved(before, after, null);
+
+      expect(lobby.parentId).toBe(CATEGORY_ID);
+    });
+  });
+
   describe("Force VC cleanup racing the ensure path", () => {
     it("ends with exactly one lobby in the category", async () => {
       let release!: () => void;
@@ -978,6 +1099,33 @@ describe("VoiceChannelManager - lobby moved out of its category (issue #1636)", 
 
       expect(busy.delete).not.toHaveBeenCalled();
       expect(lobby.delete).not.toHaveBeenCalled();
+    });
+
+    it("keeps an empty main room outside the category while someone is in its waiting room", async () => {
+      add("lobby-id", LOBBY_NAME, true);
+      const room = ownRoom("room-1", false);
+      const waiting = add("wait-1", "⏳ Waiting", false);
+      waiting.members.set("m1", { user: { bot: false } });
+      (manager as any).waitingRooms.set(room.id, waiting.id);
+      (manager as any).waitingRoomToMain.set(waiting.id, room.id);
+
+      await manager.cleanupEmptyChannels();
+
+      expect(room.delete).not.toHaveBeenCalled();
+      expect(waiting.delete).not.toHaveBeenCalled();
+    });
+
+    it("deletes an empty main room and its empty waiting room together (control)", async () => {
+      add("lobby-id", LOBBY_NAME, true);
+      const room = ownRoom("room-1", false);
+      const waiting = add("wait-1", "⏳ Waiting", false);
+      (manager as any).waitingRooms.set(room.id, waiting.id);
+      (manager as any).waitingRoomToMain.set(waiting.id, room.id);
+
+      await manager.cleanupEmptyChannels();
+
+      expect(room.delete).toHaveBeenCalled();
+      expect(waiting.delete).toHaveBeenCalled();
     });
 
     it("never deletes a channel outside the category that is not a tracked room", async () => {

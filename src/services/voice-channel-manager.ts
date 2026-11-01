@@ -734,6 +734,14 @@ export class VoiceChannelManager {
   ): Promise<"moved" | "backoff" | "failed"> {
     // Every check up to the first await is synchronous, and the back-off is
     // recorded before the request goes out, so a failed attempt counts too.
+    // The live channel, not the (possibly stale) object the caller holds. A
+    // repair that already finished (a health check, another trigger) is done:
+    // no request, and no warning.
+    const live = channel.guild?.channels?.cache?.get(channel.id) ?? channel;
+    if ("parentId" in live && live.parentId === category.id) {
+      this.lobbyMoveNotified.delete(channel.id);
+      return "moved";
+    }
     const last = this.lobbyMoveBackAt.get(channel.id);
     if (last && Date.now() - last.at < LOBBY_MOVE_BACK_BACKOFF_MS) {
       logger.warn(
@@ -749,9 +757,6 @@ export class VoiceChannelManager {
       );
       return "backoff";
     }
-    // The live channel, not the (possibly stale) object the caller holds.
-    const live = channel.guild?.channels?.cache?.get(channel.id) ?? channel;
-    if ("parentId" in live && live.parentId === category.id) return "moved";
     const attempt = { at: Date.now(), ok: false };
     this.lobbyMoveBackAt.set(channel.id, attempt);
     try {
@@ -903,6 +908,9 @@ export class VoiceChannelManager {
     if (this.pendingManagedChannels.get(channel.id)?.kind === "lobby") {
       return true;
     }
+    // A temporary room known only from persisted rows (ownership restoration
+    // failed at startup) is a room, whatever it was renamed to.
+    if ((await this.loadPersistedRoomIds(guild)).has(channel.id)) return false;
     if (await this.isManagedOnly()) {
       return this.isTrackedManagedChannel(guild, category, channel.id);
     }
@@ -1350,6 +1358,18 @@ export class VoiceChannelManager {
     } catch (error) {
       logger.error("Error pruning stale waiting room records:", error);
     }
+  }
+
+  /** Is anyone in the waiting room linked to this main room? */
+  private linkedWaitingRoomOccupied(guild: Guild, mainId: string): boolean {
+    const waitingId = this.waitingRooms.get(mainId);
+    if (!waitingId) return false;
+    const waiting = guild.channels.cache.get(waitingId);
+    return (
+      !!waiting &&
+      waiting.type === ChannelType.GuildVoice &&
+      (waiting as VoiceChannel).members.size > 0
+    );
   }
 
   /** A restored waiting room whose main channel still has members. */
@@ -3612,6 +3632,13 @@ export class VoiceChannelManager {
       // The destructive rename, delete and create runs under the lock shared
       // with ensureLobbyChannelExists and the health check (#1636).
       return this.roomLock.run(`lobby:${guild.id}`, async () => {
+        // The early lookup ran before the lock: look again now. A lobby that
+        // moved out meanwhile is put back (or reported), never deleted or
+        // replaced.
+        const recheck = await this.findMisplacedLobbies(guild, category);
+        if (recheck.lobbies.length > 0 || !recheck.verified) {
+          return this.ensureLobbyChannelExistsLocked(guild);
+        }
         // Find ALL lobby channels (including duplicates and offline ones) by
         // their exact configured names, never by a "Lobby" substring and never
         // a member room: a room named "Lobby party" is not the lobby (#1148).
@@ -3661,6 +3688,13 @@ export class VoiceChannelManager {
               error,
             );
           }
+        }
+
+        // Right before creating, look once more: the awaits above (renames,
+        // deletes) leave room for a lobby to move out.
+        const beforeCreate = await this.findMisplacedLobbies(guild, category);
+        if (beforeCreate.lobbies.length > 0 || !beforeCreate.verified) {
+          return this.ensureLobbyChannelExistsLocked(guild);
         }
 
         // Create exactly ONE lobby channel
@@ -3975,7 +4009,9 @@ export class VoiceChannelManager {
             eventChannelIds.has(channel.id) ||
             this.isFreshChannel(channel) ||
             this.waitingRoomToMain.has(channel.id) ||
-            channel.members.size > 0
+            channel.members.size > 0 ||
+            // Deleting the room also deletes its waiting room.
+            this.linkedWaitingRoomOccupied(guild, channel.id)
           ) {
             continue;
           }
