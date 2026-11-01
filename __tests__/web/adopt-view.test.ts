@@ -1185,6 +1185,36 @@ describe("Server scan message sampling switch (#1630)", () => {
     expect(header(withSampling(sampling()))).not.toContain("This scan read");
   });
 
+  it("says what was read, not the cap, when it stopped early (plain and capped)", () => {
+    const stop = { id: "c1", name: "quotes", reason: "no-access" };
+    // Stopped, nothing capped: 12 of the 40 there are.
+    const plain = header(
+      withSampling(sampling({ channelsRead: 12, stoppedAt: stop })),
+    );
+    expect(plain).toContain(
+      "This scan read 12 of 40 text channels before it stopped.",
+    );
+    // Capped and stopped: 57 text channels, 40 planned, 12 read. The help must
+    // not say "the first 40" were read while the header says 12 of 40.
+    const both = header(
+      withSampling(
+        sampling({ textChannels: 57, channelsRead: 12, stoppedAt: stop }),
+      ),
+    );
+    expect(both).toContain(
+      "This scan read 12 of 57 text channels before it stopped.",
+    );
+    expect(both).not.toContain("the first 40 of 57");
+    expect(both).toContain("Read 12 channels of 40; stopped at");
+  });
+
+  it("carries refresh=1 in the switch form, so Apply scans again (#1630)", () => {
+    const h = header(withSampling(null));
+    expect(h).toContain('<input type="hidden" name="refresh" value="1">');
+    // Only the switch's form: tab links stay cacheable.
+    expect(mainOf(page("roles"))).not.toMatch(/href="[^"]*refresh=1[^"]*tab=/);
+  });
+
   it("applies on change with JavaScript and keeps Apply without it", () => {
     const h = header(withSampling(null));
     expect(h).toContain('<form method="get" action="/admin/adopt"');

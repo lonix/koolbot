@@ -250,10 +250,15 @@ const SAMPLING_STOP_REASON: Record<
 function renderSamplingHelp(scan: ScanSampling | null): string {
   const limit = scan?.channelLimit ?? SAMPLE_CHANNEL_LIMIT;
   const share = Math.round(SAMPLE_OWNER_SHARE * 100);
-  const thisScan =
-    scan && scan.textChannels > scan.channelsPlanned
-      ? ` This scan read the first ${scan.channelsPlanned} of ${scan.textChannels} text channels.`
-      : "";
+  // What was actually read: the completed count when it stopped early, the
+  // cap when it did not.
+  const thisScan = !scan
+    ? ""
+    : scan.stoppedAt
+      ? ` This scan read ${scan.channelsRead} of ${scan.textChannels} text channels before it stopped.`
+      : scan.textChannels > scan.channelsPlanned
+        ? ` This scan read the first ${scan.channelsPlanned} of ${scan.textChannels} text channels.`
+        : "";
   return `<div>
       <p class="kb-help" id="scan-sample-help">Reads the last ${SAMPLE_MESSAGES_PER_CHANNEL} messages in up to ${limit} text channels and keeps only which bot wrote them. Needs Read Message History. Slower. Turning it on or off scans again.</p>
       <details class="kb-disclosure kb-disclosure--inline"><summary>More</summary><div class="kb-disclosure__body"><p class="kb-help">A channel is marked as one a bot writes in when one bot wrote at least ${share}% of its last ${SAMPLE_MESSAGES_PER_CHANNEL} messages, and the channel has at least ${SAMPLE_MIN_MESSAGES}. The first ${limit} text channels, in the order Discord lists them, are read; any beyond that are not.${thisScan} If the bot cannot read a channel, the scan stops there and says so, so Discord is not asked again and again.</p><p class="kb-help">The marks appear on the Channels tab, where they suggest a channel to claim, and in what is left when a bot is removed. Only the bot's name and its share are kept, in this scan, which is shared for a minute. What members wrote is not kept or logged.</p></div></details>
@@ -284,8 +289,9 @@ function renderHeader(scan: ServerScan | null, props: AdoptPageProps): string {
       : `<input type="hidden" name="filter" value="${escapeHtml(filter)}">`);
   // One decision, applied on change with JavaScript (`data-autosubmit`); the
   // Apply button is the same form without it and is hidden by the script.
+  // `refresh=1` makes either path scan again, as the help line says.
   const hints = scan
-    ? `<form method="get" action="${SCAN_PAGE}" class="kb-toolbar__end" data-autosubmit>${tabField}
+    ? `<form method="get" action="${SCAN_PAGE}" class="kb-toolbar__end" data-autosubmit>${tabField}<input type="hidden" name="refresh" value="1">
       <label class="kb-switch"><input type="checkbox" role="switch" name="sample" value="1" aria-describedby="scan-sample-help"${props.sampled ? " checked" : ""}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Find channels a bot writes in</label>
       <button type="submit" class="kb-btn kb-btn--sm" data-autosubmit-hide>Apply</button>
     </form>

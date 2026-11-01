@@ -169,6 +169,17 @@ describe("GET /adopt tabs", () => {
     expect(scan).toHaveBeenCalledTimes(2);
   });
 
+  it("scans again for the switch's own GET (?sample=1&refresh=1), not from the cache (#1630)", async () => {
+    await text("/adopt?sample=1");
+    await text("/adopt?tab=bots&sample=1");
+    expect(scan).toHaveBeenCalledTimes(1);
+    await text("/adopt?sample=1&refresh=1");
+    expect(scan).toHaveBeenCalledTimes(2);
+    expect(
+      (scan.mock.calls[1][1] as { sampleMessages: boolean }).sampleMessages,
+    ).toBe(true);
+  });
+
   it("does not remember a failed scan", async () => {
     scan.mockRejectedValueOnce(new Error("Discord is down"));
     expect(await text("/adopt")).toContain("The scan failed: Discord is down.");
