@@ -213,6 +213,60 @@ describe("debug log lines", () => {
     ).toBe(true);
   });
 
+  it.each([
+    "/admin/birthdays/123456789012345678/edit",
+    "/me/events/123456789012345678/987654321098765432",
+    "/admin/events/65a1b2c3d4e5f60718293a4b/delete",
+    "/admin/role-groups/job/3f1c2d4e-0000-4000-8000-000000000000",
+    "/admin/quotes/123456?user=123456789012345678",
+  ])("never lets an id in the path %s reach the log", async (path) => {
+    const mw = createSessionMiddleware({} as Client);
+    await mw(
+      makeReq(signedCookie(T0 - MINUTE), "POST", path),
+      makeRes(),
+      jest.fn() as unknown as NextFunction,
+    );
+    nowMs = T0 + 8 * HOUR;
+    await mw(
+      makeReq(signedCookie(T0), "GET", path),
+      makeRes(),
+      jest.fn() as unknown as NextFunction,
+    );
+    const all = loggedLines().join("\n");
+    expect(all).toMatch(/renewed by POST \/\w/);
+    for (const id of [
+      "123456789012345678",
+      "987654321098765432",
+      "65a1b2c3d4e5f60718293a4b",
+      "3f1c2d4e-0000-4000-8000-000000000000",
+      "123456",
+    ]) {
+      expect(all).not.toContain(id);
+    }
+    expect(all).toContain(":id");
+  });
+
+  it("logs the matched route pattern when Express has one (a ping)", async () => {
+    const ping = createSessionPingHandler();
+    nowMs = T0 + 40 * MINUTE;
+    const req = makeReq(signedCookie(T0), "GET", "/admin/session/ping");
+    Object.assign(req, { baseUrl: "/admin", route: { path: "/session/ping" } });
+    await ping(req, makeRes(), jest.fn() as unknown as NextFunction);
+    expect(
+      loggedLines().some((l) => l.includes("GET /admin/session/ping")),
+    ).toBe(true);
+  });
+
+  it("keeps readable names and short numbers in a path", async () => {
+    const mw = createSessionMiddleware({} as Client);
+    await mw(
+      makeReq(signedCookie(T0 - MINUTE), "GET", "/admin/settings/voice"),
+      makeRes(),
+      jest.fn() as unknown as NextFunction,
+    );
+    expect(loggedLines().join("\n")).toContain("GET /admin/settings/voice");
+  });
+
   it("never writes the cookie, its payload, the session id or the secret", async () => {
     const mw = createSessionMiddleware({} as Client);
     await mw(
@@ -260,7 +314,7 @@ describe("the Environment page's session panel", () => {
     expect(text).toContain('<dl class="kb-kv">');
     expect(text).toContain("<dt>Signed in</dt><dd>2026-11-01 03:59 UTC</dd>");
     expect(text).toContain("2026-11-01 08:45 UTC");
-    expect(text).toContain("14 min before this page");
+    expect(text).toContain("14 minutes before this page");
     expect(text).toContain("<dt>Inactivity window</dt><dd>30 minutes</dd>");
     expect(text).toContain("<dt>Hard cap</dt><dd>2026-11-02 03:59 UTC</dd>");
   });
@@ -296,12 +350,19 @@ describe("the Environment page's session panel", () => {
     expect(html).not.toContain("session-title");
   });
 
-  it("uses a singular unit for a one-minute window", () => {
+  it.each([
+    [0.5, "30 seconds"],
+    [0.25, "15 seconds"],
+    [1, "1 minute"],
+    [1.5, "1.5 minutes"],
+    [30, "30 minutes"],
+    [0.1, "6 seconds"],
+  ])("shows a window of %s minutes as %s, never rounded", (minutes, text) => {
     const html = renderBootstrapPage({
       ...COMMON,
       groups: [],
-      session: { ...session, windowMs: MINUTE },
+      session: { ...session, windowMs: minutes * MINUTE },
     });
-    expect(html).toContain("<dd>1 minute</dd>");
+    expect(html).toContain(`<dt>Inactivity window</dt><dd>${text}</dd>`);
   });
 });

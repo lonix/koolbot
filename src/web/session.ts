@@ -3,6 +3,7 @@ import { Client } from "discord.js";
 import { Request, RequestHandler, Response, NextFunction } from "express";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
+import { formatDuration } from "./session-panel.js";
 import {
   PermissionsService,
   PermissionCheckError,
@@ -219,14 +220,31 @@ async function loadValidSession(
   return { session: dbSession };
 }
 
-/** "GET /admin/settings": method and path only, never the query string. */
-function describeRoute(req: Request): string {
-  const url = req.originalUrl ?? req.url ?? "";
-  return sanitizeForLog(`${req.method} ${url.split("?")[0]}`, 160);
-}
+/** Path segments that look like an id: a Discord snowflake or any long number, a UUID, an ObjectId, a token. */
+const ID_SEGMENT = /^(?:\d{5,}|[0-9a-f-]{16,}|[A-Za-z0-9_-]{24,})$/i;
 
-function minutesOf(ms: number): number {
-  return Math.round(ms / 60000);
+/**
+ * "GET /admin/settings": the method and the path, for the debug log (#1635).
+ * It never carries the query string or an identifier. When Express has matched
+ * a route (the ping), that route's own pattern is used; otherwise the path is
+ * written with every id-like segment (a Discord user or guild id, an event id,
+ * a UUID, a long token) replaced by ":id", so a path such as
+ * /admin/birthdays/<member id>/edit logs as /admin/birthdays/:id/edit.
+ */
+function describeRoute(req: Request): string {
+  const routePath = (req.route as { path?: unknown } | undefined)?.path;
+  const matched =
+    typeof routePath === "string"
+      ? `${req.baseUrl ?? ""}${routePath}`
+      : undefined;
+  const path =
+    matched ??
+    (req.originalUrl ?? req.url ?? "")
+      .split("?")[0]
+      .split("/")
+      .map((segment) => (ID_SEGMENT.test(segment) ? ":id" : segment))
+      .join("/");
+  return sanitizeForLog(`${req.method} ${path}`, 160);
 }
 
 /**
@@ -242,7 +260,7 @@ function logRefusal(
 ): void {
   const idle =
     reason === "inactivity"
-      ? `: idle ${minutesOf(now - payload.act)} min, window ${minutesOf(getInactivityWindowMs())} min`
+      ? `: idle ${formatDuration(now - payload.act)}, window ${formatDuration(getInactivityWindowMs())}`
       : "";
   logger.debug(
     `Web session refused (${reason}) on ${describeRoute(req)}${idle}`,
@@ -388,7 +406,7 @@ export function createSessionMiddleware(
     // The audit trail of what kept a session alive (#1635): every real request
     // behind `requireSession` lands here, the banner's ping does not.
     logger.debug(
-      `Web session renewed by ${describeRoute(req)} (${role}, previous request ${minutesOf(now - payload.act)} min ago)`,
+      `Web session renewed by ${describeRoute(req)} (${role}, previous request ${formatDuration(now - payload.act)} ago)`,
     );
 
     // Scopes come from the role groups, live, on every request (#1316), and

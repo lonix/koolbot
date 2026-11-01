@@ -20,8 +20,23 @@ function utc(ms: number | undefined): string {
   return `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
-function minutes(n: number): string {
-  return `${n} ${n === 1 ? "minute" : "minutes"}`;
+/** A number with at most two decimals and no trailing zeros: 1.5, 30, 0.6. */
+function trimmed(n: number): string {
+  return String(Number(n.toFixed(2)));
+}
+
+/**
+ * The real length of a span, never rounded to a whole minute: seconds under a
+ * minute ("30 seconds"), minutes with their fraction otherwise ("1.5 minutes").
+ */
+export function formatDuration(ms: number): string {
+  const safe = Math.max(0, ms);
+  if (safe < 60000) {
+    const seconds = trimmed(safe / 1000);
+    return `${seconds} ${seconds === "1" ? "second" : "seconds"}`;
+  }
+  const minutes = trimmed(safe / 60000);
+  return `${minutes} ${minutes === "1" ? "minute" : "minutes"}`;
 }
 
 /**
@@ -34,8 +49,8 @@ export function renderSessionPanel(s: SessionDiagnostics): string {
   const previous =
     s.previousActivityAt === undefined
       ? "—"
-      : `${utc(s.previousActivityAt)} (${Math.max(0, Math.round((s.now - s.previousActivityAt) / 60000))} min before this page)`;
-  const windowText = minutes(Math.max(1, Math.round(s.windowMs / 60000)));
+      : `${utc(s.previousActivityAt)} (${formatDuration(s.now - s.previousActivityAt)} before this page)`;
+  const windowText = formatDuration(s.windowMs);
   return `<section class="kb-panel" aria-labelledby="session-title">
   <header class="kb-panel__head"><h2 class="kb-panel__title" id="session-title">Your session</h2></header>
   <div class="kb-panel__body">

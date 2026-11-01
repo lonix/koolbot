@@ -624,7 +624,7 @@ const STYLE = [
 
 // Session banner script (#367, #435, #1635): see `session-banner.ts`. It polls
 // the read-only `/admin/session/ping`, which does not count as activity.
-const SCRIPT = sessionBannerScript("/admin/session/ping", "/admin/");
+const SCRIPT = sessionBannerScript("admin");
 
 // Cron schedule picker (#444). Each .cron-picker on the page wraps a
 // hidden input (located via the `.cron-hidden` class — its form-field

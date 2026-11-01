@@ -854,9 +854,11 @@ To see what a session is doing, open **Environment** and read **Your session**:
   `WEBUI_SESSION_LIFETIME_HOURS`.
 
 With `DEBUG=true` the bot also writes one line each time a session is renewed
-(method, path without its query, and minutes since the previous request) and
-each time one is refused (the cause, the path, and for inactivity the idle time
-against the window). The lines never contain the cookie, the session id or the
+(method, path, and time since the previous request) and each time one is
+refused (the cause, the path, and for inactivity the idle time against the
+window). The path has no query string, and any segment that looks like an id (a
+Discord user or guild id, an event id, a UUID, a long token) is written as
+`:id`. The lines never contain the cookie, the session id, a user id or the
 secret.
 
 Over plain `http` (a `WEBUI_BASE_URL` that starts with `http://`) the cookie is

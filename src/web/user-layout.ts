@@ -222,7 +222,7 @@ const STYLE = [
 // `/me/session/ping` mount so `/me/*` pages never reach into the `/admin`
 // namespace; the two pings hit identical handlers, and the path split exists so
 // a change to one surface cannot silently break the countdown on the other.
-const SCRIPT = sessionBannerScript("/me/session/ping", "/me/");
+const SCRIPT = sessionBannerScript("me");
 
 // Move focus to the post-redirect flash (#855). A live region that is part
 // of a freshly loaded document is never announced by itself, so after a PRG
