@@ -962,7 +962,8 @@ seconds, and starts again after a reload or any save in the admin pages.
 - When the check could not be made (Discord did not answer, or it took longer than the Dashboard's time limit), the row says **Not checked** with the
   reason. A check that did not run is never shown as in sync, and never as out of sync.
 - On **All settings**, a status line next to **Reload commands** says **In sync**, **Out of sync** with the same names, or **Not checked**.
-- A save on **All settings** that switches on or off a feature with a slash command reloads the page, so the status line is read again instead of keeping the old state.
+- A save on **All settings** that switches on or off a feature with a slash command reloads the page, so the status line is read again
+  instead of keeping the old state.
 - After **Reset all to defaults**, the message states what the check found instead of "You may need to Reload commands".
 
 The check changes nothing: **Reload commands** is still the only way to apply the difference.
