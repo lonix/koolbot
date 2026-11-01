@@ -403,3 +403,17 @@ describe("Picker inside an AccessCard (#1547)", () => {
     expect(css).toMatch(/\n\.kb-picker \{[^}]*min-width: 18rem/);
   });
 });
+
+describe("the sub-bar proposal CSS (#1620)", () => {
+  it("takes every size from a token: no literal rem or px in the .kb-substeps rules", () => {
+    const css = readFileSync(
+      new URL("../../docs/design/kb.css", import.meta.url),
+      "utf8",
+    );
+    const rules = css.split("\n").filter((l) => l.startsWith(".kb-substeps"));
+    expect(rules.length).toBeGreaterThan(4);
+    for (const rule of rules) {
+      expect(rule).not.toMatch(/\d(?:\.\d+)?(?:rem|px|em)\b/);
+    }
+  });
+});
