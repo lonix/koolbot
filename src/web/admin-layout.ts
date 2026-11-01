@@ -20,6 +20,7 @@ import {
 } from "./setting-pickers.js";
 import { groupRowsScript } from "./event-group-form.js";
 import { getInactivityWindowMs } from "./session.js";
+import { sessionBannerScript } from "./session-banner.js";
 import { CONFIRM_LINK_SCRIPT } from "./confirm-fetch.js";
 import {
   CONFIRM_SCRIPT,
@@ -28,7 +29,6 @@ import {
   scriptTag,
 } from "./html.js";
 import {
-  SESSION_LOW_MS,
   renderTopBar,
   renderVersionPill,
   resolveViewer,
@@ -622,60 +622,9 @@ const STYLE = [
     "}",
 ].join("");
 
-// Session banner script (#367, refreshed in #435).
-//
-// In addition to the per-second local tick from #367, this:
-//   - polls `GET /admin/session/ping` every 30s and re-syncs the local
-//     deadline from the server's authoritative remaining time (the ping
-//     endpoint is read-only and does NOT itself extend the session).
-//   - resets the local deadline on `mousemove` / `keydown` (debounced)
-//     to the inactivity window length so the visible number stays
-//     snappy between polls when the admin is actually interacting.
-//
-// `data-inactivity-ms` is the full sliding window (matches the server's
-// `WEBUI_INACTIVITY_TIMEOUT_MINUTES`); activity-driven local resets
-// never push the deadline past that. The server's hard cap
-// (`expiresAt`, from the ping response) is also tracked and used as a
-// ceiling on the optimistic activity reset so the UI can't briefly
-// promise more time than the session can actually deliver.
-const SCRIPT =
-  "(function(){var el=document.getElementById('session-countdown');if(!el)return;" +
-  "function toMs(v){var n=Math.floor(Number(v));return isFinite(n)&&n>0?n:0}" +
-  "var deadline=Date.now()+toMs(el.getAttribute('data-remaining-ms'));" +
-  "var inactivityMs=toMs(el.getAttribute('data-inactivity-ms'));" +
-  // Absolute timestamp (ms since epoch) of the server's hard cap; 0
-  // means "unknown yet" — filled in on the first successful ping.
-  "var hardCapAt=0;var fired=false;var lastReset=0;" +
-  "function expire(){if(fired)return;fired=true;window.location.href='/admin/'}" +
-  "function tick(){var r=Math.max(0,deadline-Date.now());var s=Math.floor(r/1000);" +
-  "var m=Math.floor(s/60);var ss=s%60;el.textContent=m+':'+(ss<10?'0'+ss:ss);" +
-  // Under five minutes the wrapper (`.kb-session`) turns warn.
-  `if(el.parentNode&&el.parentNode.classList)el.parentNode.classList.toggle('is-low',r<${SESSION_LOW_MS});` +
-  // When the countdown hits 0, navigate to /admin/. The session middleware
-  // will reject the now-expired cookie and render the scaffold's 401 page.
-  "if(r<=0)expire()}" +
-  "function applyRemaining(ms){deadline=Date.now()+toMs(ms);tick()}" +
-  "function onActivity(){if(inactivityMs<=0||fired)return;" +
-  // Debounce so a stream of mousemove events doesn't reset every frame.
-  // Only nudge the deadline forward (never back) — and never past the
-  // server's hard cap if we know it.
-  "var now=Date.now();if(now-lastReset<5000)return;lastReset=now;" +
-  "var target=inactivityMs;" +
-  "if(hardCapAt>0){var cap=hardCapAt-now;if(cap<target)target=cap}" +
-  "if(target>0&&deadline-now<target)applyRemaining(target)}" +
-  "function poll(){if(fired)return;" +
-  "fetch('/admin/session/ping',{credentials:'same-origin',headers:{'Accept':'application/json'},cache:'no-store'})" +
-  ".then(function(res){if(res.status===401){expire();return null}" +
-  "if(!res.ok)return null;return res.json()})" +
-  ".then(function(data){if(!data)return;" +
-  "if(typeof data.expiresAt==='string'){var t=Date.parse(data.expiresAt);if(!isNaN(t))hardCapAt=t}" +
-  "if(typeof data.remainingMs==='number')applyRemaining(data.remainingMs)})" +
-  ".catch(function(){})}" +
-  // Initial poll fills `hardCapAt` quickly so the activity reset has a
-  // ceiling even before the first 30s interval elapses.
-  "tick();poll();setInterval(tick,1000);setInterval(poll,30000);" +
-  "document.addEventListener('mousemove',onActivity,{passive:true});" +
-  "document.addEventListener('keydown',onActivity)})();";
+// Session banner script (#367, #435, #1635): see `session-banner.ts`. It polls
+// the read-only `/admin/session/ping`, which does not count as activity.
+const SCRIPT = sessionBannerScript("admin");
 
 // Cron schedule picker (#444). Each .cron-picker on the page wraps a
 // hidden input (located via the `.cron-hidden` class — its form-field

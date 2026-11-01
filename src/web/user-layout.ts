@@ -10,6 +10,7 @@
  */
 
 import { escapeHtml, getInactivityWindowMs } from "./admin-layout.js";
+import { sessionBannerScript } from "./session-banner.js";
 import { channelMention } from "./discord-labels.js";
 import { designStylesheetLinks } from "./design-assets.js";
 import { CONFIRM_SCRIPT, confirmListAttr, scriptTag } from "./html.js";
@@ -28,7 +29,6 @@ import { FOCUS_FIRST_INVALID_SCRIPT } from "./event-field-errors.js";
 import { renderSwitch } from "./setting-controls.js";
 import type { MeSurfaceFlags } from "./me-surfaces.js";
 import {
-  SESSION_LOW_MS,
   renderScopeWhy,
   renderSideNav,
   renderTopBar,
@@ -218,42 +218,11 @@ const STYLE = [
   // Reflow (WCAG 1.4.10, #855): the column's gutters and the Rewind hero tighten in kb.css.
 ].join("");
 
-// Same DOM hooks (`#session-countdown`, `data-remaining-ms`,
-// `data-inactivity-ms`) and behaviour as the admin layout's banner
-// script, but polls the surface-local `/me/session/ping` mount so
-// `/me/*` pages never reach into the `/admin` namespace. The two
-// pings hit identical handlers — the path split exists so a future
-// operational change to one surface can't silently break countdown
-// on the other.
-const SCRIPT =
-  "(function(){var el=document.getElementById('session-countdown');if(!el)return;" +
-  "function toMs(v){var n=Math.floor(Number(v));return isFinite(n)&&n>0?n:0}" +
-  "var deadline=Date.now()+toMs(el.getAttribute('data-remaining-ms'));" +
-  "var inactivityMs=toMs(el.getAttribute('data-inactivity-ms'));" +
-  "var hardCapAt=0;var fired=false;var lastReset=0;" +
-  "function expire(){if(fired)return;fired=true;window.location.href='/me/'}" +
-  "function tick(){var r=Math.max(0,deadline-Date.now());var s=Math.floor(r/1000);" +
-  "var m=Math.floor(s/60);var ss=s%60;el.textContent=m+':'+(ss<10?'0'+ss:ss);" +
-  // Under five minutes the wrapper (`.kb-session`) turns warn.
-  `if(el.parentNode&&el.parentNode.classList)el.parentNode.classList.toggle('is-low',r<${SESSION_LOW_MS});` +
-  "if(r<=0)expire()}" +
-  "function applyRemaining(ms){deadline=Date.now()+toMs(ms);tick()}" +
-  "function onActivity(){if(inactivityMs<=0||fired)return;" +
-  "var now=Date.now();if(now-lastReset<5000)return;lastReset=now;" +
-  "var target=inactivityMs;" +
-  "if(hardCapAt>0){var cap=hardCapAt-now;if(cap<target)target=cap}" +
-  "if(target>0&&deadline-now<target)applyRemaining(target)}" +
-  "function poll(){if(fired)return;" +
-  "fetch('/me/session/ping',{credentials:'same-origin',headers:{'Accept':'application/json'},cache:'no-store'})" +
-  ".then(function(res){if(res.status===401){expire();return null}" +
-  "if(!res.ok)return null;return res.json()})" +
-  ".then(function(data){if(!data)return;" +
-  "if(typeof data.expiresAt==='string'){var t=Date.parse(data.expiresAt);if(!isNaN(t))hardCapAt=t}" +
-  "if(typeof data.remainingMs==='number')applyRemaining(data.remainingMs)})" +
-  ".catch(function(){})}" +
-  "tick();poll();setInterval(tick,1000);setInterval(poll,30000);" +
-  "document.addEventListener('mousemove',onActivity,{passive:true});" +
-  "document.addEventListener('keydown',onActivity)})();";
+// Session banner script (see `session-banner.ts`). It polls the surface-local
+// `/me/session/ping` mount so `/me/*` pages never reach into the `/admin`
+// namespace; the two pings hit identical handlers, and the path split exists so
+// a change to one surface cannot silently break the countdown on the other.
+const SCRIPT = sessionBannerScript("me");
 
 // Move focus to the post-redirect flash (#855). A live region that is part
 // of a freshly loaded document is never announced by itself, so after a PRG

@@ -181,6 +181,7 @@ import { BOOTSTRAP_VARS, bootstrapDisplay } from "./bootstrap-vars.js";
 import { getEnv, getEnvConfigValue } from "../config/env.js";
 import {
   createSessionPingHandler,
+  getInactivityWindowMs,
   requireAdminRoleMiddleware,
   type AuthenticatedRequest,
 } from "./session.js";
@@ -1070,6 +1071,9 @@ export function createReadOnlyRouter(
   // session's `act` timestamp — otherwise polling every 30s would keep
   // an idle session alive forever, defeating the inactivity window.
   // The handler runs its own (non-mutating) cookie + DB validation.
+  // `createWebRouter` also mounts the ping before the write router (#1635),
+  // whose `requireSession` would otherwise reach it first; this copy serves
+  // the router when it is mounted alone.
   router.get("/session/ping", createSessionPingHandler());
 
   router.use(requireSession);
@@ -1215,7 +1219,20 @@ export function createReadOnlyRouter(
         category,
         rows,
       }));
-      res.type("text/html").send(renderBootstrapPage({ ...common, groups }));
+      const session = req.webSession;
+      res.type("text/html").send(
+        renderBootstrapPage({
+          ...common,
+          groups,
+          session: session && {
+            issuedAt: session.issuedAt,
+            previousActivityAt: session.previousActivityAt,
+            now: session.lastActivityAt,
+            windowMs: getInactivityWindowMs(),
+            expiresAt: session.expiresAt,
+          },
+        }),
+      );
     }),
   );
 
