@@ -231,7 +231,9 @@ export function createBotStatusRouter(client: Client): Router {
       const session = requireSessionContext(req);
       const id = String(req.params.id);
       const move = parseMoveRequest(req);
-      if (move === null) {
+      // The order token is required: count and place alone cannot tell that
+      // other entries were reordered since the page was drawn (#1669).
+      if (move === null || move.order === undefined) {
         flashRedirect(res, PAGE, {
           type: "err",
           text: "That move could not be read. Reload the page and try again.",

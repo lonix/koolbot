@@ -31,6 +31,7 @@ import type { CommandSyncReport } from "../services/command-manager.js";
 import {
   REORDER_SCRIPT,
   REORDER_STATUS_HTML,
+  orderToken,
   renderReorderCell,
   reorderListAttrs,
   reorderRowAttrs,
@@ -4747,11 +4748,12 @@ export function renderNoticesPage(props: NoticesProps): string {
       ? `<div class="empty">No notices stored.</div>`
       : props.groups
           .map((g) => {
+            const shownOrder = orderToken(g.rows.map((n) => n.id));
             const rows = g.rows
               .map((n, index) => {
                 const f = formView(props.refusedForm, noticeEditForm(n.id));
                 return `<tr${reorderRowAttrs(`notice-${n.id}`, n.title)}>
-<td>${renderReorderCell({ action: `/admin/notices/${n.id}/move`, scope: n.category, csrfInput, index, count: g.rows.length, label: n.title })}</td>
+<td>${renderReorderCell({ action: `/admin/notices/${n.id}/move`, scope: n.category, csrfInput, index, count: g.rows.length, orderToken: shownOrder, label: n.title })}</td>
 <th scope="row">${escapeHtml(n.title)}<div class="muted mono">id: ${escapeHtml(n.id)}</div></th>
 <td class="muted">${escapeHtml(n.preview)}</td>
 <td class="mono muted">${escapeHtml(n.messageId)}</td>
@@ -5524,6 +5526,7 @@ export function renderStringArrayEditor(
     botStatusImportForm(opts.collectionId),
   );
 
+  const shownOrder = orderToken(opts.items.map((item) => item.id));
   const rows =
     opts.items.length === 0
       ? `<tr><td colspan="3"><span class="muted">No entries stored.</span></td></tr>`
@@ -5531,7 +5534,7 @@ export function renderStringArrayEditor(
           .map((item, index) => {
             const f = formView(opts.refusedForm, botStatusEditForm(item.id));
             return `<tr${reorderRowAttrs(`entry-${item.id}`, item.text)}>
-<td>${renderReorderCell({ action: `${entryPath(item.id)}/move`, scope: opts.collectionId, csrfInput, index, count: opts.items.length, label: item.text })}</td>
+<td>${renderReorderCell({ action: `${entryPath(item.id)}/move`, scope: opts.collectionId, csrfInput, index, count: opts.items.length, orderToken: shownOrder, label: item.text })}</td>
 <th scope="row">
   <details class="helper edit-details"${f.open()}><summary>${escapeHtml(item.text)}</summary>
     <form method="POST" action="${entryPath(item.id)}/update" class="stack">${csrfInput}
