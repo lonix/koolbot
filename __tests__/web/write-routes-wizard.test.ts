@@ -35,6 +35,9 @@ const mockApplyConfiguration = jest.fn<() => Promise<unknown>>();
 const mockEndSession = jest.fn();
 const mockConfigGetAll = jest.fn<() => Promise<unknown>>(async () => []);
 const mockConfigGet = jest.fn(async () => null);
+const mockConfigGetBoolean = jest.fn<(key: string) => Promise<boolean>>(
+  async () => false,
+);
 const mockConfigGetStringStrict = jest.fn(
   async (_key: string, defaultValue: string = ""): Promise<string> =>
     defaultValue,
@@ -77,7 +80,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
       getStringStrict: mockConfigGetStringStrict,
       getString: jest.fn(async () => ""),
       getNumber: jest.fn(async () => 0),
-      getBoolean: jest.fn(async () => false),
+      getBoolean: mockConfigGetBoolean,
       getAll: mockConfigGetAll,
       registerReloadCallback: jest.fn(),
     }),
@@ -136,6 +139,7 @@ beforeEach(async () => {
         : [],
     );
   mockConfigGetAll.mockImplementation(async () => []);
+  mockConfigGetBoolean.mockImplementation(async () => false);
   harness = await startAdminHarness([
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
@@ -807,15 +811,144 @@ describe("POST /wizard/apply", () => {
     });
   });
 
-  it("ends the session and flashes when applyConfiguration threw", async () => {
+  it("keeps the session and returns to Review when applyConfiguration threw (#1622)", async () => {
     mockGetSession.mockReturnValue(wizardState(["quotes"], {}));
     mockApplyConfiguration.mockRejectedValue(new Error("mongo down"));
     const res = await harness.post("/wizard/apply");
-    const flash = parseFlashRedirect(res.headers.get("location"));
-    expect(flash.path).toBe("/admin/settings");
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("/admin/wizard?");
+    expect(location).toContain("step=confirm");
+    const flash = parseFlashRedirect(location);
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("mongo down");
-    expect(mockEndSession).toHaveBeenCalled();
+    expect(flash.msg).not.toContain("Wizard failed");
+    expect(mockEndSession).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      result: "failure",
+      errorMessage: "mongo down",
+    });
+  });
+});
+
+/**
+ * #1622: Voice Tracking is not ticked (so Apply writes it off) while the
+ * weekly recap that needs it stays on. Before the fix Review showed nothing
+ * and Apply threw after the session had been ended.
+ */
+describe("a feature turned off while a part that needs it stays on (#1622)", () => {
+  const recapOn = (key: string): boolean =>
+    key === "voicetracking.announcements.enabled" ||
+    key === "voicetracking.enabled";
+
+  beforeEach(() => {
+    mockConfigGetBoolean.mockImplementation(async (key) => recapOn(key));
+    mockGetSession.mockReturnValue(
+      wizardState(["quotes"], { "quotes.enabled": true }),
+    );
+    mockApplyConfiguration.mockResolvedValue({
+      success: true,
+      appliedKeys: [],
+      rolledBackKeys: [],
+      revertFailedKeys: [],
+    });
+  });
+
+  it("Review names the parts, links each one and offers to turn them off", async () => {
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).toContain("Some parts need a feature you are turning off");
+    expect(html).toContain("Voice Tracking enabled");
+    expect(html).toContain(
+      '<span class="kb-mono">voicetracking.enabled</span>',
+    );
+    expect(html).toContain(
+      '<a href="/admin/settings#section-voicetracking">Scheduled weekly recap enabled</a>',
+    );
+    expect(html).not.toContain("`");
+    expect(html).toContain(
+      'name="cascadeOff" value="voicetracking.announcements.enabled"',
+    );
+    expect(html).toContain('form="wizard-apply-form"');
+    expect(html).not.toMatch(/<button[^>]*btn-primary[^>]*disabled/);
+  });
+
+  it("Review shows nothing about it when nothing depends on what is turned off", async () => {
+    mockConfigGetBoolean.mockImplementation(async () => false);
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).not.toContain("need a feature you are turning off");
+  });
+
+  it("refuses an unconfirmed apply back to Review, keeping the session and writing nothing", async () => {
+    const res = await harness.post("/wizard/apply");
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("step=confirm");
+    const flash = parseFlashRedirect(location);
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("Nothing was applied");
+    expect(flash.msg).not.toContain("`");
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    expect(mockEndSession).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      result: "failure",
+      details: {
+        stage: "dependencies",
+        cascadeKeys: ["voicetracking.announcements.enabled"],
+        reason: "not-confirmed",
+      },
+    });
+    const cascaded = mockAddConfiguration.mock.calls
+      .filter((c) => c[2] === "voicetracking.announcements.enabled")
+      .map((c) => c[3]);
+    expect(cascaded).toEqual([]);
+  });
+
+  it("turns the parts off in the same apply once the admin confirmed them", async () => {
+    const res = await harness.post("/wizard/apply", {
+      cascadeOff: "voicetracking.announcements.enabled",
+    });
+    expect(mockApplyConfiguration).toHaveBeenCalledTimes(1);
+    const off = mockAddConfiguration.mock.calls
+      .filter((c) => c[3] === false)
+      .map((c) => c[2]);
+    expect(off).toContain("voicetracking.announcements.enabled");
+    expect(res.headers.get("location")).toContain("/admin/settings");
+    expect(lastAudit()).toMatchObject({
+      result: "success",
+      details: { cascadeOff: ["voicetracking.announcements.enabled"] },
+    });
+  });
+
+  it("refuses a confirmation that no longer matches what is on", async () => {
+    await harness.post("/wizard/apply", { cascadeOff: "something.else" });
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      details: { reason: "out-of-date" },
+    });
+  });
+
+  it("follows the chain: turning off Voice Tracking also needs what needs Achievements", async () => {
+    mockConfigGetBoolean.mockImplementation(
+      async (key) =>
+        key === "voicetracking.enabled" ||
+        key === "achievements.enabled" ||
+        key === "celebrations.enabled",
+    );
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).toContain('<span class="kb-mono">achievements.enabled</span>');
+    expect(html).toContain('<span class="kb-mono">celebrations.enabled</span>');
+  });
+
+  it("blocks Apply on Review when a chosen enable needs something that stays off", async () => {
+    mockGetSession.mockReturnValue(
+      wizardState(["achievements"], { "achievements.enabled": true }),
+    );
+    mockConfigGetBoolean.mockImplementation(async () => false);
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).toContain("These settings can't be applied together");
+    expect(html).toMatch(/<button[^>]*btn-primary[^>]*disabled/);
+    const res = await harness.post("/wizard/apply");
+    expect(res.headers.get("location")).toContain("step=confirm");
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    expect(mockEndSession).not.toHaveBeenCalled();
   });
 });
 

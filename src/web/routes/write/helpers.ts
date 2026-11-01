@@ -682,6 +682,26 @@ export const WIZARD_FEATURE_ORDER = [
 ];
 
 /**
+ * The `false` writes Apply adds for every feature the admin did not tick on the
+ * landing page (each run is a complete declaration of what should be on): the
+ * feature's `.enabled` key and its {@link WIZARD_FEATURE_EXTRA_GATES}. One
+ * function, so Review judges the same batch Apply writes (#1622).
+ */
+export function wizardOffGates(selectedFeatures: readonly string[]): string[] {
+  const selected = new Set(selectedFeatures);
+  const gates: string[] = [];
+  for (const fk of WIZARD_FEATURE_ORDER) {
+    if (selected.has(fk)) continue;
+    const enabledKey = (WIZARD_FEATURE_SETTINGS[fk] ?? []).find((k) =>
+      k.endsWith(".enabled"),
+    );
+    if (!enabledKey) continue;
+    gates.push(enabledKey, ...(WIZARD_FEATURE_EXTRA_GATES[fk] ?? []));
+  }
+  return gates;
+}
+
+/**
  * Config keys whose string value is set directly as a Discord channel name
  * (or part of one). For these, `:shortcode:` emoji are resolved to Unicode at
  * the write boundary (issue #558) so admins can type `:green_circle:` and get

@@ -79,7 +79,7 @@ import {
   navStatusForPage,
   WIZARD_FEATURE_SETTINGS,
   WIZARD_FEATURE_ORDER,
-  WIZARD_FEATURE_EXTRA_GATES,
+  wizardOffGates,
   wizardApplyFailureMessage,
   coerceConfigValueForGuild,
   isReactionRoleMessageKey,
@@ -89,6 +89,10 @@ import {
   findPowerfulRoleForSetting,
   truncateFlash,
 } from "./helpers.js";
+import {
+  planWizardDependencies,
+  type WizardDependencyPlan,
+} from "./wizard-dependencies.js";
 
 /** A role id as Discord sends it: digits only. Anything else is ignored. */
 const SNOWFLAKE = /^\d{1,25}$/;
@@ -261,6 +265,20 @@ export function createWizardRouter(client: Client): Router {
                 "Discord or the role groups could not be read, so the role mapping can't be checked.";
             }
           }
+          // What Apply would refuse or need confirmed (#1622), judged on the
+          // batch Apply writes. A failed read says nothing here: Apply checks
+          // again and refuses back to this page.
+          let dependencies: WizardDependencyPlan | null = null;
+          try {
+            const cfg = ConfigService.getInstance();
+            dependencies = await planWizardDependencies(
+              existing.configuration,
+              existing.selectedFeatures,
+              (key) => cfg.getBoolean(key, false),
+            );
+          } catch (err) {
+            logger.warn("wizard: review could not check dependencies", err);
+          }
           res.type("text/html").send(
             renderWizardConfirmPage({
               csrfToken,
@@ -273,6 +291,7 @@ export function createWizardRouter(client: Client): Router {
               accessGaps: gaps,
               accessFingerprint: fingerprint,
               hostRole,
+              dependencies,
               flash,
             }),
           );
@@ -830,24 +849,13 @@ export function createWizardRouter(client: Client): Router {
       // so re-running the wizard is the supported way to turn things off.
       // Without this, unchecked features would silently retain their
       // pre-existing enabled state.
-      const selectedSet = new Set(state.selectedFeatures);
-      for (const fk of WIZARD_FEATURE_ORDER) {
-        if (selectedSet.has(fk)) continue;
-        const enabledKey = (WIZARD_FEATURE_SETTINGS[fk] ?? []).find((k) =>
-          k.endsWith(".enabled"),
+      for (const gate of wizardOffGates(state.selectedFeatures)) {
+        wizard.addConfiguration(
+          session.discordUserId,
+          session.guildId,
+          gate,
+          false,
         );
-        if (!enabledKey) continue;
-        for (const gate of [
-          enabledKey,
-          ...(WIZARD_FEATURE_EXTRA_GATES[fk] ?? []),
-        ]) {
-          wizard.addConfiguration(
-            session.discordUserId,
-            session.guildId,
-            gate,
-            false,
-          );
-        }
       }
 
       const confirmFailure = (text: string): void => {
@@ -860,6 +868,81 @@ export function createWizardRouter(client: Client): Router {
         }).toString();
         res.redirect(303, `/admin/wizard?${qs}`);
       };
+
+      // Feature dependencies (#663, #1622), judged on the batch Review showed
+      // (the chosen settings plus the gates for every unticked feature) and
+      // before anything is written. A feature being turned off while a part
+      // that needs it stays on is applied only when the admin confirmed the
+      // extra turn-offs on Review; anything else is refused back to Review,
+      // with the wizard session and every choice kept.
+      let cascadeOff: string[] = [];
+      try {
+        const config = ConfigService.getInstance();
+        const plan = await planWizardDependencies(
+          state.configuration,
+          state.selectedFeatures,
+          (key) => config.getBoolean(key, false),
+        );
+        const posted = (req.body as Record<string, unknown> | undefined)
+          ?.cascadeOff;
+        if (plan.cascadeKeys.length > 0) {
+          if (posted !== plan.fingerprint) {
+            await recordAudit(session, {
+              action: "wizard.apply",
+              details: {
+                stage: "dependencies",
+                cascadeKeys: plan.cascadeKeys,
+                reason: posted === undefined ? "not-confirmed" : "out-of-date",
+              },
+              result: "failure",
+              errorMessage:
+                "A feature being turned off still has parts that need it",
+            });
+            confirmFailure(
+              posted === undefined
+                ? "Nothing was applied. Some parts need a feature you are turning off. Switch on the line that turns them off too, then apply again."
+                : "Nothing was applied. The parts that need a feature you are turning off changed since you opened Review. Look at the updated list and apply again.",
+            );
+            return;
+          }
+          cascadeOff = plan.cascadeKeys;
+        }
+        if (plan.blockers.length > 0) {
+          await recordAudit(session, {
+            action: "wizard.apply",
+            details: {
+              stage: "dependencies",
+              keys: plan.blockers.map((b) => b.key),
+            },
+            result: "failure",
+            errorMessage: plan.blockers.map((b) => b.message).join(" "),
+          });
+          confirmFailure(
+            `Nothing was applied. ${plan.blockers.map((b) => b.message).join(" ")}`,
+          );
+          return;
+        }
+      } catch (err) {
+        logger.error("Wizard apply: dependencies could not be checked", err);
+        await recordAudit(session, {
+          action: "wizard.apply",
+          details: { stage: "dependencies" },
+          result: "failure",
+          errorMessage: err instanceof Error ? err.message : "Unknown error",
+        });
+        confirmFailure(
+          "Nothing was applied: the settings could not be checked against each other. Try again in a moment.",
+        );
+        return;
+      }
+      for (const key of cascadeOff) {
+        wizard.addConfiguration(
+          session.discordUserId,
+          session.guildId,
+          key,
+          false,
+        );
+      }
 
       // Role access (#1321) goes first: it is the part that can be undone, so
       // a failure further on can put it back. It is checked against the live
@@ -997,7 +1080,9 @@ export function createWizardRouter(client: Client): Router {
           : " The role mapping was undone too.";
       };
 
-      const pendingKeys = Object.keys(state.configuration);
+      const pendingKeys = [
+        ...new Set([...Object.keys(state.configuration), ...cascadeOff]),
+      ];
       try {
         const result = await wizard.applyConfiguration(
           session.discordUserId,
@@ -1013,6 +1098,7 @@ export function createWizardRouter(client: Client): Router {
             rolledBackKeys: result.rolledBackKeys,
             revertFailedKeys: result.revertFailedKeys,
             reloadFailed: result.reloadFailed ?? false,
+            cascadeOff,
             accessGroups: accessApplied.map((c) => c.groupId ?? c.groupName),
           },
           result: result.success ? "success" : "failure",
@@ -1111,11 +1197,11 @@ export function createWizardRouter(client: Client): Router {
           result: "failure",
           errorMessage: text,
         });
-        wizard.endSession(session.discordUserId, session.guildId);
-        flashRedirect(res, "/admin/settings", {
-          type: "err",
-          text: `Wizard failed: ${text}${accessNote}`,
-        });
+        // The session and the admin's choices stay, like every other refused
+        // apply: they go back to Review with the reason and can retry.
+        confirmFailure(
+          `The settings could not be applied. ${text}${accessNote}`,
+        );
       }
     }),
   );
