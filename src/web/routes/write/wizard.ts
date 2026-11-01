@@ -274,7 +274,7 @@ export function createWizardRouter(client: Client): Router {
             dependencies = await planWizardDependencies(
               existing.configuration,
               existing.selectedFeatures,
-              (key) => cfg.getBoolean(key, false),
+              (key) => cfg.getBooleanStrict(key, false),
             );
           } catch (err) {
             logger.warn("wizard: review could not check dependencies", err);
@@ -636,10 +636,13 @@ export function createWizardRouter(client: Client): Router {
       for (const k of settingKeys) {
         if (masterOff && k !== masterKey) {
           // The control was greyed out and not submitted, but an earlier visit
-          // to this step may have staged a value for it. Drop it, so Review's
-          // dependency check reads the live value instead of taking a stale
-          // `true` for the admin's choice (#1622). Other features' choices
-          // are not touched.
+          // to this step may have staged a value for it. A staged `true` (or
+          // any value other than `false`) is dropped, so Review's dependency
+          // check reads the live value instead of taking a stale enable for the
+          // admin's choice (#1622). A staged `false` is an explicit disable
+          // (`aka.enabled` has its own gate) and stays. Other features'
+          // choices are not touched.
+          if (state.configuration[k] === false) continue;
           wizard.removeConfiguration(session.discordUserId, session.guildId, k);
           continue;
         }
@@ -890,7 +893,7 @@ export function createWizardRouter(client: Client): Router {
         const plan = await planWizardDependencies(
           state.configuration,
           state.selectedFeatures,
-          (key) => config.getBoolean(key, false),
+          (key) => config.getBooleanStrict(key, false),
         );
         const posted = (req.body as Record<string, unknown> | undefined)
           ?.cascadeOff;

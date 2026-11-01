@@ -362,7 +362,9 @@ export class WizardService {
     // together in one wizard run. A violation aborts the apply with an
     // operator-friendly message so the caller can surface it; partial writes
     // are avoided because nothing has been persisted yet.
-    const issues = await this.configService.findDependencyIssues(batch);
+    const issues = await this.configService.findDependencyIssues(batch, {
+      strict: true,
+    });
     if (issues.length > 0) {
       throw new DependencyError(issues);
     }

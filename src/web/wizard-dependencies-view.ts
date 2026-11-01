@@ -75,11 +75,22 @@ export function renderDependencyReview(
             ? settingRef(key, false)
             : `<a href="/admin/wizard?step=${step}">${escapeHtml(labelOf(key))}</a>`;
         };
-        const leave = `go back to the step for ${stepLink(b.key)} and leave ${b.direction === "enable" ? "it off" : "it on"}`;
+        const it = b.related.length === 1 ? "it" : "them";
+        const restart = `<a href="${WIZARD_RESTART_HREF}">Restart the wizard</a>`;
+        // The blocker's own feature has a step only when it was chosen. Without
+        // one there is nothing to go back to, so the only way to change it is a
+        // restart (which discards the choices).
+        const ownStep = steps[b.key] !== undefined;
         if (b.direction === "disable") {
-          const it = b.related.length === 1 ? "it" : "them";
-          return `<li>Turning off ${settingRef(b.key, false)} needs ${refList(b.related)} turned off first. Go back to ${b.related.length === 1 ? "its" : "their"} step and switch ${it} off, or ${leave}.</li>`;
+          const relatedLinks = b.related.map(stepLink).join(" or ");
+          const off = `Go back to ${relatedLinks} and switch ${it} off`;
+          return ownStep
+            ? `<li>Turning off ${settingRef(b.key, false)} needs ${refList(b.related)} turned off first. ${off}, or go back to the step for ${stepLink(b.key)} and leave it on.</li>`
+            : `<li>Turning off ${settingRef(b.key, false)} needs ${refList(b.related)} turned off first. ${settingRef(b.key, false)} was not chosen, so there is no step for it. ${off}, or ${restart} and choose it on the first step (this starts your choices over).</li>`;
         }
+        const leave = ownStep
+          ? `go back to the step for ${stepLink(b.key)} and leave it off`
+          : "leave it off";
         // Two different situations, two different advice. A prerequisite whose
         // feature was chosen has a step: it is switched off there, so go back.
         // One that was not chosen has no step, and switching it on in All
@@ -98,7 +109,7 @@ export function renderDependencyReview(
         if (missing.length > 0) {
           const it = missing.length === 1 ? "it" : "them";
           sentences.push(
-            `${refList(missing)} ${missing.length === 1 ? "was" : "were"} not chosen, and turning ${it} on in All settings does not help, because Apply turns off every feature that was not chosen. <a href="${WIZARD_RESTART_HREF}">Restart the wizard</a> and choose ${it} on the first step (this starts your choices over).`,
+            `${refList(missing)} ${missing.length === 1 ? "was" : "were"} not chosen, and turning ${it} on in All settings does not help, because Apply turns off every feature that was not chosen. ${restart} and choose ${it} on the first step (this starts your choices over).`,
           );
         }
         sentences.push(`Or ${leave}.`);

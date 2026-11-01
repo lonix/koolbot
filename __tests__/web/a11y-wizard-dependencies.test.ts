@@ -140,4 +140,75 @@ describe("renderDependencyReview", () => {
     expect(links).toContain("/admin/wizard?step=1");
     expect(links).toContain("/admin/wizard?reset=1");
   });
+
+  describe("a blocker whose own feature was not chosen has no step to go back to", () => {
+    const blocker = (steps: Record<string, number>) => ({
+      cascade: [],
+      cascadeKeys: [],
+      fingerprint: "",
+      blockers: [
+        {
+          key: "voicetracking.enabled",
+          direction: "disable" as const,
+          related: ["achievements.enabled"],
+          steps,
+        },
+      ],
+    });
+    const hrefs = (): (string | null)[] =>
+      Array.from(document.querySelectorAll("a")).map((a) =>
+        a.getAttribute("href"),
+      );
+
+    it("disable direction, feature chosen: links both steps, no restart", () => {
+      mount(
+        renderDependencyReview(
+          blocker({ "voicetracking.enabled": 0, "achievements.enabled": 1 }),
+        ),
+      );
+      expect(hrefs()).toEqual(
+        expect.arrayContaining([
+          "/admin/wizard?step=0",
+          "/admin/wizard?step=1",
+        ]),
+      );
+      expect(hrefs()).not.toContain("/admin/wizard?reset=1");
+      expect(document.body.textContent).toContain("leave it on");
+    });
+
+    it("disable direction, feature not chosen: offers the restart, not a step that does not exist", () => {
+      mount(renderDependencyReview(blocker({ "achievements.enabled": 1 })));
+      expect(hrefs()).toContain("/admin/wizard?reset=1");
+      expect(hrefs()).toContain("/admin/wizard?step=1");
+      expect(hrefs()).not.toContain("/admin/wizard?step=0");
+      const text = document.body.textContent ?? "";
+      expect(text).toContain("was not chosen");
+      expect(text).toContain("choose it on the first step");
+      expect(text).not.toContain("leave it on");
+      expect(text).not.toContain("`");
+    });
+
+    it("enable direction, the blocker's own feature chosen or not", () => {
+      const enable = (steps: Record<string, number>) => ({
+        cascade: [],
+        cascadeKeys: [],
+        fingerprint: "",
+        blockers: [
+          {
+            key: "achievements.enabled",
+            direction: "enable" as const,
+            related: ["voicetracking.enabled"],
+            steps,
+          },
+        ],
+      });
+      mount(renderDependencyReview(enable({ "achievements.enabled": 2 })));
+      expect(hrefs()).toContain("/admin/wizard?step=2");
+      expect(hrefs()).toContain("/admin/wizard?reset=1");
+      mount(renderDependencyReview(enable({})));
+      expect(hrefs()).toContain("/admin/wizard?reset=1");
+      expect(hrefs()).not.toContain("/admin/wizard?step=2");
+      expect(document.body.textContent).toContain("leave it off");
+    });
+  });
 });

@@ -39,6 +39,11 @@ const mockConfigGet = jest.fn(async () => null);
 const mockConfigGetBoolean = jest.fn<(key: string) => Promise<boolean>>(
   async () => false,
 );
+// The strict read the dependency check gates writes on; by default it answers
+// like the forgiving one, so a test makes it reject to simulate a failed read.
+const mockConfigGetBooleanStrict = jest.fn<
+  (key: string, defaultValue?: boolean) => Promise<boolean>
+>(async (key) => mockConfigGetBoolean(key));
 const mockConfigGetStringStrict = jest.fn(
   async (_key: string, defaultValue: string = ""): Promise<string> =>
     defaultValue,
@@ -83,6 +88,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
       getString: jest.fn(async () => ""),
       getNumber: jest.fn(async () => 0),
       getBoolean: mockConfigGetBoolean,
+      getBooleanStrict: mockConfigGetBooleanStrict,
       getAll: mockConfigGetAll,
       registerReloadCallback: jest.fn(),
     }),
@@ -142,6 +148,9 @@ beforeEach(async () => {
     );
   mockConfigGetAll.mockImplementation(async () => []);
   mockConfigGetBoolean.mockImplementation(async () => false);
+  mockConfigGetBooleanStrict.mockImplementation(async (key) =>
+    mockConfigGetBoolean(key),
+  );
   harness = await startAdminHarness([
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
@@ -912,6 +921,31 @@ describe("switching a feature's master off on a revisited step (#1622)", () => {
     });
   });
 
+  it("keeps a staged false and clears only the staged true children", async () => {
+    state.configuration["voicetracking.stats.top.enabled"] = false;
+    state.configuration["voicetracking.seen.enabled"] = false;
+    await harness.post("/wizard/step/0", {});
+    expect(state.configuration).toEqual({
+      "voicetracking.enabled": false,
+      "voicetracking.stats.top.enabled": false,
+      "voicetracking.seen.enabled": false,
+      "quotes.enabled": true,
+    });
+  });
+
+  it("keeps an explicit command disable (aka.enabled=false) when Name history's master is switched off", async () => {
+    state.selectedFeatures = ["namehistory"];
+    state.configuration = {
+      "namehistory.enabled": true,
+      "aka.enabled": false,
+    };
+    await harness.post("/wizard/step/0", {});
+    expect(state.configuration).toEqual({
+      "namehistory.enabled": false,
+      "aka.enabled": false,
+    });
+  });
+
   it("needs no cascade when the cleared child has no live value", async () => {
     mockConfigGetBoolean.mockImplementation(
       async (key) => key === "voicetracking.enabled",
@@ -1010,6 +1044,22 @@ describe("a feature turned off while a part that needs it stays on (#1622)", () 
     expect(lastAudit()).toMatchObject({
       result: "success",
       details: { cascadeOff: ["voicetracking.announcements.enabled"] },
+    });
+  });
+
+  it("refuses the apply when a dependent cannot be read, writing nothing and keeping the session", async () => {
+    // The forgiving read would count the unreadable recap as off and let the
+    // apply through; the strict read refuses.
+    mockConfigGetBooleanStrict.mockRejectedValue(new Error("mongo down"));
+    const res = await harness.post("/wizard/apply", {
+      cascadeOff: "voicetracking.announcements.enabled",
+    });
+    expect(res.headers.get("location")).toContain("step=confirm");
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    expect(mockEndSession).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      result: "failure",
+      details: { stage: "dependencies" },
     });
   });
 

@@ -240,11 +240,13 @@ describe("WizardService", () => {
         "quotes.enabled": false,
       });
       // Derived values win over the saved choice for that key and are written.
+      // Strict reads: an unreadable dependent must refuse the apply, not count as off.
       expect(mockConfigService.findDependencyIssues).toHaveBeenCalledWith(
         expect.objectContaining({
           "voicetracking.announcements.enabled": false,
           "quotes.enabled": false,
         }),
+        { strict: true },
       );
       expect(result.appliedKeys).toContain(
         "voicetracking.announcements.enabled",

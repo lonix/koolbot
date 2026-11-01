@@ -205,6 +205,25 @@ describe("ConfigService dependency enforcement (#663)", () => {
     });
   });
 
+  describe("findDependencyIssues() read failures (#1622)", () => {
+    it("reads state strictly on request: an unreadable dependent rejects instead of counting as off", async () => {
+      mockFindOne.mockRejectedValue(new Error("mongo down"));
+      await expect(
+        service.findDependencyIssues(
+          { "voicetracking.enabled": false },
+          { strict: true },
+        ),
+      ).rejects.toThrow("mongo down");
+    });
+
+    it("keeps the forgiving read for every other write path", async () => {
+      mockFindOne.mockRejectedValue(new Error("mongo down"));
+      await expect(
+        service.findDependencyIssues({ "voicetracking.enabled": false }),
+      ).resolves.toEqual([]);
+    });
+  });
+
   describe("findDependencyIssues() batch", () => {
     it("passes when a feature and its dependency are enabled together", async () => {
       seedConfig({ "voicetracking.enabled": false });
