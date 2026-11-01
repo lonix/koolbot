@@ -284,7 +284,7 @@ const presetSelect = (f: FormView): string =>
 // (and the "set permissions" switch) so the admin can adjust them before saving.
 // The permission groups are all open in the markup; this folds the ones with
 // nothing on (a refused form keeps them open), and keeps each "N on" in step.
-const PRESET_SCRIPT =
+export const PRESET_SCRIPT =
   "(function(){" +
   "function count(d){var n=d.querySelectorAll('input[name=perm]:checked').length;" +
   "var s=d.querySelector('.rg-perm-count');if(s)s.textContent=', '+(n?n+' on':'none on');return n}" +

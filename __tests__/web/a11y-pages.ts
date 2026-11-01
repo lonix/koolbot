@@ -738,12 +738,22 @@ function roleGroupsPermissionPages(): A11yPage[] {
   const group = ROLE_GROUPS_REFUSED_BASE.groups[0];
   const bits = (...b: bigint[]): string =>
     b.reduce((a, c) => a | c, 0n).toString();
+  // The Edit form sits in a closed "Edit" disclosure; a fixture that left it closed
+  // would hide the switches, the Callout and the disabled state from axe and the preview.
+  const openEdit = (html: string): string =>
+    html.replace(
+      /<details class="kb-disclosure">(<summary><svg[^>]*kb-chev[^>]*>(?:(?!<\/summary>).)*?Edit<span)/,
+      '<details class="kb-disclosure" open>$1',
+    );
   const page = (over: Partial<typeof group>): string =>
-    renderRoleGroupsPage({
-      ...ROLE_GROUPS_REFUSED_BASE,
-      groups: [{ ...group, ...over } as never],
-    });
-  // What `PRESET_SCRIPT` does on load: fold every group with nothing on.
+    openEdit(
+      renderRoleGroupsPage({
+        ...ROLE_GROUPS_REFUSED_BASE,
+        groups: [{ ...group, ...over } as never],
+      }),
+    );
+  // What `PRESET_SCRIPT` does on load: fold every group with nothing on
+  // (`role-groups-script.test.ts` runs the real script and checks it agrees).
   const folded = (html: string): string =>
     html.replace(
       /(<details class="kb-disclosure" data-perm-group="[a-z]+") open>(<summary>(?:(?!<\/summary>).)*?, none on<\/span><\/summary>)/g,
