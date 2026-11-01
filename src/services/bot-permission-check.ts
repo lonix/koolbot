@@ -312,7 +312,7 @@ function scheduleChannels(
   }));
 }
 
-async function defaultCall<T>(
+export async function defaultCall<T>(
   client: Client,
   fn: () => Promise<T>,
   name: string,

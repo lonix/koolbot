@@ -66,6 +66,17 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   isDebugMode: (): boolean => false,
 }));
 
+// The REST wrapper the Administrator check reads through: no backoff in tests.
+jest.unstable_mockModule("../../src/services/command-manager.js", () => ({
+  CommandManager: {
+    getInstance: (): unknown => ({
+      makeDiscordApiCall: async (
+        fn: () => Promise<unknown>,
+      ): Promise<unknown> => fn(),
+    }),
+  },
+}));
+
 jest.unstable_mockModule("../../src/services/wizard-service.js", () => ({
   WizardService: {
     getInstance: (): unknown => ({
@@ -111,9 +122,41 @@ const roleCache = new Map<
   string,
   { id: string; name: string; permissions: { bitfield: bigint } }
 >();
+/**
+ * The bot's own membership for the Administrator check (#1617). Null (the
+ * default) is a server whose members cannot be read, so the check is "unknown",
+ * which is what every older test here relies on.
+ */
+let botMember: {
+  permissionBits: bigint;
+  /** Roles in view; an empty list is a bot whose roles could not be read. */
+  roleCount: number;
+} | null = null;
+const mockFetchMe = jest.fn<() => Promise<unknown>>();
+function memberOf(m: NonNullable<typeof botMember>): unknown {
+  return {
+    permissions: {
+      has: (bit: bigint): boolean => (m.permissionBits & bit) === bit,
+    },
+    roles: { cache: { size: m.roleCount } },
+  };
+}
 const client = {
-  user: { id: "bot" },
+  user: { id: "123456789012345678" },
   guilds: {
+    cache: {
+      get: (): unknown =>
+        botMember
+          ? {
+              members: {
+                get me(): unknown {
+                  return memberOf(botMember as NonNullable<typeof botMember>);
+                },
+                fetchMe: mockFetchMe,
+              },
+            }
+          : undefined,
+    },
     fetch: async (): Promise<unknown> => ({
       roles: { fetch: async () => undefined, cache: roleCache },
     }),
@@ -139,6 +182,8 @@ beforeEach(async () => {
     permissions: { bitfield: 0x8n },
   });
   mockGetSession.mockReturnValue(null);
+  botMember = null;
+  mockFetchMe.mockReset();
   jest
     .spyOn(RoleGroupService.getInstance(), "groupBackedRoles")
     .mockImplementation(async (_g, ids) =>
@@ -781,7 +826,7 @@ describe("POST /wizard/apply", () => {
     expect(derived["aka.enabled"]).toBe(false);
   });
 
-  it("ends the session and lands on Settings after a successful apply", async () => {
+  it("ends the session and lands on the narrow-permissions step after a successful apply", async () => {
     mockGetSession.mockReturnValue(
       wizardState(["quotes"], { "quotes.enabled": true }),
     );
@@ -793,7 +838,7 @@ describe("POST /wizard/apply", () => {
     });
     const res = await harness.post("/wizard/apply");
     const flash = parseFlashRedirect(res.headers.get("location"));
-    expect(flash.path).toBe("/admin/settings");
+    expect(flash.path).toBe("/admin/wizard/done");
     expect(flash.type).toBe("ok");
     // The chosen setting plus the off switch of every unticked feature, as
     // when those were saved into the session before the apply.
@@ -913,7 +958,7 @@ describe("switching a feature's master off on a revisited step (#1622)", () => {
     const res = await harness.post("/wizard/apply", {
       cascadeOff: "voicetracking.announcements.enabled",
     });
-    expect(res.headers.get("location")).toContain("/admin/settings");
+    expect(res.headers.get("location")).toContain("/admin/wizard/done");
     expect(lastDerived()["voicetracking.announcements.enabled"]).toBe(false);
     expect(lastAudit()).toMatchObject({
       result: "success",
@@ -1040,7 +1085,7 @@ describe("a feature turned off while a part that needs it stays on (#1622)", () 
     });
     expect(mockApplyConfiguration).toHaveBeenCalledTimes(1);
     expect(lastDerived()["voicetracking.announcements.enabled"]).toBe(false);
-    expect(res.headers.get("location")).toContain("/admin/settings");
+    expect(res.headers.get("location")).toContain("/admin/wizard/done");
     expect(lastAudit()).toMatchObject({
       result: "success",
       details: { cascadeOff: ["voicetracking.announcements.enabled"] },
@@ -1088,7 +1133,7 @@ describe("a feature turned off while a part that needs it stays on (#1622)", () 
     mockApplyConfiguration.mockClear();
     mockRecordAudit.mockClear();
     const retried = await harness.post("/wizard/apply");
-    expect(retried.headers.get("location")).toContain("/admin/settings");
+    expect(retried.headers.get("location")).toContain("/admin/wizard/done");
     expect(
       lastDerived()["voicetracking.announcements.enabled"],
     ).toBeUndefined();
@@ -1158,5 +1203,259 @@ describe("POST /wizard/cancel", () => {
     expect(lastAudit()).toMatchObject({
       details: { hadSession: false, discardedKeys: [] },
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The Administrator check (#1617)
+// ---------------------------------------------------------------------------
+
+const ADMIN = 0x8n;
+const SOME_PERMISSION = 0x400n;
+const quotesState = (): Record<string, unknown> =>
+  wizardState(["quotes"], { "quotes.enabled": true });
+const applied = {
+  success: true,
+  appliedKeys: ["quotes.enabled"],
+  rolledBackKeys: [],
+  revertFailedKeys: [],
+};
+
+describe("the Administrator check on the first page and on Review (#1617)", () => {
+  it("says the bot has Administrator, with no warning", async () => {
+    botMember = { permissionBits: ADMIN, roleCount: 2 };
+    const html = await (await harness.get("/wizard")).text();
+    expect(html).toContain('data-wizard-admin="has"');
+    expect(html).toContain("The bot has Administrator");
+    expect(html).not.toContain("does not have Administrator");
+    // No Check again button, so no hidden default button either.
+    expect(html).not.toContain('hidden tabindex="-1">Next');
+  });
+
+  it("names the fix and offers Check again when Administrator is missing, with the invite link", async () => {
+    botMember = { permissionBits: SOME_PERMISSION, roleCount: 2 };
+    const html = await (await harness.get("/wizard")).text();
+    expect(html).toContain('data-wizard-admin="missing"');
+    expect(html).toContain("The bot does not have Administrator");
+    expect(html).toContain(
+      "https://discord.com/oauth2/authorize?client_id=123456789012345678&amp;permissions=8&amp;scope=bot%20applications.commands",
+    );
+    expect(html).toContain("Server Settings, then Roles");
+    expect(html).toContain('formaction="/admin/wizard/check"');
+    expect(html).toContain("Creating roles, channels and categories may fail");
+    // Enter in the form must still mean Next: a hidden Next comes before Check again.
+    const next = html.indexOf('hidden tabindex="-1">Next</button>');
+    expect(next).toBeGreaterThan(-1);
+    expect(next).toBeLessThan(html.indexOf('formaction="/admin/wizard/check"'));
+  });
+
+  it("says it could not check, and claims neither way, when the bot's membership cannot be read", async () => {
+    const html = await (await harness.get("/wizard")).text();
+    expect(html).toContain('data-wizard-admin="unknown"');
+    expect(html).toContain("Administrator could not be checked");
+    expect(html).not.toContain("The bot has Administrator");
+    expect(html).not.toContain("The bot does not have Administrator");
+  });
+
+  it("does not claim an answer when the bot's roles are not in view", async () => {
+    botMember = { permissionBits: 0n, roleCount: 0 };
+    const html = await (await harness.get("/wizard")).text();
+    expect(html).toContain('data-wizard-admin="unknown"');
+  });
+
+  it("reads the bot's membership from Discord on Check again, and uses the cache before", async () => {
+    botMember = { permissionBits: ADMIN, roleCount: 2 };
+    mockFetchMe.mockResolvedValue(
+      memberOf({ permissionBits: 0n, roleCount: 2 }),
+    );
+    await harness.get("/wizard");
+    expect(mockFetchMe).not.toHaveBeenCalled();
+    const html = await (await harness.get("/wizard?recheck=1")).text();
+    expect(mockFetchMe).toHaveBeenCalledTimes(1);
+    // The fresh read wins over the cache.
+    expect(html).toContain('data-wizard-admin="missing"');
+  });
+
+  it("says unknown, not has or lacks, when the read on Check again fails", async () => {
+    botMember = { permissionBits: ADMIN, roleCount: 2 };
+    mockFetchMe.mockRejectedValue(new Error("down"));
+    const html = await (await harness.get("/wizard?recheck=1")).text();
+    expect(html).toContain('data-wizard-admin="unknown"');
+    expect(html).toContain("Discord could not be reached.");
+  });
+
+  it("shows the same check on Review, with the Apply form joined to the continue switch", async () => {
+    botMember = { permissionBits: SOME_PERMISSION, roleCount: 2 };
+    mockGetSession.mockReturnValue(quotesState());
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).toContain('data-wizard-admin="missing"');
+    expect(html).toContain('href="/admin/wizard?step=confirm&amp;recheck=1"');
+    expect(html).toContain('name="continueWithoutAdmin"');
+    expect(html).toContain('form="wizard-apply-form"');
+    expect(html).toContain('id="wizard-apply-form"');
+    // Apply is never greyed out for this: that would be a hard block.
+    expect(html).not.toMatch(/btn-primary"[^>]* disabled>Apply/);
+  });
+
+  it("shows no continue switch on Review when the bot has Administrator or the check is unknown", async () => {
+    mockGetSession.mockReturnValue(quotesState());
+    const unknown = await (await harness.get("/wizard?step=confirm")).text();
+    expect(unknown).toContain('data-wizard-admin="unknown"');
+    expect(unknown).not.toContain("continueWithoutAdmin");
+    botMember = { permissionBits: ADMIN, roleCount: 2 };
+    const has = await (await harness.get("/wizard?step=confirm")).text();
+    expect(has).toContain('data-wizard-admin="has"');
+    expect(has).not.toContain("continueWithoutAdmin");
+  });
+
+  it("keeps the wizard's choices through Check again on Review (a reload that stores nothing)", async () => {
+    botMember = { permissionBits: SOME_PERMISSION, roleCount: 2 };
+    mockGetSession.mockReturnValue(quotesState());
+    mockFetchMe.mockResolvedValue(
+      memberOf({ permissionBits: ADMIN, roleCount: 2 }),
+    );
+    const html = await (
+      await harness.get("/wizard?step=confirm&recheck=1")
+    ).text();
+    expect(html).toContain("quotes.enabled");
+    expect(html).toContain('data-wizard-admin="has"');
+    expect(mockEndSession).not.toHaveBeenCalled();
+    expect(mockCreateSession).not.toHaveBeenCalled();
+    expect(mockAddConfiguration).not.toHaveBeenCalled();
+    expect(mockRemoveConfiguration).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /wizard/check keeps the ticked features (#1617)", () => {
+  it("redirects back with the recognised features and saves nothing", async () => {
+    const res = await harness.post("/wizard/check", {
+      features: ["quotes", "polls", "not-a-feature"],
+    });
+    expect(res.headers.get("location")).toBe(
+      "/admin/wizard?recheck=1&ticked=quotes%2Cpolls",
+    );
+    expect(mockCreateSession).not.toHaveBeenCalled();
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("works with nothing ticked", async () => {
+    const res = await harness.post("/wizard/check", {});
+    expect(res.headers.get("location")).toBe("/admin/wizard?recheck=1");
+  });
+
+  it("ticks the features again on the first page and ignores unknown names", async () => {
+    const html = await (
+      await harness.get("/wizard?recheck=1&ticked=quotes,polls,<b>x</b>")
+    ).text();
+    expect(html).toMatch(/value="quotes" id="feat-quotes" checked/);
+    expect(html).toMatch(/value="polls" id="feat-polls" checked/);
+    expect(html).not.toMatch(/value="lfg" id="feat-lfg" checked/);
+    expect(html).not.toContain("<b>x</b>");
+  });
+});
+
+describe("POST /wizard/apply and Administrator (#1617)", () => {
+  it("refuses back to Review, with the session and choices kept, when Administrator is missing and not confirmed", async () => {
+    botMember = { permissionBits: SOME_PERMISSION, roleCount: 2 };
+    mockFetchMe.mockResolvedValue(memberOf(botMember));
+    mockGetSession.mockReturnValue(quotesState());
+    const res = await harness.post("/wizard/apply");
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("step=confirm");
+    const flash = parseFlashRedirect(location);
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("Nothing was applied");
+    expect(flash.msg).toContain("Continue without Administrator");
+    expect(flash.msg).not.toMatch(/[`*]/);
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    expect(mockEndSession).not.toHaveBeenCalled();
+    expect(lastAudit()).toMatchObject({
+      action: "wizard.apply",
+      details: { stage: "administrator" },
+      result: "failure",
+    });
+  });
+
+  it("applies when Administrator is missing and the admin chose Continue without Administrator", async () => {
+    botMember = { permissionBits: SOME_PERMISSION, roleCount: 2 };
+    mockFetchMe.mockResolvedValue(memberOf(botMember));
+    mockGetSession.mockReturnValue(quotesState());
+    mockApplyConfiguration.mockResolvedValue(applied);
+    const res = await harness.post("/wizard/apply", {
+      continueWithoutAdmin: "1",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).path).toBe(
+      "/admin/wizard/done",
+    );
+    expect(mockApplyConfiguration).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not take a switch posted without 1 as the choice", async () => {
+    botMember = { permissionBits: SOME_PERMISSION, roleCount: 2 };
+    mockFetchMe.mockResolvedValue(memberOf(botMember));
+    mockGetSession.mockReturnValue(quotesState());
+    await harness.post("/wizard/apply", { continueWithoutAdmin: "0" });
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("reads the bot again at Apply: an admin who fixed it in Discord is not stopped", async () => {
+    botMember = { permissionBits: SOME_PERMISSION, roleCount: 2 };
+    mockFetchMe.mockResolvedValue(
+      memberOf({ permissionBits: ADMIN, roleCount: 2 }),
+    );
+    mockGetSession.mockReturnValue(quotesState());
+    mockApplyConfiguration.mockResolvedValue(applied);
+    await harness.post("/wizard/apply");
+    expect(mockApplyConfiguration).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies when the bot has Administrator and a stray continue switch is posted", async () => {
+    botMember = { permissionBits: ADMIN, roleCount: 2 };
+    mockFetchMe.mockResolvedValue(memberOf(botMember));
+    mockGetSession.mockReturnValue(quotesState());
+    mockApplyConfiguration.mockResolvedValue(applied);
+    await harness.post("/wizard/apply", { continueWithoutAdmin: "1" });
+    expect(mockApplyConfiguration).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not block Apply when the check cannot be made (lookup failing)", async () => {
+    botMember = { permissionBits: ADMIN, roleCount: 2 };
+    mockFetchMe.mockRejectedValue(new Error("down"));
+    mockGetSession.mockReturnValue(quotesState());
+    mockApplyConfiguration.mockResolvedValue(applied);
+    await harness.post("/wizard/apply");
+    expect(mockApplyConfiguration).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("GET /wizard/done: the optional narrowing step (#1617)", () => {
+  it("renders, says it only reads, and links to Bot permissions", async () => {
+    botMember = { permissionBits: ADMIN, roleCount: 2 };
+    const res = await harness.get("/wizard/done");
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Narrow the bot's permissions");
+    expect(html).toContain('href="/admin/bot-permissions"');
+    expect(html).toContain("The bot still has Administrator");
+    // The check cannot run against the test client, and the page says so.
+    expect(html).toContain("could not be checked");
+    // A read-only page: no form posts anything.
+    expect(html).not.toContain('method="POST" action="/admin/wizard');
+  });
+
+  it("shows the flash and the Event host job link, and ignores a job id that is not an id", async () => {
+    const ok = await (await harness.get("/wizard/done?job=abc-123_DEF")).text();
+    expect(ok).toContain("/admin/role-groups?job=abc-123_DEF");
+    const bad = await (
+      await harness.get("/wizard/done?job=%22%3E%3Cscript%3E")
+    ).text();
+    expect(bad).not.toContain("/admin/role-groups?job=");
+    expect(bad).not.toContain("<script>x");
+  });
+
+  it("says there is nothing to swap when the bot does not have Administrator", async () => {
+    botMember = { permissionBits: SOME_PERMISSION, roleCount: 2 };
+    const html = await (await harness.get("/wizard/done")).text();
+    expect(html).toContain("There is nothing to swap");
   });
 });

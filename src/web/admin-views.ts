@@ -159,6 +159,11 @@ import {
   renderDependencyReview,
   type WizardDependencyReview,
 } from "./wizard-dependencies-view.js";
+import {
+  renderAdministratorCallout,
+  renderAdministratorContinue,
+} from "./wizard-admin-view.js";
+import type { AdministratorCheck } from "../services/wizard-admin-check.js";
 import type { HostReview } from "../services/wizard-host-role.js";
 import {
   renderPermissionNotice,
@@ -2322,9 +2327,19 @@ ${renderFlash(props.flash)}
 
 // ---------- Setup Wizard ----------
 
+/** The Administrator check the wizard shows (#1617): the result and the invite link that fixes it. */
+export interface WizardAdminProps {
+  check: AdministratorCheck;
+  inviteUrl: string | null;
+}
+
 export interface WizardPageProps extends CommonProps {
   featureOrder: string[];
   featureStatus: Record<string, boolean>;
+  /** Whether the bot has Administrator (#1617); absent when the page is drawn without a check. */
+  admin?: WizardAdminProps;
+  /** Features to tick again after *Check again*, so the check loses no choice. */
+  ticked?: readonly string[];
 }
 
 const WIZARD_FEATURE_LABELS: Record<string, { name: string; desc: string }> = {
@@ -2411,8 +2426,9 @@ export function renderWizardPage(props: WizardPageProps): string {
       const currentlyOn = Boolean(props.featureStatus[fk]);
       const indicator = `<span class="fc-current">${tagOnOff(currentlyOn)}</span>`;
       const id = `feat-${fk}`;
+      const tick = props.ticked?.includes(fk) ? " checked" : "";
       return `<div class="feature-card">
-  <input type="checkbox" name="features" value="${escapeHtml(fk)}" id="${escapeHtml(id)}">
+  <input type="checkbox" name="features" value="${escapeHtml(fk)}" id="${escapeHtml(id)}"${tick}>
   <div class="fc-info">
     <label for="${escapeHtml(id)}" class="fc-name">${escapeHtml(info.name)} ${indicator}</label>
     <div class="fc-desc">${escapeHtml(info.desc)}</div>
@@ -2421,6 +2437,22 @@ export function renderWizardPage(props: WizardPageProps): string {
     })
     .join("");
 
+  // Empty when the page is drawn without a check, so nothing else moves (#1617).
+  const adminHtml = props.admin
+    ? `${renderAdministratorCallout({
+        check: props.admin.check,
+        inviteUrl: props.admin.inviteUrl,
+        stage: "start",
+        checkAgain: { kind: "button", formaction: "/admin/wizard/check" },
+      })}\n  `
+    : "";
+  // Check again is a submit button that sits before Next in the form, so Enter
+  // in a field would press it. A hidden Next ahead of it keeps Enter meaning
+  // Next (the default button is the first submit button in the form).
+  const defaultNext =
+    props.admin && props.admin.check.state !== "has"
+      ? `<button type="submit" hidden tabindex="-1">Next</button>\n  `
+      : "";
   const body = `
 <h1>Setup Wizard</h1>
 ${renderWizardSteps("features")}
@@ -2440,7 +2472,7 @@ ${renderWizardSteps("features")}
 </div>
 <form method="POST" action="/admin/wizard/start">
   <input type="hidden" name="_csrf" value="${csrf}">
-  <div class="card">
+  ${defaultNext}${adminHtml}<div class="card">
     <h2>Select features to configure</h2>
     <div class="wizard-features">${cards}</div>
   </div>
@@ -2693,6 +2725,8 @@ export interface WizardConfirmPageProps extends CommonProps {
   hostRole?: HostReview | null;
   /** What turning features off needs or refuses (#1622); null when it could not be checked. */
   dependencies?: WizardDependencyReview | null;
+  /** Whether the bot has Administrator (#1617); absent when the page is drawn without a check. */
+  admin?: WizardAdminProps;
   flash?: FlashMessage | null;
 }
 
@@ -2720,12 +2754,29 @@ export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
   // without dependency conflicts renders exactly as before (#1622).
   const dependencyReview = renderDependencyReview(props.dependencies);
   const dependencyHtml = dependencyReview ? `${dependencyReview}\n` : "";
+  // The Administrator check (#1617). The continue switch sits outside the Apply
+  // form and joins it by id, like the dependency review's confirm switch.
+  const adminCheck = props.admin?.check;
+  const adminContinue = adminCheck
+    ? renderAdministratorContinue(adminCheck, WIZARD_APPLY_FORM_ID)
+    : "";
+  const adminHtml = props.admin
+    ? `${renderAdministratorCallout({
+        check: props.admin.check,
+        inviteUrl: props.admin.inviteUrl,
+        stage: "review",
+        checkAgain: {
+          kind: "link",
+          href: "/admin/wizard?step=confirm&recheck=1",
+        },
+      })}\n${adminContinue ? `${adminContinue}\n` : ""}`
+    : "";
   const body = `
 ${renderWizardSteps("review")}
 <h1>Review configuration</h1>
 <p class="subtitle">The following settings will be applied when you click <strong>Apply</strong>.</p>
 ${renderFlash(props.flash)}
-${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGaps ?? [], hostRole)}
+${adminHtml}${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGaps ?? [], hostRole)}
 ${dependencyHtml}<div class="card">
   <table>
     <thead><tr><th scope="col">Key</th><th scope="col">New value</th><th scope="col">Description</th></tr></thead>
@@ -2733,7 +2784,7 @@ ${dependencyHtml}<div class="card">
   </table>
 </div>
 <div class="actions">
-  <form method="POST" action="/admin/wizard/apply"${dependencyHtml ? ` id="${WIZARD_APPLY_FORM_ID}"` : ""}>
+  <form method="POST" action="/admin/wizard/apply"${dependencyHtml || adminContinue ? ` id="${WIZARD_APPLY_FORM_ID}"` : ""}>
     <input type="hidden" name="_csrf" value="${csrf}">
     ${props.accessFingerprint ? `<input type="hidden" name="accessFingerprint" value="${escapeHtml(props.accessFingerprint)}">` : ""}
     ${hostRole?.planId ? `<input type="hidden" name="hostPlanId" value="${escapeHtml(hostRole.planId)}">` : ""}

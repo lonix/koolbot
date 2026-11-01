@@ -145,7 +145,8 @@ Review bot permissions carefully:
 - **Voice features**: `ManageChannels`, `MoveMembers`
 - **Moderation features**: `ViewAuditLog`, `ModerateMembers`, `BanMembers`
 - **Reaction roles / role rewards**: `ManageRoles`
-- **Avoid**: `Administrator` (use specific permissions instead)
+- **Administrator**: fine to start with (the Setup wizard asks for it), but it is more than the bot needs. Narrow the bot to the permissions above once
+  the wizard has applied (the Web UI's **Bot permissions** page lists what your features need)
 
 ### Guild Scope and Public Bot
 

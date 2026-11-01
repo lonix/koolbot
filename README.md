@@ -111,7 +111,8 @@ KoolBot ignores events from other servers, but you should also turn the option o
   Set **Install Link** to **None** (or **Discord Provided Link** only while you invite it yourself).
 - Optional: enable `core.guild_scope.leave_other_guilds` in the Web UI to make the bot leave any server other
   than `GUILD_ID`. It is off by default. See [SECURITY.md](SECURITY.md#guild-scope-and-public-bot).
-- Invite the bot with least-privilege permissions, never Administrator. See
+- Invite the bot with the permissions your features need. Administrator is fine to start with: the Setup wizard asks for it and,
+  once you have applied it, shows how to narrow the bot to what your features need. See
   [TROUBLESHOOTING.md](TROUBLESHOOTING.md#bot-has-no-permissions) for the invite link.
 
 ### 3. **Start with Docker Compose**
