@@ -164,7 +164,14 @@ export class CommandManager {
     }
   }
 
-  private async loadCommandsDynamically(): Promise<unknown[]> {
+  /**
+   * The commands the switched-on features need. `strict` is for the read-only
+   * sync check (#1638): a gate that cannot be read, or a command that cannot
+   * be loaded, rejects instead of being skipped, so the check says unknown
+   * rather than reporting an enabled command as "to remove". Registration and
+   * start-up keep the forgiving read.
+   */
+  private async loadCommandsDynamically(strict = false): Promise<unknown[]> {
     try {
       const commands = [];
       const enabledCommands = [];
@@ -174,7 +181,9 @@ export class CommandManager {
       for (const config of COMMAND_CONFIGS) {
         try {
           const shouldEnable = await isCommandEnabled(config, (key, def) =>
-            this.configService.getBoolean(key, def),
+            strict
+              ? this.configService.getBooleanStrict(key, def)
+              : this.configService.getBoolean(key, def),
           );
 
           if (shouldEnable) {
@@ -192,6 +201,7 @@ export class CommandManager {
             logger.debug(`✗ /${config.name} command disabled`);
           }
         } catch (error) {
+          if (strict) throw error;
           logger.warn(`Failed to load command ${config.name}:`, error);
         }
       }
@@ -202,13 +212,15 @@ export class CommandManager {
 
       return commands;
     } catch (error) {
+      // The check reports its own failure as "unknown"; it is not an error log.
+      if (strict) throw error;
       logger.error("Error loading commands dynamically:", error);
       throw error;
     }
   }
 
-  private async getEnabledCommands(): Promise<unknown[]> {
-    return this.loadCommandsDynamically();
+  private async getEnabledCommands(strict = false): Promise<unknown[]> {
+    return this.loadCommandsDynamically(strict);
   }
 
   // Helper function to make Discord API calls with timeout and retry logic.
@@ -369,7 +381,7 @@ export class CommandManager {
   /**
    * Compare the registered guild commands with the desired list, read-only
    * (#1638): one GET, no PUT, and the bot's own command table is not touched.
-   * Reuses `getEnabledCommands()` and the projection of `commandListsMatch`.
+   * Reuses `getEnabledCommands(true)` (strict gate reads) and the projection of `commandListsMatch`.
    * The result is cached per instance for `COMMAND_SYNC_TTL_MS` and concurrent
    * callers share one read, so a busy Dashboard sends one request a minute. It
    * never rejects: any failure is `unknown`, with a reason in plain words.
@@ -427,7 +439,7 @@ export class CommandManager {
       }
       let desired: unknown[];
       try {
-        desired = await this.getEnabledCommands();
+        desired = await this.getEnabledCommands(true);
       } catch (error) {
         logger.debug("Sync check could not load the desired commands:", error);
         return unknown("the commands the bot should have could not be read");

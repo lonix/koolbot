@@ -756,7 +756,13 @@ export function createSettingsRouter(client: Client): Router {
             // gates a slash command: the status line beside Reload commands
             // (#1638) would still describe the old state, so the page reloads
             // and reads it again.
-            changedKeys.some((k) => COMMAND_GATING_KEYS.has(k))
+            // A gate whose prior value could not be read counts as changed: the
+            // default it falls back to may hide a real flip.
+            applied.some(
+              (a) =>
+                COMMAND_GATING_KEYS.has(a.key) &&
+                (changedKeys.includes(a.key) || unknownBefore.has(a.key)),
+            )
           : changedKeys.some((k) => k.endsWith(".enabled")) ||
             applied.some(
               (a) =>

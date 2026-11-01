@@ -242,6 +242,70 @@ describe("CommandManager.checkCommandSync (#1638)", () => {
     expectNoWrite();
   });
 
+  describe("a command gate that cannot be read (#1638)", () => {
+    beforeEach(() => {
+      // The real loader, so the gate reads are the ones under test.
+      delete (manager as unknown as { getEnabledCommands?: unknown })
+        .getEnabledCommands;
+    });
+
+    const gates = (
+      strict: () => Promise<boolean>,
+      lenient: () => Promise<boolean>,
+    ): void => {
+      (manager as unknown as { configService: unknown }).configService = {
+        getString: async (key: string) => values[key] ?? "",
+        getBoolean: lenient,
+        getBooleanStrict: strict,
+      };
+    };
+
+    it("is unknown, never out of sync, when a gate read fails", async () => {
+      gates(
+        async () => {
+          throw new Error("db down");
+        },
+        async () => false,
+      );
+      getSpy.mockResolvedValue([echo("ping")]);
+      const report = await manager.checkCommandSync();
+      expect(report).toMatchObject({ state: "unknown" });
+      expect(report.state === "unknown" && report.reason).toContain(
+        "could not be read",
+      );
+      expectNoWrite();
+    });
+
+    it("registration keeps its forgiving read (control)", async () => {
+      gates(
+        async () => {
+          throw new Error("db down");
+        },
+        async () => {
+          throw new Error("db down");
+        },
+      );
+      getSpy.mockResolvedValue([]);
+      await expect(manager.registerCommands()).resolves.toBeUndefined();
+    });
+
+    it("reads every gate strictly for the check and leniently for registration", async () => {
+      const strict = jest.fn(async () => false);
+      const lenient = jest.fn(async () => false);
+      gates(strict, lenient);
+      getSpy.mockResolvedValue([]);
+      // The always-on commands (help, config, me) are not in Discord's empty
+      // list, so this is out of sync; what matters is that it was read.
+      expect((await manager.checkCommandSync()).state).toBe("out-of-sync");
+      expect(strict).toHaveBeenCalled();
+      expect(lenient).not.toHaveBeenCalled();
+      strict.mockClear();
+      await manager.registerCommands();
+      expect(lenient).toHaveBeenCalled();
+      expect(strict).not.toHaveBeenCalled();
+    });
+  });
+
   it("a read that started before an invalidation cannot refill the cache", async () => {
     let finish: (v: unknown) => void = () => undefined;
     getSpy.mockImplementationOnce(
