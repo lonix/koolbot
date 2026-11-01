@@ -1,4 +1,7 @@
+/* global Document, HTMLInputElement, HTMLDetailsElement, Node */
 import { describe, it, expect } from "@jest/globals";
+import { JSDOM } from "jsdom";
+import { PermissionFlagsBits, PermissionsBitField } from "discord.js";
 import { orderToken } from "../../src/web/reorder-view.js";
 import {
   renderAdminFixPage,
@@ -115,9 +118,10 @@ describe("renderRoleGroupsPage", () => {
     // ... but the form still posts it, so nothing stored changes.
     expect(html).toContain('name="capability" value="staff" checked');
     expect(html).toContain('name="capability" value="host" checked');
-    expect(html).toContain("> Moderator</label>");
-    expect(html).toContain("> Event host</label>");
-    expect(html).not.toContain("> staff</label>");
+    // The row's name is the UI name (#1615: the label text moved into the SettingRow name).
+    expect(html).toMatch(/class="kb-setting__name"[^>]*>Moderator<\/p>/);
+    expect(html).toMatch(/class="kb-setting__name"[^>]*>Event host<\/p>/);
+    expect(html).not.toMatch(/class="kb-setting__name"[^>]*>staff<\/p>/);
   });
 
   it("offers an Event host preset that ticks host and nothing else (#1316)", () => {
@@ -197,7 +201,12 @@ describe("renderRoleGroupsPage", () => {
     );
     expect(edits).toHaveLength(2);
     // One summary per row: Delete is a button, not a second disclosure.
-    expect(html.match(/<summary>/g) ?? []).toHaveLength(2);
+    // (The permission groups of the form are disclosures too, marked data-perm-group: #1615.)
+    expect(
+      html.match(
+        /<details class="kb-disclosure"(?![^>]*data-perm-group)[^>]*><summary>/g,
+      ) ?? [],
+    ).toHaveLength(2);
   });
 
   it("keeps a refused edit form open (#1616)", () => {
@@ -723,5 +732,233 @@ describe("renderRoleDeletePage (#1184)", () => {
     expect(renderRoleDeletePage(p())).toContain(
       'name="reviewToken" value="review-token"',
     );
+  });
+});
+
+// Capabilities and Discord permissions are SettingRows with Switches (#1615).
+describe("Role groups form switches (#1615)", () => {
+  const forms = (html: string): { create: string; edit: string } => {
+    const doc = new JSDOM(html).window.document;
+    const pick = (suffix: string): string =>
+      doc.querySelector(`form[action$="${suffix}"]`)?.outerHTML ?? "";
+    return { create: pick("/role-groups/create"), edit: pick("/g1/edit") };
+  };
+  const doc = (html: string): Document => new JSDOM(html).window.document;
+
+  it("draws no stacked checkbox in the create and edit forms", () => {
+    const { create, edit } = forms(renderRoleGroupsPage(props()));
+    expect(create).not.toContain('class="check"');
+    expect(edit).not.toContain('class="check"');
+    // The legacy form.stack rule would column-stack a label.kb-switch.
+    expect(create).not.toMatch(/<form[^>]*class="stack"/);
+    expect(edit).not.toMatch(/<form[^>]*class="stack"/);
+  });
+
+  it("draws each capability as a SettingRow with a Switch: name and the Access step's line left, switch right", () => {
+    const d = doc(forms(renderRoleGroupsPage(props())).edit);
+    const rows = [...d.querySelectorAll(".kb-setting")].filter((r) =>
+      r.querySelector('input[name="capability"]'),
+    );
+    expect(
+      rows.map((r) => r.querySelector(".kb-setting__name")?.textContent),
+    ).toEqual(["Admin", "Moderator", "Event host", "Bot"]);
+    expect(rows[0].querySelector(".kb-setting__desc")?.textContent).toBe(
+      "Change every setting and run the setup wizard",
+    );
+    for (const r of rows) {
+      const input = r.querySelector<HTMLInputElement>("input");
+      expect(input?.getAttribute("role")).toBe("switch");
+      expect(
+        r.querySelector(".kb-setting__control .kb-switch__state"),
+      ).not.toBeNull();
+      // The row's name names the switch.
+      const labelled = input?.getAttribute("aria-labelledby") ?? "";
+      expect(d.getElementById(labelled)?.textContent).toBe(
+        r.querySelector(".kb-setting__name")?.textContent,
+      );
+    }
+    expect(
+      d.querySelector('input[value="staff"]')?.hasAttribute("checked"),
+    ).toBe(true);
+    expect(
+      d.querySelector('input[value="admin"]')?.hasAttribute("checked"),
+    ).toBe(false);
+  });
+
+  it("disables the capability switches of a gate-only group and says why beside them", () => {
+    const d = doc(
+      forms(
+        renderRoleGroupsPage(
+          props({ groups: [row({ gateOnly: true, capabilities: [] })] }),
+        ),
+      ).edit,
+    );
+    const boxes = [
+      ...d.querySelectorAll<HTMLInputElement>('input[name="capability"]'),
+    ];
+    expect(boxes).toHaveLength(4);
+    expect(boxes.every((b) => b.disabled)).toBe(true);
+    expect(d.body.textContent).toContain("gate-only");
+    const help = d.querySelector(".kb-help[id$='capability-help']");
+    expect(help?.textContent).toMatch(/gating/);
+    for (const b of boxes) {
+      expect(b.getAttribute("aria-describedby")).toContain(help?.id ?? "?");
+    }
+  });
+
+  it("keeps every element id on the page unique across the create and edit forms", () => {
+    const html = renderRoleGroupsPage(
+      props({ groups: [row(), row({ id: "g2", name: "Other" })] }),
+    );
+    const ids = [...doc(html).querySelectorAll("[id]")].map((e) => e.id);
+    expect(ids.filter((id, i) => ids.indexOf(id) !== i)).toEqual([]);
+  });
+
+  it("draws one switch per permission bit, once, under its group", () => {
+    const d = doc(forms(renderRoleGroupsPage(props())).edit);
+    const perms = [
+      ...d.querySelectorAll<HTMLInputElement>('input[name="perm"]'),
+    ];
+    expect(perms).toHaveLength(52);
+    expect(new Set(perms.map((p) => p.value)).size).toBe(52);
+    // Human names, not flag names.
+    const names = [...d.querySelectorAll(".kb-setting__name")].map(
+      (n) => n.textContent,
+    );
+    expect(names).toContain("Manage Server");
+    expect(names).not.toContain("ManageGuild");
+    expect(perms.every((p) => p.getAttribute("role") === "switch")).toBe(true);
+  });
+
+  it("groups permissions in collapsible disclosures whose summary counts the ones on", () => {
+    // ModerateMembers (Membership) and SendMessages + ManageMessages (Text channels)
+    const bits = (
+      PermissionFlagsBits.ModerateMembers |
+      PermissionFlagsBits.SendMessages |
+      PermissionFlagsBits.ManageMessages
+    ).toString();
+    const d = doc(
+      forms(
+        renderRoleGroupsPage(props({ groups: [row({ permissions: bits })] })),
+      ).edit,
+    );
+    const groups = [
+      ...d.querySelectorAll<HTMLDetailsElement>("details[data-perm-group]"),
+    ];
+    expect(groups.map((g) => g.dataset.permGroup)).toEqual([
+      "general",
+      "membership",
+      "text",
+      "voice",
+      "stage",
+      "apps",
+      "events",
+      "advanced",
+    ]);
+    const summary = (key: string): string =>
+      groups.find((g) => g.dataset.permGroup === key)?.querySelector("summary")
+        ?.textContent ?? "";
+    expect(summary("text")).toContain("Text channels, 2 on");
+    expect(summary("membership")).toContain("Membership, 1 on");
+    expect(summary("voice")).toContain("Voice channels, none on");
+    for (const g of groups) {
+      expect(g.classList.contains("kb-disclosure")).toBe(true);
+      // Without JavaScript every group is open; the page script folds the quiet ones.
+      expect(g.hasAttribute("open")).toBe(true);
+      expect(g.querySelector(".kb-overline, summary")).not.toBeNull();
+    }
+  });
+
+  it("puts Administrator last in Advanced, under a warn Callout", () => {
+    const d = doc(forms(renderRoleGroupsPage(props())).edit);
+    const advanced = d.querySelector('details[data-perm-group="advanced"]');
+    const inputs = [
+      ...(advanced?.querySelectorAll('input[name="perm"]') ?? []),
+    ];
+    expect((inputs.at(-1) as HTMLInputElement).value).toBe("Administrator");
+    const callout = advanced?.querySelector(".kb-callout.kb-callout--warn");
+    expect(callout).not.toBeNull();
+    // Above the switch, not after it; plain text, no markdown.
+    const after = callout!.compareDocumentPosition(inputs.at(-1) as Node);
+    expect(after & 4).toBeTruthy();
+    expect(callout!.textContent).not.toMatch(/[`*]/);
+  });
+
+  it("keeps every group open in a refused form so focus can reach an invalid control", () => {
+    const html = renderRoleGroupsPage(
+      props({
+        refusedForm: {
+          formId: "role-group-edit-g1",
+          errors: { name: "Taken." },
+          values: { name: "Mods" },
+        },
+      }),
+    );
+    const d = doc(forms(html).edit);
+    expect(d.querySelectorAll("details[data-perm-group]")).toHaveLength(8);
+    expect(
+      [...d.querySelectorAll("details[data-perm-group]")].every((g) =>
+        g.hasAttribute("data-keep-open"),
+      ),
+    ).toBe(true);
+  });
+
+  it("renders the permission Switch for a refused form from what was posted", () => {
+    const html = renderRoleGroupsPage(
+      props({
+        refusedForm: {
+          formId: "role-group-create",
+          errors: { name: "Taken." },
+          values: { name: "x", "perm-BanMembers": "1", editPermissions: "1" },
+        },
+      }),
+    );
+    const d = doc(forms(html).create);
+    expect(
+      d.querySelector('input[value="BanMembers"]')?.hasAttribute("checked"),
+    ).toBe(true);
+    expect(
+      d.querySelector('input[value="KickMembers"]')?.hasAttribute("checked"),
+    ).toBe(false);
+    expect(
+      d.querySelector('input[name="editPermissions"]')?.getAttribute("role"),
+    ).toBe("switch");
+  });
+
+  it("lets a preset tick the switches and keeps each group's count in step", () => {
+    const html = renderRoleGroupsPage(props());
+    expect(html).toContain("input[name=perm]");
+    expect(html).toContain("input[name=capability]");
+    expect(html).toContain("rg-perm-count");
+  });
+
+  it("round-trips the stored bits: the ticked switches are exactly the stored permissions", () => {
+    const stored = [
+      "0",
+      "8",
+      (
+        PermissionFlagsBits.BanMembers |
+        PermissionFlagsBits.ManageGuildExpressions
+      ).toString(),
+      (
+        PermissionFlagsBits.ModerateMembers |
+        PermissionFlagsBits.UseExternalApps |
+        PermissionFlagsBits.BypassSlowmode
+      ).toString(),
+      PermissionsBitField.All.toString(),
+    ];
+    for (const bits of stored) {
+      const d = doc(
+        forms(
+          renderRoleGroupsPage(props({ groups: [row({ permissions: bits })] })),
+        ).edit,
+      );
+      const ticked = [
+        ...d.querySelectorAll<HTMLInputElement>('input[name="perm"]:checked'),
+      ].map(
+        (i) => PermissionFlagsBits[i.value as keyof typeof PermissionFlagsBits],
+      );
+      expect(ticked.reduce((a, b) => a | b, 0n).toString()).toBe(bits);
+    }
   });
 });
