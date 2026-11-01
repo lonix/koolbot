@@ -1330,6 +1330,20 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
       });
     }
 
+    it("the periodic sweep drops the link of a waiting room whose main room is gone, then sweeps it (#1673)", async () => {
+      settings["voicechannels.cleanup.managed_only"] = true;
+      markMigrated();
+      const { main, waiting } = await setupPair(1);
+      // The room went while a new waiting room was being made for it.
+      guildChannels.delete(main.id);
+      category.children.cache.delete(main.id);
+
+      await manager.cleanupEmptyChannels();
+
+      expect(waiting.delete).toHaveBeenCalled();
+      expect(manager.getMainChannelForWaitingRoom(waiting.id)).toBeUndefined();
+    });
+
     it("treats rows without mainChannelId as before (empty waiting room swept)", async () => {
       settings["voicechannels.cleanup.managed_only"] = true;
       markMigrated();

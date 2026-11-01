@@ -13,6 +13,7 @@ jest.mock("../../src/services/config-service.js");
 
 import { VoiceChannelManager } from "../../src/services/voice-channel-manager.js";
 import { ConfigService } from "../../src/services/config-service.js";
+import { ManagedVoiceChannel } from "../../src/models/managed-voice-channel.js";
 
 const mockConfigService =
   ConfigService.getInstance() as jest.Mocked<ConfigService>;
@@ -279,6 +280,9 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
       (manager as any).waitingRoomToMain.set("replacement-id", "main-id");
       slow.resolve();
       await run;
+      // The room stays: its new waiting room must not be left linked to a
+      // deleted room (the next pass deletes both once they are empty).
+      expect(main.delete).not.toHaveBeenCalled();
       expect((manager as any).waitingRooms.get("main-id")).toBe(
         "replacement-id",
       );
@@ -405,6 +409,36 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
       );
       expect(main.delete).toHaveBeenCalledTimes(1);
       expect(waiting.delete).not.toHaveBeenCalled();
+    });
+
+    it("a restore still reading when destroy() runs applies nothing and sets no flag", async () => {
+      setup(false);
+      (manager as any).waitingRooms.clear();
+      (manager as any).waitingRoomToMain.clear();
+      (manager as any).waitingRoomLinksRestored = false;
+      (manager as any).isDbReady = () => true;
+      const rows = deferred<unknown[]>();
+      const find = jest
+        .spyOn(ManagedVoiceChannel as any, "find")
+        .mockReturnValue(rows.promise as never);
+      try {
+        const restore = (manager as any).ensureWaitingRoomLinks(main.guild);
+        manager.destroy(); // the shutdown sequence reached destroy()
+        rows.resolve([{ channelId: "waiting-id", mainChannelId: "main-id" }]);
+        expect(await restore).toBe(false);
+        expect((manager as any).waitingRooms.size).toBe(0);
+        expect((manager as any).waitingRoomToMain.size).toBe(0);
+        expect((manager as any).waitingRoomLinksRestored).toBe(false);
+        await manager.deleteEmptyChannelsOnShutdown(
+          main.guild,
+          categoryOf(main, waiting),
+          "Lobby",
+        );
+        expect(main.delete).not.toHaveBeenCalled();
+        expect(waiting.delete).not.toHaveBeenCalled();
+      } finally {
+        find.mockRestore();
+      }
     });
 
     it("control: deletes an empty room and an empty waiting room, never the lobby", async () => {

@@ -1274,6 +1274,8 @@ export class VoiceChannelManager {
   private waitingRoomLinksRestored = false;
   /** A background links restore started by a live cleanup (#1673), if any. */
   private linksRestoreInFlight: Promise<boolean> | null = null;
+  /** Bumped by destroy(): a restore started before it must not apply its result. */
+  private linksGeneration = 0;
 
   /**
    * Idempotent gate for every pass that may delete channels (startup sweeps and
@@ -1293,6 +1295,7 @@ export class VoiceChannelManager {
       );
       return false;
     }
+    const generation = this.linksGeneration;
     try {
       const rows = await ManagedVoiceChannel.find(
         {
@@ -1302,6 +1305,8 @@ export class VoiceChannelManager {
         },
         { channelId: 1, mainChannelId: 1 },
       );
+      // destroy() ran while the read was pending: apply nothing, set no flag.
+      if (generation !== this.linksGeneration) return false;
       for (const row of rows) {
         if (!row.mainChannelId) continue;
         if (
@@ -3071,8 +3076,10 @@ export class VoiceChannelManager {
           this.waitingRoomToMain.delete(waitingRoomId);
         }
         await this.forgetManagedChannel(waitingRoomId).catch(() => undefined);
-        // Someone may have joined the room meanwhile: it stays.
-        if (channel.members.size !== 0) {
+        // Someone may have joined the room meanwhile, or the owner made a new
+        // waiting room (its link was kept above): the room stays, and the
+        // next pass deletes it once everything is empty.
+        if (channel.members.size !== 0 || this.waitingRooms.has(channel.id)) {
           this.channelsBeingDeleted.delete(channel.id);
           return;
         }
@@ -3954,6 +3961,9 @@ export class VoiceChannelManager {
 
       // Never delete before the waiting-room links are known (#1085).
       if (!(await this.ensureWaitingRoomLinks(guild))) return false;
+      // Drop links whose main room is gone (a waiting room made while its room
+      // was being deleted, #1673), so the waiting room is swept like any other.
+      await this.pruneStaleWaitingRooms(guild);
 
       // Event channels belong to the event service (#1190); with no list of
       // them, delete nothing.
@@ -4684,5 +4694,6 @@ export class VoiceChannelManager {
     this.waitingRoomToMain.clear();
     this.waitingRoomLinksRestored = false;
     this.linksRestoreInFlight = null;
+    this.linksGeneration++;
   }
 }
