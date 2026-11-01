@@ -34,6 +34,7 @@ function clientWith(opts: {
   fetchGuild?: () => Promise<unknown>;
 }): Client {
   const guild = {
+    roles: { fetch: async (): Promise<unknown> => [] },
     members: { me: opts.me ?? null, fetchMe: opts.fetchMe ?? jest.fn() },
   };
   return {
@@ -123,5 +124,79 @@ describe("administratorInviteUrl", () => {
     expect(
       administratorInviteUrl({ user: { id: "1&x=" } } as unknown as Client),
     ).toBeNull();
+  });
+});
+
+describe("checkBotAdministrator reads the roles again on refresh", () => {
+  /** A member whose permissions come from a role cache that is stale until the roles are fetched. */
+  function staleRoles(opts: { rolesFetch: () => Promise<unknown> }): {
+    client: Client;
+    fetched: () => boolean;
+  } {
+    let fresh = false;
+    const me = {
+      permissions: { has: (b: bigint): boolean => fresh && (ADMIN & b) === b },
+      roles: { cache: { size: 2 } },
+    };
+    const guild = {
+      roles: {
+        fetch: async (): Promise<unknown> => {
+          const out = await opts.rolesFetch();
+          fresh = true;
+          return out;
+        },
+      },
+      members: { me, fetchMe: async (): Promise<unknown> => me },
+    };
+    return {
+      client: {
+        guilds: { cache: { get: (): unknown => guild } },
+      } as unknown as Client,
+      fetched: () => fresh,
+    };
+  }
+
+  it("has: Check again after Administrator was switched on sees it once the roles are fetched", async () => {
+    const { client, fetched } = staleRoles({ rolesFetch: async () => [] });
+    expect(await checkBotAdministrator(client, "g", { refresh: true })).toEqual(
+      {
+        state: "has",
+      },
+    );
+    expect(fetched()).toBe(true);
+  });
+
+  it("does not fetch the roles for the first view", async () => {
+    const { client, fetched } = staleRoles({ rolesFetch: async () => [] });
+    await checkBotAdministrator(client, "g");
+    expect(fetched()).toBe(false);
+  });
+
+  it("unknown, not the stale answer, when the roles cannot be read", async () => {
+    const { client } = staleRoles({
+      rolesFetch: async () => {
+        throw new Error("down");
+      },
+    });
+    expect(
+      await checkBotAdministrator(client, "g", { refresh: true }),
+    ).toMatchObject({ state: "unknown" });
+  });
+
+  it("unknown when the guild has no roles manager to refresh", async () => {
+    const c = {
+      guilds: {
+        cache: {
+          get: (): unknown => ({
+            members: { me: member(ADMIN), fetchMe: async () => member(ADMIN) },
+          }),
+        },
+      },
+    } as unknown as Client;
+    expect(
+      await checkBotAdministrator(c, "g", { refresh: true }),
+    ).toMatchObject({
+      state: "unknown",
+    });
   });
 });

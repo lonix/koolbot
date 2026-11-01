@@ -16,7 +16,8 @@ import type {
 import { FEATURE_REQUIREMENTS } from "../../src/services/bot-permission-registry.js";
 
 const INVITE = "https://discord.com/oauth2/authorize?client_id=1&permissions=8";
-const INVITE_HTML = INVITE.replace("&", "&amp;");
+const INVITE_HTML =
+  "https://discord.com/oauth2/authorize?client_id=1&amp;permissions=8";
 const link = {
   kind: "link",
   href: "/admin/wizard?step=confirm&recheck=1",
@@ -211,5 +212,124 @@ describe("renderWizardDonePage", () => {
       hostJobId: "a&b",
     });
     expect(html).toContain("/admin/role-groups?job=a%26b");
+  });
+});
+
+describe("renderWizardDonePage never calls a permission unneeded that something uses", () => {
+  const server = { kind: "server" as const, id: null, name: "Guild" };
+  const refOf = (id: string): FeatureRef => {
+    const r = FEATURE_REQUIREMENTS.find((x) => x.id === id);
+    if (!r) throw new Error(id);
+    return {
+      id: r.id,
+      area: r.area,
+      feature: r.feature,
+      effect: r.effect,
+      fix: r.fix,
+    };
+  };
+  const reportWith = (
+    checks: BotPermissionReport["checks"],
+  ): BotPermissionReport => ({
+    available: true,
+    reason: null,
+    fresh: true,
+    problems: [],
+    unknown: [],
+    quiet: [],
+    okFeatures: [],
+    notes: [],
+    checks,
+  });
+  const base = {
+    csrfToken: "t",
+    remainingMs: 1000,
+    admin: { state: "has" } as const,
+  };
+  /** The page's own content, without the layout. */
+  const mainOf = (html: string): string =>
+    html.slice(html.indexOf("<main"), html.indexOf("</main>"));
+  /** The part of the page before the folded "not needed" list, and the folded list. */
+  const split = (html: string): { before: string; folded: string } => {
+    const main = mainOf(html);
+    const at = main.indexOf("Not needed by your features");
+    return at < 0
+      ? { before: main, folded: "" }
+      : { before: main.slice(0, at), folded: main.slice(at) };
+  };
+
+  it("keeps Read Message History needed when looking for group is on with no channel set (it posts where it is used)", () => {
+    const html = renderWizardDonePage({
+      ...base,
+      report: reportWith([
+        {
+          feature: refOf("lfg-post"),
+          kind: "permission",
+          // What the checker reports for an optional channel left empty ...
+          enabled: false,
+          outcome: "unchecked",
+          target: null,
+          missing: [],
+          // ... except that the feature is on and posts in the invoking channel.
+          needsServerWide: true,
+        },
+      ]),
+    });
+    const { before, folded } = split(html);
+    expect(before).toContain("Read Message History");
+    expect(before).toContain("Looking for group");
+    expect(folded).not.toContain("Read Message History");
+  });
+
+  it("leaves Read Message History in the not-needed list when looking for group is off", () => {
+    const html = renderWizardDonePage({
+      ...base,
+      report: reportWith([
+        {
+          feature: refOf("lfg-post"),
+          kind: "permission",
+          enabled: false,
+          outcome: "unchecked",
+          target: null,
+          missing: [],
+        },
+      ]),
+    });
+    const { before, folded } = split(html);
+    expect(folded).toContain("Read Message History");
+    expect(before).not.toContain("Read Message History");
+  });
+
+  it("lists the permissions KoolBot uses but does not check (/ban, /timeout) as used, never as not needed", () => {
+    const html = renderWizardDonePage({
+      ...base,
+      report: reportWith([
+        {
+          feature: refOf("event-tags"),
+          kind: "permission",
+          enabled: true,
+          outcome: "ok",
+          target: server,
+          missing: [],
+        },
+      ]),
+    });
+    const { before, folded } = split(html);
+    for (const name of ["Ban Members", "Timeout Members"]) {
+      expect(before).toContain(name);
+      expect(folded).not.toContain(name);
+    }
+    expect(before).toContain("/ban");
+    expect(before).toContain("/timeout");
+    expect(before).toContain("Used, but not checked here");
+  });
+
+  it("does not claim that every other permission is not needed, and says what the list is", () => {
+    const html = renderWizardDonePage({ ...base, report: reportWith([]) });
+    const main = mainOf(html);
+    expect(main).not.toMatch(/every other/i);
+    expect(main).not.toContain("is not needed either");
+    expect(main).toContain("what KoolBot checks and uses");
+    expect(main).toContain('href="/admin/bot-permissions"');
   });
 });

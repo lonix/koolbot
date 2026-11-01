@@ -81,6 +81,12 @@ export interface FeatureRequirement {
    */
   targetOptional?: boolean;
   /**
+   * With the optional channel empty the feature still posts, in the channel the
+   * command ran in (looking for group), so it needs its permissions wherever it
+   * runs. The check reports it as not checked, and says so with `needsServerWide`.
+   */
+  postsInInvokingChannel?: boolean;
+  /**
    * The channels are not in a setting: each schedule row in Mongo names its own
    * (#1481), so there is no `targetKey`. `announcements`: the enabled scheduled
    * announcements; `polls`: the enabled poll schedules. The entry is checked once
@@ -613,6 +619,7 @@ const morePostingRequirements: FeatureRequirement[] = [
     enabledKey: "lfg.enabled",
     targetKey: "lfg.channel_id",
     targetOptional: true,
+    postsInInvokingChannel: true,
     effect:
       "/lfg tells the member it could not post, and no post is made. Without Read Message History a post is not updated or closed when its party fills or its time runs out, so its buttons stay (logged in the bot's log only).",
     fix: "Give the bot's role View Channel, Send Messages, Embed Links and Read Message History, and make sure the LFG channel does not deny them.",

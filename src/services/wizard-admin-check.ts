@@ -11,8 +11,9 @@
  *   is not used: it reads the role's own bits and reuses a read for 30 seconds,
  *   which would show the old answer to an admin who just fixed it in Discord.
  * - First view: the gateway cache. After *Check again* and at Apply
- *   (`refresh: true`): one forced read of the member through the shared REST
- *   backoff.
+ *   (`refresh: true`): the server's roles and the bot's member are read again
+ *   through the shared REST backoff (the member's permissions are worked out
+ *   from the role cache, so both must be fresh).
  * - It never guesses. When the server, the bot's membership or its roles cannot
  *   be read, the answer is `unknown`, which the wizard says out loud and never
  *   treats as "has" or "lacks".
@@ -58,6 +59,15 @@ export async function checkBotAdministrator(
     let me = members.me;
     if (opts.refresh || !me) {
       try {
+        // `me.permissions` resolves the member's role ids against the guild's
+        // role cache, so a refresh reads the roles too: a member read alone
+        // would answer from stale role bits.
+        if (opts.refresh) {
+          const roles = guild?.roles;
+          if (!roles)
+            return UNKNOWN("The bot could not read this server's roles.");
+          await call(() => roles.fetch(), "admin-roles");
+        }
         me = await call(() => members.fetchMe({ force: true }), "admin-me");
       } catch (err) {
         logger.debug(

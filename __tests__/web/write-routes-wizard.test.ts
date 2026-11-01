@@ -148,6 +148,7 @@ const client = {
       get: (): unknown =>
         botMember
           ? {
+              roles: { fetch: async (): Promise<unknown> => [] },
               members: {
                 get me(): unknown {
                   return memberOf(botMember as NonNullable<typeof botMember>);

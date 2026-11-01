@@ -166,7 +166,8 @@ proposal until the owner settles it.
 - **Review** adds a Switch row, *Continue without Administrator*, posted with the Apply form. Apply is not disabled for it; the server stops with a message
   back on Review until the switch is on.
 - The wizard ends on `/admin/wizard/done`, not a fifth step in the Steps bar: *Narrow the bot's permissions*, optional, read-only. A Panel of the
-  permissions the switched-on features need with chips for the features, a folded *Not needed* list, a Panel of four numbered steps to swap
+  permissions the switched-on features need with chips for the features, a Panel *Used, but not checked here* (the permissions KoolBot uses that
+  Bot permissions does not check, never called unneeded), a folded *Not needed* list of what only switched-off features use, a Panel of four numbered steps to swap
   Administrator in Discord, and one primary button, *Open Bot permissions*, next to *Skip for now*.
 
 ## Event host

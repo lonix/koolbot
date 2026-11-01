@@ -116,6 +116,14 @@ export interface FeatureCheck {
   target: PermissionTarget | null;
   /** The permission names (or `ROLE_ABOVE_BOT`) that are missing there. */
   missing: string[];
+  /**
+   * The feature is switched on and posts in whichever channel it is used in, so
+   * no channel is fixed and nothing is checked (`enabled` is false), yet it needs
+   * its permissions wherever it runs (looking for group with no channel set,
+   * #1617). Only the Setup wizard's narrowing step reads it, so it never calls
+   * such a permission unneeded.
+   */
+  needsServerWide?: boolean;
 }
 
 export interface BotPermissionReport {
@@ -730,6 +738,9 @@ export async function checkBotPermissions(
           outcome: "unchecked",
           target: null,
           missing: [],
+          ...(inUse && optionalEmpty && r.postsInInvokingChannel
+            ? { needsServerWide: true }
+            : {}),
         });
         const note = `${r.area}: ${setting} is not set, so ${r.feature.toLowerCase()} is not checked.`;
         if (inUse && !optionalEmpty && !notes.includes(note)) notes.push(note);
