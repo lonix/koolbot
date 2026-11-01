@@ -7,6 +7,7 @@ import {
   type ScanTab,
 } from "../../src/web/adopt-view.js";
 import { escapeHtml } from "../../src/web/html.js";
+import { AUTO_SUBMIT_SCRIPT } from "../../src/web/auto-submit.js";
 import { toneIcon } from "../../src/web/icons.js";
 import { GUILD_MEMBERS_INTENT_HOWTO } from "../../src/utils/guild-members-intent.js";
 import type { ServerScan } from "../../src/services/server-scan-service.js";
@@ -216,11 +217,13 @@ describe("Server scan tabs (#1323)", () => {
   it("shows the ownership hints as a switch in the header, on the current tab", () => {
     const off = mainOf(page("roles"));
     expect(off).toContain(
-      '<input type="checkbox" role="switch" name="sample" value="1"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>',
+      '<input type="checkbox" role="switch" name="sample" value="1" aria-describedby="scan-sample-help"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>',
     );
     expect(off).toContain('<input type="hidden" name="tab" value="roles">');
     const on = mainOf(page("overview", { sampled: true }));
-    expect(on).toContain('name="sample" value="1" checked>');
+    expect(on).toContain(
+      'name="sample" value="1" aria-describedby="scan-sample-help" checked>',
+    );
     // kb.css prints On/Off itself from :checked; literal text would double it.
     for (const html of [off, on]) {
       expect(html).toContain(
@@ -270,7 +273,7 @@ describe("Server scan tabs (#1323)", () => {
       const html = mainOf(page(t, { sampled: true }));
       const forms = html.match(/<form\b[^>]*>/gi) ?? [];
       expect(forms).toEqual([
-        '<form method="get" action="/admin/adopt" class="kb-toolbar__end">',
+        '<form method="get" action="/admin/adopt" class="kb-toolbar__end" data-autosubmit>',
       ]);
       expect(html).not.toMatch(/method="post"/i);
       expect(html).not.toContain("_csrf");
@@ -1076,5 +1079,190 @@ describe("/admin/adopt routing (#1019)", () => {
     const layers = router.stack.filter((l: any) => l.route?.path === "/adopt");
     expect(layers).toHaveLength(1);
     expect(Object.keys(layers[0].route.methods)).toEqual(["get"]);
+  });
+});
+
+describe("Server scan message sampling switch (#1630)", () => {
+  const sampling = (extra: Record<string, unknown> = {}): any => ({
+    channelsRead: 40,
+    channelsPlanned: 40,
+    textChannels: 40,
+    channelLimit: 40,
+    stoppedAt: null,
+    ...extra,
+  });
+  const header = (html: string): string =>
+    html.slice(html.indexOf("<header"), html.indexOf("</header>"));
+  const withSampling = (s: unknown, extra: Props = {}): string =>
+    mainOf(
+      page("overview", {
+        sampled: s !== null,
+        scan: { ...scan, sampling: s } as ServerScan,
+        ...extra,
+      }),
+    );
+
+  it("names the switch for what it finds and says what it reads, keeps and needs", () => {
+    const h = header(withSampling(null));
+    expect(h).toContain("Find channels a bot writes in</label>");
+    expect(h).not.toContain("Channel ownership hints");
+    expect(h).toContain(
+      'id="scan-sample-help">Reads the last 25 messages in up to 40 text channels and keeps only which bot wrote them. Needs Read Message History. Slower. Turning it on or off scans again.</p>',
+    );
+    expect(h).toContain('aria-describedby="scan-sample-help"');
+    // Flash and Callout texts are plain; help lines too.
+    expect(h).not.toMatch(/scan-sample-help">[^<]*[`*]/);
+  });
+
+  it("keeps the 60% rule, the cap and what is kept behind More", () => {
+    const h = header(withSampling(null));
+    const more = h.slice(h.indexOf("<details"));
+    expect(more).toContain('class="kb-disclosure kb-disclosure--inline"');
+    expect(more).toContain("<summary>More</summary>");
+    expect(more).toContain("at least 60% of its last 25 messages");
+    expect(more).toContain("at least 5");
+    expect(more).toContain("The first 40 text channels");
+    expect(more).toContain("the scan stops there and says so");
+    expect(more).toContain("Only the bot's name and its share are kept");
+    expect(more).toContain("not kept or logged");
+  });
+
+  it("says in the header whether this scan used the sampling", () => {
+    expect(header(withSampling(null))).toContain(
+      "Read from Discord 2026-10-07 00:00 UTC, without bot message sampling</span>",
+    );
+    const on = header(withSampling(sampling()));
+    expect(on).toContain(
+      "Read from Discord 2026-10-07 00:00 UTC, with bot message sampling</span>",
+    );
+    expect(on).not.toContain("stopped at");
+  });
+
+  it("follows the scan, not the switch, when they differ", () => {
+    // The switch is on in the URL but this scan did not sample.
+    const h = header(withSampling(null, { sampled: true }));
+    expect(h).toContain("without bot message sampling");
+    expect(h).toContain(
+      'value="1" aria-describedby="scan-sample-help" checked>',
+    );
+  });
+
+  it.each([
+    ["no-access", "the bot cannot read its history"],
+    ["failed", "Discord returned an error"],
+  ])("says how far it got, where it stopped and why (%s)", (reason, words) => {
+    const h = header(
+      withSampling(
+        sampling({
+          channelsRead: 12,
+          stoppedAt: { id: "c1", name: "quotes", reason },
+        }),
+      ),
+    );
+    expect(h).toContain(
+      `<span>Read 12 channels of 40; stopped at <span class="kb-mention">`,
+    );
+    expect(h).toContain(`quotes</span>, ${words}</span>`);
+  });
+
+  it("lists the sampling in the Not read callout next to where it stopped", () => {
+    const html = withSampling(
+      sampling({
+        channelsRead: 12,
+        stoppedAt: { id: "c1", name: "quotes", reason: "no-access" },
+      }),
+      {
+        scan: {
+          ...scan,
+          sampling: sampling({
+            channelsRead: 12,
+            stoppedAt: { id: "c1", name: "quotes", reason: "no-access" },
+          }),
+          partial: [
+            "message sampling (stopped at the first channel it could not read)",
+          ],
+        } as ServerScan,
+      },
+    );
+    expect(html).toContain(
+      "Not read: message sampling (stopped at the first channel it could not read).",
+    );
+    expect(header(html)).toContain("the bot cannot read its history");
+  });
+
+  it("escapes the channel it stopped at", () => {
+    const h = header(
+      withSampling(
+        sampling({
+          stoppedAt: { id: "zz", name: "<img src=x>", reason: "failed" },
+        }),
+      ),
+    );
+    expect(h).not.toContain("<img");
+    expect(h).toContain("&lt;img src=x&gt;");
+  });
+
+  it("says how many text channels the cap left unread, behind More", () => {
+    const h = header(
+      withSampling(sampling({ textChannels: 57, channelsRead: 40 })),
+    );
+    expect(h).toContain("This scan read the first 40 of 57 text channels.");
+    expect(header(withSampling(sampling()))).not.toContain("This scan read");
+  });
+
+  it("says what was read, not the cap, when it stopped early (plain and capped)", () => {
+    const stop = { id: "c1", name: "quotes", reason: "no-access" };
+    // Stopped, nothing capped: 12 of the 40 there are.
+    const plain = header(
+      withSampling(sampling({ channelsRead: 12, stoppedAt: stop })),
+    );
+    expect(plain).toContain(
+      "This scan read 12 of 40 text channels before it stopped.",
+    );
+    // Capped and stopped: 57 text channels, 40 planned, 12 read. The help must
+    // not say "the first 40" were read while the header says 12 of 40.
+    const both = header(
+      withSampling(
+        sampling({ textChannels: 57, channelsRead: 12, stoppedAt: stop }),
+      ),
+    );
+    expect(both).toContain(
+      "This scan read 12 of 57 text channels before it stopped.",
+    );
+    expect(both).not.toContain("the first 40 of 57");
+    expect(both).toContain("Read 12 channels of 40; stopped at");
+  });
+
+  it("carries refresh=1 in the switch form, so Apply scans again (#1630)", () => {
+    const h = header(withSampling(null));
+    expect(h).toContain('<input type="hidden" name="refresh" value="1">');
+    // Only the switch's form: tab links stay cacheable.
+    expect(mainOf(page("roles"))).not.toMatch(/href="[^"]*refresh=1[^"]*tab=/);
+  });
+
+  it("applies on change with JavaScript and keeps Apply without it", () => {
+    const h = header(withSampling(null));
+    expect(h).toContain('<form method="get" action="/admin/adopt"');
+    expect(h).toMatch(/<form [^>]*data-autosubmit>/);
+    expect(h).toContain(
+      '<button type="submit" class="kb-btn kb-btn--sm" data-autosubmit-hide>Apply</button>',
+    );
+    // The full page carries the script, and only a page with the switch does.
+    expect(page("overview")).toContain(AUTO_SUBMIT_SCRIPT);
+    expect(page("overview", { scan: null })).not.toContain(AUTO_SUBMIT_SCRIPT);
+  });
+
+  it("links the places that need the sampling to the scan with it on", () => {
+    const bots = (s: unknown): string =>
+      mainOf(
+        page("bots", {
+          sampled: s !== null,
+          scan: { ...scan, sampling: s } as ServerScan,
+        }),
+      );
+    expect(bots(null)).toContain(
+      '<a href="/admin/adopt?tab=bots&amp;sample=1">Find channels a bot writes in</a> to add them.',
+    );
+    expect(bots(sampling())).not.toContain("to add them.");
   });
 });

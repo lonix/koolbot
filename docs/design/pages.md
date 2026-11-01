@@ -72,15 +72,21 @@ Server scan, Overview tab. The read-only inventory of `adopt-view.ts`, reordered
 3. Left: Warnings as IssueRows, Notes folded; Suggestions, each with a button to the page that acts on it.
 4. Right: Other bots, one card per bot with a coverage bar and the replacement table folded; Discord native facts.
 
-The full role, channel and bot tables live in their tabs. The ownership-hints switch in the header replaces the `?sample=1` link.
+The full role, channel and bot tables live in their tabs. The *Find channels a bot writes in* switch in the header replaces the `?sample=1` link.
 
-**As built (#1323).** The tabs are `?tab=` links (Overview, Roles, Channels, Other bots, Discord) and the ownership-hints switch is a GET form, so
-the page works without JavaScript. The tabs share one scan for a minute, and the header says when Discord was read. Issue rows and callouts carry
+**As built (#1323).** The tabs are `?tab=` links (Overview, Roles, Channels, Other bots, Discord) and the *Find channels a bot writes in* switch is a GET
+form, so the page works without JavaScript. The tabs share one scan for a minute, and the header says when Discord was read. Issue rows and callouts carry
 their tone icon from `icons.ts`. The Channels tab is the tree described below (#1364).
 
 **As built (#1546).** On the Overview the verdict comes first, then the partial-read callout when there is one, then the tiles. The other tabs keep
 the partial-read callout at the top. With the GuildMembers intent off, the Overview says why once, in the folded *Notes*; the *Other bots* panel
 carries the bot-list caveat in its footer, and with no bots found the *Other bots* tile says the list may be incomplete.
+
+**As built (#1630).** The switch is named for what it finds, and one line under the title says what it reads, keeps and needs; the 60% rule, the
+channel cap and what is kept sit behind an inline *More*. With JavaScript the form submits when the switch changes and *Apply* is hidden; without it,
+*Apply* is the same GET. The header says whether this scan used the switch ("with bot message sampling"), and when the sampling stopped early, how
+many channels it read and where it stopped. Places that need the sampling (the *Other bots* leftovers, the cleanup page) link to the scan with the
+switch on.
 
 ### ServerScanChannelsPage
 

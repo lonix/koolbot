@@ -189,7 +189,7 @@ describe("Claim on a looks-like row (#1364)", () => {
   it("stays read-only: Claim is a link, and the one form is still the GET switch", () => {
     const html = channelsPage({ sampled: true });
     expect(html.match(/<form\b[^>]*>/gi)).toEqual([
-      '<form method="get" action="/admin/adopt" class="kb-toolbar__end">',
+      '<form method="get" action="/admin/adopt" class="kb-toolbar__end" data-autosubmit>',
     ]);
     expect(html.match(/<button/gi)).toHaveLength(1);
     expect(html).not.toContain("_csrf");

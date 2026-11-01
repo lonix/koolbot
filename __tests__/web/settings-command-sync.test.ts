@@ -80,4 +80,18 @@ describe("All settings: slash-command state (#1638)", () => {
     });
     expect(html).not.toContain("<img");
   });
+
+  it("puts the anchor on, or before, the element that holds Reload commands", () => {
+    // A link to #commands-sync must bring the button into view, not only the
+    // status line under it.
+    for (const sync of [{ state: "in-sync", checkedAt: 0 } as const, null]) {
+      const html = render(sync);
+      const anchor = html.indexOf('id="commands-sync"');
+      const button = html.indexOf("Reload commands</button>");
+      expect(anchor).toBeGreaterThan(-1);
+      expect(anchor).toBeLessThan(button);
+      // The id also covers the status line, which follows the button.
+      expect(html.indexOf("kb-statusline", anchor)).toBeGreaterThan(button);
+    }
+  });
 });

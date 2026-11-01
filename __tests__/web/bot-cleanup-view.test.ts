@@ -75,3 +75,32 @@ describe("bot cleanup page labels", () => {
     expect(html).not.toContain("<strong>log</strong>");
   });
 });
+
+describe("bot cleanup page, no removed bot found (#1630)", () => {
+  const empty = (sampled: boolean): string =>
+    renderBotCleanupPage({
+      csrfToken: "t",
+      remainingMs: 1000,
+      botId: null,
+      candidates: [],
+      planned: null,
+      selectedChannelIds: [],
+      sampled,
+      approvedAt: null,
+    });
+
+  it("links the Server scan with the switch on, named as the switch is", () => {
+    const html = empty(false);
+    expect(html).toContain("No removed bot found.");
+    expect(html).toContain(
+      '<a href="/admin/adopt?sample=1&amp;tab=bots">Find channels a bot writes in</a> on the Server scan',
+    );
+    expect(html).not.toContain("channel ownership hints");
+  });
+
+  it("does not ask for the switch when the page already used it", () => {
+    const html = empty(true);
+    expect(html).toContain("No removed bot found.");
+    expect(html).not.toContain("Find channels a bot writes in");
+  });
+});

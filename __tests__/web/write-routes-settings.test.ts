@@ -768,6 +768,37 @@ describe("All settings reloads when a save changes a command-gating key (#1638)"
     expect((await save("quotes.enabled", "true")).reload).toBeUndefined();
   });
 
+  it("reloads when the gating key's prior value could not be read, even if the save writes the default", async () => {
+    // Stored true but the strict read fails: `before` falls back to the schema
+    // default (false), so a save of false looks unchanged although the command
+    // may now need removing.
+    mockConfigGetBooleanStrict.mockRejectedValueOnce(new Error("db down"));
+    const res = await harness.post(
+      "/settings/save-section",
+      { category: "quotes", keys: ["quotes.enabled"] },
+      { json: true },
+    );
+    const body = (await res.json()) as { reload?: string };
+    expect(mockConfigSet).toHaveBeenCalledWith(
+      "quotes.enabled",
+      false,
+      expect.any(String),
+      "quotes",
+      expect.anything(),
+    );
+    expect(body.reload).toContain("/admin/settings?");
+  });
+
+  it("does not reload for an unreadable key that gates no command", async () => {
+    mockConfigGetBooleanStrict.mockRejectedValueOnce(new Error("db down"));
+    const res = await harness.post(
+      "/settings/save-section",
+      { category: "polls", keys: ["polls.enabled"] },
+      { json: true },
+    );
+    expect(((await res.json()) as { reload?: string }).reload).toBeUndefined();
+  });
+
   it("a feature page keeps its own reload rules", async () => {
     const body = await save("quotes.enabled", "true", "/admin/quotes");
     expect(body.reload).toContain("/admin/quotes?");

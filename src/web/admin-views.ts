@@ -1889,10 +1889,12 @@ export function renderSettingsPage(props: SettingsProps): string {
     props.commandSync === undefined
       ? null
       : commandSyncStatus(props.commandSync);
+  // The anchor starts before the action bar, so a link to #commands-sync (the
+  // Dashboard row) brings Reload commands into view along with its status.
   const commandSyncHtml = syncStatus
-    ? `
-<div class="kb-statusline" id="commands-sync" role="status"><span class="kb-status kb-status--${syncStatus.tone}">${escapeHtml(syncStatus.label)}</span><span>${escapeHtml(syncStatus.text)}</span></div>`
-    : "";
+    ? `<div id="commands-sync">${actionBar}
+<div class="kb-statusline" role="status"><span class="kb-status kb-status--${syncStatus.tone}">${escapeHtml(syncStatus.label)}</span><span>${escapeHtml(syncStatus.text)}</span></div></div>`
+    : actionBar;
 
   const pickers = {
     textChannels: props.textChannels,
@@ -2017,7 +2019,7 @@ export function renderSettingsPage(props: SettingsProps): string {
 <h1>All settings</h1>
 <p class="subtitle">All DB-backed configuration, grouped by feature. Mirrors <code>SETTINGS.md</code> and <code>config-service.ts</code>.</p>
 ${renderFlash(props.flash, SETTINGS_FLASH_ID)}
-${actionBar}${commandSyncHtml}
+${commandSyncHtml}
 ${
   props.settingsUnavailable
     ? `<div class="card">${renderSettingsUnavailableNotice()}</div>`

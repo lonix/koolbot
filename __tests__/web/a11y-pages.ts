@@ -1398,7 +1398,38 @@ export function adminPages(): A11yPage[] {
         navFeatureStatus: {},
         sampled: true,
         tab: "overview",
-        scan: busyScan(),
+        scan: {
+          ...busyScan(),
+          sampling: {
+            channelsRead: 9,
+            channelsPlanned: 9,
+            textChannels: 52,
+            channelLimit: 9,
+            stoppedAt: null,
+          },
+        },
+      }),
+    },
+    {
+      name: "Server scan (channels, message sampling stopped early)",
+      html: renderAdoptPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        sampled: true,
+        tab: "channels",
+        scan: {
+          ...busyScan(),
+          partial: [
+            "message sampling (stopped at the first channel it could not read)",
+          ],
+          sampling: {
+            channelsRead: 12,
+            channelsPlanned: 40,
+            textChannels: 40,
+            channelLimit: 40,
+            stoppedAt: { id: "c1", name: "quotes", reason: "no-access" },
+          },
+        },
       }),
     },
     {
