@@ -13,7 +13,7 @@ import logger, { isDebugMode } from "../utils/logger.js";
 import { getErrorMessage } from "../utils/error-guards.js";
 import { replyWithError } from "../utils/error-reply.js";
 import { getSharedRest } from "../utils/discord-rest.js";
-import { commandListsMatch } from "../utils/command-diff.js";
+import { commandListsMatch, diffCommandLists } from "../utils/command-diff.js";
 import { recordCommandAudit } from "../utils/record-command-audit.js";
 import { voiceRoomNameOf } from "../utils/voice-room-name.js";
 import { ConfigService } from "./config-service.js";
@@ -32,6 +32,30 @@ interface CommandModule {
   data: SlashCommandBuilder;
   execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
 }
+
+/**
+ * Whether Discord's registered slash commands match what the switched-on
+ * features should have (#1638). `unknown` means the check could not be made:
+ * it is never read as "in sync" and never as "out of sync".
+ */
+export type CommandSyncReport =
+  | { state: "in-sync"; checkedAt: number }
+  | {
+      state: "out-of-sync";
+      checkedAt: number;
+      /** A feature was switched on: members do not see these yet. */
+      added: string[];
+      /** A feature was switched off or the command retired: Discord still lists these. */
+      removed: string[];
+      /** Options or descriptions changed. */
+      changed: string[];
+    }
+  | { state: "unknown"; checkedAt: number; reason: string };
+
+/** How long a sync check is reused per instance (one Discord GET). */
+export const COMMAND_SYNC_TTL_MS = 60_000;
+/** A check that could not be made is retried sooner, but not on every page hit. */
+export const COMMAND_SYNC_UNKNOWN_TTL_MS = 10_000;
 
 export class CommandManager {
   private static instance: CommandManager;
@@ -333,6 +357,118 @@ export class CommandManager {
         error,
       );
       return false;
+    }
+  }
+
+  private syncCache: { report: CommandSyncReport; expires: number } | null =
+    null;
+  private syncInflight: Promise<CommandSyncReport> | null = null;
+  /** Bumped by `invalidateCommandSync()`, so a read that started earlier cannot refill the cache. */
+  private syncGeneration = 0;
+
+  /**
+   * Compare the registered guild commands with the desired list, read-only
+   * (#1638): one GET, no PUT, and the bot's own command table is not touched.
+   * Reuses `getEnabledCommands()` and the projection of `commandListsMatch`.
+   * The result is cached per instance for `COMMAND_SYNC_TTL_MS` and concurrent
+   * callers share one read, so a busy Dashboard sends one request a minute. It
+   * never rejects: any failure is `unknown`, with a reason in plain words.
+   */
+  public checkCommandSync(): Promise<CommandSyncReport> {
+    if (this.syncCache && this.syncCache.expires > Date.now()) {
+      return Promise.resolve(this.syncCache.report);
+    }
+    if (this.syncInflight) return this.syncInflight;
+    const generation = this.syncGeneration;
+    const run: Promise<CommandSyncReport> = this.readCommandSync()
+      .then((report) => {
+        if (generation === this.syncGeneration) {
+          this.syncCache = {
+            report,
+            expires:
+              Date.now() +
+              (report.state === "unknown"
+                ? COMMAND_SYNC_UNKNOWN_TTL_MS
+                : COMMAND_SYNC_TTL_MS),
+          };
+        }
+        return report;
+      })
+      .finally(() => {
+        if (this.syncInflight === run) this.syncInflight = null;
+      });
+    this.syncInflight = run;
+    return run;
+  }
+
+  /**
+   * Forget the cached sync check. Called after a reload and after anything
+   * that changes settings, so the next read looks at Discord again. This is
+   * cache invalidation only: it never reloads or registers anything.
+   */
+  public invalidateCommandSync(): void {
+    this.syncGeneration++;
+    this.syncCache = null;
+    this.syncInflight = null;
+  }
+
+  private async readCommandSync(): Promise<CommandSyncReport> {
+    const unknown = (reason: string): CommandSyncReport => ({
+      state: "unknown",
+      checkedAt: Date.now(),
+      reason,
+    });
+    try {
+      const guildId = await this.configService.getString("GUILD_ID");
+      const clientId = await this.configService.getString("CLIENT_ID");
+      const token = await this.configService.getString("DISCORD_TOKEN");
+      if (!guildId || !clientId || !token) {
+        return unknown("the server, application id or bot token is not set");
+      }
+      let desired: unknown[];
+      try {
+        desired = await this.getEnabledCommands();
+      } catch (error) {
+        logger.debug("Sync check could not load the desired commands:", error);
+        return unknown("the commands the bot should have could not be read");
+      }
+      let registered: unknown;
+      try {
+        const rest = getSharedRest(token);
+        const route = Routes.applicationGuildCommands(clientId, guildId);
+        registered = await this.makeDiscordApiCall(
+          async () =>
+            rest.get(route, {
+              query: new URLSearchParams({ with_localizations: "true" }),
+            }),
+          "check registered commands",
+          15000,
+          1,
+          true,
+          false,
+        );
+      } catch (error) {
+        logger.debug("Sync check could not read Discord's commands:", error);
+        return unknown("Discord did not answer");
+      }
+      const diff = diffCommandLists(desired, registered);
+      if (diff === null) {
+        return unknown("Discord's command list could not be compared");
+      }
+      const same = commandListsMatch(desired, registered);
+      const named =
+        diff.added.length + diff.removed.length + diff.changed.length;
+      if (same && named === 0) {
+        return { state: "in-sync", checkedAt: Date.now() };
+      }
+      if (named === 0) {
+        // The lists differ but no command can be named: say so, never "in sync".
+        return unknown("Discord's command list could not be compared");
+      }
+      return { state: "out-of-sync", checkedAt: Date.now(), ...diff };
+    } catch (error) {
+      logger.debug("Command sync check failed:", error);
+      return unknown("the check could not be made");
     }
   }
 

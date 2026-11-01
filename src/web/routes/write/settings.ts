@@ -22,6 +22,8 @@ import { PROTECTED_KEYS } from "../../bootstrap-vars.js";
 import { recordAudit } from "../../audit.js";
 import { findUnknownShortcodes } from "../../../utils/emoji-shortcodes.js";
 import { getDisplayedRemainingMs } from "../../admin-layout.js";
+import { commandSyncFlashNote } from "../../command-sync-text.js";
+import { rereadCommandSync } from "../../command-sync-read.js";
 import {
   renderImportDiffPage,
   readSettingField,
@@ -405,7 +407,14 @@ export function createSettingsRouter(client: Client): Router {
           deleted > 0
             ? `, ${deleted} orphan key${deleted === 1 ? "" : "s"} removed`
             : "";
-        const reloadNote = " You may need to Reload commands.";
+        // What the commands need is read, not guessed (#1638): the cached check
+        // is dropped and Discord is read again, with the Dashboard's time limit.
+        // Only when something was written; a reset that landed nothing changed
+        // nothing, so it reads nothing.
+        const reloadNote =
+          failed.length === 0 || landed > 0
+            ? commandSyncFlashNote(await rereadCommandSync(client))
+            : "";
         // Re-arm every scheduled job from the defaults just written (#1013);
         // only the command list still needs a manual reload. Not diffed: a
         // key with no stored row may have been running on an env fallback,

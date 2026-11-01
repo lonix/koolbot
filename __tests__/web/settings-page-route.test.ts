@@ -118,6 +118,8 @@ jest.unstable_mockModule("../../src/models/reaction-role-config.js", () => ({
 
 const { createReadOnlyRouter } =
   await import("../../src/web/read-only-routes.js");
+const { CommandManager } =
+  await import("../../src/services/command-manager.js");
 
 const client = {
   user: { id: "bot" },
@@ -173,6 +175,45 @@ describe("GET /settings", () => {
     const html = await (await harness.get("/settings")).text();
     expect(html).not.toContain("#repost-header");
     expect(html).not.toContain("#repost-message");
+  });
+});
+
+describe("GET /settings: slash-command state (#1638)", () => {
+  const check = (impl: () => Promise<unknown>): void => {
+    jest
+      .spyOn(CommandManager, "getInstance")
+      .mockReturnValue({ checkCommandSync: impl } as never);
+  };
+  afterEach(() => jest.restoreAllMocks());
+
+  it("says In sync next to the Reload commands button", async () => {
+    check(async () => ({ state: "in-sync", checkedAt: 0 }));
+    const html = await (await harness.get("/settings")).text();
+    expect(html).toContain('id="commands-sync"');
+    expect(html).toContain('kb-status--ok">In sync</span>');
+    expect(html).toContain('action="/admin/settings/reload"');
+  });
+
+  it("names what differs", async () => {
+    check(async () => ({
+      state: "out-of-sync",
+      checkedAt: 0,
+      added: ["poll"],
+      removed: [],
+      changed: ["quote"],
+    }));
+    const html = await (await harness.get("/settings")).text();
+    expect(html).toContain("Out of sync</span>");
+    expect(html).toContain("1 to add (/poll), 1 to update (/quote).");
+  });
+
+  it("says Not checked, never In sync, when the check throws", async () => {
+    check(async () => {
+      throw new Error("boom");
+    });
+    const html = await (await harness.get("/settings")).text();
+    expect(html).toContain("Not checked</span>");
+    expect(html).not.toContain(">In sync<");
   });
 });
 

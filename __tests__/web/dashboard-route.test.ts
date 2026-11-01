@@ -97,6 +97,8 @@ const { createReadOnlyRouter } =
   await import("../../src/web/read-only-routes.js");
 const { cachedScan, scanCacheKey, resetScanCache } =
   await import("../../src/web/server-scan-cache.js");
+const { CommandManager } =
+  await import("../../src/services/command-manager.js");
 const check = await import("../../src/services/bot-permission-check.js");
 const status = await import("../../src/services/bot-permission-status.js");
 
@@ -150,6 +152,8 @@ function clientWith(serverBits: bigint, categoryBits = serverBits): Client {
 }
 
 let harness: AdminHarness;
+/** What the stubbed slash-command check answers (#1638); in sync unless a test says otherwise. */
+let commandSync: jest.Mock<() => Promise<unknown>>;
 let scan: jest.Mock<(guildId: string, opts: unknown) => Promise<unknown>>;
 
 async function start(client: Client): Promise<void> {
@@ -164,6 +168,10 @@ beforeEach(() => {
   resetScanCache();
   check.resetBotPermissionCache();
   status.resetPermissionIssueCount();
+  commandSync = jest.fn(async () => ({ state: "in-sync", checkedAt: 0 }));
+  jest.spyOn(CommandManager, "getInstance").mockReturnValue({
+    checkCommandSync: commandSync,
+  } as never);
   scan = jest.fn(async () => busyScan());
   jest
     .spyOn(ServerScanService, "getInstance")
@@ -183,6 +191,41 @@ const dashboard = async (): Promise<string> => {
   expect(res.status).toBe(200);
   return res.text();
 };
+
+describe("GET /admin/ slash-command row (#1638)", () => {
+  it("lists what is out of sync under Needs you, linking to All settings, with no button of its own", async () => {
+    commandSync.mockResolvedValue({
+      state: "out-of-sync",
+      checkedAt: 0,
+      added: ["poll"],
+      removed: ["event"],
+      changed: [],
+    });
+    await start(clientWith(ALL));
+    const html = await dashboard();
+    expect(html).toContain('id="p-needs"');
+    expect(html).toContain(
+      "Slash commands are out of sync: 1 to add (/poll), 1 to remove (/event)",
+    );
+    expect(html).toContain('href="/admin/settings#commands-sync"');
+    expect(html).not.toContain("/admin/settings/reload");
+  });
+
+  it("says Not checked, never in sync, when the check fails", async () => {
+    commandSync.mockRejectedValue(new Error("DiscordAPIError: raw text"));
+    await start(clientWith(ALL));
+    const html = await dashboard();
+    expect(html).toContain("Slash commands could not be checked");
+    expect(html).not.toContain("DiscordAPIError");
+    expect(html).not.toContain("out of sync");
+  });
+
+  it("reads the check once per page", async () => {
+    await start(clientWith(ALL));
+    await dashboard();
+    expect(commandSync).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("GET /admin/", () => {
   it("shows the state, hides Needs you when nothing is wrong, and has no switch", async () => {

@@ -952,6 +952,20 @@ scan found for up to 30 minutes after it finished, each row saying how long ago 
 read (for example "Found by a Server scan 12 minutes ago"), and the Server scan page is where
 you run a new one. The scan page itself still shares one scan for a minute (#1415).
 
+**Slash commands out of sync** (#1638). Switching a feature on or off changes which slash commands should exist, but Discord only
+learns that when the commands are reloaded. The Dashboard and **All settings** therefore compare the commands Discord has registered with
+the ones the switched-on features need, and say what differs. The check reads Discord once (a read, never a write), is reused for 60
+seconds, and starts again after a reload or any save in the admin pages.
+
+- On the **Dashboard**, **Needs you** gets a first row, for example "Slash commands are out of sync: 2 to add (/poll, /lfg), 1 to remove (/event)",
+  with one sentence on what members see and an **Open All settings** button. The Dashboard has no **Reload commands** button of its own.
+- When the check could not be made (Discord did not answer, or it took longer than the Dashboard's time limit), the row says **Not checked** with the
+  reason. A check that did not run is never shown as in sync, and never as out of sync.
+- On **All settings**, a status line next to **Reload commands** says **In sync**, **Out of sync** with the same names, or **Not checked**.
+- After **Reset all to defaults**, the message states what the check found instead of "You may need to Reload commands".
+
+The check changes nothing: **Reload commands** is still the only way to apply the difference.
+
 The Dashboard's **Version** panel (#1029) shows the running version
 next to the latest KoolBot release, with its state: _up to date_, _update
 available_ (with the kind: major, minor or patch), or _couldn't check_. It also

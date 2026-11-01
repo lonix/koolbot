@@ -65,6 +65,8 @@ const mockFindDependencyIssues =
   jest.fn<() => Promise<Array<{ key: string; message: string }>>>();
 const mockRegisterCommands = jest.fn<() => Promise<void>>();
 const mockPopulateClientCommands = jest.fn<() => Promise<void>>();
+const mockInvalidateCommandSync = jest.fn();
+const mockCheckCommandSync = jest.fn<() => Promise<unknown>>();
 const mockSetConfigReloadStatus = jest.fn();
 const mockGuildsFetch = jest.fn<() => Promise<unknown>>();
 /** The guild's roles by id, for the powerful-role check (#1145). */
@@ -139,6 +141,8 @@ jest.unstable_mockModule("../../src/services/command-manager.js", () => ({
     getInstance: (): unknown => ({
       registerCommands: mockRegisterCommands,
       populateClientCommands: mockPopulateClientCommands,
+      invalidateCommandSync: mockInvalidateCommandSync,
+      checkCommandSync: mockCheckCommandSync,
     }),
   },
 }));
@@ -1944,6 +1948,62 @@ describe("a feature page's folded settings reopen after a save or reset (#1301)"
       redirect: "/admin/digest",
     });
     expect(settingsOf(res)).toBeNull();
+  });
+});
+
+describe("the flash after a reset says what the command check says (#1638)", () => {
+  const reset = async (): Promise<string> => {
+    const res = await harness.post("/settings/reset-defaults", {
+      confirm: "Kool Guild",
+    });
+    return parseFlashRedirect(res.headers.get("location")).msg;
+  };
+
+  it("reads Discord again after the reset and says the commands are in sync", async () => {
+    mockCheckCommandSync.mockResolvedValue({ state: "in-sync", checkedAt: 0 });
+    const msg = await reset();
+    expect(msg).toContain("Slash commands are in sync.");
+    expect(msg).not.toContain("You may need to Reload commands");
+    expect(mockInvalidateCommandSync).toHaveBeenCalled();
+    expect(mockInvalidateCommandSync.mock.invocationCallOrder[0]).toBeLessThan(
+      mockCheckCommandSync.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("names what to add and remove", async () => {
+    mockCheckCommandSync.mockResolvedValue({
+      state: "out-of-sync",
+      checkedAt: 0,
+      added: ["poll"],
+      removed: ["event"],
+      changed: [],
+    });
+    const msg = await reset();
+    expect(msg).toContain(
+      "Slash commands are out of sync: 1 to add (/poll), 1 to remove (/event). Use Reload commands to apply the change.",
+    );
+  });
+
+  it("says it could not check, never in sync, when the check is unknown or throws", async () => {
+    mockCheckCommandSync.mockResolvedValue({
+      state: "unknown",
+      checkedAt: 0,
+      reason: "Discord did not answer",
+    });
+    expect(await reset()).toContain(
+      "Slash commands could not be checked: Discord did not answer.",
+    );
+    mockCheckCommandSync.mockRejectedValue(new Error("boom"));
+    const thrown = await reset();
+    expect(thrown).toContain("Slash commands could not be checked.");
+    expect(thrown).not.toContain("in sync");
+  });
+
+  it("never reloads or registers commands while checking", async () => {
+    mockCheckCommandSync.mockResolvedValue({ state: "in-sync", checkedAt: 0 });
+    await reset();
+    expect(mockRegisterCommands).not.toHaveBeenCalled();
+    expect(mockPopulateClientCommands).not.toHaveBeenCalled();
   });
 });
 

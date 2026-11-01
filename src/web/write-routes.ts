@@ -13,6 +13,7 @@
  */
 
 import { Router, type RequestHandler } from "express";
+import { CommandManager } from "../services/command-manager.js";
 import { Client } from "discord.js";
 import { requireCsrf } from "./csrf.js";
 import { createAdoptionLimitsRouter } from "./adoption-rate-limit.js";
@@ -46,6 +47,28 @@ import { createChannelManagerRouter } from "./routes/write/channel-manager.js";
 
 export * from "./routes/write/helpers.js";
 
+/**
+ * After any admin write has been answered, forget the cached slash-command sync
+ * check (#1638): a settings save, a wizard apply or a feature page can change
+ * which commands should exist, and the Reload commands route changes what
+ * Discord has. This only clears a cache (the next read looks at Discord again);
+ * it never reloads or registers anything, and it never fails a write.
+ */
+export function invalidateCommandSyncAfterWrite(
+  client: Client,
+): RequestHandler {
+  return function invalidateCommandSyncAfterWrite(_req, res, next) {
+    res.once("finish", () => {
+      try {
+        CommandManager.getInstance(client).invalidateCommandSync();
+      } catch {
+        // The 60 s cache lifetime bounds how stale the check can get.
+      }
+    });
+    next();
+  };
+}
+
 export function createWriteRouter(
   client: Client,
   requireSession: RequestHandler,
@@ -57,6 +80,7 @@ export function createWriteRouter(
   // their own writes (when #482/#484 add them) live on `/me/*`.
   router.use(requireAdminRoleMiddleware());
   router.use(requireCsrf);
+  router.use(invalidateCommandSyncAfterWrite(client));
 
   // Adoption writes and the pages that scan the server are throttled (#1184).
   router.use(createAdoptionLimitsRouter());

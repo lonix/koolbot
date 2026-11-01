@@ -26,6 +26,8 @@ import {
   REVIEW_JOB_NOTE,
 } from "../utils/moderation-labels.js";
 import { icon } from "./icons.js";
+import { commandSyncStatus } from "./command-sync-text.js";
+import type { CommandSyncReport } from "../services/command-manager.js";
 import {
   REORDER_SCRIPT,
   REORDER_STATUS_HTML,
@@ -488,6 +490,12 @@ export interface SettingsProps extends CommonProps {
    * overwrite the real stored values.
    */
   settingsUnavailable?: boolean;
+  /**
+   * The read-only slash-command check (#1638), shown next to Reload commands.
+   * `null` means it could not be made ("Not checked"); omitted means the
+   * caller did not ask, and nothing is shown.
+   */
+  commandSync?: CommandSyncReport | null;
 }
 
 /**
@@ -1864,6 +1872,15 @@ export function renderSettingsPage(props: SettingsProps): string {
   }
 </div>`;
 
+  const syncStatus =
+    props.commandSync === undefined
+      ? null
+      : commandSyncStatus(props.commandSync);
+  const commandSyncHtml = syncStatus
+    ? `
+<div class="kb-statusline" id="commands-sync" role="status"><span class="kb-status kb-status--${syncStatus.tone}">${escapeHtml(syncStatus.label)}</span><span>${escapeHtml(syncStatus.text)}</span></div>`
+    : "";
+
   const pickers = {
     textChannels: props.textChannels,
     voiceChannels: props.voiceChannels,
@@ -1987,7 +2004,7 @@ export function renderSettingsPage(props: SettingsProps): string {
 <h1>All settings</h1>
 <p class="subtitle">All DB-backed configuration, grouped by feature. Mirrors <code>SETTINGS.md</code> and <code>config-service.ts</code>.</p>
 ${renderFlash(props.flash, SETTINGS_FLASH_ID)}
-${actionBar}
+${actionBar}${commandSyncHtml}
 ${
   props.settingsUnavailable
     ? `<div class="card">${renderSettingsUnavailableNotice()}</div>`

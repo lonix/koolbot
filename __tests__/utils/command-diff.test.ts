@@ -1,5 +1,8 @@
 import { describe, it, expect } from "@jest/globals";
-import { commandListsMatch } from "../../src/utils/command-diff.js";
+import {
+  commandListsMatch,
+  diffCommandLists,
+} from "../../src/utils/command-diff.js";
 
 type Cmd = Record<string, unknown>;
 
@@ -227,5 +230,100 @@ describe("commandListsMatch (#1307)", () => {
         commandListsMatch(ping(), bad({ name_localizations: { nb: "ping" } })),
       ).toBe(false);
     });
+  });
+});
+
+describe("diffCommandLists (#1638)", () => {
+  it("names nothing when Discord has exactly the desired list", () => {
+    expect(diffCommandLists(sent(), echoed())).toEqual({
+      added: [],
+      removed: [],
+      changed: [],
+    });
+  });
+
+  it("names a command to add and one to remove, by plain name and sorted", () => {
+    const desired = [
+      ...sent(),
+      { name: "poll", description: "P" },
+      { name: "lfg", description: "L" },
+    ];
+    const registered = [
+      ...echoed(),
+      { type: 1, name: "event", description: "E" },
+    ];
+    expect(diffCommandLists(desired, registered)).toEqual({
+      added: ["lfg", "poll"],
+      removed: ["event"],
+      changed: [],
+    });
+  });
+
+  it("names a command whose options or description changed", () => {
+    const desired = sent();
+    (desired[1] as Cmd).description = "Pong!";
+    expect(diffCommandLists(desired, echoed())).toEqual({
+      added: [],
+      removed: [],
+      changed: ["ping"],
+    });
+  });
+
+  it("decides contexts/integration_types once for the whole list, like commandListsMatch", () => {
+    // Only one desired command sends contexts; the other commands must still
+    // be compared on them, so the diff agrees with the whole-list verdict.
+    const desired: Cmd[] = [
+      { name: "ping", description: "Pong", contexts: [0] },
+      { name: "quote", description: "Quotes" },
+    ];
+    const registered: Cmd[] = [
+      { type: 1, name: "ping", description: "Pong", contexts: [0] },
+      { type: 1, name: "quote", description: "Quotes", contexts: [0, 1] },
+    ];
+    expect(commandListsMatch(desired, registered)).toBe(false);
+    expect(diffCommandLists(desired, registered)).toEqual({
+      added: [],
+      removed: [],
+      changed: ["quote"],
+    });
+  });
+
+  it("agrees with commandListsMatch on every fixture", () => {
+    const changedDesc = sent();
+    (changedDesc[0] as Cmd).description = "Other";
+    const cases: Array<[Cmd[], Cmd[]]> = [
+      [sent(), echoed()],
+      [changedDesc, echoed()],
+      [sent().slice(0, 1), echoed()],
+      [sent(), echoed().slice(1)],
+      [[], []],
+    ];
+    for (const [d, r] of cases) {
+      const diff = diffCommandLists(d, r);
+      expect(diff).not.toBeNull();
+      const empty =
+        diff!.added.length + diff!.removed.length + diff!.changed.length === 0;
+      expect(empty).toBe(commandListsMatch(d, r));
+    }
+  });
+
+  it("keys by type and name", () => {
+    const desired = [{ name: "ping", type: 2 }];
+    const registered = [{ name: "ping", type: 1, description: "x" }];
+    expect(diffCommandLists(desired, registered)).toEqual({
+      added: ["ping"],
+      removed: ["ping"],
+      changed: [],
+    });
+  });
+
+  it.each([
+    ["not arrays", "x", []],
+    ["a duplicate desired name", [{ name: "a" }, { name: "a" }], []],
+    ["a duplicate registered name", [], [{ name: "a" }, { name: "a" }]],
+    ["a command without a name", [{ description: "x" }], []],
+    ["a malformed option list", [{ name: "a", options: "bad" }], []],
+  ])("returns null, never an empty diff, for %s", (_label, d, r) => {
+    expect(diffCommandLists(d, r)).toBeNull();
   });
 });

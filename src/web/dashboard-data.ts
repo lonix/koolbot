@@ -16,10 +16,18 @@ import {
   type BotPermissionReport,
   type MissingPermission,
 } from "../services/bot-permission-check.js";
+import type { CommandSyncReport } from "../services/command-manager.js";
 import type { ServerScan } from "../services/server-scan-service.js";
 import type { GuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
 import { NAV_ITEMS, type NavFeatureStatus } from "./admin-layout.js";
 import { fixedOnBotPermissions } from "./adopt-view.js";
+import {
+  COMMAND_SYNC_HREF,
+  commandSyncImpact,
+  commandSyncNotChecked,
+  commandSyncReason,
+  commandSyncTitle,
+} from "./command-sync-text.js";
 
 /** How long one source may take before the page goes ahead without it. */
 export const DASHBOARD_SOURCE_TIMEOUT_MS = 2_500;
@@ -53,7 +61,11 @@ export interface DatabaseCounts {
 }
 
 export interface NeedsYouRow {
-  severity: "blocker" | "warning" | "missing";
+  /**
+   * `sync` and `unchecked` are the slash-command check (#1638): the commands
+   * differ from Discord's, or the check could not be made.
+   */
+  severity: "blocker" | "warning" | "missing" | "sync" | "unchecked";
   title: string;
   /** One sentence on what it breaks; plain text, escaped by the renderer. */
   detail: string;
@@ -88,6 +100,8 @@ export interface DashboardData {
   /** Unavailable when the database is not connected or the counts timed out. */
   counts: Read<DatabaseCounts>;
   permissions: Read<PermissionsSummary>;
+  /** Slash commands against Discord's list (#1638). Unavailable: the check did not answer in time. */
+  commandSync: Read<CommandSyncReport>;
   needsYou: NeedsYouRow[];
   /** When the scan whose rows are listed was read, or null: no recent scan to read from. */
   scanReadAt: string | null;
@@ -101,6 +115,8 @@ export interface DashboardSources {
   mongoState: () => string;
   counts: () => Promise<DatabaseCounts>;
   permissions: () => Promise<BotPermissionReport>;
+  /** The read-only slash-command check: cached and never writes (`CommandManager.checkCommandSync`). */
+  commandSync: () => Promise<CommandSyncReport>;
   /**
    * The last finished scan still within the Dashboard's retention, with when it
    * finished (ms), or null. Never starts one.
@@ -251,6 +267,40 @@ export function scanRows(
     }));
 }
 
+/**
+ * The slash-command row of Needs you (#1638): none when the commands match, one
+ * that names what differs when they do not, and one that says *Not checked*
+ * (with the reason) when the check could not be made. It links to All settings,
+ * where Reload commands is: the Dashboard has no switch.
+ */
+export function commandSyncRows(read: Read<CommandSyncReport>): NeedsYouRow[] {
+  const report = read.state === "ok" ? read.value : null;
+  if (report?.state === "in-sync") return [];
+  if (report?.state === "out-of-sync") {
+    return [
+      {
+        severity: "sync",
+        title: commandSyncTitle(report),
+        detail: `${commandSyncImpact(report)} Reload commands on All settings applies the change.`,
+        href: COMMAND_SYNC_HREF,
+        action: "Open All settings",
+      },
+    ];
+  }
+  const reason =
+    commandSyncReason(report) ??
+    (read.state === "unavailable" ? "the check took too long" : undefined);
+  return [
+    {
+      severity: "unchecked",
+      title: "Slash commands could not be checked",
+      detail: `${commandSyncNotChecked(reason)}. Whether the commands are in sync is not known.`,
+      href: COMMAND_SYNC_HREF,
+      action: "Open All settings",
+    },
+  ];
+}
+
 /** Switched-on features the check could not look at, each counted once. */
 export function uncheckedFeatures(report: BotPermissionReport): number {
   const ids = new Set<string>(report.unknown.map((u) => u.feature.id));
@@ -285,7 +335,7 @@ export async function loadDashboardData(
   const dbConnected = mongoState === "connected";
   const voiceOn = src.voiceTrackingEnabled();
 
-  const [guild, counts, report, voice] = await Promise.all([
+  const [guild, counts, report, voice, commandSync] = await Promise.all([
     read(src.guild, ms),
     dbConnected
       ? read(src.counts, ms)
@@ -295,6 +345,7 @@ export async function loadDashboardData(
         }),
     read(src.permissions, ms),
     voiceOn ? read(src.voiceWeek, ms) : Promise.resolve(null),
+    read(src.commandSync, ms),
   ]);
 
   const permissionsRead = report.state === "ok" ? report.value : null;
@@ -313,7 +364,9 @@ export async function loadDashboardData(
     }
   })();
 
+  // First, so the six-row cut never hides it behind permission rows.
   const needsYou = [
+    ...commandSyncRows(commandSync),
     ...(permissionsRead ? permissionRows(permissionsRead) : []),
     ...(scan
       ? scanRows(
@@ -329,6 +382,7 @@ export async function loadDashboardData(
     mongoState,
     counts,
     permissions,
+    commandSync,
     needsYou,
     scanReadAt: scan ? new Date(scan.readAt).toISOString() : null,
     voice:
