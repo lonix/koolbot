@@ -436,24 +436,13 @@ async function cleanupVoiceChannels(): Promise<void> {
               "Lobby",
             )) || "Lobby";
 
-          // Clean up any empty channels in the category
-          for (const channel of category.children.cache.values()) {
-            if (
-              channel.type === ChannelType.GuildVoice &&
-              channel.members.size === 0 &&
-              channel.name !== lobbyChannelName
-            ) {
-              try {
-                await channel.delete();
-                logger.info(`Cleaned up empty channel ${channel.name}`);
-              } catch (error) {
-                logger.error(
-                  `Error cleaning up channel ${channel.name}:`,
-                  error,
-                );
-              }
-            }
-          }
+          // Clean up any empty channels in the category (a room whose
+          // waiting room is occupied stays, #1673)
+          await voiceChannelManager.deleteEmptyChannelsOnShutdown(
+            guild,
+            category,
+            lobbyChannelName,
+          );
         }
       }
     }

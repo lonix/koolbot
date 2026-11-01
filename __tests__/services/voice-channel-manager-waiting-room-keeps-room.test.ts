@@ -27,10 +27,6 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
   let waiting: any;
   let waiter: any;
 
-  // The release step is not awaited by the event handler (see #1682 review).
-  const settleReleases = (): Promise<unknown> =>
-    Promise.all([...(manager as any).pendingReleases]);
-
   function makeMembers(list: any[]): any {
     const map = new Map<string, any>(list.map((m) => [m.id, m]));
     return map;
@@ -127,15 +123,7 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
   });
 
   describe("when the last waiting member goes (the room must not leak)", () => {
-    function voiceUpdate(newChannel: unknown): [VoiceState, VoiceState] {
-      const member = waiter as GuildMember;
-      return [
-        { channel: waiting, member } as unknown as VoiceState,
-        { channel: newChannel, member } as unknown as VoiceState,
-      ];
-    }
-
-    it("deletes the room and waiting room when the last waiter disconnects", async () => {
+    it("the next cleanup pass deletes the room and its waiting room", async () => {
       setup(true);
       const owner = { id: "owner-id", displayName: "Owner" } as GuildMember;
       // The owner leaves the (now empty) room: it is kept for the waiter.
@@ -144,45 +132,26 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
         { channel: null, member: owner } as unknown as VoiceState,
       );
       expect(main.delete).not.toHaveBeenCalled();
-      expect(waiter.voice.disconnect).not.toHaveBeenCalled();
-      waiting.members = makeMembers([]); // the waiter disconnects
-      await manager.handleVoiceStateUpdate(...voiceUpdate(null));
-      await settleReleases();
+      // The waiter disconnects. Nothing runs at once: the room waits for the
+      // next pass (the 5-minute sweep) and is not touched by the live event.
+      waiting.members = makeMembers([]);
+      await manager.handleVoiceStateUpdate(
+        { channel: waiting, member: waiter } as unknown as VoiceState,
+        { channel: null, member: waiter } as unknown as VoiceState,
+      );
+      expect(main.delete).not.toHaveBeenCalled();
+      // The pass finds the room empty with an empty waiting room.
+      await (manager as any).cleanupEmptyChannel(main as VoiceChannel);
       expect(main.delete).toHaveBeenCalledTimes(1);
       expect(waiting.delete).toHaveBeenCalledTimes(1);
       expect((manager as any).userChannels.has("owner-id")).toBe(false);
       expect((manager as any).waitingRooms.has("main-id")).toBe(false);
     });
 
-    it("deletes the room when the last waiter moves to another channel", async () => {
-      setup(true);
-      waiting.members = makeMembers([]);
-      const other = {
-        id: "other-id",
-        name: "Elsewhere",
-        type: ChannelType.GuildVoice,
-      };
-      await manager.handleVoiceStateUpdate(...voiceUpdate(other));
-      await settleReleases();
-      expect(main.delete).toHaveBeenCalledTimes(1);
-    });
-
     it("keeps the room while another waiter is still waiting", async () => {
       setup(true);
-      const second = { id: "second-id" };
-      waiting.members = makeMembers([second]);
-      await manager.handleVoiceStateUpdate(...voiceUpdate(null));
-      await settleReleases();
-      expect(main.delete).not.toHaveBeenCalled();
-    });
-
-    it("does not delete an occupied room when a waiter is admitted into it", async () => {
-      setup(true);
-      const owner = { id: "owner-id" };
-      main.members = makeMembers([owner, waiter]);
-      waiting.members = makeMembers([]);
-      await manager.handleVoiceStateUpdate(...voiceUpdate(main));
-      await settleReleases();
+      waiting.members = makeMembers([{ id: "second-id" }]);
+      await (manager as any).cleanupEmptyChannel(main as VoiceChannel);
       expect(main.delete).not.toHaveBeenCalled();
     });
   });
@@ -215,18 +184,6 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
       expect(waiting.delete).not.toHaveBeenCalled();
       expect(waiter.voice.disconnect).not.toHaveBeenCalled();
     });
-
-    it("does nothing when voice channel management is off", async () => {
-      setup(true);
-      mockConfigService.getBoolean = jest.fn().mockResolvedValue(false) as any;
-      waiting.members = makeMembers([]);
-      await manager.handleVoiceStateUpdate(
-        { channel: waiting, member: waiter } as unknown as VoiceState,
-        { channel: null, member: waiter } as unknown as VoiceState,
-      );
-      expect(main.delete).not.toHaveBeenCalled();
-      expect(waiting.delete).not.toHaveBeenCalled();
-    });
   });
 
   function deferred<T = void>(): {
@@ -241,30 +198,7 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
   }
   const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
-  describe("ordering and concurrency (review of #1682)", () => {
-    it("does not make the voice tracker wait for a slow cleanup", async () => {
-      setup(true);
-      waiting.members = makeMembers([]); // the last waiter leaves
-      const slow = deferred();
-      main.delete = jest.fn().mockReturnValue(slow.promise);
-      let settled = false;
-      const update = manager
-        .handleVoiceStateUpdate(
-          { channel: waiting, member: waiter } as unknown as VoiceState,
-          { channel: null, member: waiter } as unknown as VoiceState,
-        )
-        .then(() => {
-          settled = true;
-        });
-      await flush();
-      expect(main.delete).toHaveBeenCalled(); // cleanup is under way ...
-      expect(settled).toBe(true); // ... and the event handler already returned
-      slow.resolve();
-      await update;
-      await Promise.all([...(manager as any).pendingReleases]);
-      expect((manager as any).userChannels.has("owner-id")).toBe(false);
-    });
-
+  describe("races during a cleanup (review of #1682)", () => {
     it("a late cleanup of the old room leaves the owner's new room alone (cleanupEmptyChannel)", async () => {
       setup(false);
       const slow = deferred();
@@ -289,19 +223,6 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
       slow.resolve();
       await run;
       expect((manager as any).userChannels.get("owner-id")).toBe(newRoom);
-    });
-
-    it("runs the two cleanup paths for one room one after the other", async () => {
-      setup(false);
-      const slow = deferred();
-      main.delete = jest.fn().mockReturnValue(slow.promise);
-      const first = (manager as any).cleanupUserChannel("owner-id");
-      const second = (manager as any).cleanupEmptyChannel(main as VoiceChannel);
-      await flush();
-      expect(main.delete).toHaveBeenCalledTimes(1);
-      slow.resolve();
-      await Promise.all([first, second]);
-      expect(main.delete).toHaveBeenCalledTimes(1);
     });
 
     it("does not delete while the waiting-room links are unknown, and retries", async () => {
@@ -371,6 +292,85 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
       await run;
       expect(main.delete).not.toHaveBeenCalled();
       expect((manager as any).userChannels.has("owner-id")).toBe(true);
+    });
+  });
+
+  describe("a failed waiting-room delete (review of #1682)", () => {
+    it("keeps the room and every link when the waiting room cannot be deleted (cleanupEmptyChannel)", async () => {
+      setup(false);
+      waiting.delete = jest.fn().mockRejectedValue(new Error("rate limited"));
+      await (manager as any).cleanupEmptyChannel(main as VoiceChannel);
+      expect(main.delete).not.toHaveBeenCalled();
+      expect((manager as any).waitingRooms.get("main-id")).toBe("waiting-id");
+      expect((manager as any).waitingRoomToMain.get("waiting-id")).toBe(
+        "main-id",
+      );
+      expect((manager as any).userChannels.has("owner-id")).toBe(true);
+      expect((manager as any).channelsBeingDeleted.has("main-id")).toBe(false);
+    });
+
+    it("keeps the room and every link when the waiting room cannot be deleted (cleanupUserChannel)", async () => {
+      setup(false);
+      waiting.delete = jest.fn().mockRejectedValue(new Error("rate limited"));
+      await (manager as any).cleanupUserChannel("owner-id");
+      expect(main.delete).not.toHaveBeenCalled();
+      expect((manager as any).waitingRooms.get("main-id")).toBe("waiting-id");
+      expect((manager as any).waitingRoomToMain.get("waiting-id")).toBe(
+        "main-id",
+      );
+      expect((manager as any).userChannels.has("owner-id")).toBe(true);
+    });
+
+    it("deletes both and clears the links when the waiting-room delete succeeds", async () => {
+      setup(false);
+      await (manager as any).cleanupEmptyChannel(main as VoiceChannel);
+      expect(waiting.delete).toHaveBeenCalledTimes(1);
+      expect(main.delete).toHaveBeenCalledTimes(1);
+      expect((manager as any).waitingRooms.size).toBe(0);
+      expect((manager as any).waitingRoomToMain.size).toBe(0);
+    });
+  });
+
+  describe("shutdown sweep (review of #1682)", () => {
+    function categoryOf(...channels: any[]): any {
+      return {
+        children: {
+          cache: new Map(channels.map((c) => [c.id, c])),
+        },
+      };
+    }
+    const lobby = (): any => ({
+      id: "lobby-id",
+      name: "Lobby",
+      type: ChannelType.GuildVoice,
+      members: makeMembers([]),
+      delete: jest.fn().mockResolvedValue(undefined),
+    });
+
+    it("deletes neither an empty room nor its occupied waiting room", async () => {
+      setup(true);
+      const l = lobby();
+      await manager.deleteEmptyChannelsOnShutdown(
+        main.guild,
+        categoryOf(main, waiting, l),
+        "Lobby",
+      );
+      expect(main.delete).not.toHaveBeenCalled();
+      expect(waiting.delete).not.toHaveBeenCalled();
+      expect(l.delete).not.toHaveBeenCalled();
+    });
+
+    it("control: deletes an empty room and an empty waiting room, never the lobby", async () => {
+      setup(false);
+      const l = lobby();
+      await manager.deleteEmptyChannelsOnShutdown(
+        main.guild,
+        categoryOf(main, waiting, l),
+        "Lobby",
+      );
+      expect(main.delete).toHaveBeenCalledTimes(1);
+      expect(waiting.delete).toHaveBeenCalledTimes(1);
+      expect(l.delete).not.toHaveBeenCalled();
     });
   });
 });
