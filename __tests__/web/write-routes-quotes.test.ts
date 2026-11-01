@@ -222,8 +222,8 @@ describe("POST /quotes/:id/edit", () => {
     );
     expect(r.html).toContain('value=" bob "');
     expect(r.html).toContain("\n  new text </textarea>");
-    expect(r.html).toContain(
-      '<details class="helper edit-details" open><summary>Edit</summary>',
+    expect(r.html).toMatch(
+      /<details class="kb-disclosure" open><summary>.*?Edit<span class="kb-visually-hidden"> quote /,
     );
     expect(mockEditQuote).not.toHaveBeenCalled();
   });
