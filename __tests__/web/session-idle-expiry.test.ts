@@ -11,7 +11,9 @@
  * `Max-Age` the code intends.
  *
  * They pass without any change to the middleware: they are proof that the
- * server side is correct, not a fix for it.
+ * server side is correct, not a fix for it. They mount each router on its own,
+ * so they cannot see the order the bot really uses; `session-ping-mount.test.ts`
+ * does (through `createWebRouter`).
  */
 import {
   describe,

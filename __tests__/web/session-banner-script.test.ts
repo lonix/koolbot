@@ -36,7 +36,9 @@ interface Harness {
   /** Let the pending fetch promise chains settle. */
   settle: () => Promise<void>;
   fetched: string[];
-  replyWith: (r: PingReply | "network-error") => void;
+  replyWith: (r: PingReply | "network-error" | "hang" | "hang-body") => void;
+  /** Answer the n-th request that was left hanging (0 is the first). */
+  release: (n: number, r: PingReply) => void;
 }
 
 const SURFACES: Array<{
@@ -64,6 +66,8 @@ function mount(
   remainingMs: number,
   /** Replaces the real script, for the mutation checks below. */
   script: string = sessionBannerScript(surface.key),
+  /** What the ping answers from the start (the first one goes out at mount). */
+  initial: PingReply | "hang" | "hang-body" = { status: 200 },
 ): Harness {
   const dom = new JSDOM(
     `<!doctype html><body><span class="kb-session"><span id="session-countdown" data-remaining-ms="${remainingMs}" data-inactivity-ms="${WINDOW}">--:--</span></span></body>`,
@@ -82,10 +86,29 @@ function mount(
   };
 
   const fetched: string[] = [];
-  let reply: PingReply | "network-error" = { status: 200 };
+  let reply: PingReply | "network-error" | "hang" | "hang-body" = initial;
+  const hanging: Array<(r: PingReply) => void> = [];
   win.fetch = (url: string) => {
     fetched.push(url);
     if (reply === "network-error") return Promise.reject(new Error("offline"));
+    if (reply === "hang") {
+      return new Promise((resolve) => {
+        hanging.push((r) =>
+          resolve({
+            status: r.status,
+            ok: r.status >= 200 && r.status < 300,
+            json: () => Promise.resolve(r.body),
+          }),
+        );
+      });
+    }
+    if (reply === "hang-body") {
+      return Promise.resolve({
+        status: 200,
+        ok: true,
+        json: () => new Promise(() => undefined),
+      });
+    }
     const r = reply;
     return Promise.resolve({
       status: r.status,
@@ -159,6 +182,7 @@ function mount(
     replyWith: (r) => {
       reply = r;
     },
+    release: (n, r) => hanging[n](r),
   };
 }
 
@@ -340,6 +364,49 @@ describe.each(SURFACES)("session banner script on $name", (surface) => {
       expect(h.text()).toBe("20:00");
     },
   );
+});
+
+describe.each(SURFACES)("a ping that never finishes, on $name", (surface) => {
+  it("is given up after a while, and the next check asks again (stalled fetch)", async () => {
+    const h = mount(surface, WINDOW, undefined, "hang");
+    await h.advance(40 * 1000);
+    expect(h.fetched.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("is given up after a while too when the body never arrives", async () => {
+    const h = mount(surface, WINDOW, undefined, "hang-body");
+    await h.advance(90 * 1000);
+    const after = h.fetched.length;
+    await h.advance(90 * 1000);
+    expect(h.fetched.length).toBeGreaterThan(after);
+    expect(h.fakeWindow.location.href).toBe("");
+  });
+
+  it("validates on wake even though a ping from before the sleep never answered", async () => {
+    const h = mount(surface, WINDOW, undefined, "hang");
+    await h.advance(40 * 1000);
+    h.replyWith({ status: 401, body: { error: "unauthorized" } });
+    h.sleep(8 * 60 * MINUTE);
+    h.fire("visibilitychange");
+    await h.settle();
+    expect(h.fakeWindow.location.href).toBe(surface.home);
+  });
+
+  it("ignores a reply from before a wake: it cannot restore an expired countdown", async () => {
+    const h = mount(surface, 2 * MINUTE, undefined, "hang");
+    await h.advance(5 * 1000);
+    // A ping is out. The laptop sleeps for 8 hours; on wake the server says
+    // one second is left.
+    h.replyWith({ status: 200, body: { remainingMs: 1000 } });
+    h.sleep(8 * 60 * MINUTE);
+    h.fire("visibilitychange");
+    await h.settle();
+    // Now the old, pre-sleep ping finally answers with 25 minutes.
+    h.release(0, { status: 200, body: { remainingMs: 25 * MINUTE } });
+    await h.settle();
+    expect(h.text()).not.toMatch(/^2[0-9]:/);
+    expect(h.text()).toMatch(/^0:0[01]$/);
+  });
 });
 
 describe("the fake clock catches a countdown that only counts callbacks", () => {

@@ -219,6 +219,13 @@ describe("debug log lines", () => {
     "/admin/events/65a1b2c3d4e5f60718293a4b/delete",
     "/admin/role-groups/job/3f1c2d4e-0000-4000-8000-000000000000",
     "/admin/quotes/123456?user=123456789012345678",
+    // Percent-encoded: the server decodes these to the same snowflake.
+    "/admin/birthdays/%3123456789012345678/edit",
+    "/admin/birthdays/%31%32%33%34%35%36%37%38%39%30%31%32%33%34%35%36%37%38/edit",
+    "/admin/birthdays/%25313233343536373839303132333435363738/edit",
+    // Malformed escapes never throw and never let the digits through.
+    "/admin/birthdays/%zz123456789012345678/edit",
+    "/admin/birthdays/12345678%/edit",
   ])("never lets an id in the path %s reach the log", async (path) => {
     const mw = createSessionMiddleware({} as Client);
     await mw(

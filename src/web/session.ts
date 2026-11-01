@@ -224,6 +224,30 @@ async function loadValidSession(
 const ID_SEGMENT = /^(?:\d{5,}|[0-9a-f-]{16,}|[A-Za-z0-9_-]{24,})$/i;
 
 /**
+ * Whether a raw path segment is, or decodes to, an id. Express decodes the
+ * segment before a handler sees it, so `%3123456789012345678` is the same
+ * snowflake as `123456789012345678`: the segment is decoded (up to three
+ * times, for a double-encoded one) before it is classified, and each piece
+ * between encoded slashes is checked. A malformed escape cannot be decoded
+ * and so cannot be shown to be harmless: it counts as an id.
+ */
+function looksLikeId(segment: string): boolean {
+  let current = segment;
+  for (let i = 0; i < 3; i++) {
+    if (current.split("/").some((part) => ID_SEGMENT.test(part))) return true;
+    if (!current.includes("%")) return false;
+    try {
+      const decoded = decodeURIComponent(current);
+      if (decoded === current) return false;
+      current = decoded;
+    } catch {
+      return true;
+    }
+  }
+  return current.split("/").some((part) => ID_SEGMENT.test(part));
+}
+
+/**
  * "GET /admin/settings": the method and the path, for the debug log (#1635).
  * It never carries the query string or an identifier. When Express has matched
  * a route (the ping), that route's own pattern is used; otherwise the path is
@@ -242,7 +266,7 @@ function describeRoute(req: Request): string {
     (req.originalUrl ?? req.url ?? "")
       .split("?")[0]
       .split("/")
-      .map((segment) => (ID_SEGMENT.test(segment) ? ":id" : segment))
+      .map((segment) => (looksLikeId(segment) ? ":id" : segment))
       .join("/");
   return sanitizeForLog(`${req.method} ${path}`, 160);
 }
