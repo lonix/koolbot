@@ -1647,6 +1647,14 @@ export function adminPages(): A11yPage[] {
       name: "Bootstrap",
       html: renderBootstrapPage({
         ...COMMON,
+        // The "Your session" panel (#1635), so axe and the UI preview see it.
+        session: {
+          issuedAt: Date.UTC(2026, 10, 1, 3, 59),
+          previousActivityAt: Date.UTC(2026, 10, 1, 8, 45),
+          now: Date.UTC(2026, 10, 1, 8, 59),
+          windowMs: 30 * 60 * 1000,
+          expiresAt: new Date(Date.UTC(2026, 10, 2, 3, 59)),
+        },
         groups: [
           {
             category: "Discord",

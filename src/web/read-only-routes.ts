@@ -179,6 +179,7 @@ import { BOOTSTRAP_VARS, bootstrapDisplay } from "./bootstrap-vars.js";
 import { getEnv, getEnvConfigValue } from "../config/env.js";
 import {
   createSessionPingHandler,
+  getInactivityWindowMs,
   requireAdminRoleMiddleware,
   type AuthenticatedRequest,
 } from "./session.js";
@@ -1209,7 +1210,20 @@ export function createReadOnlyRouter(
         category,
         rows,
       }));
-      res.type("text/html").send(renderBootstrapPage({ ...common, groups }));
+      const session = req.webSession;
+      res.type("text/html").send(
+        renderBootstrapPage({
+          ...common,
+          groups,
+          session: session && {
+            issuedAt: session.issuedAt,
+            previousActivityAt: session.previousActivityAt,
+            now: session.lastActivityAt,
+            windowMs: getInactivityWindowMs(),
+            expiresAt: session.expiresAt,
+          },
+        }),
+      );
     }),
   );
 

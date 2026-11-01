@@ -814,6 +814,56 @@ Or rotate `WEBUI_SESSION_SECRET` in `.env` and restart — that
 invalidates every signed cookie and every outstanding magic link as a
 side effect, since the HMAC key changes.
 
+### What counts as activity
+
+This section is for admins who want to know why a session is still open, or
+why it ended. Every request that passes the session check writes a new
+cookie with the time of that request (`act`), so the inactivity window starts
+again. Opening a page, saving a form and every request a page makes while a job
+runs all count. Nothing in the browser counts by itself: a mouse move or a key
+press does not reach the server, and the countdown in the top bar never extends
+a session.
+
+| What the page sends | Renews the session? |
+| --- | --- |
+| A page load, a form save, a confirm step, a button such as **Check now** | Yes |
+| The countdown's check (`/admin/session/ping`, `/me/session/ping`), every 30 seconds | No. It is answered before the session check and writes no cookie. |
+| The job status check (`/admin/role-groups/job/<id>`, `/admin/adopt/history/job/<id>`) on the six pages that run a job | Yes, every 1.5 seconds, and only while the job is still `running`. The check stops on `done`, `failed`, an unknown job, a sign-in page or a network error. |
+| The top bar countdown and the "Current time" line on the timezone card of **My preferences** | No. They run in the browser only. |
+
+No other page polls, reloads itself or refreshes by meta tag. A test
+(`__tests__/web/session-renewal-sources.test.ts`) fails when a new
+timer-driven request appears, so this table is revisited with it.
+
+> [!NOTE]
+> A tab you left alone for hours still shows its old page. That is not a
+> session. The page is only a picture of the last load; the next click makes a
+> request, and the server answers 401 after the window. When the page wakes
+> (the tab is shown again or the browser restores it from its cache), the
+> countdown checks the clock and asks the server at once, and sends the browser
+> to the sign-in page if the session has ended.
+
+To see what a session is doing, open **Environment** and read **Your session**:
+
+- **Signed in:** when the session was issued.
+- **Previous request:** when the request before this page was. This page is a
+  request too and has just renewed the session, so only the one before it shows
+  what kept the session alive.
+- **Inactivity window:** `WEBUI_INACTIVITY_TIMEOUT_MINUTES`.
+- **Hard cap:** the latest time the session can last, from
+  `WEBUI_SESSION_LIFETIME_HOURS`.
+
+With `DEBUG=true` the bot also writes one line each time a session is renewed
+(method, path without its query, and minutes since the previous request) and
+each time one is refused (the cause, the path, and for inactivity the idle time
+against the window). The lines never contain the cookie, the session id or the
+secret.
+
+Over plain `http` (a `WEBUI_BASE_URL` that starts with `http://`) the cookie is
+named `koolbot_session`, has no `Secure` flag, and expires in the browser
+after the inactivity window (`Max-Age`), renewed on every request. Over
+`https` it is named `__Host-koolbot_session` and has `Secure`.
+
 ---
 
 ## Prometheus / OpenMetrics endpoint

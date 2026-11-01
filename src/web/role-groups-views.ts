@@ -591,7 +591,7 @@ ${errors}${losing}${renderAdoptionDiff(props.plan)}${form}`;
   });
 }
 
-const JOB_SCRIPT = (jobId: string): string =>
+export const JOB_SCRIPT = (jobId: string): string =>
   `(function(){var id=${JSON.stringify(jobId)};var el=document.getElementById('rg-job');` +
   "function tick(){fetch('/admin/role-groups/job/'+encodeURIComponent(id),{credentials:'same-origin'})" +
   ".then(function(r){return r.json()}).then(function(j){" +

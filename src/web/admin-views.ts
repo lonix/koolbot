@@ -154,6 +154,10 @@ import {
   type PermissionNotice,
 } from "./permission-notice.js";
 import type { AccessChange, AccessGap } from "../services/wizard-access.js";
+import {
+  renderSessionPanel,
+  type SessionDiagnostics,
+} from "./session-panel.js";
 
 interface CommonProps {
   csrfToken: string;
@@ -260,6 +264,8 @@ export function renderDashboardPage(props: DashboardProps): string {
 // ---------- Bootstrap ----------
 
 export interface BootstrapProps extends CommonProps {
+  /** The signed-in session's real state, shown first (#1635). */
+  session?: SessionDiagnostics;
   groups: Array<{
     category: string;
     rows: Array<{
@@ -300,7 +306,7 @@ export function renderBootstrapPage(props: BootstrapProps): string {
 <h1>Environment</h1>
 <p class="subtitle">Process startup variables loaded from <code>.env</code>. Read-only — change them by editing <code>.env</code> and restarting the bot.</p>
 <div class="notice info">Secrets are shown as configured or unset only, never any part of their value. Never edited from the WebUI, never written to MongoDB.</div>
-${sections}
+${props.session ? `${renderSessionPanel(props.session)}\n` : ""}${sections}
 `;
   return renderAdminPage({
     title: "Environment",

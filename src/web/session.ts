@@ -2,6 +2,7 @@ import { Buffer } from "buffer";
 import { Client } from "discord.js";
 import { Request, RequestHandler, Response, NextFunction } from "express";
 import logger from "../utils/logger.js";
+import { sanitizeForLog } from "../utils/log-sanitize.js";
 import {
   PermissionsService,
   PermissionCheckError,
@@ -82,6 +83,18 @@ export interface WebSessionContext {
   shellFeatures?: ShellFeatureStatus;
   lastActivityAt: number;
   /**
+   * When the session was issued (the cookie's `iat`, set at sign-in), in ms.
+   * For the Environment page's "Signed in" line (#1635); optional so a context
+   * built without a cookie (tests) stays valid.
+   */
+  issuedAt?: number;
+  /**
+   * The cookie's `act` BEFORE this request renewed it: when the previous real
+   * request was, in ms. `lastActivityAt` is always "now", so it cannot show
+   * what kept a session alive; this can (#1635).
+   */
+  previousActivityAt?: number;
+  /**
    * Server-side hard cap for the session, mirrored from
    * `WebSession.expiresAt`. Used by the banner countdown so the rendered
    * remaining time respects the TTL ceiling, not just the inactivity window.
@@ -161,6 +174,19 @@ export function clearSessionCookie(res: Response): void {
   }
 }
 
+/** Why a session was refused; names the cause in the debug log (#1635). */
+type RefusalReason =
+  | "inactivity"
+  | "hard cap"
+  | "revoked"
+  | "missing row"
+  | "mismatch"
+  | "foreign guild";
+
+type LoadedSession =
+  | { session: IWebSession; refused?: undefined }
+  | { session?: undefined; refused: RefusalReason };
+
 /**
  * Cookie + DB validation shared by `createSessionMiddleware` and the
  * read-only `/session/ping` handler. Enforces the sliding inactivity
@@ -171,22 +197,56 @@ export function clearSessionCookie(res: Response): void {
 async function loadValidSession(
   payload: CookiePayload,
   now: number,
-): Promise<IWebSession | null> {
-  if (now - payload.act > getInactivityWindowMs()) return null;
-  const dbSession = await WebSessionService.getInstance().findById(payload.sid);
-  if (
-    !dbSession ||
-    dbSession.revokedAt ||
-    dbSession.expiresAt.getTime() <= now ||
-    dbSession.discordUserId !== payload.uid ||
-    dbSession.guildId !== payload.gid ||
-    // Pinned to the configured guild (#1144): a session row for any other
-    // guild is refused here, so it also fails `/session/ping`.
-    isForeignGuild(dbSession.guildId, env.guildId)
-  ) {
-    return null;
+): Promise<LoadedSession> {
+  if (now - payload.act > getInactivityWindowMs()) {
+    return { refused: "inactivity" };
   }
-  return dbSession;
+  const dbSession = await WebSessionService.getInstance().findById(payload.sid);
+  if (!dbSession) return { refused: "missing row" };
+  if (dbSession.revokedAt) return { refused: "revoked" };
+  if (dbSession.expiresAt.getTime() <= now) return { refused: "hard cap" };
+  if (
+    dbSession.discordUserId !== payload.uid ||
+    dbSession.guildId !== payload.gid
+  ) {
+    return { refused: "mismatch" };
+  }
+  // Pinned to the configured guild (#1144): a session row for any other
+  // guild is refused here, so it also fails `/session/ping`.
+  if (isForeignGuild(dbSession.guildId, env.guildId)) {
+    return { refused: "foreign guild" };
+  }
+  return { session: dbSession };
+}
+
+/** "GET /admin/settings": method and path only, never the query string. */
+function describeRoute(req: Request): string {
+  const url = req.originalUrl ?? req.url ?? "";
+  return sanitizeForLog(`${req.method} ${url.split("?")[0]}`, 160);
+}
+
+function minutesOf(ms: number): number {
+  return Math.round(ms / 60000);
+}
+
+/**
+ * One debug line when a session is refused (#1635). It names the cause and
+ * the route, and for inactivity the idle gap against the window. It never
+ * carries the cookie, its payload, the session id or the secret.
+ */
+function logRefusal(
+  req: Request,
+  reason: RefusalReason,
+  payload: CookiePayload,
+  now: number,
+): void {
+  const idle =
+    reason === "inactivity"
+      ? `: idle ${minutesOf(now - payload.act)} min, window ${minutesOf(getInactivityWindowMs())} min`
+      : "";
+  logger.debug(
+    `Web session refused (${reason}) on ${describeRoute(req)}${idle}`,
+  );
 }
 
 export function readSessionCookie(req: Request): CookiePayload | null {
@@ -254,12 +314,14 @@ export function createSessionMiddleware(
     }
 
     const now = Date.now();
-    const dbSession = await loadValidSession(payload, now);
-    if (!dbSession) {
+    const loaded = await loadValidSession(payload, now);
+    if (!loaded.session) {
+      logRefusal(req, loaded.refused, payload, now);
       clearSessionCookie(res);
       respondUnauthorized(res);
       return;
     }
+    const dbSession = loaded.session;
     const sessionService = WebSessionService.getInstance();
 
     try {
@@ -323,6 +385,11 @@ export function createSessionMiddleware(
     const role = normalizeSessionRole(dbSession.role);
     const refreshed: CookiePayload = { ...payload, rol: role, act: now };
     writeSessionCookie(res, refreshed);
+    // The audit trail of what kept a session alive (#1635): every real request
+    // behind `requireSession` lands here, the banner's ping does not.
+    logger.debug(
+      `Web session renewed by ${describeRoute(req)} (${role}, previous request ${minutesOf(now - payload.act)} min ago)`,
+    );
 
     // Scopes come from the role groups, live, on every request (#1316), and
     // never from the stored column. An admin session is gated by its role (the
@@ -352,6 +419,8 @@ export function createSessionMiddleware(
       scopeReasons,
       shellFeatures,
       lastActivityAt: now,
+      issuedAt: payload.iat,
+      previousActivityAt: payload.act,
       expiresAt: dbSession.expiresAt,
     };
     // Hand the layouts who is looking (#1317) for the rest of this request.
@@ -560,11 +629,13 @@ export function createSessionPingHandler(): RequestHandler {
         return;
       }
       const now = Date.now();
-      const dbSession = await loadValidSession(payload, now);
-      if (!dbSession) {
+      const loaded = await loadValidSession(payload, now);
+      if (!loaded.session) {
+        logRefusal(req, loaded.refused, payload, now);
         respondPingUnauthorized(res);
         return;
       }
+      const dbSession = loaded.session;
       const inactivityMs = getInactivityWindowMs();
       const inactivityRemaining = Math.max(0, payload.act + inactivityMs - now);
       const hardCapRemaining = Math.max(0, dbSession.expiresAt.getTime() - now);
