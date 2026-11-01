@@ -17,6 +17,8 @@ export interface WizardDependencyReview {
     key: string;
     direction: "enable" | "disable";
     related: string[];
+    /** The wizard step that sets a key, for the keys whose feature was chosen. */
+    steps?: Record<string, number>;
   }[];
 }
 
@@ -36,6 +38,11 @@ function settingRef(key: string, link: boolean): string {
     ? `<a href="/admin/settings#section-${escapeHtml(meta?.category ?? key.split(".")[0])}">${name}</a>`
     : `<strong>${name}</strong>`;
   return `${named} (<span class="kb-mono">${escapeHtml(key)}</span>)`;
+}
+
+function labelOf(key: string): string {
+  const meta = (settingsMetadata as Record<string, { label?: string }>)[key];
+  return meta?.label ?? key;
 }
 
 function refList(keys: string[]): string {
@@ -61,13 +68,41 @@ export function renderDependencyReview(
   if (review.blockers.length > 0) {
     const items = review.blockers
       .map((b) => {
-        const it = b.related.length === 1 ? "it" : "them";
-        return b.direction === "enable"
-          ? // No wizard step exists for a feature that was not chosen, and
-            // switching it on in All settings does not help: Apply turns off
-            // every feature that was not chosen. Say what does work.
-            `<li>Turning on ${settingRef(b.key, false)} needs ${refList(b.related)} turned on too, and turning ${it} on in All settings does not help, because Apply turns off every feature that was not chosen. <a href="${WIZARD_RESTART_HREF}">Restart the wizard</a> and choose ${it} on the first step (this starts your choices over), or go back to the step for ${settingRef(b.key, false)} and leave it off.</li>`
-          : `<li>Turning off ${settingRef(b.key, false)} needs ${refList(b.related)} turned off first. Go back to ${b.related.length === 1 ? "its" : "their"} step and switch ${it} off, or keep ${settingRef(b.key, false)} on.</li>`;
+        const steps = b.steps ?? {};
+        const stepLink = (key: string): string => {
+          const step = steps[key];
+          return step === undefined
+            ? settingRef(key, false)
+            : `<a href="/admin/wizard?step=${step}">${escapeHtml(labelOf(key))}</a>`;
+        };
+        const leave = `go back to the step for ${stepLink(b.key)} and leave ${b.direction === "enable" ? "it off" : "it on"}`;
+        if (b.direction === "disable") {
+          const it = b.related.length === 1 ? "it" : "them";
+          return `<li>Turning off ${settingRef(b.key, false)} needs ${refList(b.related)} turned off first. Go back to ${b.related.length === 1 ? "its" : "their"} step and switch ${it} off, or ${leave}.</li>`;
+        }
+        // Two different situations, two different advice. A prerequisite whose
+        // feature was chosen has a step: it is switched off there, so go back.
+        // One that was not chosen has no step, and switching it on in All
+        // settings does not help because Apply turns off every feature that was
+        // not chosen: only a restart (which discards the choices) changes it.
+        const chosen = b.related.filter((k) => steps[k] !== undefined);
+        const missing = b.related.filter((k) => steps[k] === undefined);
+        const sentences = [
+          `Turning on ${settingRef(b.key, false)} needs ${refList(b.related)} turned on too.`,
+        ];
+        if (chosen.length > 0) {
+          sentences.push(
+            `${chosen.length === 1 ? "It is" : "They are"} switched off in ${chosen.length === 1 ? "its" : "their"} own step: go back to ${chosen.map(stepLink).join(" or ")} and switch ${chosen.length === 1 ? "it" : "them"} on.`,
+          );
+        }
+        if (missing.length > 0) {
+          const it = missing.length === 1 ? "it" : "them";
+          sentences.push(
+            `${refList(missing)} ${missing.length === 1 ? "was" : "were"} not chosen, and turning ${it} on in All settings does not help, because Apply turns off every feature that was not chosen. <a href="${WIZARD_RESTART_HREF}">Restart the wizard</a> and choose ${it} on the first step (this starts your choices over).`,
+          );
+        }
+        sentences.push(`Or ${leave}.`);
+        return `<li>${sentences.join(" ")}</li>`;
       })
       .join("");
     parts.push(

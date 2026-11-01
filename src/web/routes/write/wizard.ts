@@ -634,7 +634,15 @@ export function createWizardRouter(client: Client): Router {
       const saved: Record<string, unknown> = {};
       const dropped: Array<{ key: string; reason: string }> = [];
       for (const k of settingKeys) {
-        if (masterOff && k !== masterKey) continue;
+        if (masterOff && k !== masterKey) {
+          // The control was greyed out and not submitted, but an earlier visit
+          // to this step may have staged a value for it. Drop it, so Review's
+          // dependency check reads the live value instead of taking a stale
+          // `true` for the admin's choice (#1622). Other features' choices
+          // are not touched.
+          wizard.removeConfiguration(session.discordUserId, session.guildId, k);
+          continue;
+        }
         const current = await ConfigService.getInstance()
           .get(k)
           .catch(() => undefined);

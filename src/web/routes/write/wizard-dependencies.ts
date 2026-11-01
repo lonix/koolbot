@@ -15,7 +15,11 @@ import {
   type DependencyCascade,
   type DependencyIssue,
 } from "../../../services/config-schema.js";
-import { wizardOffGates } from "./helpers.js";
+import {
+  WIZARD_FEATURE_ORDER,
+  WIZARD_FEATURE_SETTINGS,
+  wizardOffGates,
+} from "./helpers.js";
 
 export interface WizardDependencyPlan {
   /** Per feature being turned off: the dependents that are on and must go off with it. */
@@ -25,7 +29,25 @@ export interface WizardDependencyPlan {
   /** What the admin confirms by posting this back; Apply recomputes it and compares. */
   fingerprint: string;
   /** Still refused once the cascade is applied (an enable whose requirement stays off). */
-  blockers: DependencyIssue[];
+  blockers: WizardBlocker[];
+}
+
+/**
+ * A refused pair plus, for each key in it, the wizard step that sets it when
+ * its feature was chosen. A key with no entry has no step: its feature was not
+ * chosen (or it is not a wizard key), so only a restart can change it.
+ */
+export type WizardBlocker = DependencyIssue & { steps: Record<string, number> };
+
+function stepOf(
+  key: string,
+  selectedFeatures: readonly string[],
+): number | undefined {
+  const feature = WIZARD_FEATURE_ORDER.find((fk) =>
+    (WIZARD_FEATURE_SETTINGS[fk] ?? []).includes(key),
+  );
+  const index = feature ? selectedFeatures.indexOf(feature) : -1;
+  return index >= 0 ? index : undefined;
 }
 
 export async function planWizardDependencies(
@@ -49,6 +71,13 @@ export async function planWizardDependencies(
     cascade,
     cascadeKeys: keys,
     fingerprint: keys.join(","),
-    blockers: validateDependencies(settled, resolve),
+    blockers: validateDependencies(settled, resolve).map((issue) => {
+      const steps: Record<string, number> = {};
+      for (const key of [issue.key, ...issue.related]) {
+        const step = stepOf(key, selectedFeatures);
+        if (step !== undefined) steps[key] = step;
+      }
+      return { ...issue, steps };
+    }),
   };
 }

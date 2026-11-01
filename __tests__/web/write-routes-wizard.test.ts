@@ -31,6 +31,7 @@ const mockRecordAudit = jest.fn(async () => undefined);
 const mockGetSession = jest.fn<() => unknown>();
 const mockCreateSession = jest.fn();
 const mockAddConfiguration = jest.fn();
+const mockRemoveConfiguration = jest.fn();
 const mockApplyConfiguration = jest.fn<() => Promise<unknown>>();
 const mockEndSession = jest.fn();
 const mockConfigGetAll = jest.fn<() => Promise<unknown>>(async () => []);
@@ -66,6 +67,7 @@ jest.unstable_mockModule("../../src/services/wizard-service.js", () => ({
       getSession: mockGetSession,
       createSession: mockCreateSession,
       addConfiguration: mockAddConfiguration,
+      removeConfiguration: mockRemoveConfiguration,
       applyConfiguration: mockApplyConfiguration,
       endSession: mockEndSession,
       getConfiguration: (): undefined => undefined,
@@ -848,6 +850,90 @@ describe("POST /wizard/apply", () => {
  * weekly recap that needs it stays on. Before the fix Review showed nothing
  * and Apply threw after the session had been ended.
  */
+/**
+ * Revisiting a step and switching its master off must not leave the earlier
+ * staged children behind: the planner would take a stale `true` for the admin's
+ * choice and block Apply instead of offering the cascade (#1622).
+ */
+describe("switching a feature's master off on a revisited step (#1622)", () => {
+  type Choices = Record<string, unknown>;
+  let state: { selectedFeatures: string[]; configuration: Choices };
+
+  beforeEach(() => {
+    mockConfigGetBoolean.mockImplementation(
+      async (key) =>
+        key === "voicetracking.announcements.enabled" ||
+        key === "voicetracking.enabled",
+    );
+    mockApplyConfiguration.mockResolvedValue({
+      success: true,
+      appliedKeys: [],
+      rolledBackKeys: [],
+      revertFailedKeys: [],
+    });
+    state = {
+      selectedFeatures: ["voicetracking", "quotes"],
+      configuration: {
+        "voicetracking.enabled": true,
+        "voicetracking.announcements.enabled": true,
+        "voicetracking.stats.top.enabled": true,
+        "voicetracking.seen.enabled": true,
+        "quotes.enabled": true,
+      },
+    };
+    mockGetSession.mockImplementation(() => state);
+    mockAddConfiguration.mockImplementation((...a: unknown[]) => {
+      state.configuration[a[2] as string] = a[3];
+    });
+    mockRemoveConfiguration.mockImplementation((...a: unknown[]) => {
+      delete state.configuration[a[2] as string];
+    });
+  });
+
+  it("clears that feature's staged children and nothing else, so Review offers the cascade", async () => {
+    await harness.post("/wizard/step/0", {});
+    expect(state.configuration).toEqual({
+      "voicetracking.enabled": false,
+      "quotes.enabled": true,
+    });
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).toContain('name="cascadeOff"');
+    expect(html).not.toContain("These settings can't be applied together");
+    expect(html).not.toMatch(/<button[^>]*btn-primary[^>]*disabled/);
+
+    const res = await harness.post("/wizard/apply", {
+      cascadeOff: "voicetracking.announcements.enabled",
+    });
+    expect(res.headers.get("location")).toContain("/admin/settings");
+    expect(lastDerived()["voicetracking.announcements.enabled"]).toBe(false);
+    expect(lastAudit()).toMatchObject({
+      result: "success",
+      details: { cascadeOff: ["voicetracking.announcements.enabled"] },
+    });
+  });
+
+  it("needs no cascade when the cleared child has no live value", async () => {
+    mockConfigGetBoolean.mockImplementation(
+      async (key) => key === "voicetracking.enabled",
+    );
+    await harness.post("/wizard/step/0", {});
+    expect(state.configuration["voicetracking.announcements.enabled"]).toBe(
+      undefined,
+    );
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).not.toContain('name="cascadeOff"');
+    expect(html).not.toContain("These settings can't be applied together");
+  });
+
+  it("keeps the children staged while the master stays on", async () => {
+    await harness.post("/wizard/step/0", {
+      "value_voicetracking.enabled": "true",
+    });
+    expect(mockRemoveConfiguration).not.toHaveBeenCalled();
+    expect(state.configuration["voicetracking.enabled"]).toBe(true);
+  });
+});
+
 describe("a feature turned off while a part that needs it stays on (#1622)", () => {
   const recapOn = (key: string): boolean =>
     key === "voicetracking.announcements.enabled" ||

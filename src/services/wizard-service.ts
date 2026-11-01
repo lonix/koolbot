@@ -224,6 +224,22 @@ export class WizardService {
     return this.updateSession(userId, guildId, state);
   }
 
+  /**
+   * Drop a staged choice, so the key reads its live value again (#1622).
+   * Returns false when there is no session; a key that was not staged is a no-op.
+   */
+  removeConfiguration(userId: string, guildId: string, key: string): boolean {
+    const state = this.getSession(userId, guildId);
+    if (!state) {
+      return false;
+    }
+    if (!hasOwn(state.configuration, key)) {
+      return true;
+    }
+    delete state.configuration[key];
+    return this.updateSession(userId, guildId, state);
+  }
+
   /** Remember the Access step's picks until the review step applies them. */
   setAccess(
     userId: string,

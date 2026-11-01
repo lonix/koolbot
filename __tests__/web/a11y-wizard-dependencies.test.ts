@@ -85,4 +85,59 @@ describe("renderDependencyReview", () => {
     expect(links).toContain("/admin/wizard?reset=1");
     expect(links).toContain("/admin/settings#section-voicetracking");
   });
+
+  it("links the prerequisite's own step when it was chosen but is switched off there", () => {
+    mount(
+      renderDependencyReview({
+        cascade: [],
+        cascadeKeys: [],
+        fingerprint: "",
+        blockers: [
+          {
+            key: "achievements.enabled",
+            direction: "enable",
+            related: ["voicetracking.enabled"],
+            steps: { "voicetracking.enabled": 0, "achievements.enabled": 2 },
+          },
+        ],
+      }),
+    );
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("is switched off in its own step");
+    expect(text).toContain("switch it on");
+    expect(text).toContain("leave it off");
+    // A restart would discard every other choice for nothing.
+    expect(text).not.toContain("Restart the wizard");
+    expect(text).not.toContain("does not help");
+    expect(text).not.toContain("`");
+    const links = Array.from(document.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(links).toContain("/admin/wizard?step=0");
+    expect(links).toContain("/admin/wizard?step=2");
+    expect(links).not.toContain("/admin/wizard?reset=1");
+  });
+
+  it("gives both pieces of advice when one prerequisite was chosen and another was not", () => {
+    mount(
+      renderDependencyReview({
+        cascade: [],
+        cascadeKeys: [],
+        fingerprint: "",
+        blockers: [
+          {
+            key: "digest.include_achievements",
+            direction: "enable",
+            related: ["achievements.enabled", "voicetracking.enabled"],
+            steps: { "achievements.enabled": 1 },
+          },
+        ],
+      }),
+    );
+    const links = Array.from(document.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(links).toContain("/admin/wizard?step=1");
+    expect(links).toContain("/admin/wizard?reset=1");
+  });
 });
