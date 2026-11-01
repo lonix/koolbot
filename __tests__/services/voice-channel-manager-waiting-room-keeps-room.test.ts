@@ -27,6 +27,10 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
   let waiting: any;
   let waiter: any;
 
+  // The release step is not awaited by the event handler (see #1682 review).
+  const settleReleases = (): Promise<unknown> =>
+    Promise.all([...(manager as any).pendingReleases]);
+
   function makeMembers(list: any[]): any {
     const map = new Map<string, any>(list.map((m) => [m.id, m]));
     return map;
@@ -62,6 +66,8 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
     (manager as any).userChannels.set("owner-id", main);
     (manager as any).waitingRooms.set(main.id, waiting.id);
     (manager as any).waitingRoomToMain.set(waiting.id, main.id);
+    // Links restored at startup (the default after a healthy start).
+    (manager as any).waitingRoomLinksRestored = true;
   }
 
   beforeEach(() => {
@@ -141,6 +147,7 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
       expect(waiter.voice.disconnect).not.toHaveBeenCalled();
       waiting.members = makeMembers([]); // the waiter disconnects
       await manager.handleVoiceStateUpdate(...voiceUpdate(null));
+      await settleReleases();
       expect(main.delete).toHaveBeenCalledTimes(1);
       expect(waiting.delete).toHaveBeenCalledTimes(1);
       expect((manager as any).userChannels.has("owner-id")).toBe(false);
@@ -156,6 +163,7 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
         type: ChannelType.GuildVoice,
       };
       await manager.handleVoiceStateUpdate(...voiceUpdate(other));
+      await settleReleases();
       expect(main.delete).toHaveBeenCalledTimes(1);
     });
 
@@ -164,6 +172,7 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
       const second = { id: "second-id" };
       waiting.members = makeMembers([second]);
       await manager.handleVoiceStateUpdate(...voiceUpdate(null));
+      await settleReleases();
       expect(main.delete).not.toHaveBeenCalled();
     });
 
@@ -173,6 +182,7 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
       main.members = makeMembers([owner, waiter]);
       waiting.members = makeMembers([]);
       await manager.handleVoiceStateUpdate(...voiceUpdate(main));
+      await settleReleases();
       expect(main.delete).not.toHaveBeenCalled();
     });
   });
@@ -216,6 +226,151 @@ describe("VoiceChannelManager - waiting room keeps its room alive (#1673)", () =
       );
       expect(main.delete).not.toHaveBeenCalled();
       expect(waiting.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  function deferred<T = void>(): {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+  } {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+  const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  describe("ordering and concurrency (review of #1682)", () => {
+    it("does not make the voice tracker wait for a slow cleanup", async () => {
+      setup(true);
+      waiting.members = makeMembers([]); // the last waiter leaves
+      const slow = deferred();
+      main.delete = jest.fn().mockReturnValue(slow.promise);
+      let settled = false;
+      const update = manager
+        .handleVoiceStateUpdate(
+          { channel: waiting, member: waiter } as unknown as VoiceState,
+          { channel: null, member: waiter } as unknown as VoiceState,
+        )
+        .then(() => {
+          settled = true;
+        });
+      await flush();
+      expect(main.delete).toHaveBeenCalled(); // cleanup is under way ...
+      expect(settled).toBe(true); // ... and the event handler already returned
+      slow.resolve();
+      await update;
+      await Promise.all([...(manager as any).pendingReleases]);
+      expect((manager as any).userChannels.has("owner-id")).toBe(false);
+    });
+
+    it("a late cleanup of the old room leaves the owner's new room alone (cleanupEmptyChannel)", async () => {
+      setup(false);
+      const slow = deferred();
+      main.delete = jest.fn().mockReturnValue(slow.promise);
+      const run = (manager as any).cleanupEmptyChannel(main as VoiceChannel);
+      await flush();
+      const newRoom = { id: "new-room", members: makeMembers([]) };
+      (manager as any).userChannels.set("owner-id", newRoom);
+      slow.resolve();
+      await run;
+      expect((manager as any).userChannels.get("owner-id")).toBe(newRoom);
+    });
+
+    it("a late cleanup of the old room leaves the owner's new room alone (cleanupUserChannel)", async () => {
+      setup(false);
+      const slow = deferred();
+      main.delete = jest.fn().mockReturnValue(slow.promise);
+      const run = (manager as any).cleanupUserChannel("owner-id");
+      await flush();
+      const newRoom = { id: "new-room", members: makeMembers([]) };
+      (manager as any).userChannels.set("owner-id", newRoom);
+      slow.resolve();
+      await run;
+      expect((manager as any).userChannels.get("owner-id")).toBe(newRoom);
+    });
+
+    it("runs the two cleanup paths for one room one after the other", async () => {
+      setup(false);
+      const slow = deferred();
+      main.delete = jest.fn().mockReturnValue(slow.promise);
+      const first = (manager as any).cleanupUserChannel("owner-id");
+      const second = (manager as any).cleanupEmptyChannel(main as VoiceChannel);
+      await flush();
+      expect(main.delete).toHaveBeenCalledTimes(1);
+      slow.resolve();
+      await Promise.all([first, second]);
+      expect(main.delete).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not delete while the waiting-room links are unknown, and retries", async () => {
+      setup(true);
+      (manager as any).waitingRoomLinksRestored = false;
+      // The links are not in memory (the startup read failed): the waiting
+      // room cannot be seen from the main room.
+      (manager as any).waitingRooms.clear();
+      const ensure = jest
+        .spyOn(manager as any, "ensureWaitingRoomLinks")
+        .mockResolvedValue(false as never);
+      await (manager as any).cleanupEmptyChannel(main as VoiceChannel);
+      await (manager as any).cleanupUserChannel("owner-id");
+      expect(ensure).toHaveBeenCalled();
+      expect(main.delete).not.toHaveBeenCalled();
+
+      // The retry succeeds: links are back, the guard applies.
+      ensure.mockImplementation((async () => {
+        (manager as any).waitingRooms.set(main.id, waiting.id);
+        return true;
+      }) as never);
+      await (manager as any).cleanupEmptyChannel(main as VoiceChannel);
+      expect(main.delete).not.toHaveBeenCalled(); // waiter is still waiting
+      waiting.members = makeMembers([]);
+      await (manager as any).cleanupEmptyChannel(main as VoiceChannel);
+      expect(main.delete).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps everything when someone joins the waiting room during the links check", async () => {
+      setup(false);
+      const gate = deferred<boolean>();
+      jest
+        .spyOn(manager as any, "ensureWaitingRoomLinks")
+        .mockReturnValue(gate.promise as never);
+      const run = (manager as any).cleanupEmptyChannel(main as VoiceChannel);
+      await flush();
+      waiting.members = makeMembers([waiter]); // arrives during the await
+      gate.resolve(true);
+      await run;
+      expect(main.delete).not.toHaveBeenCalled();
+      expect(waiting.delete).not.toHaveBeenCalled();
+      expect(waiter.voice.disconnect).not.toHaveBeenCalled();
+    });
+
+    it("keeps the room when someone joins it while the waiting room is deleted (cleanupEmptyChannel)", async () => {
+      setup(false);
+      const slow = deferred();
+      waiting.delete = jest.fn().mockReturnValue(slow.promise);
+      const run = (manager as any).cleanupEmptyChannel(main as VoiceChannel);
+      await flush();
+      main.members = makeMembers([waiter]);
+      slow.resolve();
+      await run;
+      expect(main.delete).not.toHaveBeenCalled();
+      expect((manager as any).userChannels.has("owner-id")).toBe(true);
+      expect((manager as any).channelsBeingDeleted.has(main.id)).toBe(false);
+    });
+
+    it("keeps the room when someone joins it while the waiting room is deleted (cleanupUserChannel)", async () => {
+      setup(false);
+      const slow = deferred();
+      waiting.delete = jest.fn().mockReturnValue(slow.promise);
+      const run = (manager as any).cleanupUserChannel("owner-id");
+      await flush();
+      main.members = makeMembers([waiter]);
+      slow.resolve();
+      await run;
+      expect(main.delete).not.toHaveBeenCalled();
+      expect((manager as any).userChannels.has("owner-id")).toBe(true);
     });
   });
 });

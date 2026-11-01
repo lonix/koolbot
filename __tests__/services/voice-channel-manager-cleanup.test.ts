@@ -98,6 +98,8 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
 
     // Create manager instance
     manager = VoiceChannelManager.getInstance(mockClient as Client);
+    // Links restored, as after a healthy start (the live cleanup waits for them, #1673).
+    (manager as any).waitingRoomLinksRestored = true;
   });
 
   afterEach(() => {

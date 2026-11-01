@@ -296,6 +296,8 @@ export class VoiceChannelManager {
   private ownershipQueue: Map<string, string[]> = new Map(); // channelId -> array of userIds
   private customChannelNames: Map<string, string> = new Map(); // channelId -> custom name
   private channelsBeingDeleted: Set<string> = new Set(); // channelIds currently being deleted
+  /** Release steps (#1673) still running; for tests and destroy(). */
+  private pendingReleases: Set<Promise<void>> = new Set();
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
   /**
@@ -2396,7 +2398,13 @@ export class VoiceChannelManager {
     try {
       await this.handleVoiceStateUpdateInner(oldState, newState);
     } finally {
-      await this.releaseRoomHeldByWaitingRoom(oldState, newState);
+      // Not awaited: index.ts feeds the same event to the voice tracker right
+      // after this method returns, and a slow cleanup (channel deletes, DB
+      // writes) must not delay it and reorder what the tracker sees (#1673).
+      // The step has its own error handling.
+      const release = this.releaseRoomHeldByWaitingRoom(oldState, newState);
+      this.pendingReleases.add(release);
+      void release.finally(() => this.pendingReleases.delete(release));
     }
   }
 
@@ -2898,9 +2906,35 @@ export class VoiceChannelManager {
     }
   }
 
+  /**
+   * Can the waiting-room links be trusted right now? They are rebuilt from
+   * Mongo at startup; if that read failed, `linkedWaitingRoomOccupied` sees no
+   * link and would let an empty room go while someone waits in its waiting
+   * room. Unknown means "do not delete now": the 5-minute sweep retries (#1673).
+   */
+  private async waitingRoomLinksKnown(guild: Guild): Promise<boolean> {
+    return this.ensureWaitingRoomLinks(guild);
+  }
+
   private async cleanupUserChannel(userId: string): Promise<void> {
     const channel = this.userChannels.get(userId);
-    if (!channel || channel.members.size !== 0) {
+    if (!channel) return;
+    // One cleanup per room at a time, shared with cleanupEmptyChannel: a late
+    // pass for a room the other already removed must not touch what the same
+    // owner has made since (#1673).
+    return this.roomLock.run(channel.id, () =>
+      this.cleanupUserChannelLocked(userId, channel.id),
+    );
+  }
+
+  private async cleanupUserChannelLocked(
+    userId: string,
+    roomId: string,
+  ): Promise<void> {
+    // Re-read inside the turn: the other cleanup may have removed the room, or
+    // the owner may have a new one by now.
+    const channel = this.userChannels.get(userId);
+    if (!channel || channel.id !== roomId || channel.members.size !== 0) {
       return;
     }
 
@@ -2908,9 +2942,15 @@ export class VoiceChannelManager {
     // would move that person into a room that is deleted straight after and
     // disconnect them (#1673). The room goes once the waiting room is empty
     // too (see releaseRoomHeldByWaitingRoom).
-    if (this.linkedWaitingRoomOccupied(channel.guild, channel.id)) {
+    if (!(await this.waitingRoomLinksKnown(channel.guild))) return;
+    // Everything below up to the waiting-room delete is synchronous, so
+    // nobody can arrive between this check and that delete.
+    if (
+      channel.members.size !== 0 ||
+      this.linkedWaitingRoomOccupied(channel.guild, channel.id)
+    ) {
       logger.debug(
-        `Keeping empty voice channel ${sanitizeForLog(channel.name)}: its waiting room is occupied`,
+        `Keeping empty voice channel ${sanitizeForLog(channel.name)}: it or its waiting room is occupied`,
       );
       return;
     }
@@ -2919,8 +2959,10 @@ export class VoiceChannelManager {
     const channelName = channel.name;
 
     try {
-      // Clean up waiting room if one exists
+      // Clean up waiting room if one exists (empty, as checked above)
       await this.removeWaitingRoom(channelId);
+      // Someone may have joined the room while the waiting room was deleted.
+      if (channel.members.size !== 0) return;
       // Clean up live status
       this.liveChannels.delete(channelId);
       await channel.delete();
@@ -2943,8 +2985,11 @@ export class VoiceChannelManager {
     // Always reconcile in-memory state when the channel is gone (either we
     // just deleted it, or it was already gone). A stale userChannels entry
     // would otherwise lock the user out of future lobby joins until the bot
-    // restarts (issue #404).
-    this.userChannels.delete(userId);
+    // restarts (issue #404). Only an entry that still points at this room
+    // goes: a new room the owner made meanwhile is theirs (#1673).
+    if (this.userChannels.get(userId)?.id === channelId) {
+      this.userChannels.delete(userId);
+    }
     this.customChannelNames.delete(channelId);
     this.controlPanels.delete(channelId);
     this.ownershipQueue.delete(channelId);
@@ -2961,13 +3006,22 @@ export class VoiceChannelManager {
    */
   private async cleanupEmptyChannel(channel: VoiceChannel): Promise<void> {
     try {
+      // Cheap exits before taking the room's turn.
+      if (channel.members.size !== 0) return;
+      await this.roomLock.run(channel.id, () =>
+        this.cleanupEmptyChannelLocked(channel),
+      );
+    } catch (error) {
+      logger.error("Error cleaning up empty channel:", error);
+    }
+  }
+
+  private async cleanupEmptyChannelLocked(
+    channel: VoiceChannel,
+  ): Promise<void> {
+    try {
       // Only clean up if the channel is empty
       if (channel.members.size !== 0) {
-        return;
-      }
-
-      // Someone waiting for this room keeps it alive (#1673).
-      if (this.linkedWaitingRoomOccupied(channel.guild, channel.id)) {
         return;
       }
 
@@ -2992,8 +3046,39 @@ export class VoiceChannelManager {
         return;
       }
 
+      // Someone waiting for this room keeps it alive (#1673). Unknown links
+      // count as "do not delete now".
+      if (!(await this.waitingRoomLinksKnown(channel.guild))) return;
+      if (
+        channel.members.size !== 0 ||
+        this.linkedWaitingRoomOccupied(channel.guild, channel.id)
+      ) {
+        return;
+      }
+
       // Mark channel as being deleted
       this.channelsBeingDeleted.add(channel.id);
+
+      // The waiting room goes first, while it is still known to be empty (no
+      // await since the check above). Deleting it after the room would leave
+      // a window in which someone joins it and is then disconnected.
+      const waitingRoomId = this.waitingRooms.get(channel.id);
+      if (waitingRoomId) {
+        this.waitingRooms.delete(channel.id);
+        this.waitingRoomToMain.delete(waitingRoomId);
+        try {
+          const waitingRoom = this.client.channels.cache.get(waitingRoomId);
+          if (waitingRoom) await waitingRoom.delete();
+          await this.forgetManagedChannel(waitingRoomId);
+        } catch {
+          // Ignore errors cleaning up waiting room
+        }
+        // Someone may have joined the room meanwhile: it stays.
+        if (channel.members.size !== 0) {
+          this.channelsBeingDeleted.delete(channel.id);
+          return;
+        }
+      }
 
       // Delete the channel
       try {
@@ -3012,8 +3097,9 @@ export class VoiceChannelManager {
         }
       }
 
-      // Clean up all tracking for this channel
-      if (ownerId) {
+      // Clean up all tracking for this channel. Only an owner entry that
+      // still points at this room goes (#1673).
+      if (ownerId && this.userChannels.get(ownerId)?.id === channel.id) {
         this.userChannels.delete(ownerId);
       }
 
@@ -3033,20 +3119,6 @@ export class VoiceChannelManager {
 
       // Drop the persisted ownership row so a restart doesn't re-adopt it (#615).
       await this.removeOwnershipRecord(channel.id);
-
-      // Clean up waiting room (fire-and-forget after channel deleted to avoid race conditions)
-      const waitingRoomId = this.waitingRooms.get(channel.id);
-      if (waitingRoomId) {
-        this.waitingRooms.delete(channel.id);
-        this.waitingRoomToMain.delete(waitingRoomId);
-        try {
-          const waitingRoom = this.client.channels.cache.get(waitingRoomId);
-          if (waitingRoom) await waitingRoom.delete();
-          await this.forgetManagedChannel(waitingRoomId);
-        } catch {
-          // Ignore errors cleaning up waiting room
-        }
-      }
 
       // Remove from deletion tracking
       this.channelsBeingDeleted.delete(channel.id);
@@ -4609,6 +4681,7 @@ export class VoiceChannelManager {
     this.customChannelNames.clear();
     this.ownershipQueue.clear();
     this.channelsBeingDeleted.clear();
+    this.pendingReleases.clear();
     this.liveChannels.clear();
     this.waitingRooms.clear();
     this.waitingRoomToMain.clear();

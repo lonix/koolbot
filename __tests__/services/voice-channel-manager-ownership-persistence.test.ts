@@ -85,6 +85,8 @@ describe("VoiceChannelManager - ownership persistence (issue #615)", () => {
     } as any;
 
     manager = VoiceChannelManager.getInstance(mockClient as Client);
+    // Links restored, as after a healthy start (the live cleanup waits for them, #1673).
+    (manager as any).waitingRoomLinksRestored = true;
     // Pretend Mongo is connected so the persistence helpers run against the
     // mocked model rather than short-circuiting.
     jest.spyOn(manager as any, "isDbReady").mockReturnValue(true);
