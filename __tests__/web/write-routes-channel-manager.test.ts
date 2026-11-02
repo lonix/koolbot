@@ -1140,6 +1140,7 @@ describe("POST /channels/:id/move", () => {
     await mount();
     const res = await harness.post(`/channels/${TEXT2}/move`, {
       direction: "up",
+      neighbor: TEXT,
     });
     expect(flashOf(res)).toMatchObject({ type: "ok" });
     // TEXT and TEXT2 are renumbered with TEXT2 first.
@@ -1168,7 +1169,10 @@ describe("POST /channels/:id/move", () => {
       view(C, { name: "c", parentId: CAT, position: 2 }),
     ];
     await mount();
-    const up = await harness.post(`/channels/${C}/move`, { direction: "up" });
+    const up = await harness.post(`/channels/${C}/move`, {
+      direction: "up",
+      neighbor: TEXT,
+    });
     expect(flashOf(up)).toMatchObject({ type: "ok" });
     // Only CAT's text channels are renumbered; B (in the other category) is
     // not part of the move.
@@ -1179,11 +1183,13 @@ describe("POST /channels/:id/move", () => {
     // B is alone in its category, so it has no neighbour to swap with.
     const alone = await harness.post(`/channels/${B}/move`, {
       direction: "down",
+      neighbor: "",
     });
     expect(flashOf(alone).msg).toContain("already last");
     // A is first among CAT's channels even though B sits after it overall.
     const first = await harness.post(`/channels/${TEXT}/move`, {
       direction: "up",
+      neighbor: "",
     });
     expect(flashOf(first).msg).toContain("already first");
     expect(mockSetPosition).toHaveBeenCalledTimes(1);
@@ -1206,10 +1212,38 @@ describe("POST /channels/:id/move", () => {
     expect(mockSetPosition).toHaveBeenCalledTimes(1);
   });
 
+  it("refuses a move that does not say which neighbour it was drawn for, and moves nothing", async () => {
+    await mount();
+    // Same request as the accepted one in the control below, minus the field.
+    const missing = await harness.post(`/channels/${TEXT2}/move`, {
+      direction: "up",
+    });
+    expect(flashOf(missing)).toMatchObject({
+      type: "err",
+      msg: "That move could not be read. Reload the page and try again.",
+    });
+    expect(mockSetPosition).not.toHaveBeenCalled();
+    expect(mockApiCall).not.toHaveBeenCalled();
+    // Controls: the right neighbour is still accepted, a wrong one still refused.
+    const wrong = await harness.post(`/channels/${TEXT2}/move`, {
+      direction: "up",
+      neighbor: "100000000000000099",
+    });
+    expect(flashOf(wrong).msg).toContain("changed since you opened this page");
+    expect(mockSetPosition).not.toHaveBeenCalled();
+    const right = await harness.post(`/channels/${TEXT2}/move`, {
+      direction: "up",
+      neighbor: TEXT,
+    });
+    expect(flashOf(right).type).toBe("ok");
+    expect(mockSetPosition).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses to move past the first or last place", async () => {
     await mount();
     const res = await harness.post(`/channels/${TEXT}/move`, {
       direction: "up",
+      neighbor: "",
     });
     expect(flashOf(res).msg).toContain("already first");
     expect(mockSetPosition).not.toHaveBeenCalled();
@@ -1714,7 +1748,10 @@ describe("cancellable requests and rate limits", () => {
 
   it("sends moves and deletes as cancellable requests too", async () => {
     await mount();
-    await harness.post(`/channels/${TEXT2}/move`, { direction: "up" });
+    await harness.post(`/channels/${TEXT2}/move`, {
+      direction: "up",
+      neighbor: TEXT,
+    });
     expect(mockRest.patch.mock.calls[0][0]).toBe("/guilds/guild-1/channels");
     expect(mockRest.patch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
     await harness.post(`/channels/${TEXT2}/delete`, { confirm: tok(TEXT2) });
