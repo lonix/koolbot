@@ -1069,3 +1069,46 @@ describe("the string-list editor on the Presence page renders only kb- component
     );
   });
 });
+
+describe("review fixes on #1695", () => {
+  const switchForms: Array<[string, string]> = [
+    ["the create form", "/admin/announcements/create"],
+    ["the one-off form", "/admin/announcements/post-once"],
+  ];
+
+  it.each(switchForms)(
+    "keeps the whole switch sentence in one span: %s",
+    (_n, action) => {
+      const form = main(announcements()).querySelector(
+        `form[action="${action}"]`,
+      ) as Element;
+      const labels = Array.from(form.querySelectorAll("label.kb-switch"));
+      expect(labels.length).toBeGreaterThan(0);
+      for (const label of labels) {
+        // Track and state first, then one text span: the sentence and its
+        // inline code wrap together instead of becoming flex items.
+        const kids = Array.from(label.children).map((c) => c.tagName);
+        expect(kids).toEqual(["INPUT", "SPAN", "SPAN", "SPAN"]);
+        const text = label.lastElementChild as Element;
+        expect(text.className).toBe("");
+        expect(text.textContent).toContain("Process placeholders");
+        expect(text.querySelectorAll("code")).toHaveLength(2);
+        // No stray text node beside the spans.
+        const loose = Array.from(label.childNodes).filter(
+          (n) => n.nodeType === 3 && (n.textContent ?? "").trim() !== "",
+        );
+        expect(loose).toHaveLength(0);
+      }
+    },
+  );
+
+  it("puts the Presence pool panels in one kb-stack", () => {
+    const panels = Array.from(
+      main(presence()).querySelectorAll("section.kb-panel"),
+    );
+    expect(panels).toHaveLength(2);
+    const parent = panels[0].parentElement as Element;
+    expect(parent.classList.contains("kb-stack")).toBe(true);
+    expect(panels[1].parentElement).toBe(parent);
+  });
+});

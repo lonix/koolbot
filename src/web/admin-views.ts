@@ -3074,7 +3074,7 @@ function renderAnnouncementFields(
   return `${pollSelect(f, "channelId", "Channel", channelOptionsHtml(textChannels, f.selected("channelId") || undefined), true)}
     ${withSchedule ? renderCronField(f, "cron", "Schedule", "0 9 * * *") : ""}
     ${pollField(f, "message", "Message", `<textarea class="kb-textarea" name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"${fieldControlAttrs(f.control("message"))}>${f.textareaContent("message")}</textarea>`)}
-    <label class="kb-switch"><input type="checkbox" role="switch" name="placeholders" value="1"${f.checked("placeholders") ? " checked" : ""}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Process placeholders (replace <code>{server_name}</code>, <code>{date}</code>, etc.)</label>
+    <label class="kb-switch"><input type="checkbox" role="switch" name="placeholders" value="1"${f.checked("placeholders") ? " checked" : ""}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span><span>Process placeholders (replace <code>{server_name}</code>, <code>{date}</code>, etc.)</span></label>
     ${PLACEHOLDER_REFERENCE_HTML}
     <fieldset class="kb-field">
       <legend class="kb-label">Optional embed</legend>
@@ -5877,7 +5877,7 @@ export function renderBotStatusPage(props: BotStatusProps): string {
 <p class="muted">The bot picks one message at random, so the order only decides how a pool reads here and in its export. Use <em>Move up</em> and <em>Move down</em> on a row to change its place, or drag a row by its handle. A new entry goes last.</p>
 ${renderFlash(props.flash)}
 ${REORDER_STATUS_HTML}
-${editors}
+<div class="kb-stack">${editors}</div>
 ${scriptTag(REORDER_SCRIPT)}
 `;
   return renderAdminPage({
