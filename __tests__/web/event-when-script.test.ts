@@ -20,7 +20,9 @@ function hostPage(flash = false): string {
     groupPresetsNotice: null,
   });
   return `<!doctype html><html><body>${
-    flash ? '<div class="notice err" data-flash>nope</div>' : ""
+    flash
+      ? '<div class="kb-callout kb-callout--err" role="alert" data-flash>nope</div>'
+      : ""
   }${body}</body></html>`;
 }
 

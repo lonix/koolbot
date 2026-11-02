@@ -92,7 +92,7 @@ function page(
   if (draft) {
     html = html.replace(
       "<form",
-      '<div class="notice err" data-flash>Groups: nope</div><form',
+      '<div class="kb-callout kb-callout--err" role="alert" data-flash>Groups: nope</div><form',
     );
   }
   const dom = new JSDOM(html, {

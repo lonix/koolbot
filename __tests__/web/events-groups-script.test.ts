@@ -43,7 +43,7 @@ function boot(
     // The page as it comes back after a refused submit.
     html = html.replace(
       BACK_LINK,
-      `${BACK_LINK}<div class="notice err" data-flash>Groups: nope</div>`,
+      `${BACK_LINK}<div class="kb-callout kb-callout--err" role="alert" data-flash>Groups: nope</div>`,
     );
   }
   const dom = new JSDOM(html, {

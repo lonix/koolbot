@@ -8,7 +8,7 @@
 import type { ConfigSchema } from "../services/config-schema.js";
 import { getPermissionIssueCount } from "../services/bot-permission-status.js";
 import { designStylesheetLinks } from "./design-assets.js";
-import { icon, type IconName } from "./icons.js";
+import { icon, toneIcon, type IconName } from "./icons.js";
 import { SAVEBAR_SCRIPT } from "./savebar.js";
 import { NUMBER_INPUT_SCRIPT } from "./number-input.js";
 import {
@@ -518,6 +518,15 @@ const STYLE = [
   ".notice.ok{background:var(--ok-bg);color:var(--ok-text)}",
   ".notice.warn{background:var(--warn-bg);color:var(--warn-text)}",
   ".notice.err{background:var(--err-bg);color:var(--err-text)}",
+  // The flash is a kb-callout now (#1684) and a Callout has no margin. The
+  // old .notice kept 1rem below it, so the flash keeps that wherever it lands:
+  // straight in <main>, a card, a disclosure body or a Panel body (the AJAX
+  // flash is inserted before the form, whatever its parent is). A kb-stack
+  // spaces its children by its gap, so there it adds nothing. The stack rule
+  // is more specific, so the order does not matter. Goes away with the old
+  // classes (#1652).
+  ".kb-callout[data-flash],.kb-callout.section-flash{margin:0 0 var(--space-4)}",
+  ".kb-stack>.kb-callout[data-flash],.kb-stack>.kb-callout.section-flash{margin:0}",
   // Disabled-feature banner (#610): explanatory text on the left, inline
   // enable action + Settings link on the right; wraps on narrow screens.
   "form.stack{display:flex;flex-direction:column;gap:.6rem}",
@@ -742,6 +751,15 @@ const FOCUS_INVALID_FN =
 // submitter manually as well as via `SubmitEvent.submitter` so a Reset on an
 // older browser without `submitter` isn't mistakenly AJAX-posted to the
 // save-section route.
+// The icons the AJAX flash carries, drawn by the same `toneIcon` the server
+// flash uses so both show one Callout. `<` is escaped so the JSON can never
+// close the surrounding <script>.
+const FLASH_ICONS_JSON = JSON.stringify({
+  ok: toneIcon("ok"),
+  warn: toneIcon("warn"),
+  err: toneIcon("err"),
+}).replace(/</g, "\\u003c");
+
 const SETTINGS_SAVE_SCRIPT =
   "(function(){" +
   FOCUS_INVALID_FN +
@@ -750,21 +768,27 @@ const SETTINGS_SAVE_SCRIPT =
   // The flash node is given an id so a rejected control can point its
   // `aria-describedby` at it and carry the server's reason (#854).
   "var seq=0;" +
+  "var FLASH_ICONS=" +
+  FLASH_ICONS_JSON +
+  ";" +
   "function flashEl(form){var card=form.closest('.card');if(!card)return null;" +
   "var n=card.querySelector('.section-flash');" +
   // The node is a live region, so every save result (success, CSRF failure,
   // rate-limit, network error) is announced (#855). A result is a polite
   // status; a failure is an alert (#1517), set in `show`.
-  "if(!n){n=document.createElement('div');n.className='notice section-flash';" +
+  "if(!n){n=document.createElement('div');n.className='kb-callout section-flash';" +
   "n.setAttribute('role','status');n.setAttribute('aria-live','polite');" +
   "form.parentNode.insertBefore(n,form)}" +
   "if(!n.id)n.id='section-flash-'+(++seq);return n}" +
   "function show(form,type,text){var n=flashEl(form);if(!n)return;" +
   "var cls=type==='ok'?'ok':type==='warn'?'warn':'err';" +
-  "n.className='notice section-flash '+cls;" +
+  // The same Callout `renderFlash` draws (#1684): icon, then the text as the
+  // title. The text is set with textContent, never as markup.
+  "n.className='kb-callout kb-callout--'+cls+' section-flash';" +
   "if(cls==='err'){n.setAttribute('role','alert');n.removeAttribute('aria-live')}" +
   "else{n.setAttribute('role','status');n.setAttribute('aria-live','polite')}" +
-  "n.textContent=text;return n}" +
+  'n.innerHTML=FLASH_ICONS[cls]+\'<div class="kb-callout__body"><p class="kb-callout__title"></p></div>\';' +
+  "n.querySelector('.kb-callout__title').textContent=text;return n}" +
   // Rejected-field marking (#854). Without this an AJAX save tells a screen
   // reader that "3 values were invalid" and nothing about which of the ~318
   // controls on the page they were. The pre-existing `aria-describedby` is
@@ -892,7 +916,7 @@ const SETTINGS_SAVE_SCRIPT =
 // full page load, and no-ops on every page that renders nothing invalid.
 //
 // With nothing invalid, focus moves to the post-redirect flash instead (the
-// `.notice[data-flash]` rendered by `renderFlash`): a live region that is
+// `[data-flash]` rendered by `renderFlash`): a live region that is
 // part of a freshly loaded document is never announced on its own, so
 // focusing it is what gets "Saved." / "Import failed" read out after a PRG
 // round-trip (#855).
@@ -903,7 +927,7 @@ const INVALID_FOCUS_SCRIPT =
   "if(inv){focusInvalid(inv);return}" +
   // Plain focus() for the flash: it sits at the top of the page, so the
   // scroll-to-centre that focusInvalid does for a deep field isn't wanted.
-  "var f=document.querySelector('.notice[data-flash]');" +
+  "var f=document.querySelector('[data-flash]');" +
   "if(f){try{f.focus()}catch(e){}}" +
   "})();";
 
