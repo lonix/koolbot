@@ -2880,6 +2880,34 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Setup wizard confirm, channels and categories to create",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [],
+        metadata: {},
+        accessChanges: [],
+        creations: [
+          {
+            kind: "category",
+            name: "Hangout",
+            settingLabel: "Voice category",
+          },
+          {
+            kind: "text",
+            name: "quotes",
+            settingLabel: "Quotes channel",
+            parent: { name: "Community" },
+          },
+          {
+            kind: "voice",
+            name: "Lobby",
+            settingLabel: "Lobby channel",
+            parent: null,
+          },
+        ],
+      }),
+    },
+    {
       name: "Setup wizard confirm, role mapping blocked",
       html: renderWizardConfirmPage({
         ...COMMON,
