@@ -33,7 +33,7 @@ export type CanCreate =
 export const CREATE_REASON = {
   channel: `The bot needs ${PERM.manageChannels.name} to create a channel. Give the bot's role ${PERM.manageChannels.name} in Server Settings, Roles; the Bot permissions page shows what is missing.`,
   category: `The bot needs ${PERM.manageChannels.name} to create a category. Give the bot's role ${PERM.manageChannels.name} in Server Settings, Roles; the Bot permissions page shows what is missing.`,
-  parent: `The bot has ${PERM.manageChannels.name}, but the chosen category denies it, so the bot cannot create a channel there. Remove the deny for the bot's role on that category; the Bot permissions page shows what is missing.`,
+  parent: `The bot has ${PERM.manageChannels.name}, but the chosen category denies it for the bot, so it cannot create a channel there. Check the category's permission overwrites for the bot; the Bot permissions page shows what is missing.`,
 } as const;
 
 export async function canBotCreate(

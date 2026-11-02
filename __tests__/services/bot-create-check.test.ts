@@ -233,6 +233,18 @@ describe("CREATE_REASON", () => {
   });
 });
 
+describe("CREATE_REASON.parent", () => {
+  it("sends the admin to the category's overwrites without naming one", () => {
+    const line = create.CREATE_REASON.parent;
+    // permissionsIn is the effective result of every overwrite, so the check
+    // cannot say whether @everyone, a role or the bot itself denies it.
+    expect(line).toContain("permission overwrites");
+    expect(line).not.toMatch(
+      /remove the deny|bot's role on|@everyone|member-specific/i,
+    );
+  });
+});
+
 describe("toPickerCreate", () => {
   it("sets ok for a possible creation", () => {
     expect(create.toPickerCreate("channel", { ok: true })).toEqual({
