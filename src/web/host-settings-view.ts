@@ -11,6 +11,7 @@
  */
 
 import { escapeHtml, scriptTag } from "./html.js";
+import { toneIcon } from "./icons.js";
 import { renderDurationPresets } from "./setting-pickers.js";
 import { renderSaveBar } from "./savebar.js";
 import {
@@ -90,6 +91,11 @@ export interface SettingsViewData {
   seriesTick?: boolean;
 }
 
+/** Why nothing can be edited now: a warning Callout, the reason as its title. */
+function renderBlocker(reason: string): string {
+  return `<div class="kb-callout kb-callout--warn" role="status">${toneIcon("warn")}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(reason)}</p></div></div>`;
+}
+
 function leadText(minutes: number | null): string {
   return minutes === null
     ? "the server default"
@@ -142,7 +148,7 @@ function renderGroups(d: SettingsViewData): string {
       (g) =>
         `<tr><th scope="row">${g.marker ? `${escapeHtml(g.marker)} ` : ""}${escapeHtml(g.name)}</th>` +
         `<td>${g.size === null ? '<span class="kb-help">No limit</span>' : escapeHtml(g.size)}</td>` +
-        `<td><span class="kb-mono">${escapeHtml(g.memberCount)}</span>${g.overSize ? ' <span class="tag tag-off">over size</span>' : ""}</td></tr>`,
+        `<td><span class="kb-mono">${escapeHtml(g.memberCount)}</span>${g.overSize ? ' <span class="kb-badge kb-badge--warn">over size</span>' : ""}</td></tr>`,
     )
     .join("");
   return `<div class="kb-panel__body--flush"><table class="kb-table"><thead><tr><th scope="col">${escapeHtml(d.groupLabel)}</th><th scope="col">Size</th><th scope="col">People</th></tr></thead><tbody>${body}</tbody></table></div>`;
@@ -179,7 +185,7 @@ ${edits}
  */
 export function renderEventSettings(d: SettingsViewData): string {
   if (d.blocker !== null) {
-    return `<div class="notice warn" role="status"><p>${escapeHtml(d.blocker)}</p></div>`;
+    return `${renderBlocker(d.blocker)}`;
   }
   const lead = `<div class="kb-settings__group"><p class="kb-overline">Channels</p>
 ${renderLead(d)}
@@ -203,7 +209,7 @@ ${renderLeaderExtras(d)}`;
  */
 export function renderGroupChanges(d: SettingsViewData): string {
   if (d.blocker !== null) {
-    return `<div class="notice warn" role="status"><p>${escapeHtml(d.blocker)}</p></div>${renderGroups(d)}`;
+    return `${renderBlocker(d.blocker)}${renderGroups(d)}`;
   }
   const names = d.groupEdit
     ? `<form method="POST" action="${escapeHtml(d.actionPath("settings"))}">${hidden("_csrf", d.csrfToken)}
@@ -251,12 +257,15 @@ export interface ResultViewData {
 export function renderResultBody(d: ResultViewData): string {
   const parts = d.message
     .split(/(?<=\.) (?=[A-Z])/)
-    .map((p) => `<p>${escapeHtml(p)}</p>`)
+    .map((p) => `<p class="kb-callout__text">${escapeHtml(p)}</p>`)
     .join("");
-  return `<section class="card" id="host-settings-result" aria-labelledby="host-settings-result-h">
-<h2 id="host-settings-result-h">${d.ok ? "Settings saved" : "Settings saved, with something left to do"}</h2>
-<div class="notice ${d.ok ? "ok" : "warn"}" role="status">${parts}</div>
+  const tone = d.ok ? "ok" : "warn";
+  return `<section class="kb-panel" id="host-settings-result" aria-labelledby="host-settings-result-h">
+<header class="kb-panel__head"><h2 class="kb-panel__title" id="host-settings-result-h">${d.ok ? "Settings saved" : "Settings saved, with something left to do"}</h2></header>
+<div class="kb-panel__body kb-stack">
+<div class="kb-callout kb-callout--${tone}" role="status">${toneIcon(tone)}<div class="kb-callout__body">${parts}</div></div>
 <p><a href="${escapeHtml(d.panelPath)}">Back to the host panel</a></p>
+</div>
 </section>`;
 }
 
@@ -270,15 +279,17 @@ export function renderConfirmBody(d: ConfirmViewData): string {
     .join("");
   const reasons = d.reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("");
   // The markers are what the panel's fetch-and-upgrade reads (`confirm-fetch.ts`, #1344).
-  return `<section class="card" id="host-settings-confirm" aria-labelledby="host-settings-confirm-h" data-confirm-page="${CONFIRM_PAGE_MARKER}">
-<h2 id="host-settings-confirm-h">Confirm these changes</h2>
-<div class="notice warn" role="status"><ul data-confirm-reasons>${reasons}</ul></div>
+  return `<section class="kb-panel" id="host-settings-confirm" aria-labelledby="host-settings-confirm-h" data-confirm-page="${CONFIRM_PAGE_MARKER}">
+<header class="kb-panel__head"><h2 class="kb-panel__title" id="host-settings-confirm-h">Confirm these changes</h2></header>
+<div class="kb-panel__body kb-stack">
+<div class="kb-callout kb-callout--warn" role="status">${toneIcon("warn")}<div class="kb-callout__body"><ul data-confirm-reasons>${reasons}</ul></div></div>
 <p>If you confirm, exactly these changes are made:</p>
 <ul data-confirm-changes>${changes}</ul>
-<form method="POST" action="${escapeHtml(d.actionPath)}" data-confirm-form>${hidden("_csrf", d.csrfToken)}${hidden("token", d.token)}
+<form method="POST" action="${escapeHtml(d.actionPath)}" data-confirm-form class="kb-stack">${hidden("_csrf", d.csrfToken)}${hidden("token", d.token)}
 <div class="kb-row"><button type="submit" class="kb-btn kb-btn--primary">Confirm and save</button>
 <a class="kb-btn kb-btn--ghost" href="${escapeHtml(d.panelPath)}">Cancel</a></div>
 </form>
 <p class="kb-help">This page is valid for ten minutes. If the event changes before you confirm, nothing is applied and you are asked to review again.</p>
+</div>
 </section>`;
 }
