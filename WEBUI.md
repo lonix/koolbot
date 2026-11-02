@@ -1475,7 +1475,16 @@ native select underneath stays the field, so it posts the same stored id, a save
 id that is no longer listed stays selected as `⚠ 1234 (unavailable)`, and without JavaScript the select is all there is.
 Lists that take several values (`channel_list`, `role_list`) get the same picker as a multi-select (#1473): the chosen items are chips
 with a remove button above an _Add_ button, choosing a row toggles it and keeps the popover open, and Backspace in an empty search removes the last chip.
-The native `select multiple` stays the field and without JavaScript is shown with its "Selected:" line. The rest of #1394 (labels
+The native `select multiple` stays the field and without JavaScript is shown with its "Selected:" line.
+
+A picker whose page says creating can work (#1658, a proposal for the owner) also offers **Create new channel: 'typed text'** (or _category_, or
+_role_) as its last row, like GitHub's milestone picker. The row shows once the typed text is not the name of an existing item of that kind (any case, so
+that text selects the item instead), is not blank and is at most 100 characters. Choosing it adds a pending option to the same select, whose value
+is `create:` plus the typed name; the trigger shows the name with "(will be created)", and choosing another row (or Discard) takes it away. A stored id is
+never overwritten: an id is only digits, so a value that starts with `create:` is never one. Without JavaScript there is no row and the select is as it was.
+A page that does not pass the flag renders exactly as before, with the same picker script
+(the create variant is sent only to a page that holds a flagged picker). Nothing is created in Discord by the picker; the server reads the value with
+`parsePickerCreateValue` and the creation is a separate step. The rest of #1394 (labels
 on voice stats, the bot permissions page, the events and host pages, the server scan pages and the Voice Channels status line) is not done yet.
 
 The **Setup Wizard** (`/admin/wizard`) walks through the features you pick,

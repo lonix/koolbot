@@ -625,7 +625,7 @@ describe("renderSettingsPage", () => {
       flash: { type: "warn", text: "1 setting skipped." },
     });
     expect(html).toContain("1 setting skipped.");
-    expect(html).toContain('class="notice warn"');
+    expect(html).toContain('class="kb-callout kb-callout--warn"');
   });
 
   it("pre-checks boolean inputs based on the current value", () => {
@@ -1513,7 +1513,7 @@ describe("renderPermissionsPage", () => {
       flash: { type: "ok", text: "Cleared /ping." },
     });
     expect(html).toContain("Cleared /ping.");
-    expect(html).toContain('class="notice ok"');
+    expect(html).toContain('class="kb-callout kb-callout--ok"');
   });
 });
 
@@ -1581,7 +1581,7 @@ describe("renderAnnouncementsPage", () => {
       flash: { type: "ok", text: "Created announcement abc." },
     });
     expect(html).toContain("Created announcement abc.");
-    expect(html).toContain('class="notice ok"');
+    expect(html).toContain('class="kb-callout kb-callout--ok"');
   });
 
   it("renders a per-row Post now action", () => {
@@ -2665,7 +2665,7 @@ describe("renderModerationPage settings card (#977)", () => {
       flash: { type: "ok", text: "Saved 4 settings in moderation." },
     });
     expect(html).toContain("Saved 4 settings in moderation.");
-    expect(html).toContain('class="notice ok"');
+    expect(html).toContain('class="kb-callout kb-callout--ok"');
   });
 
   it("renders a notice instead of controls when settings are unavailable", () => {
@@ -4754,7 +4754,7 @@ describe("renderWizardStepPage", () => {
       },
     });
     expect(html).toContain("quotes.max_length (invalid number)");
-    expect(html).toContain('class="notice warn"');
+    expect(html).toContain('class="kb-callout kb-callout--warn"');
   });
 
   it("changes the submit label on the final step", () => {
@@ -5956,7 +5956,7 @@ describe("Settings page accessibility (#854)", () => {
       invalidKeys: ["x.count"],
     });
     expect(html).toContain(
-      '<div class="notice err" id="settings-flash" role="alert" tabindex="-1" data-flash>',
+      '<div class="kb-callout kb-callout--err" id="settings-flash" role="alert" tabindex="-1" data-flash>',
     );
     expect(html).toMatch(
       /id="set-x\.count" aria-describedby="set-x\.count-help set-x\.count-warn set-x\.count-err settings-flash" aria-invalid="true"/,

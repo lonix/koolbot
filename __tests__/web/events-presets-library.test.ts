@@ -70,7 +70,7 @@ function boot(html: string, restore?: Record<string, unknown>): JSDOM {
   if (restore) {
     doc = doc.replace(
       BACK_LINK,
-      `${BACK_LINK}<div class="notice err" data-flash>Groups: nope</div>`,
+      `${BACK_LINK}<div class="kb-callout kb-callout--err" role="alert" data-flash>Groups: nope</div>`,
     );
   }
   const dom = new JSDOM(doc, {
@@ -516,7 +516,7 @@ describe("the presets admin page (#1200)", () => {
     // leads option. The draft the script restores holds the leads value.
     const html = adminPage().replace(
       "<h1>Group presets</h1>",
-      '<h1>Group presets</h1><div class="notice err" data-flash>nope</div>',
+      '<h1>Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>nope</div>',
     );
     const dom = new JSDOM(html, {
       url: "http://localhost/admin/events/presets",
@@ -564,7 +564,7 @@ describe("the presets admin page (#1200)", () => {
     const restore = (draft: Record<string, unknown>): HTMLInputElement => {
       const html = adminPage().replace(
         "<h1>Group presets</h1>",
-        '<h1>Group presets</h1><div class="notice err" data-flash>nope</div>',
+        '<h1>Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>nope</div>',
       );
       const dom = new JSDOM(html, {
         url: "http://localhost/admin/events/presets",
@@ -616,7 +616,7 @@ describe("the presets admin page (#1200)", () => {
         editing: { id: LIB_ID, label: "Old" },
       }).replace(
         "<h1>Group presets</h1>",
-        '<h1>Group presets</h1><div class="notice err" data-flash>nope</div>',
+        '<h1>Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>nope</div>',
       );
       const dom = new JSDOM(html, {
         url: "http://localhost/admin/events/presets",
@@ -650,7 +650,7 @@ describe("the presets admin page (#1200)", () => {
   it("a restored older draft counts its leads row once, as the lobby: the free slot stays usable, and changing the row's kind recounts (#1263)", () => {
     const html = adminPage({ maxCount: 4 }).replace(
       "<h1>Group presets</h1>",
-      '<h1>Group presets</h1><div class="notice err" data-flash>nope</div>',
+      '<h1>Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>nope</div>',
     );
     const dom = new JSDOM(html, {
       url: "http://localhost/admin/events/presets",
@@ -753,7 +753,7 @@ describe("the presets admin page (#1200)", () => {
     // create comes back to a page with the default 2 rows and the draft.
     const html = adminPage({ maxCount: 2 }).replace(
       "<h1>Group presets</h1>",
-      '<h1>Group presets</h1><div class="notice err" data-flash>Preset not saved.</div>',
+      '<h1>Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>Preset not saved.</div>',
     );
     const dom = new JSDOM(html, {
       url: "http://localhost/admin/events/presets",
@@ -893,7 +893,7 @@ describe("a preset's clan tags default (#1194)", () => {
   it("after a refused save, the editor draft keeps the ticked box", () => {
     const html = adminPage().replace(
       "<h1>Group presets</h1>",
-      '<h1>Group presets</h1><div class="notice err" data-flash>Preset not saved.</div>',
+      '<h1>Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>Preset not saved.</div>',
     );
     const dom = new JSDOM(html, {
       url: "http://localhost/admin/events/presets",
@@ -1234,7 +1234,7 @@ describe("the preset editors' header row and derived tags (#1406)", () => {
         "koolbot-event-preset-draft",
       ) as string;
       const second = new JSDOM(
-        `<body><div class="notice err" data-flash>nope</div>${editor()}</body>`,
+        `<body><div class="kb-callout kb-callout--err" role="alert" data-flash>nope</div>${editor()}</body>`,
         {
           url: "http://localhost/admin/events/presets",
           runScripts: "outside-only",

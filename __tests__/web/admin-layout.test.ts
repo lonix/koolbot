@@ -338,7 +338,7 @@ describe("renderAdminPage", () => {
   it("announces the AJAX save result through a live region and focuses a post-redirect flash (#855)", () => {
     const html = render();
     expect(html).toContain(
-      "n.className='notice section-flash';n.setAttribute('role','status');n.setAttribute('aria-live','polite');",
+      "n.className='kb-callout section-flash';n.setAttribute('role','status');n.setAttribute('aria-live','polite');",
     );
     // With nothing aria-invalid, the on-load script focuses the flash.
     expect(html).toContain(

@@ -318,6 +318,13 @@ describe("All settings: the reason under a rejected row (#1517)", () => {
     const flash = doc.querySelector(".section-flash");
     expect(flash?.getAttribute("role")).toBe("alert");
     expect(flash?.hasAttribute("aria-live")).toBe(false);
+    // The runtime flash is the same Callout the server draws (#1684).
+    expect(flash?.className).toBe("kb-callout kb-callout--err section-flash");
+    expect(flash?.querySelector("svg.kb-icon")).not.toBeNull();
+    expect(flash?.querySelector(".kb-callout__title")?.textContent).toBe(
+      "No changes saved.",
+    );
+    expect(flash?.className).not.toMatch(/\bnotice\b/);
   });
 
   it("falls back to the generic line for a key without a reason", async () => {

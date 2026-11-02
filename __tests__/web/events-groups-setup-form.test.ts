@@ -610,7 +610,7 @@ describe("a refused submit puts the form back (#1299)", () => {
       groupLimits: { defaultCount: 2, maxCount: 15 },
     } as never).replace(
       BACK_LINK,
-      `${BACK_LINK}<div class="notice err" data-flash>Groups: nope</div>`,
+      `${BACK_LINK}<div class="kb-callout kb-callout--err" role="alert" data-flash>Groups: nope</div>`,
     );
     const dom = new JSDOM(html, {
       url: "http://localhost/admin/events",
@@ -723,7 +723,7 @@ describe("edits by hand are remembered, even to empty (#1299)", () => {
     const run = (restore: Record<string, unknown>): JSDOM => {
       const page = html.replace(
         BACK_LINK,
-        `${BACK_LINK}<div class="notice err" data-flash>Groups: nope</div>`,
+        `${BACK_LINK}<div class="kb-callout kb-callout--err" role="alert" data-flash>Groups: nope</div>`,
       );
       const dom = new JSDOM(page, {
         url: "http://localhost/admin/events",

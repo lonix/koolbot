@@ -25,7 +25,7 @@ import {
   PERMANENT_CONFIRM_ITEMS,
   REVIEW_JOB_NOTE,
 } from "../utils/moderation-labels.js";
-import { icon, toneIcon, type IconName } from "./icons.js";
+import { icon, toneIcon, type IconName, type Tone } from "./icons.js";
 import { commandSyncStatus } from "./command-sync-text.js";
 import type { CommandSyncReport } from "../services/command-manager.js";
 import {
@@ -52,6 +52,10 @@ import {
   renderReactionRoleMessageSelect,
   renderStepper,
   renderTimezoneSelect,
+  pickerMetaAttr,
+  pickerCreateValue,
+  parsePickerCreateValue,
+  type PickerCreate,
 } from "./setting-pickers.js";
 import type { ReactionRoleMessageOptions } from "./reaction-role-messages.js";
 import { getServerTimezone } from "../utils/timezone.js";
@@ -496,6 +500,8 @@ export interface SettingsProps extends CommonProps {
   groupRoles?: RoleOption[];
   /** The bot's reaction-role messages, for a key that picks one (#1433). */
   reactionRoleMessages?: ReactionRoleMessageOptions | null;
+  /** Which rows offer the Picker's create row (#1658); rows it returns nothing for are unchanged. */
+  pickerCreate?: (r: SettingRow) => PickerCreate | undefined;
   /** Guild id of the session, used as the reset-confirmation fallback. */
   guildId: string;
   /** Guild name (when fetchable); the preferred reset-confirmation phrase. */
@@ -640,10 +646,24 @@ function buildOptionsHtml(
   includeNoneRow: boolean,
   meta?: PickerMeta[],
   noneLabel = "(none)",
+  create?: PickerCreate,
 ): string {
   const parts: string[] = [];
+  // A posted create value (#1658) is drawn again as a pending option, not as an
+  // unavailable id, so a refused form keeps what the admin chose. Only when the
+  // caller offers the create row: without it the value stays what it is today.
+  const pending: string[] = [];
+  const noneSel = selected.size === 0 ? " selected" : "";
+  if (create) {
+    selected = new Set(selected);
+    for (const v of [...selected]) {
+      const parsed = parsePickerCreateValue(v);
+      if (!parsed?.ok) continue;
+      selected.delete(v);
+      if (!pending.includes(parsed.name)) pending.push(parsed.name);
+    }
+  }
   if (includeNoneRow) {
-    const noneSel = selected.size === 0 ? " selected" : "";
     parts.push(`<option value=""${noneSel}>${escapeHtml(noneLabel)}</option>`);
     meta?.push(null);
   }
@@ -690,6 +710,13 @@ function buildOptionsHtml(
       `<option value="${escapeHtml(id)}" selected>${escapeHtml(missingText(id))}</option>`,
     );
     meta?.push(["missing", id, ""]);
+  }
+  // Last, after every listed and missing option and without a `meta` entry, so
+  // the script's option indexes still line up with the list.
+  for (const name of pending) {
+    parts.push(
+      `<option value="${escapeHtml(pickerCreateValue(name))}" data-create data-name="${escapeHtml(name)}" selected>${escapeHtml(name)} (will be created)</option>`,
+    );
   }
   return parts.join("");
 }
@@ -1179,6 +1206,8 @@ export function renderRolePicker(opts: {
   options: RoleOption[];
   selected: Iterable<string>;
   describedBy?: string;
+  /** Offer "Create new role: '…'" (#1658); omit and the Picker is unchanged. */
+  create?: PickerCreate;
 }): string {
   const meta: PickerMeta[] = [];
   const optionsHtml = buildOptionsHtml(
@@ -1186,12 +1215,14 @@ export function renderRolePicker(opts: {
     new Set(opts.selected),
     false,
     meta,
+    undefined,
+    opts.create,
   );
   const describedBy = opts.describedBy
     ? ` aria-describedby="${escapeHtml(opts.describedBy)}"`
     : "";
   return (
-    `<span class="kb-picker" data-picker data-picker-meta="${escapeHtml(JSON.stringify(meta))}">` +
+    `<span class="kb-picker" data-picker data-picker-meta="${pickerMetaAttr(meta, opts.create)}">` +
     `<select class="kb-select" id="${escapeHtml(opts.id)}" name="${escapeHtml(opts.name)}" multiple size="${Math.min(8, Math.max(3, opts.options.length))}"${describedBy}>` +
     optionsHtml +
     `</select></span>`
@@ -1216,6 +1247,8 @@ export function renderRoleSelectPicker(opts: {
   required?: boolean;
   invalid?: boolean;
   describedBy?: string;
+  /** Offer "Create new role: '…'" (#1658); omit and the Picker is unchanged. */
+  create?: PickerCreate;
 }): string {
   const meta: PickerMeta[] = [];
   const optionsHtml = buildOptionsHtml(
@@ -1224,12 +1257,13 @@ export function renderRoleSelectPicker(opts: {
     true,
     meta,
     opts.emptyLabel,
+    opts.create,
   );
   const describedBy = opts.describedBy
     ? ` aria-describedby="${escapeHtml(opts.describedBy)}"`
     : "";
   return (
-    `<span class="kb-picker" data-picker data-picker-meta="${escapeHtml(JSON.stringify(meta))}">` +
+    `<span class="kb-picker" data-picker data-picker-meta="${pickerMetaAttr(meta, opts.create)}">` +
     `<select class="kb-select"${opts.id ? ` id="${escapeHtml(opts.id)}"` : ""}${opts.ariaLabel ? ` aria-label="${escapeHtml(opts.ariaLabel)}"` : ""} name="${escapeHtml(opts.name)}"${opts.required ? " required" : ""}${opts.invalid ? ' aria-invalid="true"' : ""}${describedBy}>` +
     optionsHtml +
     `</select></span>`
@@ -1249,6 +1283,7 @@ export function renderRoleSelectPicker(opts: {
 function renderSelectionSummary(
   options: ChannelOption[] | RoleOption[],
   selected: Set<string>,
+  create?: PickerCreate,
 ): string {
   if (selected.size === 0) return "";
   const byId = new Map<string, ChannelOption | RoleOption>(
@@ -1256,7 +1291,10 @@ function renderSelectionSummary(
   );
   const tokens = Array.from(selected).map((id) => {
     const opt = byId.get(id);
-    return opt ? optionText(opt) : missingText(id);
+    if (opt) return optionText(opt);
+    // A posted create value the page draws as pending (#1658), not as a lost id.
+    const pending = create ? parsePickerCreateValue(id) : null;
+    return pending?.ok ? `${pending.name} (will be created)` : missingText(id);
   });
   return (
     `<div class="settings-selected muted" data-picker-summary style="margin-top:.4rem;font-size:.85em">` +
@@ -1325,6 +1363,8 @@ function renderSettingControl(
     /** Role list with role groups ahead of the roles, for group-aware keys. */
     groupRoles?: RoleOption[];
     reactionRoleMessages?: ReactionRoleMessageOptions | null;
+    /** Whether a single channel, category or role row offers a create row (#1658). */
+    create?: (r: SettingRow) => PickerCreate | undefined;
   },
   isCascadeMaster = false,
   depLocked = false,
@@ -1359,6 +1399,8 @@ function renderControlInput(
     /** Role list with role groups ahead of the roles, for group-aware keys. */
     groupRoles?: RoleOption[];
     reactionRoleMessages?: ReactionRoleMessageOptions | null;
+    /** Whether a single channel, category or role row offers a create row (#1658). */
+    create?: (r: SettingRow) => PickerCreate | undefined;
   },
   isCascadeMaster = false,
   depLocked = false,
@@ -1493,9 +1535,28 @@ function renderControlInput(
     // `span.kb-picker` is where `CHANNEL_PICKER_SCRIPT` puts its search box
     // (#1394); without JavaScript this is just the select it wraps.
     const meta: PickerMeta[] = [];
-    const optionsHtml = buildOptionsHtml(options, selected, true, meta);
+    // #1658: the create row, only when the caller says creation can work. A
+    // channel setting carries its text or voice subtype with it.
+    const created = pickers.create?.(r);
+    const createFor =
+      created && r.type === "channel"
+        ? {
+            ...created,
+            channelKind:
+              created.channelKind ??
+              (r.channelKind === "voice" ? "voice" : "text"),
+          }
+        : created;
+    const optionsHtml = buildOptionsHtml(
+      options,
+      selected,
+      true,
+      meta,
+      undefined,
+      createFor,
+    );
     return (
-      `<span class="kb-picker" data-picker data-picker-meta="${escapeHtml(JSON.stringify(meta))}">` +
+      `<span class="kb-picker" data-picker data-picker-meta="${pickerMetaAttr(meta, createFor)}">` +
       `<select class="kb-select"${a11yAttr} name="${valueName}"${lockAttr}>` +
       optionsHtml +
       `</select></span>`
@@ -1506,23 +1567,36 @@ function renderControlInput(
       r.type === "channel_list"
         ? channelOptionsFor(r, pickers)
         : rolesFor(r, pickers);
+    // A list stored as text splits on commas (ids never hold one). A caller
+    // drawing a refused form again may pass the posted values as an array, so a
+    // pending name that holds a comma (#1658) stays one value.
     const selected = new Set(
-      currentStr
-        .split(",")
-        .map((v) => v.trim())
-        .filter((v) => v !== ""),
+      Array.isArray(r.current)
+        ? r.current.map((v) => String(v)).filter((v) => v !== "")
+        : currentStr
+            .split(",")
+            .map((v) => v.trim())
+            .filter((v) => v !== ""),
     );
     // The same `span.kb-picker` as the single pickers (#1473): the script
     // turns the multiple select into chips plus a toggling popover. Without
     // JavaScript it is the native list and the "Selected:" summary below.
     const meta: PickerMeta[] = [];
-    const optionsHtml = buildOptionsHtml(options, selected, false, meta);
+    const createFor = r.type === "role_list" ? pickers.create?.(r) : undefined;
+    const optionsHtml = buildOptionsHtml(
+      options,
+      selected,
+      false,
+      meta,
+      undefined,
+      createFor,
+    );
     return (
-      `<span class="kb-picker" data-picker data-picker-meta="${escapeHtml(JSON.stringify(meta))}">` +
+      `<span class="kb-picker" data-picker data-picker-meta="${pickerMetaAttr(meta, createFor)}">` +
       `<select${a11yAttr} name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}"${lockAttr}>` +
       optionsHtml +
       `</select></span>` +
-      renderSelectionSummary(options, selected)
+      renderSelectionSummary(options, selected, createFor)
     );
   }
   if (r.type === "cron") {
@@ -1695,6 +1769,7 @@ interface SettingRowsContext {
     roles: RoleOption[];
     groupRoles?: RoleOption[];
     reactionRoleMessages?: ReactionRoleMessageOptions | null;
+    create?: (r: SettingRow) => PickerCreate | undefined;
   };
   /** The form's master toggle: every other row nests under it. */
   masterKey: string | null;
@@ -1921,6 +1996,7 @@ export function renderSettingsPage(props: SettingsProps): string {
     roles: props.roles,
     groupRoles: props.groupRoles,
     reactionRoleMessages: props.reactionRoleMessages,
+    create: props.pickerCreate,
   };
   // Page-wide enabled-state of every rendered key, derived from the same
   // `current` values shown in the controls. Dependency hints (#666) read from
@@ -2980,7 +3056,7 @@ export interface EventsProps extends CommonProps {
 
 export function renderFlash(flash?: FlashMessage | null, id = ""): string {
   if (!flash) return "";
-  const cls =
+  const tone: Tone =
     flash.type === "ok" ? "ok" : flash.type === "warn" ? "warn" : "err";
   // `id` is optional: the Settings page names its banner so the controls of
   // rejected keys can reference it from `aria-describedby` (#854).
@@ -2990,7 +3066,9 @@ export function renderFlash(flash?: FlashMessage | null, id = ""): string {
   // actually announced (WCAG 4.1.3, #855). A result is a polite status; a
   // failure is an alert (#1517), as docs/design/components.md -> Callout asks.
   const role = flash.type === "err" ? "alert" : "status";
-  return `<div class="notice ${cls}"${idAttr} role="${role}" tabindex="-1" data-flash>${escapeHtml(flash.text)}</div>`;
+  // The flash is one plain-text sentence, so it is the Callout's title (the
+  // fact); the text line stays out rather than repeating it.
+  return `<div class="kb-callout kb-callout--${tone}"${idAttr} role="${role}" tabindex="-1" data-flash>${toneIcon(tone)}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(flash.text)}</p></div></div>`;
 }
 
 /**
@@ -3827,7 +3905,7 @@ function eventGroupsScript(): string {
     "['auto','manual'].forEach(function(a){d['__'+a]=[];Array.prototype.forEach.call(form.querySelectorAll('[data-'+a+']'),function(el){if(el.name)d['__'+a].push(el.name)})});" +
     "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
     "try{var raw=window.sessionStorage.getItem(KEY);window.sessionStorage.removeItem(KEY);" +
-    "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
+    "if(raw&&document.querySelector('[data-flash][role=alert]')){var d=JSON.parse(raw);" +
     // The page may start with remembered rows (#1406): the draft is what was
     // submitted, so rows it does not hold are emptied before it is put back.
     "Array.prototype.forEach.call(rows(),function(r,i){['name','size','tag','marker'].forEach(function(k){f(i,k).value=''});f(i,'kind').value='team'});" +

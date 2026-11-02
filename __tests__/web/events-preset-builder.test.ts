@@ -37,7 +37,8 @@ function html(
   defaultCount = 2,
   flash = false,
 ): string {
-  const flashDiv = '<div class="notice err" data-flash>nope</div>';
+  const flashDiv =
+    '<div class="kb-callout kb-callout--err" role="alert" data-flash>nope</div>';
   if (surface === "me") {
     const body = renderMyEventPresetsBody({
       csrfToken: "t",
