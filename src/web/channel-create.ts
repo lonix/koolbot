@@ -37,6 +37,8 @@
  * a refusal from Discord (missing permission, rate limit) is reported here.
  * A create that timed out is in neither `removed` nor `stuck`: whether it exists
  * is unknown, and the error tells the admin to check Discord.
+ * A failure `makeDiscordApiCall` wrapped (`Error(..., { cause })`) is classified by
+ * its cause (`unwrapWriteError`, bounded).
  * Once an earlier create succeeded, the error names any channel that is still there
  * (`stuck`) and never says nothing was changed or offers a retry while one exists.
  *
@@ -339,6 +341,30 @@ export async function applyChannelPlan(
   return { ok: true, channels: done };
 }
 
+/** How many `cause` links are followed; a cyclic chain cannot loop. */
+const MAX_CAUSE_DEPTH = 5;
+
+/**
+ * The error to classify. `makeDiscordApiCall` wraps a failure it gave up on in
+ * `Error("Failed to ... after N attempts", { cause })`, so the Discord error
+ * that says what happened is on `.cause`. Follows the chain (bounded) and
+ * returns the first rate limit, else the first Discord API error, else the
+ * error as thrown. Every classification in this file goes through here.
+ */
+export function unwrapWriteError(error: unknown): unknown {
+  let firstApi: unknown;
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+  for (let i = 0; i < MAX_CAUSE_DEPTH; i += 1) {
+    if (current instanceof RateLimitError) return current;
+    if (current instanceof DiscordAPIError) firstApi ??= current;
+    if (!(current instanceof Error) || seen.has(current)) break;
+    seen.add(current);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return firstApi ?? error;
+}
+
 /**
  * The admin-facing message for a failed apply. With nothing created yet it is
  * `describeWriteFailure` as it is. Once an earlier create succeeded, the cause
@@ -353,11 +379,12 @@ function failureMessage(
   removed: readonly string[],
   stuck: readonly string[],
 ): string {
-  if (createdBefore === 0) return describeWriteFailure(error);
+  const root = unwrapWriteError(error);
+  if (createdBefore === 0) return describeWriteFailure(root);
   const cause =
-    error instanceof RateLimitError
+    root instanceof RateLimitError
       ? "Discord is limiting changes right now, so the request to create the next channel was cancelled."
-      : describeWriteFailure(error);
+      : describeWriteFailure(root);
   if (stuck.length > 0) {
     return `${cause} These channels were created earlier in this request and could not be removed again, so they still exist: ${stuck.join(", ")}. Check them in Discord before trying again.`;
   }
@@ -384,7 +411,8 @@ async function removeAgain(
       );
       removed.push(id);
     } catch (error) {
-      if (error instanceof DiscordAPIError && error.status === 404) {
+      const cause = unwrapWriteError(error);
+      if (cause instanceof DiscordAPIError && cause.status === 404) {
         removed.push(id);
       } else {
         logger.error(

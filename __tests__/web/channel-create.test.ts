@@ -508,3 +508,111 @@ describe("the message after a failure that follows a first create", () => {
     if (!result.ok) expect(result.error).toMatch(/Nothing was changed/);
   });
 });
+
+describe("errors wrapped by makeDiscordApiCall (the cause chain)", () => {
+  const rate = (): RateLimitError =>
+    new RateLimitError({
+      timeToReset: 0,
+      retryAfter: 120_000,
+      sublimitTimeout: 0,
+      limit: 2,
+      method: "POST",
+      hash: "h",
+      url: "https://discord.com/api/v10/guilds/1/channels",
+      route: "/guilds/:id/channels",
+      majorParameter: "1",
+      global: false,
+      scope: "user",
+    });
+  const wrap = (cause: unknown, depth = 1): Error => {
+    let e: unknown = cause;
+    for (let i = 0; i < depth; i += 1) {
+      e = new Error("Failed to create channel after 3 attempts", { cause: e });
+    }
+    return e as Error;
+  };
+  const entries = [
+    { kind: "category" as const, name: "Logs" },
+    { kind: "text" as const, name: "Raid Alerts" },
+  ];
+
+  async function run(
+    failure: Error,
+    opts: { afterFirst: boolean; deleteError?: Error },
+  ) {
+    const { deps, post, del } = setup();
+    const reviewed = planChannels(entries, live);
+    if (!reviewed.ok) throw new Error("plan");
+    if (opts.afterFirst) {
+      post.mockImplementationOnce(async (_x, o) => ({
+        id: "555555555555555555",
+        name: o.body.name as string,
+      }));
+    }
+    post.mockRejectedValueOnce(failure);
+    if (opts.deleteError) del.mockRejectedValueOnce(opts.deleteError);
+    return applyChannelPlan(deps, entries, reviewed.planId);
+  }
+
+  it.each([1, 2])(
+    "reports a wrapped rate limit (depth %i) as a rate limit on the first create",
+    async (depth) => {
+      const result = await run(wrap(rate(), depth), { afterFirst: false });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toMatch(/limiting changes/);
+        expect(result.error).not.toMatch(/Check Discord|may already/);
+      }
+    },
+  );
+
+  it("reports a wrapped rate limit on a later create, with the leftover channel named", async () => {
+    const result = await run(wrap(rate()), {
+      afterFirst: true,
+      deleteError: apiError(50013, "Missing Permissions"),
+    });
+    expect(result).toMatchObject({ ok: false, stuck: ["555555555555555555"] });
+    if (!result.ok) {
+      expect(result.error).toMatch(/limiting changes/);
+      expect(result.error).toContain("555555555555555555");
+      expect(result.error).not.toMatch(/may already|didn't confirm/);
+    }
+  });
+
+  it("reports a wrapped missing permission as Discord's refusal", async () => {
+    const result = await run(wrap(apiError(50013, "Missing Permissions")), {
+      afterFirst: false,
+    });
+    if (result.ok) throw new Error("expected failure");
+    expect(result.error).toMatch(/Discord refused the change/);
+  });
+
+  it("keeps a wrapped timeout uncertain", async () => {
+    const result = await run(
+      wrap(new Error("Discord API timeout after 30000ms")),
+      { afterFirst: false },
+    );
+    if (result.ok) throw new Error("expected failure");
+    expect(result.error).toMatch(/Check Discord/);
+  });
+
+  it("counts a wrapped 404 on the rollback delete as removed", async () => {
+    const result = await run(apiError(50013, "Missing Permissions"), {
+      afterFirst: true,
+      deleteError: wrap(apiError(10003, "Unknown Channel", 404)),
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      removed: ["555555555555555555"],
+      stuck: [],
+    });
+  });
+
+  it("does not loop on a cyclic cause chain", async () => {
+    const a = new Error("a");
+    const b = new Error("b", { cause: a });
+    (a as { cause?: unknown }).cause = b;
+    const result = await run(a, { afterFirst: false });
+    expect(result.ok).toBe(false);
+  });
+});
