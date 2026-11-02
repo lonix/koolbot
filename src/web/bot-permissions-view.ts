@@ -515,7 +515,7 @@ export function renderBotPermissionsPage(
     title: "Bot permissions",
     active: "/admin/bot-permissions",
     body: `<div class="kb-stack"><header class="kb-pagehead"><div class="kb-pagehead__text"><h1 class="kb-pagehead__title">Bot permissions</h1>
-<p class="kb-pagehead__sub">Which Discord permissions the bot has for the features you have switched on, and where it is missing any.</p></div></header>
+<p class="kb-pagehead__sub">Which Discord permissions the bot has for the features you have switched on, and where it is missing any. Administrator is fine to start with, and the Setup wizard asks for it. The permissions listed here are the target: when you are ready, narrow the bot to them.</p></div></header>
 ${body}</div>`,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,

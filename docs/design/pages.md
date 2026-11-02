@@ -51,6 +51,8 @@ The pattern for every feature page (#1301), shown on Events.
 
 Bot permissions (#1306): what to do comes first, then every permission in one matrix.
 
+The intro says Administrator is fine to start with (the Setup wizard asks for it) and that the permissions listed here are the target to narrow the bot to (#1617).
+
 1. **How to fix**, only when something is missing: a numbered, deduplicated list of steps and *Re-authorise KoolBot*, which opens Discord's bot-invite
    page with every permission the switched-on features need. Whether Discord applies the new bits to the existing role still needs checking; if it
    does not, the steps stay and the button goes.
@@ -152,6 +154,21 @@ The Setup wizard's Access step: who can do what, before any channel is set up.
 - One AccessCard per scope: Admins (`/config`), Moderators, Event hosts and Members (all `/me`). Each maps Discord roles through a Picker, or offers
   to create the role (*Create @Event host*), and writes a role group with the matching capability.
 - A callout warns when a switched-on feature has nobody to run it ("Events is on and nobody can host yet").
+
+### WizardAdministratorCheck and WizardDonePage (#1617)
+
+The Setup wizard makes sure the bot has Administrator, then helps narrow it. Both parts are drafted from existing components; the wording is a
+proposal until the owner settles it.
+
+- The first page and **Review** open with a Callout: `--ok` "The bot has Administrator"; `--warn` "The bot does not have Administrator" with what may
+  fail, how to grant it (invite link, or the bot's role in Discord) and a neutral small *Check again*; plain "Administrator could not be checked" with
+  *Check again*, claiming neither way. A missing Administrator never blocks Apply.
+- **Review** adds a Switch row, *Continue without Administrator*, posted with the Apply form. Apply is not disabled for it; the server stops with a message
+  back on Review until the switch is on.
+- The wizard ends on `/admin/wizard/done`, not a fifth step in the Steps bar: *Narrow the bot's permissions*, optional, read-only. A Panel of the
+  permissions the switched-on features need with chips for the features, a Panel *Used, but not checked here* (the permissions KoolBot uses that
+  Bot permissions does not check, never called unneeded), a folded *Not needed* list of what only switched-off features use, a Panel of four numbered steps to swap
+  Administrator in Discord, and one primary button, *Open Bot permissions*, next to *Skip for now*.
 
 ## Event host
 

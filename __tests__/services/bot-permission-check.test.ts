@@ -1709,6 +1709,27 @@ describe("channel-posting features (#1254)", () => {
       ).toEqual([...OPTIONAL_CHANNEL].sort());
     });
 
+    it("says looking for group is on, and needs its permissions wherever it runs, when no channel is set (#1617)", async () => {
+      settings = { "lfg.enabled": true, "lfg.channel_id": "" };
+      const report = await runPost({ channels: [] });
+      // Still not checked and not in use for the page's verdicts ...
+      expect(entryOf(report, "lfg-post")).toMatchObject({
+        enabled: false,
+        outcome: "unchecked",
+        needsServerWide: true,
+      });
+      // ... and only looking for group says it: the other optional channels post nowhere.
+      expect(
+        report.checks.filter((c) => c.needsServerWide).map((c) => c.feature.id),
+      ).toEqual(["lfg-post"]);
+    });
+
+    it("does not say it while looking for group is off", async () => {
+      settings = { "lfg.enabled": false, "lfg.channel_id": "" };
+      const report = await runPost({ channels: [] });
+      expect(entryOf(report, "lfg-post")?.needsServerWide).toBeUndefined();
+    });
+
     it("lets an enabled event feature with no announcement channel keep the all-clear", async () => {
       settings = { "events.enabled": true, "events.category_id": "cat" };
       const report = await runPost({

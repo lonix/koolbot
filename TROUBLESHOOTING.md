@@ -283,9 +283,12 @@ Error: An invalid token was provided
    Replace `YOUR_CLIENT_ID` with your actual Client ID. `permissions=1099796860116`
    is the least-privilege set: View Channels, Send Messages, Embed Links,
    Add Reactions, Manage Channels, Manage Roles, Move Members, View Audit Log,
-   Moderate Members and Ban Members. Do not invite the bot with
-   `permissions=8` (Administrator): it lets anyone who compromises the bot
-   token or the Web UI act as a server administrator. If a feature you use
+   Moderate Members and Ban Members. `permissions=8` (Administrator) is fine
+   to start with, and the Setup wizard asks for it, but it is more than the bot
+   needs: it lets anyone who compromises the bot token or the Web UI act as a
+   server administrator. Once the wizard has applied, narrow the bot to the
+   permissions your features need (the wizard's last step and **Bot
+   permissions** list them). If a feature you use
    needs one more permission, add just that one. Drop the permissions of
    features you have not enabled (for example Ban Members and Moderate
    Members without moderation).

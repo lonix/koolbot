@@ -44,6 +44,13 @@ import {
 } from "../../../services/wizard-access.js";
 import { ROLE_GRANTING_SETTINGS } from "../../../services/role-grants.js";
 import { renderWizardAccessPage } from "../../wizard-access-view.js";
+import { renderWizardDonePage } from "../../wizard-done-view.js";
+import { ADMIN_CONTINUE_FIELD } from "../../wizard-admin-view.js";
+import { loadPermissionReport } from "../../permission-notice.js";
+import {
+  administratorInviteUrl,
+  checkBotAdministrator,
+} from "../../../services/wizard-admin-check.js";
 import {
   defaultConfig,
   settingsMetadata,
@@ -58,6 +65,7 @@ import {
   renderWizardPage,
   renderWizardStepPage,
   renderWizardConfirmPage,
+  type WizardAdminProps,
   readSettingField,
   wantsKeptColour,
   KEEP_READ_FAILED_REASON,
@@ -114,6 +122,17 @@ function pendingConfigOverlap(
   return null;
 }
 
+/** An Event host role job id as the engine makes it; anything else is ignored. */
+const JOB_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** The wizard's features named in a query value (comma separated), in a form the page can tick again. */
+function tickedFeatures(raw: unknown): string[] {
+  if (typeof raw !== "string") return [];
+  return [
+    ...new Set(raw.split(",").filter((f) => WIZARD_FEATURE_ORDER.includes(f))),
+  ];
+}
+
 /** Features whose scope the Access step can leave without anybody to run it. */
 const GAP_FEATURES = ["events", "moderation"] as const;
 
@@ -126,6 +145,20 @@ export function createWizardRouter(client: Client): Router {
   }): Promise<AccessContext> {
     const guild = await client.guilds.fetch(session.guildId);
     return readAccessContext(guild);
+  }
+
+  /**
+   * Whether the bot has Administrator (#1617), for the first page and Review.
+   * `refresh` reads the bot's membership from Discord (Check again); never throws.
+   */
+  async function readAdmin(
+    session: { guildId: string },
+    refresh: boolean,
+  ): Promise<WizardAdminProps> {
+    return {
+      check: await checkBotAdministrator(client, session.guildId, { refresh }),
+      inviteUrl: administratorInviteUrl(client),
+    };
   }
 
   /** The plan for creating the Event host role, previewed with nothing written. */
@@ -279,11 +312,13 @@ export function createWizardRouter(client: Client): Router {
           } catch (err) {
             logger.warn("wizard: review could not check dependencies", err);
           }
+          const admin = await readAdmin(session, req.query.recheck === "1");
           res.type("text/html").send(
             renderWizardConfirmPage({
               csrfToken,
               remainingMs,
               navFeatureStatus,
+              admin,
               pending,
               metadata: settingsMetadata,
               accessChanges,
@@ -454,6 +489,56 @@ export function createWizardRouter(client: Client): Router {
           navFeatureStatus,
           featureOrder: WIZARD_FEATURE_ORDER,
           featureStatus,
+          admin: await readAdmin(session, req.query.recheck === "1"),
+          ticked: tickedFeatures(req.query.ticked),
+        }),
+      );
+    }),
+  );
+
+  // Check again on the first page (#1617): the ticked features are the only
+  // choices there, so they travel through the redirect and are ticked again.
+  // Nothing is saved.
+  router.post(
+    "/wizard/check",
+    asyncHandler(async (req, res) => {
+      requireSessionContext(req);
+      const raw = (req.body as Record<string, unknown> | undefined)?.features;
+      const ticked = tickedFeatures(
+        (Array.isArray(raw) ? raw : [raw]).map(String).join(","),
+      );
+      res.redirect(
+        303,
+        `/admin/wizard?recheck=1${
+          ticked.length > 0
+            ? `&ticked=${encodeURIComponent(ticked.join(","))}`
+            : ""
+        }`,
+      );
+    }),
+  );
+
+  // The page the wizard ends on (#1617): the optional step that narrows the
+  // bot's permissions. It reads and explains; it changes nothing in Discord.
+  router.get(
+    "/wizard/done",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const job = req.query.job;
+      const [report, admin, navFeatureStatus] = await Promise.all([
+        loadPermissionReport({ client, guildId: session.guildId }),
+        checkBotAdministrator(client, session.guildId),
+        navStatusForPage(),
+      ]);
+      res.type("text/html").send(
+        renderWizardDonePage({
+          csrfToken: getCsrfFromReq(req),
+          remainingMs: getDisplayedRemainingMs(session),
+          navFeatureStatus,
+          report,
+          admin,
+          hostJobId: typeof job === "string" && JOB_ID.test(job) ? job : null,
+          flash: readSignedFlash(req.query),
         }),
       );
     }),
@@ -881,6 +966,30 @@ export function createWizardRouter(client: Client): Router {
         res.redirect(303, `/admin/wizard?${qs}`);
       };
 
+      // The Administrator check (#1617), read from Discord again before anything
+      // is written. A bot that is known to lack it needs the admin's explicit
+      // choice (the Review switch); a check that cannot be made blocks nothing.
+      const adminNow = await checkBotAdministrator(client, session.guildId, {
+        refresh: true,
+      });
+      if (
+        adminNow.state === "missing" &&
+        (req.body as Record<string, unknown> | undefined)?.[
+          ADMIN_CONTINUE_FIELD
+        ] !== "1"
+      ) {
+        await recordAudit(session, {
+          action: "wizard.apply",
+          details: { stage: "administrator" },
+          result: "failure",
+          errorMessage: "The bot does not have Administrator",
+        });
+        confirmFailure(
+          "Nothing was applied. The bot does not have Administrator. Give it Administrator and choose Check again, or switch on Continue without Administrator, then apply again.",
+        );
+        return;
+      }
+
       // Feature dependencies (#663, #1622), judged on the batch Review showed
       // (the chosen settings plus the gates for every unticked feature) and
       // before anything is written. A feature being turned off while a part
@@ -1158,7 +1267,7 @@ export function createWizardRouter(client: Client): Router {
             if (started.ok) {
               res.redirect(
                 303,
-                `/admin/role-groups?${flashRedirectQuery({
+                `/admin/wizard/done?${flashRedirectQuery({
                   type: "ok",
                   text: `${summary}. The Event host role is being created.`,
                 })}&job=${encodeURIComponent(started.jobId)}`,
@@ -1175,7 +1284,7 @@ export function createWizardRouter(client: Client): Router {
             });
             return;
           }
-          flashRedirect(res, "/admin/settings", {
+          flashRedirect(res, "/admin/wizard/done", {
             type: "ok",
             text: `${summary}.`,
           });

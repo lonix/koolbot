@@ -1539,6 +1539,32 @@ saved. When the role was not created, the message says the settings and mapping 
 A job that fails in Discord leaves the group without a role, which does not count as mapped; finish it on Role groups.
 The group write and the role creation each get an audit entry.
 
+The wizard also makes sure the bot has the Discord **Administrator** permission (#1617): the easy path is to give the bot
+Administrator when it is invited and narrow it afterwards. The first page and **Review** each start with a callout that says
+whether the bot has it, read from the bot's own member in the server (every role it holds counts, not only its managed
+role). When it is missing, the callout lists what may then fail (roles, channels, categories) and how to grant it: the invite
+link that asks for Administrator, or the bot's role in Discord (Server Settings, then Roles). A **Check again** button reads
+the server's roles and the bot's membership from Discord again (permissions are worked out from the role cache) and keeps your
+choices: on **Review** it reloads the page (the choices live in the wizard session), and on the first page it posts the ticked features back and ticks them
+again, and neither stores anything. A missing
+Administrator does not block Apply. On **Review** a switch, _Continue without Administrator_, is the explicit choice; Apply is
+never greyed out for this, but it stops with a message back on **Review** (session and choices kept) until the switch is on, and
+the apply reads the bot again, so an admin who fixed it in Discord is not stopped. When the check cannot be made (the server or the
+bot's roles cannot be read), the callout says so and claims neither way, and nothing is blocked. Nothing about the check is stored;
+a refused apply gets the usual `wizard.apply` audit entry (stage `administrator`).
+
+After a successful apply the wizard ends on `/admin/wizard/done` (also after the Event host role was started, with a link to
+`/admin/role-groups?job=…`): an optional **Narrow the bot's permissions** step. It lists the permissions the switched-on features
+need (the same list as **Bot permissions**, plus a feature that is on but posts in whichever channel it is used in, such as
+Looking for group with no channel set, or Announcements with no schedule, whose message sent once picks its channel) with the features that need each,
+then **Used, but not checked here**: the permissions
+KoolBot's code uses that **Bot permissions** does not check (Ban Members for `/ban`, Timeout Members for `/timeout`, and the
+rest of its list), named with what each is for and never called unneeded, because they cannot be tied to a switched-on feature.
+It folds the checked permissions only switched-off features would use, and gives the four steps to swap Administrator for the
+needed set in Discord. The list is what KoolBot checks and uses, not a promise that anything else is safe to remove (Role groups
+can hand out only the permissions the bot holds). It links to **Bot permissions** and never changes a permission in Discord itself. The **Bot permissions**
+intro says the same thing (Administrator is fine to start, the needed set is the target).
+
 The **Bot permissions** page (`/admin/bot-permissions`, #1217) says which Discord
 permissions the bot is missing for the features you have switched on, so you do
 not have to guess why a feature does nothing. It is read-only and writes nothing

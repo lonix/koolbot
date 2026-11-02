@@ -67,6 +67,7 @@ import { busyScan } from "./server-scan-fixtures.js";
 import { channelsScan, scanChannel } from "./channels-scan-fixtures.js";
 import { renderBotPermissionsPage } from "../../src/web/bot-permissions-view.js";
 import { renderWizardAccessPage } from "../../src/web/wizard-access-view.js";
+import { renderWizardDonePage } from "../../src/web/wizard-done-view.js";
 import type {
   BotPermissionReport,
   FeatureCheck,
@@ -173,6 +174,29 @@ import {
 } from "../../src/web/views.js";
 
 /** One page under test: a human-readable name and the document to scan. */
+/** The Administrator check the Setup wizard shows (#1617), in each state. */
+const WIZARD_ADMIN = {
+  has: { check: { state: "has" as const }, inviteUrl: null },
+  missing: {
+    check: { state: "missing" as const },
+    inviteUrl:
+      "https://discord.com/oauth2/authorize?client_id=123456789012345678&permissions=8&scope=bot%20applications.commands",
+  },
+  unknown: {
+    check: {
+      state: "unknown" as const,
+      reason: "Discord could not be reached.",
+    },
+    inviteUrl: null,
+  },
+};
+const WIZARD_ADMIN_METADATA = {
+  "voicechannels.enabled": {
+    description: "Turn dynamic voice channels on.",
+    category: "voicechannels",
+  },
+};
+
 export interface A11yPage {
   name: string;
   html: string;
@@ -2472,6 +2496,105 @@ export function adminPages(): A11yPage[] {
         ...COMMON,
         featureOrder: ["voicechannels", "polls"],
         featureStatus: { voicechannels: true, polls: false },
+      }),
+    },
+    {
+      name: "Setup wizard, the bot has Administrator",
+      html: renderWizardPage({
+        ...COMMON,
+        featureOrder: ["voicechannels", "polls"],
+        featureStatus: { voicechannels: true, polls: false },
+        admin: WIZARD_ADMIN.has,
+      }),
+    },
+    {
+      name: "Setup wizard, the bot does not have Administrator",
+      html: renderWizardPage({
+        ...COMMON,
+        featureOrder: ["voicechannels", "polls"],
+        featureStatus: { voicechannels: true, polls: false },
+        admin: WIZARD_ADMIN.missing,
+        ticked: ["polls"],
+      }),
+    },
+    {
+      name: "Setup wizard, Administrator could not be checked",
+      html: renderWizardPage({
+        ...COMMON,
+        featureOrder: ["voicechannels", "polls"],
+        featureStatus: { voicechannels: true, polls: false },
+        admin: WIZARD_ADMIN.unknown,
+      }),
+    },
+    {
+      name: "Setup wizard confirm, the bot has Administrator",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [["voicechannels.enabled", true]],
+        metadata: WIZARD_ADMIN_METADATA,
+        admin: WIZARD_ADMIN.has,
+      }),
+    },
+    {
+      name: "Setup wizard confirm, the bot does not have Administrator",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [["voicechannels.enabled", true]],
+        metadata: WIZARD_ADMIN_METADATA,
+        admin: WIZARD_ADMIN.missing,
+      }),
+    },
+    {
+      name: "Setup wizard confirm, Administrator could not be checked",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [["voicechannels.enabled", true]],
+        metadata: WIZARD_ADMIN_METADATA,
+        admin: WIZARD_ADMIN.unknown,
+      }),
+    },
+    {
+      name: "Setup wizard done, narrow the bot's permissions",
+      html: renderWizardDonePage({
+        ...COMMON,
+        report: botPermissionReport("ok"),
+        admin: { state: "has" },
+        flash: { type: "ok", text: "Wizard applied 12 settings." },
+      }),
+    },
+    {
+      name: "Setup wizard done, the bot has no Administrator",
+      html: renderWizardDonePage({
+        ...COMMON,
+        report: botPermissionReport("mixed"),
+        admin: { state: "missing" },
+      }),
+    },
+    {
+      name: "Setup wizard done, Event host role started",
+      html: renderWizardDonePage({
+        ...COMMON,
+        report: botPermissionReport("ok"),
+        admin: { state: "unknown", reason: "Discord could not be reached." },
+        hostJobId: "job-1",
+      }),
+    },
+    {
+      name: "Setup wizard done, permissions could not be checked",
+      html: renderWizardDonePage({
+        ...COMMON,
+        report: {
+          available: false,
+          reason: "The bot could not read this server from Discord.",
+          fresh: false,
+          problems: [],
+          unknown: [],
+          quiet: [],
+          okFeatures: [],
+          notes: [],
+          checks: [],
+        },
+        admin: { state: "has" },
       }),
     },
     {

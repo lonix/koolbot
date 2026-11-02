@@ -1177,7 +1177,7 @@ describe("Create @Event host (#1365)", () => {
       const id = await reviewedPlanId(state());
       const res = await applyWith(state(), id);
       const location = res.headers.get("location") ?? "";
-      expect(location).toContain("/admin/role-groups?");
+      expect(location).toContain("/admin/wizard/done?");
       expect(location).toContain(`job=${JOB}`);
       expect(parseFlashRedirect(location).msg).toContain(
         "Event host role is being created",
