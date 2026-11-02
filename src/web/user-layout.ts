@@ -23,7 +23,7 @@ import {
   renderTimezoneSelect,
 } from "./setting-pickers.js";
 import { hostPanelPath } from "./host-panel-shared.js";
-import { icon, type IconName } from "./icons.js";
+import { icon, toneIcon, type IconName, type Tone } from "./icons.js";
 import { formView, type FormView, type RefusedForm } from "./form-errors.js";
 import { FOCUS_FIRST_INVALID_SCRIPT } from "./event-field-errors.js";
 import { renderSwitch } from "./setting-controls.js";
@@ -178,6 +178,12 @@ const STYLE = [
   ".tag-info{background:var(--info-bg);color:var(--info-text)}",
   // Disabled-feature "off" tag on the overview cards, mirroring the admin
   // Settings palette (#709).
+  // The flash is a kb-callout and a Callout has no margin. The old .notice kept `space-4` below it, so a
+  // flash straight in the column (a page without tabs is not a kb-stack) keeps that; in a kb-stack the
+  // gap spaces it, so it adds nothing. The stack rule is more specific, so the order does not matter.
+  ".kb-callout[data-flash]{margin:0 0 var(--space-4)}",
+  ".kb-stack>.kb-callout[data-flash]{margin:0}",
+  // Still used by the Rewind route's load-error line (user-routes.ts); goes with that piece (#1706).
   ".notice{padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);margin:0 0 var(--space-4)}",
   ".notice.info{background:var(--selected);color:var(--info-text)}",
   ".notice.ok{background:var(--ok-bg);color:var(--ok-text)}",
@@ -207,7 +213,6 @@ const STYLE = [
   ".btn-secondary:hover{background:var(--fill-hover)}",
   ".btn-danger{background:var(--danger);color:var(--on-primary)}",
   ".btn-danger:hover{background:var(--danger-hover)}",
-  ".form-actions{margin-top:1rem;display:flex;gap:.5rem;align-items:center}",
   // The shared preset editor's form (`form.stack`, on the member presets page; the admin layout styles its own).
   "form.stack label{display:block;margin:0 0 var(--space-3)}",
   "form.stack input[type=text],form.stack input[type=number],form.stack select{display:block;max-width:100%}",
@@ -230,7 +235,7 @@ const SCRIPT = sessionBannerScript("me");
 // screen reader. `renderFlash` gives the node `tabindex="-1"` so this plain
 // `focus()` works; no-ops on every page without a flash.
 const FLASH_FOCUS_SCRIPT =
-  "(function(){var n=document.querySelector('.notice[data-flash]');" +
+  "(function(){var n=document.querySelector('[data-flash]');" +
   "if(!n)return;try{n.focus()}catch(e){}})();";
 
 /**
@@ -360,24 +365,27 @@ function renderPageNav(active: string, flags: UserFeatureFlags): string {
  * page is for (`sub` is trusted HTML the caller built). `placeScopeWhy` adds the
  * scope's "why you see this" line at the end of the text block.
  */
-function pageHeader(title: string, sub: string): string {
+function pageHeader(title: string, sub = ""): string {
   return (
     '<header class="kb-pagehead"><div class="kb-pagehead__text">' +
     `<h1 class="kb-pagehead__title">${escapeHtml(title)}</h1>` +
-    `<p class="kb-pagehead__sub">${sub}</p></div></header>`
+    (sub ? `<p class="kb-pagehead__sub">${sub}</p>` : "") +
+    "</div></header>"
   );
 }
 
 function renderFlash(flash?: UserFlashMessage | null): string {
   if (!flash) return "";
-  const cls =
+  const tone: Tone =
     flash.type === "ok" ? "ok" : flash.type === "warn" ? "warn" : "err";
   // tabindex="-1" + data-flash: the layout's FLASH_FOCUS_SCRIPT focuses it on
   // load so the outcome of a post-redirect save is actually announced
   // (WCAG 4.1.3, #855). A result is a polite status; a failure is an alert
   // (#1517).
   const role = flash.type === "err" ? "alert" : "status";
-  return `<div class="notice ${cls}" role="${role}" tabindex="-1" data-flash>${escapeHtml(flash.text)}</div>`;
+  // The flash is one plain-text sentence, so it is the Callout's title (the
+  // fact), the same Callout the admin flash draws.
+  return `<div class="kb-callout kb-callout--${tone}" role="${role}" tabindex="-1" data-flash>${toneIcon(tone)}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(flash.text)}</p></div></div>`;
 }
 
 /**
@@ -393,7 +401,8 @@ export function renderUserFeatureDisabledNotice(opts: {
 }): string {
   if (opts.enabled) return "";
   const label = escapeHtml(opts.label);
-  return `<div class="notice info"><strong>Your server admin hasn't enabled ${label} yet.</strong> Once they enable it, it'll show up here.</div>`;
+  // A plain (info) Callout: the fact as the title, the impact as the text.
+  return `<div class="kb-callout" role="status">${toneIcon("")}<div class="kb-callout__body"><p class="kb-callout__title">Your server admin hasn't enabled ${label} yet.</p><p class="kb-callout__text">Once they enable it, it'll show up here.</p></div></div>`;
 }
 
 /**
@@ -1365,11 +1374,15 @@ export function renderUserNotificationsBody(
   // nothing to toggle, so no form and no Save button.
   if (opts.rows.length === 0) {
     return [
-      "<h1>Notifications</h1>",
+      '<div class="kb-stack">',
+      pageHeader("Notifications"),
       // EmptyState (docs/design/components.md): what is missing, then how it
       // fills up.
-      '<div class="kb-empty"><p class="kb-empty__title">No direct messages to offer</p>' +
-        '<p class="kb-empty__text">KoolBot has no direct messages to offer you on this server right now. Options appear here when the server turns a feature on.</p></div>',
+      emptyState(
+        "No direct messages to offer",
+        "KoolBot has no direct messages to offer you on this server right now. Options appear here when the server turns a feature on.",
+      ),
+      "</div>",
     ].join("");
   }
   const rows = opts.rows
@@ -1402,19 +1415,23 @@ export function renderUserNotificationsBody(
     })
     .join("");
   return [
-    "<h1>Notifications</h1>",
-    `<p class="subtitle">Choose which DMs KoolBot may send you on this server. Every channel is off until you turn it on — KoolBot never DMs you unprompted. Switch a message off and save, and the bot stops sending it.</p>`,
+    '<div class="kb-stack">',
+    pageHeader(
+      "Notifications",
+      "Choose which DMs KoolBot may send you on this server. Every channel is off until you turn it on — KoolBot never DMs you unprompted. Switch a message off and save, and the bot stops sending it.",
+    ),
     '<form method="POST" action="/me/notifications">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
     '<section class="kb-panel" aria-label="Direct-message notification channels">',
-    `<div class="kb-panel__body"><div class="kb-settings">${rows}</div>`,
-    '<div class="form-actions">',
-    '<button class="btn btn-primary" type="submit">Save preferences</button>',
-    '<span class="muted">DMs are opt-in: every channel starts off until you enable it here.</span>',
+    `<div class="kb-panel__body kb-stack"><div class="kb-settings">${rows}</div>`,
+    '<div class="kb-row">',
+    '<button class="kb-btn kb-btn--primary" type="submit">Save preferences</button>',
+    '<span class="kb-help">DMs are opt-in: every channel starts off until you enable it here.</span>',
     "</div>",
     "</div>",
     "</section>",
     "</form>",
+    "</div>",
   ].join("");
 }
 

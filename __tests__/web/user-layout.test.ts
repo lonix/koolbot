@@ -52,23 +52,32 @@ describe("renderUserPage accessibility (#855)", () => {
 
   it("renders the flash as a focusable live region and focuses it on load", () => {
     const html = render({ flash: { type: "ok", text: "Preferences saved." } });
-    expect(html).toContain(
-      '<div class="notice ok" role="status" tabindex="-1" data-flash>Preferences saved.</div>',
+    // The Callout (components.md): icon, then the one-sentence text as the title.
+    expect(html).toMatch(
+      /<div class="kb-callout kb-callout--ok" role="status" tabindex="-1" data-flash><svg [^>]*>.*?<\/svg><div class="kb-callout__body"><p class="kb-callout__title">Preferences saved\.<\/p><\/div><\/div>/,
     );
     expect(html).toContain(
-      "var n=document.querySelector('.notice[data-flash]');if(!n)return;try{n.focus()}catch(e){}",
+      "var n=document.querySelector('[data-flash]');if(!n)return;try{n.focus()}catch(e){}",
     );
+    expect(html).not.toContain('class="notice');
   });
 
   it("announces a failure flash as an alert and a result as a status (#1517)", () => {
     const err = render({ flash: { type: "err", text: "Not saved." } });
     expect(err).toContain(
-      '<div class="notice err" role="alert" tabindex="-1" data-flash>Not saved.</div>',
+      '<div class="kb-callout kb-callout--err" role="alert" tabindex="-1" data-flash>',
     );
+    expect(err).toContain('<p class="kb-callout__title">Not saved.</p>');
     const warn = render({ flash: { type: "warn", text: "Partly saved." } });
     expect(warn).toContain(
-      '<div class="notice warn" role="status" tabindex="-1" data-flash>',
+      '<div class="kb-callout kb-callout--warn" role="status" tabindex="-1" data-flash>',
     );
+  });
+
+  it("spaces a flash that sits straight in the column, as the old notice did", () => {
+    const css = /<style>([\s\S]*?)<\/style>/.exec(render())?.[1] ?? "";
+    expect(css).toContain(".kb-callout[data-flash]{margin:0 0 var(--space-4)}");
+    expect(css).toContain(".kb-stack>.kb-callout[data-flash]{margin:0}");
   });
 
   it("uses colours that clear the WCAG contrast floors", () => {
