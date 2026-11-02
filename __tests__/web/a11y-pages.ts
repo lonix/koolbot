@@ -4554,6 +4554,50 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // Nothing scheduled (#1642): the EmptyState says how the list fills.
+      name: "Announcements (nothing scheduled)",
+      html: renderAnnouncementsPage({
+        ...COMMON,
+        enabled: true,
+        textChannels: CHANNELS,
+        rows: [],
+      }),
+    },
+    {
+      // The one-off form was refused (#1642): its error line and typed message come back.
+      name: "Announcements (one-off form refused)",
+      html: renderAnnouncementsPage({
+        ...COMMON,
+        enabled: true,
+        textChannels: CHANNELS,
+        rows: [],
+        refusedForm: {
+          formId: "announcement-once",
+          errors: { message: "Write a message." },
+          values: { channelId: "c1", message: "" },
+        },
+      }),
+    },
+    {
+      // An empty pool (#1642): the EmptyState, and the Callout that says the built-in defaults are in use.
+      name: "Bot status (nothing stored, defaults in use)",
+      html: renderBotStatusPage({
+        ...COMMON,
+        maxLength: 100,
+        pools: [
+          {
+            pool: "watching",
+            label: "Watching",
+            description: "Shown as “Watching …”.",
+            requiresCount: true,
+            items: [],
+            usingDefaults: true,
+            exportText: "",
+          },
+        ],
+      }),
+    },
+    {
       // The Import form sits in a closed disclosure; a refusal opens it (#1520).
       name: "Bot status (import form refused)",
       html: renderBotStatusPage({
