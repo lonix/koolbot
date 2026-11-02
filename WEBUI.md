@@ -1482,7 +1482,8 @@ _role_) as its last row, like GitHub's milestone picker. The row shows once the 
 that text selects the item instead), is not blank and is at most 100 characters. Choosing it adds a pending option to the same select, whose value
 is `create:` plus the typed name; the trigger shows the name with "(will be created)", and choosing another row (or Discard) takes it away. A stored id is
 never overwritten: an id is only digits, so a value that starts with `create:` is never one. Without JavaScript there is no row and the select is as it was.
-A page that does not pass the flag renders exactly as before. Nothing is created in Discord by the picker; the server reads the value with
+A page that does not pass the flag renders exactly as before, with the same picker script
+(the create variant is sent only to a page that holds a flagged picker). Nothing is created in Discord by the picker; the server reads the value with
 `parsePickerCreateValue` and the creation is a separate step. The rest of #1394 (labels
 on voice stats, the bot permissions page, the events and host pages, the server scan pages and the Voice Channels status line) is not done yet.
 
