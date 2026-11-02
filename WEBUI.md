@@ -1512,6 +1512,13 @@ off (turning a feature on while what it needs stays off) shows an error callout 
 apply refuse, including an unexpected error, returns to Review with the session and all your choices kept; the flash is plain text and the
 callout carries the names and links.
 
+When a feature's channel or category will be created rather than picked (#1658 to #1661), Review lists each one in a **Channels and categories to
+create** panel, one row per entry: "Create the text channel quotes for Quotes channel", the voice and category equivalents, then where it goes and who can
+see it ("In COMMUNITY. Inherits access from COMMUNITY.", or "Not in a category. Visible to everyone who can see the server."). A category is shown in
+capitals and never with a `#`. The panel says "Nothing is created until you apply. If applying fails, nothing it created is left behind." The renderer
+(`renderCreateReview`, `src/web/wizard-create-review.ts`) and the optional `creations` prop of the Review page exist; the wizard does not pass a plan yet,
+so nothing is shown until it is wired in. The wording is a proposal and is not in the design manual.
+
 The wizard runs **Choose features, Access, Features, Review** (#1321, renamed in #1620), with a step indicator on every page. **Features** is one
 page per feature you chose, with its settings (channel settings are ordinary settings on the page of the feature that owns them; the wizard has no step of its
 own for channels). When you chose more than one feature, a row of markers under the step indicator shows which feature page you are on, and reads

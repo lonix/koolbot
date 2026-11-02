@@ -167,6 +167,10 @@ import {
   renderWizardSubSteps,
 } from "./wizard-access-view.js";
 import {
+  renderCreateReview,
+  type PlannedCreation,
+} from "./wizard-create-review.js";
+import {
   WIZARD_APPLY_FORM_ID,
   dependencyReviewBlocksApply,
   renderDependencyReview,
@@ -2826,6 +2830,8 @@ export interface WizardConfirmPageProps extends CommonProps {
   accessFingerprint?: string;
   /** The plan for creating the Event host role (#1365), when it was chosen. */
   hostRole?: HostReview | null;
+  /** Channels and categories Apply would create (#1661); rendering only until the wizard wires it in. */
+  creations?: PlannedCreation[];
   /** What turning features off needs or refuses (#1622); null when it could not be checked. */
   dependencies?: WizardDependencyReview | null;
   /** Whether the bot has Administrator (#1617); absent when the page is drawn without a check. */
@@ -2837,8 +2843,12 @@ export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
   const csrf = escapeHtml(props.csrfToken);
   const accessChanges = props.accessChanges ?? [];
   const hostRole = props.hostRole ?? null;
+  const creations = props.creations ?? [];
   const nothingToApply =
-    props.pending.length === 0 && accessChanges.length === 0 && !hostRole;
+    props.pending.length === 0 &&
+    accessChanges.length === 0 &&
+    !hostRole &&
+    creations.length === 0;
   const rows =
     props.pending.length === 0
       ? `<tr><td colspan="3" class="empty">No settings configured.</td></tr>`
@@ -2857,6 +2867,8 @@ export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
   // without dependency conflicts renders exactly as before (#1622).
   const dependencyReview = renderDependencyReview(props.dependencies);
   const dependencyHtml = dependencyReview ? `${dependencyReview}\n` : "";
+  const createReview = renderCreateReview(creations);
+  const createHtml = createReview ? `${createReview}\n` : "";
   // The Administrator check (#1617). The continue switch sits outside the Apply
   // form and joins it by id, like the dependency review's confirm switch.
   const adminCheck = props.admin?.check;
@@ -2880,7 +2892,7 @@ ${renderWizardSteps("review")}
 <p class="subtitle">The following settings will be applied when you click <strong>Apply</strong>.</p>
 ${renderFlash(props.flash)}
 ${adminHtml}${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGaps ?? [], hostRole)}
-${dependencyHtml}<div class="card">
+${createHtml}${dependencyHtml}<div class="card">
   <table>
     <thead><tr><th scope="col">Key</th><th scope="col">New value</th><th scope="col">Description</th></tr></thead>
     <tbody>${rows}</tbody>
