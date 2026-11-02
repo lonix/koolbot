@@ -14,6 +14,7 @@ import {
   afterEach,
 } from "@jest/globals";
 import type { Client } from "discord.js";
+import { CHEVRON_ICON } from "../../src/web/feature-page.js";
 import {
   startAdminHarness,
   stubRequireSession,
@@ -411,10 +412,10 @@ describe("a refused case form (#1523)", () => {
     expect(res.status).toBe(422);
     const html = await res.text();
     expect(html).toContain(
-      '<details class="helper edit-details" open><summary>Open case</summary>',
+      `<details class="kb-disclosure" open><summary>${CHEVRON_ICON}Open case<span class="kb-visually-hidden"> for `,
     );
     expect(html).toContain(
-      `<input type="number" name="review_in_days" min="1" max="3650" value=" 0" id="moderation-case-open-${ENTRY}-review_in_days" aria-invalid="true" aria-describedby="moderation-case-open-${ENTRY}-review_in_days-error">`,
+      `<input class="kb-input kb-input--sm kb-input--num" type="number" name="review_in_days" min="1" max="3650" value=" 0" id="moderation-case-open-${ENTRY}-review_in_days" aria-invalid="true" aria-describedby="moderation-case-open-${ENTRY}-review_in_days-help moderation-case-open-${ENTRY}-review_in_days-error">`,
     );
     expect(lines(html)).toEqual({
       [`moderation-case-open-${ENTRY}-review_in_days-error`]:
