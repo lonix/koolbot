@@ -338,11 +338,11 @@ describe("renderAdminPage", () => {
   it("announces the AJAX save result through a live region and focuses a post-redirect flash (#855)", () => {
     const html = render();
     expect(html).toContain(
-      "n.className='notice section-flash';n.setAttribute('role','status');n.setAttribute('aria-live','polite');",
+      "n.className='kb-callout section-flash';n.setAttribute('role','status');n.setAttribute('aria-live','polite');",
     );
     // With nothing aria-invalid, the on-load script focuses the flash.
     expect(html).toContain(
-      "var inv=document.querySelector('[aria-invalid=\"true\"]');if(inv){focusInvalid(inv);return}var f=document.querySelector('.notice[data-flash]');if(f){try{f.focus()}catch(e){}}",
+      "var inv=document.querySelector('[aria-invalid=\"true\"]');if(inv){focusInvalid(inv);return}var f=document.querySelector('[data-flash]');if(f){try{f.focus()}catch(e){}}",
     );
     expect(html).toContain("#main:focus-visible{outline:none}");
   });

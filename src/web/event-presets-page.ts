@@ -324,7 +324,7 @@ export const EVENT_PRESETS_SCRIPT =
   "['auto','manual'].forEach(function(a){d['__'+a]=[];Array.prototype.forEach.call(form.querySelectorAll('[data-'+a+']'),function(el){if(el.name)d['__'+a].push(el.name)})});" +
   "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
   "try{var raw=window.sessionStorage.getItem(KEY);window.sessionStorage.removeItem(KEY);" +
-  "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
+  "if(raw&&document.querySelector('[data-flash][role=alert]')){var d=JSON.parse(raw);" +
   "Object.keys(d).forEach(function(k){var m=/^group_(\\d+)_/.exec(k);if(m){var i=+m[1];while(rows().length<=i&&i<100)addRow(true)}});" +
   "Object.keys(d).forEach(function(k){if(k.indexOf('__')===0)return;var el=form.elements[k];if(!el)return;" +
   // A draft from before the tick can hold a leads row in a kind select, which

@@ -25,7 +25,7 @@ import {
   PERMANENT_CONFIRM_ITEMS,
   REVIEW_JOB_NOTE,
 } from "../utils/moderation-labels.js";
-import { icon, toneIcon, type IconName } from "./icons.js";
+import { icon, toneIcon, type IconName, type Tone } from "./icons.js";
 import { commandSyncStatus } from "./command-sync-text.js";
 import type { CommandSyncReport } from "../services/command-manager.js";
 import {
@@ -2962,7 +2962,7 @@ export interface EventsProps extends CommonProps {
 
 export function renderFlash(flash?: FlashMessage | null, id = ""): string {
   if (!flash) return "";
-  const cls =
+  const tone: Tone =
     flash.type === "ok" ? "ok" : flash.type === "warn" ? "warn" : "err";
   // `id` is optional: the Settings page names its banner so the controls of
   // rejected keys can reference it from `aria-describedby` (#854).
@@ -2972,7 +2972,9 @@ export function renderFlash(flash?: FlashMessage | null, id = ""): string {
   // actually announced (WCAG 4.1.3, #855). A result is a polite status; a
   // failure is an alert (#1517), as docs/design/components.md -> Callout asks.
   const role = flash.type === "err" ? "alert" : "status";
-  return `<div class="notice ${cls}"${idAttr} role="${role}" tabindex="-1" data-flash>${escapeHtml(flash.text)}</div>`;
+  // The flash is one plain-text sentence, so it is the Callout's title (the
+  // fact); the text line stays out rather than repeating it.
+  return `<div class="kb-callout kb-callout--${tone}"${idAttr} role="${role}" tabindex="-1" data-flash>${toneIcon(tone)}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(flash.text)}</p></div></div>`;
 }
 
 /**
@@ -3809,7 +3811,7 @@ function eventGroupsScript(): string {
     "['auto','manual'].forEach(function(a){d['__'+a]=[];Array.prototype.forEach.call(form.querySelectorAll('[data-'+a+']'),function(el){if(el.name)d['__'+a].push(el.name)})});" +
     "window.sessionStorage.setItem(KEY,JSON.stringify(d))}catch(x){}});" +
     "try{var raw=window.sessionStorage.getItem(KEY);window.sessionStorage.removeItem(KEY);" +
-    "if(raw&&document.querySelector('.notice.err[data-flash]')){var d=JSON.parse(raw);" +
+    "if(raw&&document.querySelector('[data-flash][role=alert]')){var d=JSON.parse(raw);" +
     // The page may start with remembered rows (#1406): the draft is what was
     // submitted, so rows it does not hold are emptied before it is put back.
     "Array.prototype.forEach.call(rows(),function(r,i){['name','size','tag','marker'].forEach(function(k){f(i,k).value=''});f(i,'kind').value='team'});" +
