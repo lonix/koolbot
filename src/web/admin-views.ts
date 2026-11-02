@@ -7114,7 +7114,7 @@ function renderCaseCard(c: CaseView, props: ModerationProps): string {
   ].join("\n    ");
   const headId = `case-${escapeHtml(c.id)}-h`;
   return `<section class="kb-panel" aria-labelledby="${headId}">
-  <header class="kb-panel__head"><h3 class="kb-panel__title" id="${headId}">Case #${c.caseNumber} · <span title="${escapeHtml(c.userId)}">${escapeHtml(c.userLabel)}</span> ${moderationActionTag(c.action)} ${caseStatusTag(c.status)}</h3></header>
+  <header class="kb-panel__head"><h3 class="kb-panel__title kb-row" id="${headId}">Case #${c.caseNumber} · <span title="${escapeHtml(c.userId)}">${escapeHtml(c.userLabel)}</span> ${moderationActionTag(c.action)} ${caseStatusTag(c.status)}</h3></header>
   <div class="kb-panel__body kb-stack">
     <dl class="kb-kv">
     ${facts}
@@ -7137,7 +7137,7 @@ function renderCaseGroup(
 ): string {
   const count = `<span class="kb-badge kb-badge--count${warn && cases.length > 0 ? " kb-badge--warn" : ""}">${cases.length}</span>`;
   return `<section class="kb-panel" id="cases-${id}" aria-labelledby="cases-${id}-h">
-  <header class="kb-panel__head"><h2 class="kb-panel__title" id="cases-${id}-h">${escapeHtml(title)} ${count}</h2></header>
+  <header class="kb-panel__head"><h2 class="kb-panel__title kb-row" id="cases-${id}-h">${escapeHtml(title)} ${count}</h2></header>
   ${
     cases.length === 0
       ? `<div class="kb-panel__body"><div class="kb-empty"><p class="kb-empty__title">${escapeHtml(empty.title)}</p><p class="kb-empty__text">${escapeHtml(empty.text)}</p></div></div>`

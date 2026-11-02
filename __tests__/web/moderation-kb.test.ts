@@ -286,7 +286,9 @@ describe("Moderation page and case cards on the kb- components (#1645)", () => {
       "/admin/moderation?action=kick&user=u1&page=3",
     ]);
     expect(panel?.querySelector(".kb-badge--off")?.textContent).toBe("kick");
-    expect(panel?.querySelector(".kb-badge--on")?.textContent).toBe("ban lifted");
+    expect(panel?.querySelector(".kb-badge--on")?.textContent).toBe(
+      "ban lifted",
+    );
   });
 
   it("shows an EmptyState when no action matches", () => {
@@ -435,5 +437,25 @@ describe("Moderation page and case cards on the kb- components (#1645)", () => {
         `[id="${decide?.getAttribute("aria-describedby")}"]`,
       )?.textContent,
     ).toBe("Review days must be a whole number.");
+  });
+
+  // A Panel title is `display: flex` without wrapping; one that holds a badge or
+  // a member name takes `kb-row` so it wraps at phone width instead of clipping.
+  it.each([
+    ["a queue group head with its count badge", "#cases-overdue-h"],
+    ["every queue group head", "#cases-closed-h"],
+    [
+      "the case card head",
+      "#cases-overdue section.kb-panel h3.kb-panel__title",
+    ],
+    [
+      "a closed case card head",
+      "#cases-closed section.kb-panel h3.kb-panel__title",
+    ],
+  ])("wraps its title: %s", (_name, selector) => {
+    const title = mainOf(PAGES[4].html).querySelector(selector);
+    expect(title).not.toBeNull();
+    expect(title?.classList.contains("kb-panel__title")).toBe(true);
+    expect(title?.classList.contains("kb-row")).toBe(true);
   });
 });

@@ -110,7 +110,7 @@ describe("Cases section", () => {
     });
     // Each group is its own Panel: the title, then a count badge (warn while a case waits).
     const head = (id: string, title: string, count: number, warn = false) =>
-      `<h2 class="kb-panel__title" id="cases-${id}-h">${title} <span class="kb-badge kb-badge--count${warn ? " kb-badge--warn" : ""}">${count}</span></h2>`;
+      `<h2 class="kb-panel__title kb-row" id="cases-${id}-h">${title} <span class="kb-badge kb-badge--count${warn ? " kb-badge--warn" : ""}">${count}</span></h2>`;
     expect(html).toContain(head("overdue", "Needs a decision", 1, true));
     expect(html).toContain(head("soon", "Review in the next 7 days", 1));
     expect(html).toContain(head("later", "Review later", 0));
@@ -134,7 +134,7 @@ describe("Cases section", () => {
       }),
     });
     expect(html).toContain(
-      '<h2 class="kb-panel__title" id="cases-later-h">Review later <span class="kb-badge kb-badge--count">1</span></h2>',
+      '<h2 class="kb-panel__title kb-row" id="cases-later-h">Review later <span class="kb-badge kb-badge--count">1</span></h2>',
     );
     expect(html).toContain('action="/admin/moderation/cases/far/uphold"');
     expect(html).toContain('formaction="/admin/moderation/cases/far/readmit"');
