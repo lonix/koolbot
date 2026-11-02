@@ -36,7 +36,12 @@ import {
   reorderListAttrs,
   reorderRowAttrs,
 } from "./reorder-view.js";
-import { formView, type FormView, type RefusedForm } from "./form-errors.js";
+import {
+  formView,
+  type FormControlAttrs,
+  type FormView,
+  type RefusedForm,
+} from "./form-errors.js";
 import { renderSaveBar } from "./savebar.js";
 import {
   pickPreset,
@@ -4100,36 +4105,109 @@ const POLL_IMPORT_UPLOAD_SCRIPT =
   "area.value=t};" +
   "reader.readAsText(f)})})();";
 
+/** A row's On / Off state as a Badge: a word and a colour, never colour alone. */
+function kbOnOff(on: boolean): string {
+  return `<span class="kb-badge ${on ? "kb-badge--on" : "kb-badge--off"}">${on ? "On" : "Off"}</span>`;
+}
+
+/** The id of a Field's control, and its `aria-invalid` and error link when the server refused it. */
+function fieldControlAttrs(c: FormControlAttrs): string {
+  const describedBy = c.describedBy
+    ? ` aria-describedby="${escapeHtml(c.describedBy)}"`
+    : "";
+  return ` id="${escapeHtml(c.id)}"${c.invalid ? ' aria-invalid="true"' : ""}${describedBy}`;
+}
+
+/** A Field: its label tied to the control by id, the control, and the refused field's error line. */
+function pollField(
+  f: FormView,
+  name: string,
+  label: string,
+  control: string,
+): string {
+  return `<div class="kb-field">
+      <label class="kb-label" for="${escapeHtml(f.id(name))}">${escapeHtml(label)}</label>
+      ${control}${f.error(name)}
+    </div>`;
+}
+
+/** A select Field of a schedule form (channel, ping role). */
+function pollSelect(
+  f: FormView,
+  name: string,
+  label: string,
+  options: string,
+  required = false,
+): string {
+  return pollField(
+    f,
+    name,
+    label,
+    `<select class="kb-select" name="${name}"${required ? " required" : ""}${fieldControlAttrs(f.control(name))}>${options}</select>`,
+  );
+}
+
+/** The multiple-answers choice of a question form: a Switch that posts `multiSelect=1` when on. */
+function pollMultiSelectSwitch(checked: boolean): string {
+  return `<label class="kb-switch"><input type="checkbox" role="switch" name="multiSelect" value="1"${checked ? " checked" : ""}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Allow multiple answer selections</label>`;
+}
+
+/** A Panel for one topic of the Polls page: the title and an optional count in its head. */
+function pollPanel(
+  id: string,
+  title: string,
+  body: string,
+  opts: { count?: number; flush?: boolean } = {},
+): string {
+  const meta =
+    opts.count === undefined
+      ? ""
+      : `<span class="kb-panel__meta">${opts.count}</span>`;
+  return `<section class="kb-panel" id="${id}" aria-labelledby="${id}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${id}-h">${escapeHtml(title)}</h2>${meta}</header>
+  <div class="kb-panel__body${opts.flush ? " kb-panel__body--flush" : ""}">${body}</div>
+</section>`;
+}
+
+/** An EmptyState: what is missing, and how the area fills up. */
+function pollEmptyState(title: string, text: string): string {
+  return `<div class="kb-empty"><div class="kb-empty__icon">${icon("vote")}</div><p class="kb-empty__title">${escapeHtml(title)}</p><p class="kb-empty__text">${escapeHtml(text)}</p></div>`;
+}
+
 export function renderPollsPage(props: PollsProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const newSchedule = formView(props.refusedForm, POLL_SCHEDULE_CREATE_FORM);
   const newItem = formView(props.refusedForm, POLL_ITEM_CREATE_FORM);
+  // The row actions are small Buttons, each its own form so they post without a script.
+  const rowAction = (action: string, label: string): string =>
+    `<form method="POST" action="${action}">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm">${label}</button></form>`;
 
   const scheduleRows = props.schedules
     .map((s) => {
       const f = formView(props.refusedForm, pollScheduleEditForm(s.id));
+      const base = `/admin/polls/schedules/${escapeHtml(s.id)}`;
       return `<tr>
-<th scope="row" class="mono">${escapeHtml(s.id)}</th>
+<th scope="row" class="kb-mono">${escapeHtml(s.id)}</th>
 <td>${channelMention({ name: s.channelName, type: s.channelType })}</td>
-<td class="mono">${escapeHtml(s.cron)}</td>
+<td class="kb-mono">${escapeHtml(s.cron)}</td>
 <td>${s.durationHours}h</td>
-<td>${s.pingRoleName ? (s.pingRoleName === s.pingRoleId ? missingMention(s.pingRoleName) : roleMention(s.pingRoleName)) : '<span class="muted">none</span>'}</td>
-<td>${tagOnOff(s.enabled)}</td>
-<td class="muted">${escapeHtml(s.lastRun)}</td>
-<td class="actions">
-  <details class="helper edit-details"${f.open()}><summary>Edit</summary>
-    <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/edit" class="stack">${csrfInput}
-      <label>Channel<select name="channelId" required${f.attrs("channelId")}>${channelOptionsHtml(props.textChannels, f.selected("channelId", s.channelId))}</select></label>${f.error("channelId")}
+<td>${s.pingRoleName ? (s.pingRoleName === s.pingRoleId ? missingMention(s.pingRoleName) : roleMention(s.pingRoleName)) : '<span class="kb-muted">none</span>'}</td>
+<td>${kbOnOff(s.enabled)}</td>
+<td class="kb-muted">${escapeHtml(s.lastRun)}</td>
+<td class="kb-actions"><div class="kb-row kb-row--nowrap">
+  <details class="kb-disclosure"${f.open()}><summary>${CHEVRON_ICON}Edit</summary>
+    <div class="kb-disclosure__body"><form method="POST" action="${base}/edit" class="kb-stack">${csrfInput}
+      ${pollSelect(f, "channelId", "Channel", channelOptionsHtml(props.textChannels, f.selected("channelId", s.channelId)), true)}
       ${renderCronField(f, "cron", "Schedule", s.cron)}
       ${renderPollDurationField(f, String(s.durationHours))}
-      <label>Ping role<select name="pingRoleId"${f.attrs("pingRoleId")}>${roleOptionsHtml(props.roles, f.selected("pingRoleId", s.pingRoleId ?? "") || undefined)}</select></label>${f.error("pingRoleId")}
-      <button type="submit" class="btn">Save changes</button>
-    </form>
+      ${pollSelect(f, "pingRoleId", "Ping role", roleOptionsHtml(props.roles, f.selected("pingRoleId", s.pingRoleId ?? "") || undefined))}
+      <div class="kb-row"><button type="submit" class="kb-btn">Save changes</button></div>
+    </form></div>
   </details>
-  <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/toggle">${csrfInput}<button type="submit" class="btn">${s.enabled ? "Disable" : "Enable"}</button></form>
-  <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/test">${csrfInput}<button type="submit" class="btn">Test</button></form>
-  <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/delete" data-confirm="Delete schedule ${escapeHtml(s.id)}?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
-</td>
+  ${rowAction(`${base}/toggle`, s.enabled ? "Disable" : "Enable")}
+  ${rowAction(`${base}/test`, "Test")}
+  <form method="POST" action="${base}/delete" data-confirm="Delete schedule ${escapeHtml(s.id)}?">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger">Delete</button></form>
+</div></td>
 </tr>`;
     })
     .join("");
@@ -4137,109 +4215,120 @@ export function renderPollsPage(props: PollsProps): string {
   const itemRows = props.items
     .map((it) => {
       const f = formView(props.refusedForm, pollItemEditForm(it.id));
+      const base = `/admin/polls/items/${escapeHtml(it.id)}`;
       return `<tr>
-<th scope="row">${escapeHtml(it.question)}<div class="muted mono">${escapeHtml(it.answers.join(" • "))}</div></th>
-<td>${it.tags.length === 0 ? '<span class="muted">—</span>' : it.tags.map((t) => `<span class="tag tag-info">${escapeHtml(t)}</span>`).join(" ")}</td>
-<td>${it.usageCount}</td>
-<td class="muted">${escapeHtml(it.lastUsed)}</td>
-<td>${tagOnOff(it.enabled)}</td>
-<td class="muted">${escapeHtml(it.source)}</td>
-<td class="actions">
-  <details class="helper edit-details"${f.open()}><summary>Edit</summary>
-    <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/edit" class="stack">${csrfInput}
-      <label>Question<input type="text" name="question" maxlength="300" value="${escapeHtml(f.value("question", it.question))}" required${f.attrs("question")}></label>${f.error("question")}
+<th scope="row">${escapeHtml(it.question)}<div class="kb-muted kb-mono">${escapeHtml(it.answers.join(" • "))}</div></th>
+<td>${it.tags.length === 0 ? '<span class="kb-muted">—</span>' : it.tags.map((t) => `<span class="kb-badge kb-badge--info">${escapeHtml(t)}</span>`).join(" ")}</td>
+<td class="kb-num">${it.usageCount}</td>
+<td class="kb-muted">${escapeHtml(it.lastUsed)}</td>
+<td>${kbOnOff(it.enabled)}</td>
+<td class="kb-muted">${escapeHtml(it.source)}</td>
+<td class="kb-actions"><div class="kb-row kb-row--nowrap">
+  <details class="kb-disclosure"${f.open()}><summary>${CHEVRON_ICON}Edit</summary>
+    <div class="kb-disclosure__body"><form method="POST" action="${base}/edit" class="kb-stack">${csrfInput}
+      ${pollField(f, "question", "Question", `<input type="text" class="kb-input" name="question" maxlength="300" value="${escapeHtml(f.value("question", it.question))}" required${fieldControlAttrs(f.control("question"))}>`)}
       ${renderPollAnswerRows(f, it.answers)}
-      <label>Tags (comma-separated, optional)<input type="text" name="tags" value="${escapeHtml(f.value("tags", it.tags.join(", ")))}"${f.attrs("tags")}></label>${f.error("tags")}
-      <label class="checkbox"><input type="checkbox" name="multiSelect" value="1"${f.checked("multiSelect", it.multiSelect) ? " checked" : ""}> Allow multiple answer selections</label>
-      <button type="submit" class="btn">Save changes</button>
-    </form>
+      ${pollField(f, "tags", "Tags (comma-separated, optional)", `<input type="text" class="kb-input" name="tags" value="${escapeHtml(f.value("tags", it.tags.join(", ")))}"${fieldControlAttrs(f.control("tags"))}>`)}
+      ${pollMultiSelectSwitch(f.checked("multiSelect", it.multiSelect))}
+      <div class="kb-row"><button type="submit" class="kb-btn">Save changes</button></div>
+    </form></div>
   </details>
-  <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/toggle">${csrfInput}<button type="submit" class="btn">${it.enabled ? "Disable" : "Enable"}</button></form>
-  <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/delete" data-confirm="Delete poll question?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
-</td>
+  ${rowAction(`${base}/toggle`, it.enabled ? "Disable" : "Enable")}
+  <form method="POST" action="${base}/delete" data-confirm="Delete poll question?">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger">Delete</button></form>
+</div></td>
 </tr>`;
     })
     .join("");
 
-  const body = `
-<h1>Polls</h1>
-<p class="subtitle">Poll schedules and the question library.</p>
-${renderPageFlash(props.flash)}
-${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Polls", featureKey: "polls.enabled", returnTo: "/admin/polls", csrfToken: props.csrfToken })}
-${renderStatusLine({
-  enabled: props.enabled,
-  chips: [
-    { text: `Default duration ${props.defaultDurationHours}h` },
-    { text: `Cooldown ${countOf(props.cooldownDays, "day")}` },
-    { text: countOf(props.schedules.length, "schedule") },
-    { text: `${countOf(props.items.length, "question")} in the library` },
-  ],
-})}
-
-<div class="card">
-  <h2>Schedules</h2>
-  ${
+  const schedulesHtml = pollPanel(
+    "polls-schedules",
+    "Schedules",
     props.schedules.length === 0
-      ? `<div class="empty">No poll schedules configured.</div>`
-      : `<table><thead><tr><th scope="col">ID</th><th scope="col">Channel</th><th scope="col">Cron</th><th scope="col">Duration</th><th scope="col">Ping role</th><th scope="col">Status</th><th scope="col">Last run</th><th scope="col">Actions</th></tr></thead><tbody>${scheduleRows}</tbody></table>`
-  }
-</div>
-<div class="card">
-  <h2>Create a new schedule</h2>
-  <form method="POST" action="/admin/polls/schedules/create" class="stack">
+      ? pollEmptyState(
+          "No poll schedules configured.",
+          "A schedule posts a poll from the question library in a channel. Create one below.",
+        )
+      : `<table class="kb-table"><thead><tr><th scope="col">ID</th><th scope="col">Channel</th><th scope="col">Cron</th><th scope="col">Duration</th><th scope="col">Ping role</th><th scope="col">Status</th><th scope="col">Last run</th><th scope="col">Actions</th></tr></thead><tbody>${scheduleRows}</tbody></table>`,
+    { count: props.schedules.length, flush: props.schedules.length > 0 },
+  );
+  const createScheduleHtml = pollPanel(
+    "polls-create-schedule",
+    "Create a new schedule",
+    `<form method="POST" action="/admin/polls/schedules/create" class="kb-stack">
     ${csrfInput}
-    <label>Channel
-      <select name="channelId" required${newSchedule.attrs("channelId")}>${channelOptionsHtml(props.textChannels, newSchedule.selected("channelId") || undefined)}</select>
-    </label>${newSchedule.error("channelId")}
+    ${pollSelect(newSchedule, "channelId", "Channel", channelOptionsHtml(props.textChannels, newSchedule.selected("channelId") || undefined), true)}
     ${renderCronField(newSchedule, "cron", "Schedule", "0 12 * * *")}
     ${renderPollDurationField(newSchedule, String(props.defaultDurationHours))}
-    <label>Ping role
-      <select name="pingRoleId"${newSchedule.attrs("pingRoleId")}>${roleOptionsHtml(props.roles, newSchedule.selected("pingRoleId") || undefined)}</select>
-    </label>${newSchedule.error("pingRoleId")}
-    <button type="submit" class="${mainButtonClass(props.enabled)}">Create schedule</button>
-  </form>
-</div>
-<div class="card">
-  <h2>Question library</h2>
-  ${
+    ${pollSelect(newSchedule, "pingRoleId", "Ping role", roleOptionsHtml(props.roles, newSchedule.selected("pingRoleId") || undefined))}
+    <div class="kb-row"><button type="submit" class="${mainKbButtonClass(props.enabled)}">Create schedule</button></div>
+  </form>`,
+  );
+  const libraryHtml = pollPanel(
+    "polls-library",
+    "Question library",
     props.items.length === 0
-      ? `<div class="empty">No poll questions stored.</div>`
-      : `<table><thead><tr><th scope="col">Question</th><th scope="col">Tags</th><th scope="col">Used</th><th scope="col">Last used</th><th scope="col">Status</th><th scope="col">Source</th><th scope="col">Actions</th></tr></thead><tbody>${itemRows}</tbody></table>`
-  }
-</div>
-<div class="card">
-  <h2>Add a poll question</h2>
-  <form method="POST" action="/admin/polls/items/create" class="stack">
+      ? pollEmptyState(
+          "No poll questions stored.",
+          "Add a question below or import a library. Schedules pick from the enabled questions stored here.",
+        )
+      : `<table class="kb-table"><thead><tr><th scope="col">Question</th><th scope="col">Tags</th><th scope="col" class="kb-num">Used</th><th scope="col">Last used</th><th scope="col">Status</th><th scope="col">Source</th><th scope="col">Actions</th></tr></thead><tbody>${itemRows}</tbody></table>`,
+    { count: props.items.length, flush: props.items.length > 0 },
+  );
+  const addItemHtml = pollPanel(
+    "polls-add-question",
+    "Add a poll question",
+    `<form method="POST" action="/admin/polls/items/create" class="kb-stack">
     ${csrfInput}
-    <label>Question
-      <input type="text" name="question" maxlength="300" required${newItem.valueAttr("question")}${newItem.attrs("question")}>
-    </label>${newItem.error("question")}
+    ${pollField(newItem, "question", "Question", `<input type="text" class="kb-input" name="question" maxlength="300" required${newItem.valueAttr("question")}${fieldControlAttrs(newItem.control("question"))}>`)}
     ${renderPollAnswerRows(newItem, [])}
-    <label>Tags (comma-separated, optional)
-      <input type="text" name="tags" placeholder="icebreaker, funny"${newItem.valueAttr("tags")}${newItem.attrs("tags")}>
-    </label>${newItem.error("tags")}
-    <label class="checkbox">
-      <input type="checkbox" name="multiSelect" value="1"${newItem.checked("multiSelect") ? " checked" : ""}>
-      Allow multiple answer selections
-    </label>
-    <button type="submit" class="btn">Add question</button>
-  </form>
-</div>
-<div class="card">
-  <h2>Import questions</h2>
-  <p class="muted">Upload a file or paste a YAML or JSON document shaped as <code>{ polls: [{ question, answers, multiselect?, tags? }] }</code>. Choosing a file loads its contents into the box below; you can review or edit before importing. Duplicate questions (same text) are skipped. Nothing is fetched from the network.</p>
-  <form method="POST" action="/admin/polls/items/import-text" class="stack">
+    ${pollField(newItem, "tags", "Tags (comma-separated, optional)", `<input type="text" class="kb-input" name="tags" placeholder="icebreaker, funny"${newItem.valueAttr("tags")}${fieldControlAttrs(newItem.control("tags"))}>`)}
+    ${pollMultiSelectSwitch(newItem.checked("multiSelect"))}
+    <div class="kb-row"><button type="submit" class="kb-btn">Add question</button></div>
+  </form>`,
+  );
+  const importHtml = pollPanel(
+    "polls-import",
+    "Import questions",
+    `<form method="POST" action="/admin/polls/items/import-text" class="kb-stack">
     ${csrfInput}
-    <label>Upload a file (optional)
-      <input type="file" id="poll-import-file" accept=".yaml,.yml,.json,.txt,application/json,application/x-yaml,text/yaml,text/plain">
-    </label>
-    <p id="poll-import-msg" class="muted" role="status" aria-live="polite"></p>
-    <label>Poll library (YAML or JSON)
-      <textarea id="poll-import-content" name="content" rows="10" maxlength="200000" placeholder="polls:&#10;  - question: Favourite colour?&#10;    answers: [Red, Green, Blue]&#10;    multiselect: false&#10;    tags: [fun]" required></textarea>
-    </label>
-    <button type="submit" class="btn">Import</button>
-  </form>
-</div>
+    <p class="kb-help">Upload a file or paste a YAML or JSON document shaped as <span class="kb-mono">{ polls: [{ question, answers, multiselect?, tags? }] }</span>. Choosing a file loads its contents into the box below; you can review or edit before importing. Duplicate questions (same text) are skipped. Nothing is fetched from the network.</p>
+    <div class="kb-field">
+      <label class="kb-label" for="poll-import-file">Upload a file (optional)</label>
+      <input type="file" class="kb-input" id="poll-import-file" accept=".yaml,.yml,.json,.txt,application/json,application/x-yaml,text/yaml,text/plain">
+    </div>
+    <p id="poll-import-msg" class="kb-help" role="status" aria-live="polite"></p>
+    <div class="kb-field">
+      <label class="kb-label" for="poll-import-content">Poll library (YAML or JSON)</label>
+      <textarea class="kb-textarea" id="poll-import-content" name="content" rows="10" maxlength="200000" placeholder="polls:&#10;  - question: Favourite colour?&#10;    answers: [Red, Green, Blue]&#10;    multiselect: false&#10;    tags: [fun]" required></textarea>
+    </div>
+    <div class="kb-row"><button type="submit" class="kb-btn">Import</button></div>
+  </form>`,
+  );
+
+  const body = `
+<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Polls</h1>
+    <p class="kb-pagehead__sub">Poll schedules and the question library.</p>
+    ${renderStatusLine({
+      enabled: props.enabled,
+      chips: [
+        { text: `Default duration ${props.defaultDurationHours}h` },
+        { text: `Cooldown ${countOf(props.cooldownDays, "day")}` },
+        { text: countOf(props.schedules.length, "schedule") },
+        { text: `${countOf(props.items.length, "question")} in the library` },
+      ],
+    })}
+  </div>
+</header>
+${renderPageFlash(props.flash)}
+${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Polls", featureKey: "polls.enabled", returnTo: "/admin/polls", csrfToken: props.csrfToken })}
+${schedulesHtml}
+${createScheduleHtml}
+${libraryHtml}
+${addItemHtml}
+${importHtml}
 ${renderFeatureSettingsCard({
   intro:
     "Change poll settings here without leaving the page. Saved through the shared settings route.",
@@ -4253,6 +4342,7 @@ ${renderFeatureSettingsCard({
   flash: props.flash,
 })}
 ${scriptTag(POLL_IMPORT_UPLOAD_SCRIPT)}
+</div>
 `;
   return renderAdminPage({
     title: "Polls",
