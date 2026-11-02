@@ -1489,7 +1489,8 @@ on voice stats, the bot permissions page, the events and host pages, the server 
 
 **Whether the bot can create (#1660, a proposal for the owner).** A page sets the create flag from `canBotCreate` (`bot-create-check.ts`), which reads the
 same snapshot of the server as **Bot permissions** and never guesses. The bot can create a channel or category when it has Manage Channels server-wide
-(Administrator counts); a channel under a category also needs Manage Channels in that category, where any overwrite that applies to the bot (@everyone, a role or the bot itself) can deny it; the check reads the effective result and does not say which one. There are three
+(Administrator counts); a channel under a category also needs Manage Channels in that category, where any overwrite that applies to the bot
+(@everyone, a role or the bot itself) can deny it; the check reads the effective result and does not say which one. There are three
 answers. Yes: the create row shows. No: no row, and the Picker's help line names the permission, where to fix it and the **Bot permissions** page
 (`CREATE_REASON`); the line shows only where a create row would otherwise be offered. Unknown, when the server, the bot's own membership or the
 category could not be read: no row and no line, because the page cannot say which is true. `toPickerCreate` turns an answer into the Picker's
