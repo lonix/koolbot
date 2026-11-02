@@ -134,6 +134,83 @@ export const TIMEZONE_SELECT_SCRIPT =
 const PICKER_CHEVRON = `<svg class="kb-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS["chevron-down"]}</svg>`;
 const PICKER_X = `<svg class="kb-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS.x}</svg>`;
 const PICKER_CHECK = `<svg class="kb-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS.check}</svg>`;
+const PICKER_PLUS = `<svg class="kb-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS.plus}</svg>`;
+
+// ---------- The Picker's create row (#1658, a proposal) ----------
+
+/** What a Picker can offer to create: a channel, a category or a role. */
+export type PickerCreateKind = "channel" | "category" | "role";
+
+/**
+ * Tells a Picker that it may offer "Create new <kind>: '<typed text>'" (#1658).
+ * The caller sets `ok` only when creation can work (the bot has the permission,
+ * see the permission-check issue) and gives `reason` otherwise; the Picker then
+ * shows the reason instead of the row. A Picker whose caller passes nothing
+ * renders exactly as before.
+ */
+export interface PickerCreate {
+  kind: PickerCreateKind;
+  ok: boolean;
+  /** Why creating is not possible, shown under the search box when `ok` is false. */
+  reason?: string;
+}
+
+/**
+ * The value a chosen create row posts on the same select: this prefix plus the
+ * typed name. A stored id is only digits, so a posted value starting with the
+ * prefix is never an id and can never overwrite one by accident.
+ */
+export const PICKER_CREATE_PREFIX = "create:";
+/** A Discord channel, category or role name is 1 to 100 characters. */
+export const PICKER_NAME_MAX = 100;
+
+/** The posted value for a name to be created. */
+export function pickerCreateValue(name: string): string {
+  return `${PICKER_CREATE_PREFIX}${name}`;
+}
+
+/**
+ * Reads a posted select value. `null` when it is not a create value (an id or
+ * empty: the caller handles it as today); otherwise the trimmed name, or the
+ * reason it is refused. The same rule as the browser's, and the real check:
+ * the browser only mirrors it.
+ */
+export function parsePickerCreateValue(
+  value: string,
+): { ok: true; name: string } | { ok: false; error: string } | null {
+  if (!value.startsWith(PICKER_CREATE_PREFIX)) return null;
+  const name = value.slice(PICKER_CREATE_PREFIX.length).trim();
+  if (name === "") return { ok: false, error: "The name cannot be blank." };
+  if (name.length > PICKER_NAME_MAX) {
+    return {
+      ok: false,
+      error: `The name can be at most ${PICKER_NAME_MAX} characters.`,
+    };
+  }
+  return { ok: true, name };
+}
+
+/**
+ * The `data-picker-meta` attribute text (already escaped). Without `create` it
+ * is the plain array it has always been, so a page that does not pass the flag
+ * is byte-identical; with it, an object holding the same array and the flag.
+ */
+export function pickerMetaAttr(meta: unknown[], create?: PickerCreate): string {
+  return escapeHtml(
+    JSON.stringify(
+      create
+        ? {
+            items: meta,
+            create: {
+              kind: create.kind,
+              ok: create.ok,
+              ...(create.reason ? { reason: create.reason } : {}),
+            },
+          }
+        : meta,
+    ),
+  );
+}
 
 /**
  * Turns each `[data-picker]` (a `span.kb-picker` around a native `select`, see
@@ -162,8 +239,9 @@ const PICKER_CHECK = `<svg class="kb-icon" viewBox="0 0 24 24" aria-hidden="true
  */
 export const CHANNEL_PICKER_SCRIPT =
   "(function(){" +
-  `var ICONS=${JSON.stringify(channelKindIcons())},CHEVRON=${JSON.stringify(PICKER_CHEVRON)},CHECK=${JSON.stringify(PICKER_CHECK)},XICON=${JSON.stringify(PICKER_X)};` +
-  "var KINDS={text:{text:1,announcement:1,forum:1,thread:1},voice:{voice:1,stage:1},role:{role:1}},uid=0;" +
+  `var ICONS=${JSON.stringify(channelKindIcons())},CHEVRON=${JSON.stringify(PICKER_CHEVRON)},CHECK=${JSON.stringify(PICKER_CHECK)},XICON=${JSON.stringify(PICKER_X)},PLUS=${JSON.stringify(PICKER_PLUS)},PFX=${JSON.stringify(PICKER_CREATE_PREFIX)},MAXN=${PICKER_NAME_MAX};` +
+  "var KINDS={text:{text:1,announcement:1,forum:1,thread:1},voice:{voice:1,stage:1},role:{role:1}},uid=0,CR=1e6;" +
+  "var CK={channel:{text:1,announcement:1,forum:1,thread:1,voice:1,stage:1},category:{category:1},role:{role:1}};" +
   "function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}" +
   "function svg(h){var s=document.createElement('span');s.innerHTML=h;return s.firstChild}" +
   "function read(sel,meta){var out=[],i,j,c,g;" +
@@ -180,7 +258,8 @@ export const CHANNEL_PICKER_SCRIPT =
   "return{k:k,q:q.trim().toLowerCase()}}" +
   "function hit(it,p){if(p.k&&!KINDS[p.k][it.kind])return false;return !p.q||(it.name+' '+it.cat).toLowerCase().indexOf(p.q)!==-1}" +
   "function init(box){var sel=box.querySelector('select');if(!sel||box.hasAttribute('data-ready'))return;box.setAttribute('data-ready','');" +
-  "var meta=[];try{meta=JSON.parse(box.getAttribute('data-picker-meta')||'[]')||[]}catch(err){}" +
+  "var meta=[],cfg=null;try{var mm=JSON.parse(box.getAttribute('data-picker-meta')||'[]')||[];" +
+  "if(Array.isArray(mm))meta=mm;else{meta=mm.items||[];cfg=mm.create&&CK[mm.create.kind]?mm.create:null}}catch(err){}" +
   "var n=++uid,items=read(sel,meta),rows=[],heads=[],vis=[],act=-1,open=false,i,lastGroup=null;" +
   "var multi=sel.multiple,expanded=false,tid='kb-picker-'+n,lid=tid+'-list',labels=[],ids=[];" +
   "for(i=0;sel.labels&&i<sel.labels.length;i++){if(!sel.labels[i].id)sel.labels[i].id=tid+'-label'+i;labels.push(sel.labels[i].textContent.trim());ids.push(sel.labels[i].id)}" +
@@ -202,6 +281,11 @@ export const CHANNEL_PICKER_SCRIPT =
   "if(it.group&&it.group!==lastGroup){li=el('li','kb-picker__group',it.group);li.setAttribute('role','presentation');ul.appendChild(li);heads.push({el:li,group:it.group})}" +
   "lastGroup=it.group;li=el('li','kb-picker__opt');li.id=lid+'-'+i;li.setAttribute('role','option');li.setAttribute('data-i',String(i));" +
   "li.appendChild(mention(it));if(it.cat)li.appendChild(el('span','kb-picker__cat',it.cat));ul.appendChild(li);rows.push(li)}" +
+  "var crow=null,live=null;" +
+  // The create row (#1658): the last row, shown only while the typed name can be created.
+  "if(cfg){crow=el('li','kb-picker__opt');crow.id=lid+'-create';crow.setAttribute('role','option');crow.setAttribute('aria-selected','false');" +
+  "crow.setAttribute('data-i',String(CR));crow.setAttribute('data-create','');crow.hidden=true;ul.appendChild(crow);" +
+  "live=el('span','kb-visually-hidden');live.setAttribute('role','status')}" +
   "pop.appendChild(lab);pop.appendChild(ul);pop.appendChild(st);pop.appendChild(hint);" +
   "sel.classList.add('kb-visually-hidden');sel.tabIndex=-1;sel.setAttribute('aria-hidden','true');" +
   // The save handlers mark a rejected field on the select (`aria-invalid`,
@@ -224,19 +308,28 @@ export const CHANNEL_PICKER_SCRIPT =
   "chips.tabIndex=-1;chips.setAttribute('role','group');" +
   "if(labels.length||sel.getAttribute('aria-label'))chips.setAttribute('aria-label','Selected '+name);" +
   "var nx=box.nextElementSibling;if(nx&&nx.hasAttribute('data-picker-summary'))nx.hidden=true}" +
-  "box.appendChild(trig);box.appendChild(pop);" +
+  "box.appendChild(trig);box.appendChild(pop);if(live)box.appendChild(live);" +
+  "function say(t){if(live){live.textContent='';live.textContent=t}}" +
+  "function rowAt(k){return k===CR?crow:rows[k]}" +
+  "function itm(k){if(items[k])return items[k];var o=sel.options[k];if(!o||!cfg)return null;" +
+  "return{value:o.value,kind:cfg.kind==='channel'?'text':cfg.kind,name:o.getAttribute('data-name')||o.textContent,cat:'',pending:true,text:o.textContent}}" +
+  "function pendOpts(){var o=[],k;for(k=items.length;k<sel.options.length;k++)if(sel.options[k].hasAttribute('data-create'))o.push(sel.options[k]);return o}" +
+  "function pendName(o){return o.getAttribute('data-name')||''}" +
+  "function undo(o){return'Removed: new '+cfg.kind+\" '\"+pendName(o)+\"'\"}" +
   "function isOn(k){return multi?sel.options[k].selected:k===sel.selectedIndex}" +
-  "function chipLabel(it){return(it.kind==='role'?'@':(ICONS[it.kind]&&it.kind!=='category')?'#':'')+(it.kind==='missing'?it.text:it.name)}" +
-  "function paintChips(){var sels=[],k,lim,c,b;for(k=0;k<items.length;k++)if(isOn(k))sels.push(k);" +
+  "function chipLabel(it){return(it.kind==='role'?'@':(ICONS[it.kind]&&it.kind!=='category')?'#':'')+(it.kind==='missing'?it.text:it.name)+(it.pending?' (will be created)':'')}" +
+  "function pmark(it){return it.pending?el('span','kb-muted',' (will be created)'):null}" +
+  "function paintChips(){var sels=[],k,lim,c,b,pm;for(k=0;k<sel.options.length;k++)if(sel.options[k].selected)sels.push(k);" +
   "chips.textContent='';if(!sels.length)chips.appendChild(el('span','kb-picker__none','None selected'));" +
   "lim=expanded?sels.length:Math.min(sels.length,12);" +
-  "for(k=0;k<lim;k++){c=el('span','kb-picker__chip');c.appendChild(mention(items[sels[k]]));" +
+  "for(k=0;k<lim;k++){c=el('span','kb-picker__chip');c.appendChild(mention(itm(sels[k])));pm=pmark(itm(sels[k]));if(pm)c.appendChild(pm);" +
   "b=el('button','kb-picker__chip-remove');b.type='button';b.setAttribute('data-rm',String(sels[k]));" +
-  "b.setAttribute('aria-label','Remove '+chipLabel(items[sels[k]]));b.disabled=sel.disabled;b.appendChild(svg(XICON));c.appendChild(b);chips.appendChild(c)}" +
+  "b.setAttribute('aria-label','Remove '+chipLabel(itm(sels[k])));b.disabled=sel.disabled;b.appendChild(svg(XICON));c.appendChild(b);chips.appendChild(c)}" +
   "if(sels.length>lim){b=el('button','kb-picker__more','+'+(sels.length-lim)+' more');b.type='button';b.setAttribute('data-more','');" +
   "b.setAttribute('aria-label','Show '+(sels.length-lim)+' more selected');chips.appendChild(b)}}" +
-  "function paint(){var cur=items[sel.selectedIndex]||items[0];trig.textContent='';" +
-  "if(multi){paintChips();trig.appendChild(el('span','kb-picker__add','Add'))}else if(cur)trig.appendChild(mention(cur));trig.appendChild(svg(CHEVRON));attrs();" +
+  "function paint(){var po=pendOpts(),q0,cur;for(q0=0;q0<po.length;q0++)if(!po[q0].selected)sel.removeChild(po[q0]);" +
+  "cur=sel.selectedIndex>=items.length?itm(sel.selectedIndex):(items[sel.selectedIndex]||items[0]);trig.textContent='';" +
+  "if(multi){paintChips();trig.appendChild(el('span','kb-picker__add','Add'))}else if(cur){trig.appendChild(mention(cur));var pk=pmark(cur);if(pk)trig.appendChild(pk)}trig.appendChild(svg(CHEVRON));attrs();" +
   // Without a visible label the trigger's name is the select's `aria-label`, and
   // a fixed name would hide the choice: add it, as the label path does by
   // pointing at the trigger's own text.
@@ -247,19 +340,32 @@ export const CHANNEL_PICKER_SCRIPT =
   // The chips may have wrapped onto another row, which moves the Add trigger the
   // open menu hangs from: place it again (a closed menu is placed when it opens).
   "if(open)place()}" +
-  "function setActive(k){if(act>=0&&rows[act])rows[act].classList.remove('is-active');act=k;" +
-  "if(k<0||!rows[k]){inp.removeAttribute('aria-activedescendant');return}" +
-  "rows[k].classList.add('is-active');inp.setAttribute('aria-activedescendant',rows[k].id);" +
+  "function setActive(k){if(act>=0&&rowAt(act))rowAt(act).classList.remove('is-active');act=k;" +
+  "if(k<0||!rowAt(k)){inp.removeAttribute('aria-activedescendant');return}" +
+  "rowAt(k).classList.add('is-active');inp.setAttribute('aria-activedescendant',rowAt(k).id);" +
   "reveal()}" +
   // Scrolls the active row into the visible part of the list. `place()` runs it
   // again after it has set the list's height, so a row that was in view at the
   // old height is not left outside the cut one.
-  "function reveal(){var r=rows[act];if(r&&r.scrollIntoView)r.scrollIntoView({block:'nearest'})}" +
+  "function reveal(){var r=rowAt(act);if(r&&r.scrollIntoView)r.scrollIntoView({block:'nearest'})}" +
+  // The name the admin typed, without the `#`, `#!` or `@` filter prefix; null when the prefix is for another kind (a `@` in a channel picker).
+  "function nameOf(raw,p){var q=raw.trim();if(cfg.kind==='category')return q;" +
+  "if(p.k&&(cfg.kind==='channel'?p.k==='role':p.k!=='role'))return null;" +
+  "if(p.k==='voice')q=q.slice(2);else if(p.k)q=q.slice(1);return q.trim()}" +
+  // An existing item of the kind with this name (case-insensitive), or a pending one.
+  "function findName(nm){var l=nm.toLowerCase(),k,po=pendOpts();for(k=0;k<items.length;k++)if(CK[cfg.kind][items[k].kind]&&items[k].name.toLowerCase()===l)return k;" +
+  "for(k=0;k<po.length;k++)if(pendName(po[k]).toLowerCase()===l)return CR;return -1}" +
   "function filter(){var p=parse(inp.value),k,shown={};vis=[];" +
   "for(k=0;k<items.length;k++){var ok=hit(items[k],p);rows[k].hidden=!ok;if(ok){vis.push(k);shown[items[k].group]=1}}" +
   "for(k=0;k<heads.length;k++)heads[k].el.hidden=!shown[heads[k].group];" +
-  "var on=-1,f0;for(f0=0;f0<vis.length&&on<0;f0++)if(isOn(vis[f0]))on=f0;setActive(vis.length?(on>=0?vis[on]:vis[0]):-1);" +
-  "var q=inp.value.trim();st.hidden=!q;st.textContent=q?(vis.length?vis.length+(vis.length===1?' match':' matches'):'No matches'):'';" +
+  "var nm=cfg?nameOf(inp.value,p):null,ex=nm?findName(nm):-1,offer=false,cmsg='',cnt;" +
+  "if(nm){if(nm.length>MAXN)cmsg='Names can be up to '+MAXN+' characters.';else if(ex<0){if(cfg.ok){offer=true;vis.push(CR)}else if(cfg.reason)cmsg=cfg.reason}}" +
+  "if(crow){crow.hidden=!offer;if(offer){crow.textContent='';crow.appendChild(svg(PLUS));crow.appendChild(document.createTextNode('Create new '+cfg.kind+\": '\"+nm+\"'\"))}}" +
+  "cnt=vis.length-(offer?1:0);" +
+  // A name that matches an existing item makes that item the active row, so Enter selects it rather than creating a twin.
+  "var on=-1,f0;for(f0=0;f0<vis.length&&on<0;f0++)if(vis[f0]!==CR&&isOn(vis[f0]))on=f0;" +
+  "setActive(vis.length?(ex>=0&&vis.indexOf(ex)>=0?ex:on>=0?vis[on]:vis[0]):-1);" +
+  "var q=inp.value.trim();st.hidden=!q;st.textContent=q?(cnt?cnt+(cnt===1?' match':' matches'):'No matches')+(cmsg?'. '+cmsg:''):'';" +
   // The menu's height follows the rows and the status line, so its place does too.
   "if(open)place()}" +
   // The popover is moved to the end of <body> while open and positioned with
@@ -292,10 +398,19 @@ export const CHANNEL_PICKER_SCRIPT =
   // A click makes its row the active one, as Enter does, so the placement that
   // `paint()` runs while open scrolls to the row just toggled and not back to the
   // row that was active before.
-  "function choose(k){if(k<0||!items[k])return;if(multi){setActive(k);sel.options[k].selected=!sel.options[k].selected;fireBoth();paint();return}" +
+  "function createChoose(){var nm=cfg&&nameOf(inp.value,parse(inp.value)),po,o,k;if(!nm||nm.length>MAXN||!cfg.ok||findName(nm)>=0)return;" +
+  "if(!multi){po=pendOpts();for(k=0;k<po.length;k++)sel.removeChild(po[k])}" +
+  "o=document.createElement('option');o.value=PFX+nm;o.setAttribute('data-create','');o.setAttribute('data-name',nm);o.textContent=nm+' (will be created)';" +
+  "sel.appendChild(o);o.selected=true;" +
+  "say('Will be created: '+cfg.kind+\" '\"+nm+\"'. Choose another row to undo.\");fireBoth();" +
+  "if(multi){inp.value='';filter();paint()}else{paint();close(true)}}" +
+  "function choose(k){if(k===CR){createChoose();return}if(k<0||!items[k])return;" +
+  "var was=!multi&&sel.selectedIndex>=items.length&&sel.options[sel.selectedIndex]&&sel.options[sel.selectedIndex].hasAttribute('data-create')?sel.options[sel.selectedIndex]:null;" +
+  "if(was)say(undo(was)+'. '+chipLabel(items[k])+' selected.');if(multi){setActive(k);sel.options[k].selected=!sel.options[k].selected;fireBoth();paint();return}" +
   "if(sel.selectedIndex!==k){sel.selectedIndex=k;fireBoth()}paint();close(true)}" +
-  "function drop(k){if(!sel.options[k]||!sel.options[k].selected||sel.disabled)return;sel.options[k].selected=false;fireBoth();paint()}" +
-  "function lastOn(){for(var k=items.length-1;k>=0;k--)if(sel.options[k].selected)return k;return -1}" +
+  "function drop(k){var o=sel.options[k];if(!o||!o.selected||sel.disabled)return;" +
+  "if(k>=items.length&&o.hasAttribute('data-create')){say(undo(o));sel.removeChild(o)}else o.selected=false;fireBoth();paint()}" +
+  "function lastOn(){for(var k=sel.options.length-1;k>=0;k--)if(sel.options[k].selected)return k;return -1}" +
   "if(chips)chips.addEventListener('click',function(e){var t=e.target&&e.target.closest?e.target.closest('button'):null;if(!t)return;" +
   // `paint()` replaces the focused "+N more" button: hand focus to the first
   // remove button it revealed (the ones before it were already shown), or to the

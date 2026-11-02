@@ -2181,6 +2181,57 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // The Picker's create row (#1658, a proposal): the same pickers with the
+      // caller's flag, as the server renders them before the script runs. The
+      // select is what shows; the row and its states are scanned in
+      // channel-picker-a11y.test.ts.
+      name: "Settings (pickers offering to create a channel, category or role)",
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        pickerCreate: (r: { type: string }) => ({
+          kind: r.type as "channel" | "category" | "role",
+          ok: true,
+        }),
+        groups: [
+          {
+            category: "voicechannels",
+            rows: [
+              {
+                key: "quotes.channel_id",
+                label: "Quotes channel",
+                current: "",
+                defaultValue: "",
+                type: "channel",
+                description: "Where quotes are posted.",
+                category: "quotes",
+              },
+              {
+                key: "voicechannels.category_id",
+                label: "Category",
+                current: "",
+                defaultValue: "",
+                type: "category",
+                description: "Category the managed channels are created in.",
+                category: "voicechannels",
+              },
+              {
+                key: "voicetracking.announcer_role",
+                label: "Announcer role",
+                current: "",
+                defaultValue: "",
+                type: "role",
+                description: "Role pinged by the announcer.",
+                category: "voicetracking",
+              },
+            ],
+          },
+        ],
+        guildId: "g1",
+        guildName: "Test Guild",
+      }),
+    },
+    {
       // The welcome roles message picker (#1433): the bot's reaction-role
       // messages by label, and a stored id that is not among them.
       name: "Settings (welcome roles message picker, stored id not found)",

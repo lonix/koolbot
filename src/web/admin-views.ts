@@ -52,6 +52,8 @@ import {
   renderReactionRoleMessageSelect,
   renderStepper,
   renderTimezoneSelect,
+  pickerMetaAttr,
+  type PickerCreate,
 } from "./setting-pickers.js";
 import type { ReactionRoleMessageOptions } from "./reaction-role-messages.js";
 import { getServerTimezone } from "../utils/timezone.js";
@@ -496,6 +498,8 @@ export interface SettingsProps extends CommonProps {
   groupRoles?: RoleOption[];
   /** The bot's reaction-role messages, for a key that picks one (#1433). */
   reactionRoleMessages?: ReactionRoleMessageOptions | null;
+  /** Which rows offer the Picker's create row (#1658); rows it returns nothing for are unchanged. */
+  pickerCreate?: (r: SettingRow) => PickerCreate | undefined;
   /** Guild id of the session, used as the reset-confirmation fallback. */
   guildId: string;
   /** Guild name (when fetchable); the preferred reset-confirmation phrase. */
@@ -1179,6 +1183,8 @@ export function renderRolePicker(opts: {
   options: RoleOption[];
   selected: Iterable<string>;
   describedBy?: string;
+  /** Offer "Create new role: '…'" (#1658); omit and the Picker is unchanged. */
+  create?: PickerCreate;
 }): string {
   const meta: PickerMeta[] = [];
   const optionsHtml = buildOptionsHtml(
@@ -1191,7 +1197,7 @@ export function renderRolePicker(opts: {
     ? ` aria-describedby="${escapeHtml(opts.describedBy)}"`
     : "";
   return (
-    `<span class="kb-picker" data-picker data-picker-meta="${escapeHtml(JSON.stringify(meta))}">` +
+    `<span class="kb-picker" data-picker data-picker-meta="${pickerMetaAttr(meta, opts.create)}">` +
     `<select class="kb-select" id="${escapeHtml(opts.id)}" name="${escapeHtml(opts.name)}" multiple size="${Math.min(8, Math.max(3, opts.options.length))}"${describedBy}>` +
     optionsHtml +
     `</select></span>`
@@ -1216,6 +1222,8 @@ export function renderRoleSelectPicker(opts: {
   required?: boolean;
   invalid?: boolean;
   describedBy?: string;
+  /** Offer "Create new role: '…'" (#1658); omit and the Picker is unchanged. */
+  create?: PickerCreate;
 }): string {
   const meta: PickerMeta[] = [];
   const optionsHtml = buildOptionsHtml(
@@ -1229,7 +1237,7 @@ export function renderRoleSelectPicker(opts: {
     ? ` aria-describedby="${escapeHtml(opts.describedBy)}"`
     : "";
   return (
-    `<span class="kb-picker" data-picker data-picker-meta="${escapeHtml(JSON.stringify(meta))}">` +
+    `<span class="kb-picker" data-picker data-picker-meta="${pickerMetaAttr(meta, opts.create)}">` +
     `<select class="kb-select"${opts.id ? ` id="${escapeHtml(opts.id)}"` : ""}${opts.ariaLabel ? ` aria-label="${escapeHtml(opts.ariaLabel)}"` : ""} name="${escapeHtml(opts.name)}"${opts.required ? " required" : ""}${opts.invalid ? ' aria-invalid="true"' : ""}${describedBy}>` +
     optionsHtml +
     `</select></span>`
@@ -1325,6 +1333,8 @@ function renderSettingControl(
     /** Role list with role groups ahead of the roles, for group-aware keys. */
     groupRoles?: RoleOption[];
     reactionRoleMessages?: ReactionRoleMessageOptions | null;
+    /** Whether a single channel, category or role row offers a create row (#1658). */
+    create?: (r: SettingRow) => PickerCreate | undefined;
   },
   isCascadeMaster = false,
   depLocked = false,
@@ -1359,6 +1369,8 @@ function renderControlInput(
     /** Role list with role groups ahead of the roles, for group-aware keys. */
     groupRoles?: RoleOption[];
     reactionRoleMessages?: ReactionRoleMessageOptions | null;
+    /** Whether a single channel, category or role row offers a create row (#1658). */
+    create?: (r: SettingRow) => PickerCreate | undefined;
   },
   isCascadeMaster = false,
   depLocked = false,
@@ -1494,8 +1506,10 @@ function renderControlInput(
     // (#1394); without JavaScript this is just the select it wraps.
     const meta: PickerMeta[] = [];
     const optionsHtml = buildOptionsHtml(options, selected, true, meta);
+    // #1658: the create row, only when the caller says creation can work.
+    const createFor = pickers.create?.(r);
     return (
-      `<span class="kb-picker" data-picker data-picker-meta="${escapeHtml(JSON.stringify(meta))}">` +
+      `<span class="kb-picker" data-picker data-picker-meta="${pickerMetaAttr(meta, createFor)}">` +
       `<select class="kb-select"${a11yAttr} name="${valueName}"${lockAttr}>` +
       optionsHtml +
       `</select></span>`
@@ -1518,7 +1532,7 @@ function renderControlInput(
     const meta: PickerMeta[] = [];
     const optionsHtml = buildOptionsHtml(options, selected, false, meta);
     return (
-      `<span class="kb-picker" data-picker data-picker-meta="${escapeHtml(JSON.stringify(meta))}">` +
+      `<span class="kb-picker" data-picker data-picker-meta="${pickerMetaAttr(meta, r.type === "role_list" ? pickers.create?.(r) : undefined)}">` +
       `<select${a11yAttr} name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}"${lockAttr}>` +
       optionsHtml +
       `</select></span>` +
@@ -1695,6 +1709,7 @@ interface SettingRowsContext {
     roles: RoleOption[];
     groupRoles?: RoleOption[];
     reactionRoleMessages?: ReactionRoleMessageOptions | null;
+    create?: (r: SettingRow) => PickerCreate | undefined;
   };
   /** The form's master toggle: every other row nests under it. */
   masterKey: string | null;
@@ -1921,6 +1936,7 @@ export function renderSettingsPage(props: SettingsProps): string {
     roles: props.roles,
     groupRoles: props.groupRoles,
     reactionRoleMessages: props.reactionRoleMessages,
+    create: props.pickerCreate,
   };
   // Page-wide enabled-state of every rendered key, derived from the same
   // `current` values shown in the controls. Dependency hints (#666) read from
