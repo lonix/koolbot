@@ -118,8 +118,6 @@ describe("the Settings page", () => {
   ])("renders only kb- classes with %s", (_n, over) => {
     const html = renderSettingsPage({ ...SETTINGS, ...over });
     const body = main(html);
-    // The flash is the shared `renderFlash`, moved by #1684.
-    for (const el of body.querySelectorAll(".notice")) el.remove();
     const used = usedClasses(body);
     expect(OLD_CLASSES.filter((c) => used.has(c))).toEqual([]);
     expect(body.querySelector("table:not(.kb-table)")).toBeNull();
@@ -190,7 +188,6 @@ describe("the Permissions page", () => {
     ["a flash", { flash: { type: "ok" as const, text: "Saved." } }],
   ])("renders only kb- classes with %s", (_n, over) => {
     const body = main(renderPermissionsPage({ ...PERMISSIONS, ...over }));
-    for (const el of body.querySelectorAll(".notice")) el.remove();
     const used = usedClasses(body);
     expect(OLD_CLASSES.filter((c) => used.has(c))).toEqual([]);
     expect(body.querySelector("table:not(.kb-table)")).toBeNull();
