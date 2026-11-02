@@ -268,7 +268,9 @@ describe("the per-row edit forms", () => {
         values: { content: "Edited", author_id: "bob" },
       }),
     );
-    const open = d.querySelectorAll("details.edit-details[open]");
+    const open = d.querySelectorAll(
+      "td.kb-actions details.kb-disclosure[open]",
+    );
     expect(open).toHaveLength(1);
     expect(
       open[0].querySelector<HTMLInputElement>("[name=author_id]")?.value,

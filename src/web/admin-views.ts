@@ -25,7 +25,7 @@ import {
   PERMANENT_CONFIRM_ITEMS,
   REVIEW_JOB_NOTE,
 } from "../utils/moderation-labels.js";
-import { icon } from "./icons.js";
+import { icon, toneIcon } from "./icons.js";
 import { commandSyncStatus } from "./command-sync-text.js";
 import type { CommandSyncReport } from "../services/command-manager.js";
 import {
@@ -5036,6 +5036,39 @@ function quotesQueryString(search: string, page: number): string {
   return parts.length === 0 ? "" : `?${parts.join("&")}`;
 }
 
+/** The attributes of a Field's control from a form view: its id, and the error link when refused. */
+function fieldControlAttrs(c: FormControlAttrs): string {
+  return ` id="${escapeHtml(c.id)}"${
+    c.invalid
+      ? ` aria-invalid="true" aria-describedby="${escapeHtml(c.describedBy ?? "")}"`
+      : c.describedBy
+        ? ` aria-describedby="${escapeHtml(c.describedBy)}"`
+        : ""
+  }`;
+}
+
+/**
+ * The pager at the foot of a list Panel: Previous and Next as small buttons
+ * (disabled at either end) around "Page n of m". The links are written as
+ * their callers build them, so a search term stays in the address.
+ */
+function renderListPager(o: {
+  prevHref: string | null;
+  nextHref: string | null;
+  page: number;
+  totalPages: number;
+}): string {
+  const prev =
+    o.prevHref !== null
+      ? `<a class="kb-btn kb-btn--sm" href="${o.prevHref}">← Prev</a>`
+      : `<button class="kb-btn kb-btn--sm" disabled>← Prev</button>`;
+  const next =
+    o.nextHref !== null
+      ? `<a class="kb-btn kb-btn--sm" href="${o.nextHref}">Next →</a>`
+      : `<button class="kb-btn kb-btn--sm" disabled>Next →</button>`;
+  return `<footer class="kb-panel__foot">${prev}<span>Page ${o.page} of ${o.totalPages}</span>${next}</footer>`;
+}
+
 export function renderQuotesPage(props: QuotesProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const totalPages = Math.max(1, Math.ceil(props.total / props.pageSize));
@@ -5046,85 +5079,98 @@ export function renderQuotesPage(props: QuotesProps): string {
       const preview =
         q.content.length > 160 ? `${q.content.slice(0, 160)}…` : q.content;
       const f = formView(props.refusedForm, quoteEditForm(q.id));
+      const content = f.control("content");
+      const author = f.control("author_id");
       return `<tr>
-<th scope="row">${escapeHtml(preview)}<div class="muted mono">id: ${escapeHtml(q.id)}</div></th>
+<th scope="row">${escapeHtml(preview)}<div class="kb-muted kb-mono">id: ${escapeHtml(q.id)}</div></th>
 <td title="${escapeHtml(q.authorId)}">${escapeHtml(q.authorLabel)}</td>
 <td>${escapeHtml(q.addedByLabel)}</td>
-<td class="muted">${escapeHtml(q.addedAt)}</td>
+<td class="kb-muted">${escapeHtml(q.addedAt)}</td>
 <td>👍 ${q.likes} · 👎 ${q.dislikes}</td>
-<td class="mono muted">${escapeHtml(q.messageId)}</td>
-<td class="actions">
-  <details class="helper edit-details"${f.open()}><summary>Edit</summary>
-    <form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/edit${escapeHtml(quotesQueryString(props.search, page))}" class="stack">${csrfInput}
-      <label>Quote<textarea name="content" rows="4" maxlength="${props.maxLength}" required${f.attrs("content")}>${f.textareaContent("content", q.content)}</textarea></label>${f.error("content")}
-      <label>Author (Discord user ID)<input type="text" name="author_id" inputmode="numeric" pattern="\\d{17,20}" value="${escapeHtml(f.value("author_id", q.authorId))}" required${f.attrs("author_id")}></label>${f.error("author_id")}
-      <button type="submit" class="btn">Save changes</button>
-    </form>
+<td class="kb-mono kb-muted">${escapeHtml(q.messageId)}</td>
+<td class="kb-actions"><div class="kb-row kb-row--nowrap">
+  <details class="kb-disclosure"${f.open()}><summary>${CHEVRON_ICON}Edit<span class="kb-visually-hidden"> quote ${escapeHtml(q.id)}</span></summary>
+    <div class="kb-disclosure__body"><form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/edit${escapeHtml(quotesQueryString(props.search, page))}" class="kb-stack">${csrfInput}
+      <div class="kb-field"><label class="kb-label" for="${escapeHtml(content.id)}">Quote</label><textarea class="kb-textarea" name="content" rows="4" maxlength="${props.maxLength}" required${fieldControlAttrs(content)}>${f.textareaContent("content", q.content)}</textarea>${f.error("content")}</div>
+      <div class="kb-field"><label class="kb-label" for="${escapeHtml(author.id)}">Author (Discord user ID)</label><input class="kb-input" type="text" name="author_id" inputmode="numeric" pattern="\\d{17,20}" value="${escapeHtml(f.value("author_id", q.authorId))}" required${fieldControlAttrs(author)}>${f.error("author_id")}</div>
+      <div class="kb-row"><button type="submit" class="kb-btn">Save changes</button></div>
+    </form></div>
   </details>
-  <form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/delete" data-confirm="Delete quote ${escapeHtml(q.id)}? Its channel post is removed too.">${csrfInput}<button type="submit" class="btn btn-danger" aria-label="Delete quote ${escapeHtml(q.id)}">Delete</button></form>
-</td>
+  <form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/delete" data-confirm="Delete quote ${escapeHtml(q.id)}? Its channel post is removed too.">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger" aria-label="Delete quote ${escapeHtml(q.id)}">Delete</button></form>
+</div></td>
 </tr>`;
     })
     .join("");
 
-  const emptyText = props.search
-    ? "No quotes match this search."
-    : "No quotes stored.";
   const tableHtml =
     props.rows.length === 0
-      ? `<div class="empty">${emptyText}</div>`
-      : `<table><thead><tr><th scope="col">Quote</th><th scope="col">Author</th><th scope="col">Added by</th><th scope="col">Added</th><th scope="col">Votes</th><th scope="col">Message ID</th><th scope="col">Actions</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+      ? props.search
+        ? `<div class="kb-panel__body"><div class="kb-empty"><p class="kb-empty__title">No quotes match this search.</p><p class="kb-empty__text">Try other words, or a quote ID, message ID or user ID.</p></div></div>`
+        : `<div class="kb-panel__body"><div class="kb-empty"><p class="kb-empty__title">No quotes stored.</p><p class="kb-empty__text">Quotes show up here as members add them in Discord with <code>/quote add</code>.</p></div></div>`
+      : `<div class="kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">Quotes</caption><thead><tr><th scope="col">Quote</th><th scope="col">Author</th><th scope="col">Added by</th><th scope="col">Added</th><th scope="col">Votes</th><th scope="col">Message ID</th><th scope="col"><span class="kb-visually-hidden">Actions</span></th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`;
 
-  const prevLink =
-    page > 1
-      ? `<a class="btn btn-sm" href="/admin/quotes${quotesQueryString(props.search, page - 1)}">← Prev</a>`
-      : `<button class="btn btn-sm" disabled>← Prev</button>`;
-  const nextLink =
-    page < totalPages
-      ? `<a class="btn btn-sm" href="/admin/quotes${quotesQueryString(props.search, page + 1)}">Next →</a>`
-      : `<button class="btn btn-sm" disabled>Next →</button>`;
   const clearLink = props.search
-    ? ` <a class="btn" href="/admin/quotes">Clear</a>`
+    ? `<a class="kb-btn" href="/admin/quotes">Clear</a>`
     : "";
 
+  const statusLine = renderStatusLine({
+    enabled: props.enabled,
+    chips: [
+      props.channel
+        ? {
+            text: `Channel ${channelText({ name: props.channel.name, type: props.channel.type })}`,
+          }
+        : {
+            text: "No channel set",
+            warn: true,
+            href: props.settingsUnavailable
+              ? undefined
+              : settingHref("quotes.channel_id"),
+          },
+      props.headerMessageId
+        ? { text: `Header post ${props.headerMessageId}`, mono: true }
+        : { text: "No header post yet" },
+      {
+        text: `${props.search ? "Matching quotes" : "Total quotes"}: ${props.total}`,
+      },
+    ],
+  });
+
   const body = `
-<h1>Quotes</h1>
-<p class="subtitle">Every stored quote, newest first. Edits and deletes update the quote channel as well.</p>
+<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Quotes</h1>
+    <p class="kb-pagehead__sub">Every stored quote, newest first. Edits and deletes update the quote channel as well.</p>
+    ${statusLine}
+  </div>
+</header>
 ${renderPageFlash(props.flash)}
 ${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Quotes", featureKey: "quotes.enabled", returnTo: "/admin/quotes", csrfToken: props.csrfToken })}
-${renderStatusLine({
-  enabled: props.enabled,
-  chips: [
-    props.channel
-      ? {
-          text: `Channel ${channelText({ name: props.channel.name, type: props.channel.type })}`,
-        }
-      : {
-          text: "No channel set",
-          warn: true,
-          href: props.settingsUnavailable
-            ? undefined
-            : settingHref("quotes.channel_id"),
-        },
-    props.headerMessageId
-      ? { text: `Header post ${props.headerMessageId}`, mono: true }
-      : { text: "No header post yet" },
-    {
-      text: `${props.search ? "Matching quotes" : "Total quotes"}: ${props.total}`,
-    },
-  ],
-})}${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
+${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
 
-<div class="card">
-  <h2>Quotes</h2>
-  <form method="GET" action="/admin/quotes" class="inline-form" role="search">
-    <label for="quote-search">Search</label>
-    <input type="search" id="quote-search" name="q" value="${escapeHtml(props.search)}" maxlength="200" placeholder="Text, quote ID, message ID or user ID">
-    <button type="submit" class="btn">Search</button>${clearLink}
-  </form>
+<section class="kb-panel" id="quotes-list" aria-labelledby="quotes-list-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="quotes-list-h">Quotes</h2></header>
+  <div class="kb-panel__body">
+    <form method="GET" action="/admin/quotes" class="kb-row" role="search">
+      <div class="kb-field"><label class="kb-label" for="quote-search">Search</label><input class="kb-input" type="search" id="quote-search" name="q" value="${escapeHtml(props.search)}" maxlength="200" placeholder="Text, quote ID, message ID or user ID"></div>
+      <button type="submit" class="kb-btn">Search</button>${clearLink}
+    </form>
+  </div>
   ${tableHtml}
-  <div class="inline-form">${prevLink} <span class="muted">Page ${page} of ${totalPages}</span> ${nextLink}</div>
-</div>
+  ${renderListPager({
+    prevHref:
+      page > 1
+        ? `/admin/quotes${quotesQueryString(props.search, page - 1)}`
+        : null,
+    nextHref:
+      page < totalPages
+        ? `/admin/quotes${quotesQueryString(props.search, page + 1)}`
+        : null,
+    page,
+    totalPages,
+  })}
+</section>
 ${renderRepostCard({
   id: "repost-header",
   heading: "Header post",
@@ -5148,20 +5194,22 @@ ${renderRepostCard({
         ? "Set the quote channel first."
         : null,
 })}
-<div class="card">
-  <h2>Quote channel</h2>
-  <form method="POST" action="/admin/quotes/sync" class="inline-form" data-confirm="Rebuild the quote channel? This deletes every message in it and reposts all quotes with their saved votes."${confirmListAttr(
-    [
-      "Every message in the quote channel is deleted, including anything that is not a quote.",
-      "The header and every quote are posted again, with their saved votes.",
-    ],
-  )}>
-    ${csrfInput}
-    <button type="submit" class="btn"${props.enabled ? "" : " disabled"}>Resync quote channel</button>
-    <span class="muted">Clears the channel, posts a fresh header and reposts every quote with its saved vote tally.</span>
-  </form>
-  <p class="inline-form"><a class="btn" href="/admin/quotes/export">Export quotes (JSON)</a> <span class="muted">The same backup <code>/quote export</code> produces; restore it with <code>/quote import</code>.</span></p>
-</div>
+<section class="kb-panel" id="quote-channel" aria-labelledby="quote-channel-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="quote-channel-h">Quote channel</h2></header>
+  <div class="kb-panel__body kb-stack">
+    <form method="POST" action="/admin/quotes/sync" class="kb-row" data-confirm="Rebuild the quote channel? This deletes every message in it and reposts all quotes with their saved votes."${confirmListAttr(
+      [
+        "Every message in the quote channel is deleted, including anything that is not a quote.",
+        "The header and every quote are posted again, with their saved votes.",
+      ],
+    )}>
+      ${csrfInput}
+      <button type="submit" class="kb-btn kb-btn--danger"${props.enabled ? "" : " disabled"}>Resync quote channel</button>
+      <span class="kb-help">Clears the channel, posts a fresh header and reposts every quote with its saved vote tally.${props.enabled ? "" : " Turn on Quotes first."}</span>
+    </form>
+    <p class="kb-row"><a class="kb-btn" href="/admin/quotes/export">Export quotes (JSON)</a> <span class="kb-help">The same backup <code>/quote export</code> produces; restore it with <code>/quote import</code>.</span></p>
+  </div>
+</section>
 ${renderFeatureSettingsCard({
   intro:
     "Change quote settings here without leaving the page. Changing the channel does not move quotes already posted: after saving, use Resync quote channel above to repost them in the new channel.",
@@ -5176,6 +5224,7 @@ ${renderFeatureSettingsCard({
   flash: props.flash,
   needsSetup: !props.channel,
 })}
+</div>
 `;
   return renderAdminPage({
     title: "Quotes",
@@ -5256,7 +5305,7 @@ function renderBirthdayPreviewText(
   text: string,
   preview: BirthdayPreviewView,
 ): string {
-  const mentionHtml = `<span class="tag tag-info">@${escapeHtml(preview.mentionLabel)}</span>`;
+  const mentionHtml = `<span class="kb-mention">@${escapeHtml(preview.mentionLabel)}</span>`;
   return escapeHtml(text)
     .split(escapeHtml(`<@${preview.mentionUserId}>`))
     .join(mentionHtml);
@@ -5293,24 +5342,28 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
     .map((b) => {
       const id = escapeHtml(b.userId);
       const f = formView(props.refusedForm, birthdayEditForm(b.userId));
+      const month = f.control("month");
+      const day = f.control("day");
       const clearYear = b.hasYear
-        ? `<label class="checkbox"><input type="checkbox" name="clear_year" value="1"${f.checked("clear_year") ? " checked" : ""}> Remove the birth year (the post stops showing an age)</label>`
+        ? `<label class="kb-switch"><input type="checkbox" role="switch" name="clear_year" value="1"${f.checked("clear_year") ? " checked" : ""}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Remove the birth year (the post stops showing an age)</label>`
         : "";
       return `<tr>
-<th scope="row" title="${id}">${escapeHtml(b.userLabel)}<div class="muted mono">${id}</div></th>
+<th scope="row" title="${id}">${escapeHtml(b.userLabel)}<div class="kb-muted kb-mono">${id}</div></th>
 <td>${escapeHtml(formatMonthDay(b.month, b.day))}</td>
-<td>${escapeHtml(b.nextDate)} <span class="muted">(${nextBirthdayLabel(b)})</span></td>
-<td>${b.hasYear ? "on file" : '<span class="muted">none</span>'}</td>
-<td>${b.roleGranted ? '<span class="tag tag-on">granted</span>' : '<span class="muted">—</span>'}</td>
-<td class="muted">${b.lastAnnouncedYear ?? "—"}</td>
-<td class="actions">
-  <details class="helper edit-details"${f.open()}><summary>Edit</summary>
-    <form method="POST" action="/admin/birthdays/${id}/edit" class="stack">${csrfInput}
-      <label>Month<select name="month" required${f.attrs("month")}>${monthOptions(Number(f.selected("month", String(b.month))))}</select></label>${f.error("month")}
-      <label>Day<select name="day" required${f.attrs("day")}>${dayOptions(Number(f.selected("day", String(b.day))))}</select></label>${f.error("day")}
+<td>${escapeHtml(b.nextDate)} <span class="kb-muted">(${nextBirthdayLabel(b)})</span></td>
+<td>${b.hasYear ? "on file" : '<span class="kb-muted">none</span>'}</td>
+<td>${b.roleGranted ? '<span class="kb-badge kb-badge--on">granted</span>' : '<span class="kb-muted">—</span>'}</td>
+<td class="kb-muted">${b.lastAnnouncedYear ?? "—"}</td>
+<td class="kb-actions"><div class="kb-row kb-row--nowrap">
+  <details class="kb-disclosure"${f.open()}><summary>${CHEVRON_ICON}Edit<span class="kb-visually-hidden"> birthday of ${escapeHtml(b.userLabel)}</span></summary>
+    <div class="kb-disclosure__body"><form method="POST" action="/admin/birthdays/${id}/edit" class="kb-stack">${csrfInput}
+      <div class="kb-fields">
+        <div class="kb-field"><label class="kb-label" for="${escapeHtml(month.id)}">Month</label><select class="kb-select" name="month" required${fieldControlAttrs(month)}>${monthOptions(Number(f.selected("month", String(b.month))))}</select>${f.error("month")}</div>
+        <div class="kb-field"><label class="kb-label" for="${escapeHtml(day.id)}">Day</label><select class="kb-select" name="day" required${fieldControlAttrs(day)}>${dayOptions(Number(f.selected("day", String(b.day))))}</select>${f.error("day")}</div>
+      </div>
       ${clearYear}
-      <button type="submit" class="btn">Save changes</button>
-    </form>
+      <div class="kb-row"><button type="submit" class="kb-btn">Save changes</button></div>
+    </form></div>
   </details>
   <form method="POST" action="/admin/birthdays/${id}/remove" data-confirm="Remove the birthday for ${escapeHtml(b.userLabel)}? Any birthday role they hold is taken back and the bot's birthday posts about them are deleted."${confirmListAttr(
     [
@@ -5319,28 +5372,22 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
       "The bot's birthday posts about them are deleted.",
       "If the role or a post cannot be undone, the birthday is kept so you can retry.",
     ],
-  )}>${csrfInput}<button type="submit" class="btn btn-danger" aria-label="Remove birthday for ${escapeHtml(b.userLabel)}">Remove</button></form>
-</td>
+  )}>${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger" aria-label="Remove birthday for ${escapeHtml(b.userLabel)}">Remove</button></form>
+</div></td>
 </tr>`;
     })
     .join("");
 
-  const tableHtml = props.listUnavailable
-    ? `<div class="notice">Stored birthdays could not be read. Check the bot's logs and reload the page.</div>`
+  const listIntro = `<p class="kb-help">Soonest first, by each member's own timezone. Birth years stay private: the page shows only whether one is on file.</p>`;
+  const listHtml = props.listUnavailable
+    ? `<div class="kb-panel__body"><div class="kb-callout kb-callout--err" role="alert">${toneIcon("err")}<div class="kb-callout__body"><p class="kb-callout__title">Stored birthdays could not be read.</p><p class="kb-callout__text">Check the bot's logs and reload the page.</p></div></div></div>`
     : props.rows.length === 0
-      ? `<div class="empty">No member has set a birthday yet. Members add theirs on <code>/me/birthday</code>.</div>`
-      : `<table><thead><tr><th scope="col">Member</th><th scope="col">Birthday</th><th scope="col">Next</th><th scope="col">Birth year</th><th scope="col">Role grant</th><th scope="col">Last handled</th><th scope="col">Actions</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+      ? `<div class="kb-panel__body"><div class="kb-empty"><p class="kb-empty__title">No member has set a birthday yet.</p><p class="kb-empty__text">Members add theirs on <code>/me/birthday</code>.</p></div></div>`
+      : `<div class="kb-panel__body kb-stack">${listIntro}<details class="kb-disclosure kb-disclosure--inline"><summary>${CHEVRON_ICON}About these columns</summary><div class="kb-disclosure__body"><p class="kb-help"><em>Role grant</em> means the bot recorded giving the birthday role and has not swept it yet; the next run removes it once <code>birthdays.role_duration_hours</code> has passed. <em>Last handled</em> is the year the check last dealt with the member: it posted for them, or skipped them because they had left the server. Removing an entry takes back a live birthday role and deletes the bot's birthday posts about the member, the same as their own data reset.</p></div></details></div>
+  <div class="kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">Stored birthdays</caption><thead><tr><th scope="col">Member</th><th scope="col">Birthday</th><th scope="col">Next</th><th scope="col">Birth year</th><th scope="col">Role grant</th><th scope="col">Last handled</th><th scope="col"><span class="kb-visually-hidden">Actions</span></th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`;
 
   const pageLink = (n: number): string =>
     n > 1 ? `/admin/birthdays?page=${n}` : "/admin/birthdays";
-  const prevLink =
-    page > 1
-      ? `<a class="btn btn-sm" href="${pageLink(page - 1)}">← Prev</a>`
-      : `<button class="btn btn-sm" disabled>← Prev</button>`;
-  const nextLink =
-    page < totalPages
-      ? `<a class="btn btn-sm" href="${pageLink(page + 1)}">Next →</a>`
-      : `<button class="btn btn-sm" disabled>Next →</button>`;
 
   const p = props.preview;
   const withoutAgeHtml = p.withoutAge
@@ -5362,58 +5409,73 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
       ? "Set <code>birthdays.channel_id</code> first."
       : "Runs the scheduled check now: posts for anyone whose birthday it is in their own timezone and has not been announced this year, and removes expired birthday roles. Nobody is announced twice.";
 
+  const statusLine = renderStatusLine({
+    enabled: props.enabled,
+    chips: [
+      props.channel
+        ? {
+            text: `Channel ${channelText({ name: props.channel.name, type: props.channel.type })}`,
+          }
+        : {
+            text: "No channel set",
+            warn: true,
+            href: props.settingsUnavailable
+              ? undefined
+              : settingHref("birthdays.channel_id"),
+          },
+      { text: props.role ? `Role @${props.role.name}` : "No birthday role" },
+      { text: `Schedule ${props.cron}`, mono: true },
+      {
+        text: props.listUnavailable
+          ? "Stored birthdays unavailable"
+          : `${countOf(props.total, "stored birthday")}`,
+      },
+    ],
+  });
+
   const body = `
-<h1>Birthdays</h1>
-<p class="subtitle">Members set their own birthday on <code>/me/birthday</code>. Here you can see who is coming up, correct or remove an entry, and check the message before it goes live.</p>
+<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Birthdays</h1>
+    <p class="kb-pagehead__sub">Members set their own birthday on <code>/me/birthday</code>. Here you can see who is coming up, correct or remove an entry, and check the message before it goes live.</p>
+    ${statusLine}
+  </div>
+</header>
 ${renderPageFlash(props.flash)}
 ${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Birthdays", featureKey: "birthdays.enabled", returnTo: "/admin/birthdays", csrfToken: props.csrfToken })}
-${renderStatusLine({
-  enabled: props.enabled,
-  chips: [
-    props.channel
-      ? {
-          text: `Channel ${channelText({ name: props.channel.name, type: props.channel.type })}`,
-        }
-      : {
-          text: "No channel set",
-          warn: true,
-          href: props.settingsUnavailable
-            ? undefined
-            : settingHref("birthdays.channel_id"),
-        },
-    { text: props.role ? `Role @${props.role.name}` : "No birthday role" },
-    { text: `Schedule ${props.cron}`, mono: true },
-    {
-      text: props.listUnavailable
-        ? "Stored birthdays unavailable"
-        : `${countOf(props.total, "stored birthday")}`,
-    },
-  ],
-})}${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
-<div class="card">
-  <h2>Run the check</h2>
-  <form method="POST" action="/admin/birthdays/run-now" class="inline-form" data-confirm="Run the birthday check now?"${CONFIRM_NEUTRAL_ATTR}>
-    ${csrfInput}
-    <button type="submit" class="btn"${runDisabled ? " disabled" : ""}>Run now</button>
-    <span class="muted">${runHint}</span>
-  </form>
-</div>
-<div class="card">
-  <h2>Message preview</h2>
-  <p class="muted">The saved <code>birthdays.message</code>, filled in with you as the member. Save the settings below to update it.</p>
-  <dl class="kv">
-    <dt>Birth year on file (age ${p.sampleAge})</dt><dd>${renderBirthdayPreviewText(p.withAge, p)}</dd>
-    ${withoutAgeHtml}
-  </dl>
-  <p class="muted">${previewNotes.join(" ")}</p>
-</div>
-
-<div class="card">
-  <h2>Stored birthdays</h2>
-  <p class="muted">Soonest first, by each member's own timezone. <em>Role grant</em> means the bot recorded giving the birthday role and has not swept it yet; the next run removes it once <code>birthdays.role_duration_hours</code> has passed. <em>Last handled</em> is the year the check last dealt with the member: it posted for them, or skipped them because they had left the server. Birth years stay private: the page shows only whether one is on file. Removing an entry takes back a live birthday role and deletes the bot's birthday posts about the member, the same as their own data reset.</p>
-  ${tableHtml}
-  <div class="inline-form">${prevLink} <span class="muted">Page ${page} of ${totalPages}</span> ${nextLink}</div>
-</div>
+${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
+<section class="kb-panel" id="stored-birthdays" aria-labelledby="stored-birthdays-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="stored-birthdays-h">Stored birthdays</h2></header>
+  ${listHtml}
+  ${renderListPager({
+    prevHref: page > 1 ? pageLink(page - 1) : null,
+    nextHref: page < totalPages ? pageLink(page + 1) : null,
+    page,
+    totalPages,
+  })}
+</section>
+<section class="kb-panel" id="birthday-preview" aria-labelledby="birthday-preview-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="birthday-preview-h">Message preview</h2></header>
+  <div class="kb-panel__body kb-stack">
+    <p class="kb-help">The saved <code>birthdays.message</code>, filled in with you as the member. Save the settings below to update it.</p>
+    <dl class="kb-kv">
+      <dt>Birth year on file (age ${p.sampleAge})</dt><dd>${renderBirthdayPreviewText(p.withAge, p)}</dd>
+      ${withoutAgeHtml}
+    </dl>
+    <p class="kb-help">${previewNotes.join(" ")}</p>
+  </div>
+</section>
+<section class="kb-panel" id="birthday-run" aria-labelledby="birthday-run-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="birthday-run-h">Run the check</h2></header>
+  <div class="kb-panel__body">
+    <form method="POST" action="/admin/birthdays/run-now" class="kb-row" data-confirm="Run the birthday check now?"${CONFIRM_NEUTRAL_ATTR}>
+      ${csrfInput}
+      <button type="submit" class="kb-btn"${runDisabled ? " disabled" : ""}>Run now</button>
+      <span class="kb-help">${runHint}</span>
+    </form>
+  </div>
+</section>
 ${renderFeatureSettingsCard({
   intro:
     "Change birthday settings here without leaving the page. A schedule change re-arms the birthday check on save — no restart needed.",
@@ -5428,6 +5490,7 @@ ${renderFeatureSettingsCard({
   flash: props.flash,
   needsSetup: !props.channel,
 })}
+</div>
 `;
   return renderAdminPage({
     title: "Birthdays",

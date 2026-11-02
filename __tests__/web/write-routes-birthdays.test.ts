@@ -200,11 +200,11 @@ describe("POST /birthdays/:userId/edit", () => {
       const res = await edit({ month: "", day: "20", clear_year: "1" });
       expect(res.status).toBe(422);
       const html = await res.text();
-      expect(html).toContain(
-        `<details class="helper edit-details" open><summary>Edit</summary>`,
+      expect(html).toMatch(
+        /<details class="kb-disclosure" open><summary>.*?Edit<span class="kb-visually-hidden"> birthday of /,
       );
       expect(html).toContain(
-        `<select name="month" required id="birthday-edit-${MEMBER}-month" aria-invalid="true" aria-describedby="birthday-edit-${MEMBER}-month-error">`,
+        `<select class="kb-select" name="month" required id="birthday-edit-${MEMBER}-month" aria-invalid="true" aria-describedby="birthday-edit-${MEMBER}-month-error">`,
       );
       expect(html).toContain(
         `<p class="kb-field__error" id="birthday-edit-${MEMBER}-month-error">Choose a month.</p>`,
