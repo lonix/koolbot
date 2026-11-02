@@ -79,6 +79,8 @@ describe("VoiceChannelManager - room lock (#1143)", () => {
       channels: { cache: { get: () => room } },
     } as unknown as Client);
     (manager as any).userChannels.set("a", room);
+    // Links restored, as after a healthy start (the live cleanup waits for them, #1673).
+    (manager as any).waitingRoomLinksRestored = true;
     (manager as any).customChannelNames.set("room", "custom");
     (manager as any).persistOwnership = jest.fn(async () => undefined);
     (manager as any).updateControlPanelOwnership = jest.fn(async () => {});
