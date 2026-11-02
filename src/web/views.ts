@@ -9,7 +9,11 @@ import { escapeHtml } from "./html.js";
 
 function pageShell(
   title: string,
-  body: string,
+  heading: string,
+  /** Trusted markup for the PageHeader: `<p class="kb-pagehead__sub">` lines. */
+  subHtml: string,
+  /** Trusted markup for the Panel under it; empty for a page that is only text. */
+  panelHtml: string,
   product: "KoolBot Admin" | "KoolBot" = "KoolBot Admin",
 ): string {
   return [
@@ -18,34 +22,21 @@ function pageShell(
     '<meta charset="utf-8">',
     `<title>${escapeHtml(title)} — ${product}</title>`,
     '<meta name="viewport" content="width=device-width,initial-scale=1">',
+    // kb.css supplies the base (box-sizing, the body font and background, links, the focus ring and
+    // the dark `color-scheme`, #1507). These pre-auth pages are the same dark UI as the rest (#569),
+    // so they carry no style sheet of their own (#1710).
     designStylesheetLinks(product === "KoolBot" ? "/me" : "/admin"),
-    "<style>",
-    // kb.css is linked above; this shell never set border-box or line-height, so keep it that way
-    // until it moves to the kb- classes (#1314). The colour scheme is kb.css's `dark` (#1507).
-    // Dark palette shared with the authenticated admin UI (issue #569) so the
-    // pre-auth sign-in / sign-out / invalid-link pages don't flash light mode.
-    `body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:48rem;margin:0 auto;padding:2rem;background:var(--bg);color:var(--text);line-height:normal;box-sizing:content-box;}`,
-    "h1{margin-top:0;}",
-    `a{color:var(--link);text-decoration:none;}`,
-    "a:hover{text-decoration:underline;}",
-    "table{border-collapse:collapse;width:100%;}",
-    `th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid var(--border);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9rem;}`,
-    `th{background:var(--surface-alt);}`,
-    `code{background:var(--surface);padding:.1rem .3rem;border-radius:.25rem;}`,
-    "nav a{margin-right:.75rem;}",
-    "form{margin-top:1rem;}",
-    `button{background:var(--primary);color:var(--on-primary);border:0;padding:.45rem .9rem;border-radius:4px;cursor:pointer;font:inherit;font-weight:600;}`,
-    `button:hover{background:var(--primary-hover);}`,
-    // Keyboard focus ring (WCAG 2.4.7, #855). The UA default is nearly
-    // invisible on this dark palette.
-    `a:focus-visible,button:focus-visible{outline:2px solid var(--focus);outline-offset:2px;}`,
-    "</style></head><body>",
     // <main> gives assistive tech a landmark to jump to on these one-shot pages.
-    "<main>",
-    body,
+    '</head><body><main class="kb-member">',
+    `<header class="kb-pagehead"><div class="kb-pagehead__text"><h1 class="kb-pagehead__title">${escapeHtml(heading)}</h1>${subHtml}</div></header>`,
+    panelHtml
+      ? `<div class="kb-panel"><div class="kb-panel__body">${panelHtml}</div></div>`
+      : "",
     "</main></body></html>",
   ].join("");
 }
+
+const sub = (html: string): string => `<p class="kb-pagehead__sub">${html}</p>`;
 
 /**
  * The shared shell for the HTTP error responses the web layer renders as
@@ -67,7 +58,9 @@ export function renderErrorPage(opts: {
 }): string {
   return pageShell(
     opts.title,
-    `<h1>${escapeHtml(opts.heading)}</h1>${opts.bodyHtml}`,
+    opts.heading,
+    "",
+    opts.bodyHtml,
     opts.product ?? "KoolBot Admin",
   );
 }
@@ -84,15 +77,20 @@ export function renderSignedOut(
   opts: { revoked?: boolean } = {},
 ): string {
   const revoked = opts.revoked ?? true;
+  const next =
+    'Run <span class="kb-mono">/me</span> (or <span class="kb-mono">/config</span> for admins) in Discord to start a new one.';
   return pageShell(
     "Signed out",
+    "Signed out",
     [
-      "<h1>Signed out</h1>",
-      message ? `<p>${escapeHtml(message)}</p>` : "",
-      revoked
-        ? "<p>Your session has been revoked. Run <code>/me</code> (or <code>/config</code> for admins) in Discord to start a new one.</p>"
-        : "<p>This browser has been signed out, but the server could not confirm your session was revoked; it will expire on its own. Run <code>/me</code> (or <code>/config</code> for admins) in Discord to start a new one.</p>",
+      message ? sub(escapeHtml(message)) : "",
+      sub(
+        revoked
+          ? `Your session has been revoked. ${next}`
+          : `This browser has been signed out, but the server could not confirm your session was revoked; it will expire on its own. ${next}`,
+      ),
     ].join(""),
+    "",
   );
 }
 
@@ -101,26 +99,32 @@ export function renderConsent(opts: {
   csrfToken: string;
 }): string {
   const action = `/admin/s/${encodeURIComponent(opts.token)}`;
-  const body = [
-    "<h1>Sign in to KoolBot Admin</h1>",
-    "<p>Click <strong>Continue</strong> to start your admin session in this browser. Your single-use sign-in link will be consumed when you do.</p>",
-    `<form method="POST" action="${escapeHtml(action)}">`,
+  const form = [
+    `<form method="POST" action="${escapeHtml(action)}" class="kb-row">`,
     // Double-submit CSRF token: mirrors the koolbot_csrf cookie so the POST
     // redemption can reject a cross-site login-CSRF forgery (issue #771). A
     // cross-site auto-submit can't read the victim's cookie to forge a match.
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
-    '<button type="submit">Continue</button>',
+    '<button type="submit" class="kb-btn kb-btn--primary">Continue</button>',
     "</form>",
   ].join("");
-  return pageShell("Sign in", body);
+  return pageShell(
+    "Sign in",
+    "Sign in to KoolBot Admin",
+    sub(
+      "Click <strong>Continue</strong> to start your admin session in this browser. Your single-use sign-in link will be consumed when you do.",
+    ),
+    form,
+  );
 }
 
 export function renderInvalidLink(): string {
   return pageShell(
     "Invalid link",
-    [
-      "<h1>Link invalid or expired</h1>",
-      "<p>Magic-link tokens are single-use and expire quickly. Run <code>/me</code> (or <code>/config</code> for admins) in Discord again to receive a fresh link.</p>",
-    ].join(""),
+    "Link invalid or expired",
+    sub(
+      'Magic-link tokens are single-use and expire quickly. Run <span class="kb-mono">/me</span> (or <span class="kb-mono">/config</span> for admins) in Discord again to receive a fresh link.',
+    ),
+    "",
   );
 }
