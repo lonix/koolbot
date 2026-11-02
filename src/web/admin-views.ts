@@ -1888,18 +1888,18 @@ export function renderSettingsPage(props: SettingsProps): string {
   const invalidKeys = new Set(props.invalidKeys ?? []);
 
   const actionBar = `
-<div class="actions">
+<div class="kb-row">
   <form method="POST" action="/admin/settings/reload" data-confirm="Reload bot slash commands now? This briefly puts the bot into a config-reload status."${CONFIRM_NEUTRAL_ATTR}>
     <input type="hidden" name="_csrf" value="${csrf}">
-    <button type="submit" class="btn">Reload commands</button>
+    <button type="submit" class="kb-btn">Reload commands</button>
   </form>
-  <a href="/admin/settings/export" class="btn">Export YAML</a>
-  <a href="#import-section" class="btn">Import YAML</a>${
+  <a href="/admin/settings/export" class="kb-btn">Export YAML</a>
+  <a href="#import-section" class="kb-btn">Import YAML</a>${
     // The wizard pre-fills from the same store; don't point at it while the
     // store can't be read.
     props.settingsUnavailable
       ? ""
-      : `\n  <a href="/admin/wizard" class="btn">Setup wizard</a>`
+      : `\n  <a href="/admin/wizard" class="kb-btn">Setup wizard</a>`
   }
 </div>`;
 
@@ -1910,7 +1910,7 @@ export function renderSettingsPage(props: SettingsProps): string {
   // The anchor starts before the action bar, so a link to #commands-sync (the
   // Dashboard row) brings Reload commands into view along with its status.
   const commandSyncHtml = syncStatus
-    ? `<div id="commands-sync">${actionBar}
+    ? `<div id="commands-sync" class="kb-stack">${actionBar}
 <div class="kb-statusline" role="status"><span class="kb-status kb-status--${syncStatus.tone}">${escapeHtml(syncStatus.label)}</span><span>${escapeHtml(syncStatus.text)}</span></div></div>`
     : actionBar;
 
@@ -1955,7 +1955,7 @@ export function renderSettingsPage(props: SettingsProps): string {
         flashId: props.flash ? SETTINGS_FLASH_ID : undefined,
       });
       const descHtml = meta.description
-        ? `<p class="muted" style="margin:.25rem 0 .75rem">${escapeHtml(meta.description)}</p>`
+        ? `<p class="kb-help">${escapeHtml(meta.description)}</p>`
         : "";
       // The bot-permission notice of a mapped section (#1487), between the
       // description and the form; nothing at all when there is none.
@@ -1964,17 +1964,17 @@ export function renderSettingsPage(props: SettingsProps): string {
         { canLinkToPage: true },
       );
       const noticeHtml = noticeText
-        ? `\n  <div class="kb-stack" style="margin-bottom: var(--space-3)">${noticeText}</div>`
+        ? `<div class="kb-stack">${noticeText}</div>`
         : "";
       // One <form> per category. Save submits every row's value in one
       // atomic request; the per-row reset buttons submit the sibling reset
       // form for a single key (issue #433).
       const scopeAttr = cascadeMasterKey ? " data-cascade-scope" : "";
       return `
-<div class="card card--savebar" id="section-${escapeHtml(g.category)}">
-  <h2>${escapeHtml(meta.title)}</h2>
-  ${descHtml}${noticeHtml}
-  ${renderSettingsForms({
+<section class="kb-panel" id="section-${escapeHtml(g.category)}" aria-labelledby="section-${escapeHtml(g.category)}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="section-${escapeHtml(g.category)}-h">${escapeHtml(meta.title)}</h2></header>
+  <div class="kb-panel__body kb-stack">${descHtml}${noticeHtml}
+  <div>${renderSettingsForms({
     formId: `form-${g.category}`,
     saveAttrs: scopeAttr,
     hiddenFields: `<input type="hidden" name="_csrf" value="${csrf}">
@@ -1983,24 +1983,29 @@ export function renderSettingsPage(props: SettingsProps): string {
     submitLabel: "Save",
     title: meta.title,
     csrfToken: props.csrfToken,
-  })}
-</div>`;
+  })}</div>
+  </div>
+</section>`;
     })
     .join("");
 
   const importSection = `
-<div id="import-section" class="card">
-  <h2>Import YAML</h2>
-  <p class="muted" id="import-yaml-help" style="margin:0 0 .75rem">Paste a YAML key→value mapping. A diff preview is shown before anything is written. Bootstrap and environment keys are always refused.</p>
-  <form method="POST" action="/admin/settings/import" class="stack">
+<section id="import-section" class="kb-panel" aria-labelledby="import-section-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="import-section-h">Import YAML</h2></header>
+  <div class="kb-panel__body">
+  <form method="POST" action="/admin/settings/import" class="kb-stack">
     <input type="hidden" name="_csrf" value="${csrf}">
-    <label for="import-yaml">YAML to import</label>
-    <textarea id="import-yaml" name="yaml" rows="12" aria-describedby="import-yaml-help" placeholder="voicechannels.enabled: true&#10;quotes.max_length: 500"></textarea>
-    <div>
-      <button type="submit" class="btn">Preview import</button>
+    <div class="kb-field">
+      <label class="kb-label" for="import-yaml">YAML to import</label>
+      <p class="kb-help" id="import-yaml-help">Paste a YAML key→value mapping. A diff preview is shown before anything is written. Bootstrap and environment keys are always refused.</p>
+      <textarea class="kb-textarea" id="import-yaml" name="yaml" rows="12" aria-describedby="import-yaml-help" placeholder="voicechannels.enabled: true&#10;quotes.max_length: 500"></textarea>
+    </div>
+    <div class="kb-row">
+      <button type="submit" class="kb-btn">Preview import</button>
     </div>
   </form>
-</div>`;
+  </div>
+</section>`;
 
   // Two-step confirm: the JS confirm() guards the click, and the operator
   // must additionally type the guild name (or guild id when the name can't
@@ -2034,17 +2039,19 @@ export function renderSettingsPage(props: SettingsProps): string {
 </section>`;
 
   const body = `
-<h1>All settings</h1>
-<p class="subtitle">All DB-backed configuration, grouped by feature. Mirrors <code>SETTINGS.md</code> and <code>config-service.ts</code>.</p>
+<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">All settings</h1>
+    <p class="kb-pagehead__sub">All DB-backed configuration, grouped by feature. Mirrors <code class="kb-mono">SETTINGS.md</code> and <code class="kb-mono">config-service.ts</code>.</p>
+  </div>
+</header>
 ${renderFlash(props.flash, SETTINGS_FLASH_ID)}
 ${commandSyncHtml}
-${
-  props.settingsUnavailable
-    ? `<div class="card">${renderSettingsUnavailableNotice()}</div>`
-    : sections
-}
+${props.settingsUnavailable ? renderSettingsUnavailableNotice() : sections}
 ${importSection}
 ${dangerSection}
+</div>
 `;
   return renderAdminPage({
     title: "All settings",
@@ -2190,19 +2197,19 @@ export function renderPermissionsPage(props: PermissionsProps): string {
   /** Status of a command with no explicit restriction. */
   const unrestrictedStatus = (cmd: string): string => {
     if (props.staffDefaultCommands?.has(cmd) !== true) {
-      return `<span class="tag tag-info">open</span>`;
+      return `<span class="kb-badge kb-badge--info">open</span>`;
     }
     if (props.groupsUnavailable === true) {
-      return `<span class="tag tag-warn">unknown (role groups unavailable)</span>`;
+      return `<span class="kb-badge kb-badge--warn">unknown (role groups unavailable)</span>`;
     }
     return props.staffDefaultActive === true
-      ? `<span class="tag tag-warn">Moderators only (default)</span>`
-      : `<span class="tag tag-info">open</span>`;
+      ? `<span class="kb-badge kb-badge--warn">Moderators only (default)</span>`
+      : `<span class="kb-badge kb-badge--info">open</span>`;
   };
   const groupHeaders = usedGroupRefs
     .map(
       (ref) =>
-        `<th scope="col">${escapeHtml(groupRefLabel(ref, groups))} <span class="muted">(group)</span></th>`,
+        `<th scope="col">${escapeHtml(groupRefLabel(ref, groups))} <span class="kb-muted">(group)</span></th>`,
     )
     .join("");
 
@@ -2228,30 +2235,32 @@ export function renderPermissionsPage(props: PermissionsProps): string {
             `<td>${
               allowed.has(rid)
                 ? `<span class="kb-perm kb-perm--has">${icon("check")}Allowed</span>`
-                : '<span class="muted" aria-hidden="true">—</span><span class="visually-hidden">Not allowed</span>'
+                : '<span class="kb-muted" aria-hidden="true">—</span><span class="kb-visually-hidden">Not allowed</span>'
             }</td>`,
         )
         .join("");
       const status =
         allowed.size === 0
           ? unrestrictedStatus(cmd)
-          : `<span class="tag tag-warn">restricted</span>`;
+          : `<span class="kb-badge kb-badge--warn">restricted</span>`;
       // The command name is the row header of a true 2D grid (#855), so a
       // screen reader can recover "which command, which role" from any cell.
-      return `<tr><th scope="row" class="mono">/${escapeHtml(cmd)}</th><td>${status}</td>${cells}</tr>`;
+      return `<tr><th scope="row" class="kb-mono">/${escapeHtml(cmd)}</th><td>${status}</td>${cells}</tr>`;
     })
     .join("");
 
   const matrixHtml =
     props.roleIds.length === 0 && usedGroupRefs.length === 0
-      ? `<div class="empty">No restricted commands. ${
+      ? kbEmptyState(
+          "shield-check",
+          "No restricted commands.",
           props.groupsUnavailable === true
             ? "The role groups couldn't be read, so the moderation commands are refused until they can be."
             : props.staffDefaultActive === true
               ? "Commands are open by default, except the moderation commands, which are for Moderators only while a Moderator or Admin role group exists."
-              : "All registered commands are open by default."
-        }</div>`
-      : `<table><caption class="visually-hidden">Which roles may run each restricted command</caption><thead><tr><th scope="col">Command</th><th scope="col">Status</th>${headerRoles}${groupHeaders}</tr></thead><tbody>${matrixRows}</tbody></table>`;
+              : "All registered commands are open by default.",
+        )
+      : `<table class="kb-table"><caption class="kb-visually-hidden">Which roles may run each restricted command</caption><thead><tr><th scope="col">Command</th><th scope="col">Status</th>${headerRoles}${groupHeaders}</tr></thead><tbody>${matrixRows}</tbody></table>`;
 
   const editRows = props.commands
     .map((cmd) => {
@@ -2262,7 +2271,7 @@ export function renderPermissionsPage(props: PermissionsProps): string {
       const status =
         current.size === 0
           ? unrestrictedStatus(cmd)
-          : `<span class="tag tag-warn">restricted</span>`;
+          : `<span class="kb-badge kb-badge--warn">restricted</span>`;
       // Role groups (#1023): each group alone, or "and above" (that group
       // plus every group ranked higher). A reference to a group that has
       // since been deleted stays selected so saving doesn't drop it silently;
@@ -2296,33 +2305,42 @@ export function renderPermissionsPage(props: PermissionsProps): string {
               selected,
             });
       return `<tr>
-<th scope="row" class="mono">/${escapedCmd}</th>
+<th scope="row" class="kb-mono">/${escapedCmd}</th>
 <td>${status}</td>
 <td>
-  <form method="POST" action="/admin/permissions/set" class="inline-form" style="align-items:flex-start">
+  <form method="POST" action="/admin/permissions/set" class="kb-row">
     <input type="hidden" name="_csrf" value="${csrf}">
     <input type="hidden" name="command" value="${escapedCmd}">
-    <label class="visually-hidden" for="${selectId}">Allowed roles for /${escapedCmd}</label>
+    <label class="kb-visually-hidden" for="${selectId}">Allowed roles for /${escapedCmd}</label>
     ${picker}
-    <button type="submit" class="btn btn-sm">Save</button>
+    <button type="submit" class="kb-btn kb-btn--sm">Save</button>
   </form>
 </td>
 </tr>`;
     })
     .join("");
 
+  const matrixEmpty = props.roleIds.length === 0 && usedGroupRefs.length === 0;
   const body = `
-<h1>Command permissions</h1>
-<p class="subtitle">Discord command access. Administrators always bypass these checks. Select roles or role groups to restrict a command; deselect all and save to make it open. "And above" includes every group ranked higher. While at least one Moderator or Admin group exists, the moderation commands (<code>/warn</code>, <code>/timeout</code>, <code>/ban</code>, <code>/modlog</code>) default to Moderators unless you set a restriction here; with no groups they stay open.</p>
+<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Command permissions</h1>
+    <p class="kb-pagehead__sub">Discord command access. Administrators always bypass these checks. Select roles or role groups to restrict a command; deselect all and save to make it open. "And above" includes every group ranked higher. While at least one Moderator or Admin group exists, the moderation commands (<code class="kb-mono">/warn</code>, <code class="kb-mono">/timeout</code>, <code class="kb-mono">/ban</code>, <code class="kb-mono">/modlog</code>) default to Moderators unless you set a restriction here; with no groups they stay open.</p>
+  </div>
+</header>
 ${renderFlash(props.flash)}
-<div class="card">
-  <h2>Edit</h2>
-  <table>
+${monitorPanel({
+  id: "perm-edit",
+  title: "Edit",
+  flush: true,
+  body: `<table class="kb-table"><caption class="kb-visually-hidden">Allowed roles for each command</caption>
     <thead><tr><th scope="col">Command</th><th scope="col">Status</th><th scope="col">Allowed roles (multi-select)</th></tr></thead>
     <tbody>${editRows}</tbody>
-  </table>
+  </table>`,
+})}
+${monitorPanel({ id: "perm-matrix", title: "Matrix", flush: !matrixEmpty, body: matrixHtml })}
 </div>
-<div class="card"><h2>Matrix</h2>${matrixHtml}</div>
 `;
   return renderAdminPage({
     title: "Command permissions",
@@ -6180,7 +6198,7 @@ export interface FeatureSettingsCardProps {
  * layout's on-load script focuses it and screen readers announce it (#855).
  */
 export function renderSettingsUnavailableNotice(): string {
-  return `<div class="notice warn" role="status" tabindex="-1" data-flash>Settings could not be loaded, so they can't be edited here right now. Reload the page to try again.</div>`;
+  return `<div class="kb-callout kb-callout--warn" role="status" tabindex="-1" data-flash>${toneIcon("warn")}<div class="kb-callout__body"><p class="kb-callout__title">Settings could not be loaded, so they can't be edited here right now.</p><p class="kb-callout__text">Reload the page to try again.</p></div></div>`;
 }
 
 /**
@@ -6218,10 +6236,10 @@ export function renderFeatureSettingsCard(
   const flashHtml = props.flash?.openSettings ? renderFlash(props.flash) : "";
   if (props.unavailable) {
     return `
-<div class="card">
-  <h2>${escapeHtml(props.title ?? "Settings")}</h2>
-  ${flashHtml}${renderSettingsUnavailableNotice()}
-</div>`;
+<section class="kb-panel" aria-labelledby="feature-settings-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="feature-settings-h">${escapeHtml(props.title ?? "Settings")}</h2></header>
+  <div class="kb-panel__body kb-stack">${flashHtml}${renderSettingsUnavailableNotice()}</div>
+</section>`;
   }
   if (props.settingRows.length === 0) return flashHtml;
   const pickers = {
@@ -6253,7 +6271,7 @@ export function renderFeatureSettingsCard(
     linkSections: false,
   });
   const introHtml = props.intro
-    ? `\n  <p class="muted" style="margin:.25rem 0 .75rem">${escapeHtml(props.intro)}</p>`
+    ? `<p class="kb-help">${escapeHtml(props.intro)}</p>`
     : "";
   const scopeAttr = masterKey ? " data-cascade-scope" : "";
   const cascadeInput = masterKey
@@ -6288,11 +6306,11 @@ export function renderFeatureSettingsCard(
       ? `<span class="kb-disclosure__hint" data-fold-hint>${changed} changed from the default</span>`
       : "";
   return `
-<div class="card card--savebar">
+<section class="kb-panel">
   <details class="kb-disclosure" id="feature-settings" data-settings-fold data-fold-key="${escapeHtml(props.returnTo)}"${forced ? " open data-fold-forced" : ""}>
     <summary>${CHEVRON_ICON}${escapeHtml(title)} <span class="kb-badge kb-badge--count">${props.settingRows.length}</span>${hint}</summary>
-    <div class="kb-disclosure__body">${flashHtml}${introHtml}
-  ${renderSettingsForms({
+    <div class="kb-disclosure__body kb-stack">${flashHtml}${introHtml}
+  <div>${renderSettingsForms({
     formId,
     saveAttrs: scopeAttr,
     hiddenFields: `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
@@ -6303,11 +6321,11 @@ export function renderFeatureSettingsCard(
     title,
     csrfToken: props.csrfToken,
     returnTo: props.returnTo,
-  })}
+  })}</div>
     </div>
   </details>
   ${scriptTag(SETTINGS_FOLD_SCRIPT)}
-</div>`;
+</section>`;
 }
 
 /** Channel manager (`CHANNELS_PATH` in channel-manager-view.ts, which imports this module). */

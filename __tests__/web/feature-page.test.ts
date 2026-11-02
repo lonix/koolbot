@@ -180,13 +180,11 @@ describe("the folded settings card", () => {
     expect(d.querySelector("[data-savebar]")).not.toBeNull();
   });
 
-  it("keeps the .card that the AJAX save looks for around the form", () => {
+  it("keeps the Panel that the AJAX save looks for around the form", () => {
     mount(card());
     const form = document.querySelector("form[action$='save-section']");
-    expect(form?.closest(".card")?.classList.contains("card--savebar")).toBe(
-      true,
-    );
-    expect(fold().closest(".card")).not.toBeNull();
+    expect(form?.closest(".kb-panel")).not.toBeNull();
+    expect(fold().parentElement?.classList.contains("kb-panel")).toBe(true);
   });
 
   it("opens when the page says the feature is off", () => {

@@ -342,7 +342,7 @@ describe("renderAdminPage", () => {
     );
     // With nothing aria-invalid, the on-load script focuses the flash.
     expect(html).toContain(
-      "var inv=document.querySelector('[aria-invalid=\"true\"]');if(inv){focusInvalid(inv);return}var f=document.querySelector('.notice[data-flash]');if(f){try{f.focus()}catch(e){}}",
+      "var inv=document.querySelector('[aria-invalid=\"true\"]');if(inv){focusInvalid(inv);return}var f=document.querySelector('[data-flash]');if(f){try{f.focus()}catch(e){}}",
     );
     expect(html).toContain("#main:focus-visible{outline:none}");
   });

@@ -749,7 +749,7 @@ const SETTINGS_SAVE_SCRIPT =
   // The flash node is given an id so a rejected control can point its
   // `aria-describedby` at it and carry the server's reason (#854).
   "var seq=0;" +
-  "function flashEl(form){var card=form.closest('.card');if(!card)return null;" +
+  "function flashEl(form){var card=form.closest('.card,.kb-panel');if(!card)return null;" +
   "var n=card.querySelector('.section-flash');" +
   // The node is a live region, so every save result (success, CSRF failure,
   // rate-limit, network error) is announced (#855). A result is a polite
@@ -902,7 +902,7 @@ const INVALID_FOCUS_SCRIPT =
   "if(inv){focusInvalid(inv);return}" +
   // Plain focus() for the flash: it sits at the top of the page, so the
   // scroll-to-centre that focusInvalid does for a deep field isn't wanted.
-  "var f=document.querySelector('.notice[data-flash]');" +
+  "var f=document.querySelector('[data-flash]');" +
   "if(f){try{f.focus()}catch(e){}}" +
   "})();";
 

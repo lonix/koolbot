@@ -188,11 +188,11 @@ describe("the Polls page renders only kb- components (#1640)", () => {
 });
 
 describe("what the page still takes from shared helpers", () => {
-  // `renderFlash` (any flash), `renderFeatureSettingsCard` and
-  // `renderSettingsUnavailableNotice` are shared by every feature page and still
-  // draw the old `notice` and `card`. #1647 moves the settings ones; the flash
-  // helper is named in no sub-issue of #1639. Their subtrees are cut out here by
-  // name, so the page's own markup is checked and the exclusion is visible.
+  // `renderFlash` (any flash) is shared by every feature page and still draws
+  // the old `notice`; the flash helper is named in no sub-issue of #1639. Its
+  // subtree is cut out here by name, so the page's own markup is checked and the
+  // exclusion is visible. The settings card and its unavailable notice were
+  // moved in #1647 and are checked with the rest of the page.
   const SETTING_ROW = {
     key: "polls.enabled",
     label: "Polls system enabled",
@@ -202,12 +202,7 @@ describe("what the page still takes from shared helpers", () => {
     description: "Enable the poll system.",
     category: "polls",
   };
-  const OLD_SHARED = [
-    "[data-flash]",
-    ".card",
-    ".notice",
-    "#feature-settings",
-  ].join(",");
+  const OLD_SHARED = ["[data-flash]", ".notice"].join(",");
 
   it.each([
     ["a flash", { flash: { type: "ok" as const, text: "Saved." } }],
