@@ -7,6 +7,8 @@
 import { describe, it, expect } from "@jest/globals";
 import { JSDOM } from "jsdom";
 import {
+  renderUserNotificationsBody,
+  renderUserFeatureDisabledNotice,
   renderUserBirthdayBody,
   renderUserTimezoneBody,
   renderUserVoiceBody,
@@ -129,6 +131,15 @@ const BODIES: Array<{ name: string; html: string }> = [
   },
 ];
 
+const notifRows = [
+  {
+    key: "digest",
+    label: "Weekly digest",
+    description: "A weekly DM.",
+    enabled: true,
+    comingSoon: "Coming soon.",
+  },
+];
 const LEGACY =
   ".card, .btn, .btn-secondary, .btn-danger, .pill, .subtitle, .muted, .mono, .tz-select, .tz-preview, .preset-grid, .preset-actions, .form-actions, .prefs-table, .empty";
 
@@ -284,5 +295,82 @@ describe("Privacy (#1543)", () => {
         .querySelector('#tracking input[name="action"]')!
         .getAttribute("value"),
     ).toBe("opt-in");
+  });
+});
+
+describe("the feature-disabled notice (#1705)", () => {
+  it("is a plain Callout with the fact as title and the impact as text", () => {
+    const doc = dom(
+      renderUserFeatureDisabledNotice({ enabled: false, label: "Rewind" }),
+    );
+    const c = doc.querySelector(".kb-callout")!;
+    expect(c.className).toBe("kb-callout");
+    expect(c.getAttribute("role")).toBe("status");
+    expect(c.querySelector(".kb-callout__title")!.textContent).toBe(
+      "Your server admin hasn't enabled Rewind yet.",
+    );
+    expect(c.querySelector(".kb-callout__text")!.textContent).toBe(
+      "Once they enable it, it'll show up here.",
+    );
+    expect(doc.querySelector(".notice")).toBeNull();
+  });
+
+  it("renders nothing when the feature is on", () => {
+    expect(
+      renderUserFeatureDisabledNotice({ enabled: true, label: "Rewind" }),
+    ).toBe("");
+  });
+});
+
+describe.each([
+  {
+    name: "notifications",
+    html: renderUserNotificationsBody({ csrfToken, rows: notifRows }),
+  },
+  {
+    name: "notifications (nothing to offer)",
+    html: renderUserNotificationsBody({ csrfToken, rows: [] }),
+  },
+])("the $name body (#1705)", ({ html }) => {
+  const doc = dom(html);
+
+  it("uses none of the legacy member classes and no style attribute", () => {
+    expect(doc.querySelectorAll(LEGACY)).toHaveLength(0);
+    expect(doc.querySelectorAll("[style]")).toHaveLength(0);
+    expect(
+      doc.querySelectorAll(".notice, .btn-primary, .form-actions"),
+    ).toHaveLength(0);
+  });
+
+  it("is one kb-stack that opens with a PageHeader and one h1", () => {
+    const root = doc.body.firstElementChild!;
+    expect(root.className).toBe("kb-stack");
+    expect(root.firstElementChild!.className).toBe("kb-pagehead");
+    expect(doc.querySelectorAll("h1")).toHaveLength(1);
+    expect(doc.querySelector("h1")!.className).toBe("kb-pagehead__title");
+  });
+});
+
+describe("the notifications body buttons and states (#1705)", () => {
+  it("saves with the one primary kb-btn in a kb-row, no JavaScript needed", () => {
+    const doc = dom(
+      renderUserNotificationsBody({ csrfToken, rows: notifRows }),
+    );
+    expect(doc.querySelectorAll(".kb-btn--primary")).toHaveLength(1);
+    const btn = doc.querySelector("button.kb-btn.kb-btn--primary")!;
+    expect(btn.textContent).toBe("Save preferences");
+    expect(btn.closest(".kb-row")!.querySelector(".kb-help")).not.toBeNull();
+    expect(doc.querySelector("form")!.getAttribute("action")).toBe(
+      "/me/notifications",
+    );
+  });
+
+  it("shows an EmptyState and no form when there is nothing to offer", () => {
+    const doc = dom(renderUserNotificationsBody({ csrfToken, rows: [] }));
+    expect(doc.querySelector(".kb-empty .kb-empty__title")!.textContent).toBe(
+      "No direct messages to offer",
+    );
+    expect(doc.querySelector("form")).toBeNull();
+    expect(doc.querySelector(".kb-pagehead__sub")).toBeNull();
   });
 });
