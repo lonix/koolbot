@@ -698,6 +698,7 @@ one):
 | Reconnect Mongo before a query | `MongoConnectionGuard` | `src/utils/mongo.ts` |
 | Escape a value into HTML | `escapeHtml`, `escapeJsInAttr` | `src/web/html.ts` |
 | Pick an embed accent colour (never a hex literal; a guard test fails on one) | `embedColor(kind)` | `src/utils/embed-style.ts` |
+| Create the channel or category a setting points at (plan with nothing written, apply that re-checks the live server, rollback on failure; no permission overwrites; run under a per-server lock) | `planChannels`, `applyChannelPlan` | `src/web/channel-create.ts` |
 | Show a time in a Discord message (never `toLocaleString()` and friends; a guard test fails on one; footers read `KoolBot · <Feature>` with no "System" and no id) | `discordTimestamp(date, style)` | `src/utils/discord-time.ts` |
 
 ```typescript
