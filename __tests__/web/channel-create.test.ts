@@ -349,3 +349,162 @@ describe("applyChannelPlan", () => {
     if (!result.ok) expect(result.error).toMatch(/limiting changes/);
   });
 });
+
+describe("capacity of a whole plan", () => {
+  const fill = (count: number, parentId: string | null = null) =>
+    Array.from({ length: count }, (_, i) =>
+      view(
+        `7${String(i).padStart(17, "0")}`,
+        `fill-${parentId ?? "top"}-${i}`,
+        "text",
+        parentId,
+      ),
+    );
+  const two = [
+    { kind: "text" as const, name: "one" },
+    { kind: "text" as const, name: "two" },
+  ];
+
+  it("refuses 499 server channels plus two creates, before any write", () => {
+    expect(planChannels(two, fill(499)).ok).toBe(false);
+  });
+  it("accepts 498 plus two creates (exactly at 500)", () => {
+    expect(planChannels(two, fill(498)).ok).toBe(true);
+  });
+  it("refuses one create on a full server", () => {
+    expect(planChannels([two[0]], fill(500)).ok).toBe(false);
+  });
+  it("does not count selected existing channels against the limit", () => {
+    const keep = view("888888888888888888", "keep", "text");
+    const full = [...fill(499), keep];
+    const plan = planChannels(
+      [
+        { kind: "text", name: "keep" },
+        { kind: "text", name: "fresh" },
+      ],
+      [...fill(498), keep],
+    );
+    expect(plan.ok && plan.entries.map((e) => e.action)).toEqual([
+      "existing",
+      "create",
+    ]);
+    const onlyExisting = planChannels([{ kind: "text", name: "keep" }], full);
+    expect(onlyExisting.ok).toBe(true);
+  });
+
+  const inCat = (n: number) => [
+    view(CAT, "Staff", "category"),
+    ...fill(n, CAT),
+  ];
+  const twoIn = two.map((e) => ({ ...e, parentId: CAT }));
+  it("refuses 49 category children plus two creates", () => {
+    const plan = planChannels(twoIn, inCat(49));
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.errors.join(" ")).toMatch(/per category/);
+  });
+  it("accepts 48 plus two creates (exactly 50)", () => {
+    expect(planChannels(twoIn, inCat(48)).ok).toBe(true);
+  });
+  it("does not count selected existing channels against a category", () => {
+    expect(
+      planChannels(
+        [{ kind: "text", name: "fill-" + CAT + "-0", parentId: CAT }],
+        inCat(50),
+      ).ok,
+    ).toBe(true);
+    const plan = planChannels(
+      [
+        { kind: "text", name: "fill-" + CAT + "-0", parentId: CAT },
+        { kind: "text", name: "fresh", parentId: CAT },
+      ],
+      inCat(49),
+    );
+    expect(plan.ok).toBe(true);
+  });
+  it("counts a create in another category separately", () => {
+    expect(
+      planChannels(
+        [
+          { kind: "text", name: "x" },
+          { kind: "text", name: "y" },
+        ],
+        inCat(50),
+      ).ok,
+    ).toBe(true);
+  });
+});
+
+describe("the message after a failure that follows a first create", () => {
+  const rate = (): Error =>
+    new RateLimitError({
+      timeToReset: 0,
+      retryAfter: 120_000,
+      sublimitTimeout: 0,
+      limit: 2,
+      method: "POST",
+      hash: "h",
+      url: "https://discord.com/api/v10/guilds/1/channels",
+      route: "/guilds/:id/channels",
+      majorParameter: "1",
+      global: false,
+      scope: "user",
+    });
+  const kinds: [string, () => Error][] = [
+    ["rate limit", rate],
+    ["missing permission", () => apiError(50013, "Missing Permissions")],
+    ["timeout", () => new Error("Discord API timeout after 30000ms")],
+    ["other error", () => new Error("socket hang up")],
+  ];
+  const rollbacks: [string, "ok" | "fail" | "gone"][] = [
+    ["rollback succeeded", "ok"],
+    ["rollback failed", "fail"],
+    ["rollback gone (404)", "gone"],
+  ];
+  const entries = [
+    { kind: "category" as const, name: "Logs" },
+    { kind: "text" as const, name: "Raid Alerts" },
+  ];
+
+  describe.each(kinds)("%s on the second create", (_k, make) => {
+    it.each(rollbacks)("%s", async (_r, mode) => {
+      const { deps, post, del } = setup();
+      const reviewed = planChannels(entries, live);
+      if (!reviewed.ok) throw new Error("plan");
+      post.mockImplementationOnce(async (_x, o) => ({
+        id: "555555555555555555",
+        name: o.body.name as string,
+      }));
+      post.mockRejectedValueOnce(make());
+      if (mode === "fail")
+        del.mockRejectedValueOnce(apiError(50013, "Missing Permissions"));
+      if (mode === "gone")
+        del.mockRejectedValueOnce(apiError(10003, "Unknown Channel", 404));
+      const result = await applyChannelPlan(deps, entries, reviewed.planId);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      // Something was created in this call, so it never claims no change.
+      expect(result.error).not.toMatch(/nothing was changed/i);
+      if (mode === "fail") {
+        expect(result.stuck).toEqual(["555555555555555555"]);
+        expect(result.error).toContain("555555555555555555");
+        expect(result.error).toMatch(/still exist/);
+        expect(result.error).toMatch(/check/i);
+        expect(result.error).not.toMatch(/try again in|retry/i);
+        expect(result.error).not.toMatch(/were removed again/);
+      } else {
+        expect(result.stuck).toEqual([]);
+        expect(result.removed).toEqual(["555555555555555555"]);
+        expect(result.error).toMatch(/removed again/);
+      }
+    });
+  });
+
+  it("keeps the plain message when the first create fails", async () => {
+    const { deps, post } = setup();
+    const reviewed = planChannels(entries, live);
+    if (!reviewed.ok) throw new Error("plan");
+    post.mockRejectedValueOnce(rate());
+    const result = await applyChannelPlan(deps, entries, reviewed.planId);
+    if (!result.ok) expect(result.error).toMatch(/Nothing was changed/);
+  });
+});

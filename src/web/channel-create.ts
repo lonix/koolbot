@@ -37,6 +37,8 @@
  * a refusal from Discord (missing permission, rate limit) is reported here.
  * A create that timed out is in neither `removed` nor `stuck`: whether it exists
  * is unknown, and the error tells the admin to check Discord.
+ * Once an earlier create succeeded, the error names any channel that is still there
+ * (`stuck`) and never says nothing was changed or offers a retry while one exists.
  *
  * Writes use the write-REST client and `cancellableCall` from
  * `channel-write-rest.ts` (timeout, no automatic retry of a create). A create is
@@ -44,7 +46,13 @@
  */
 
 import { createHash } from "node:crypto";
-import { ChannelType, DiscordAPIError, Routes, type REST } from "discord.js";
+import {
+  ChannelType,
+  DiscordAPIError,
+  RateLimitError,
+  Routes,
+  type REST,
+} from "discord.js";
 import {
   CHANNEL_LIMITS,
   cleanName,
@@ -320,10 +328,40 @@ export async function applyChannelPlan(
       done.push({ id: created.id, name: created.name, created: true });
     } catch (error) {
       const { removed, stuck } = await removeAgain(deps, createdIds);
-      return { ok: false, error: describeWriteFailure(error), removed, stuck };
+      return {
+        ok: false,
+        error: failureMessage(error, createdIds.length, removed, stuck),
+        removed,
+        stuck,
+      };
     }
   }
   return { ok: true, channels: done };
+}
+
+/**
+ * The admin-facing message for a failed apply. With nothing created yet it is
+ * `describeWriteFailure` as it is. Once an earlier create succeeded, the cause
+ * is scoped to the failed request, and the message says what happened to the
+ * earlier channels: removed again, or still there (ids) to check before any
+ * retry. It never says "nothing was changed" or offers a retry while a
+ * channel this call created still exists.
+ */
+function failureMessage(
+  error: unknown,
+  createdBefore: number,
+  removed: readonly string[],
+  stuck: readonly string[],
+): string {
+  if (createdBefore === 0) return describeWriteFailure(error);
+  const cause =
+    error instanceof RateLimitError
+      ? "Discord is limiting changes right now, so the request to create the next channel was cancelled."
+      : describeWriteFailure(error);
+  if (stuck.length > 0) {
+    return `${cause} These channels were created earlier in this request and could not be removed again, so they still exist: ${stuck.join(", ")}. Check them in Discord before trying again.`;
+  }
+  return `${cause} The ${removed.length === 1 ? "channel" : "channels"} created earlier in this request ${removed.length === 1 ? "was" : "were"} removed again.`;
 }
 
 /** Delete what one apply created, newest first. A channel already gone counts as removed. */
