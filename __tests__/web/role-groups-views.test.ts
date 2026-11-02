@@ -111,10 +111,16 @@ describe("renderRoleGroupsPage", () => {
     const html = renderRoleGroupsPage(
       props({ groups: [row({ capabilities: ["staff", "host"] })] }),
     );
-    expect(html).toContain('<span class="tag tag-info">Moderator</span>');
-    expect(html).toContain('<span class="tag tag-info">Event host</span>');
+    expect(html).toContain(
+      '<span class="kb-badge kb-badge--info">Moderator</span>',
+    );
+    expect(html).toContain(
+      '<span class="kb-badge kb-badge--info">Event host</span>',
+    );
     // The tag no longer shows the raw key ...
-    expect(html).not.toContain('<span class="tag tag-info">staff</span>');
+    expect(html).not.toContain(
+      '<span class="kb-badge kb-badge--info">staff</span>',
+    );
     // ... but the form still posts it, so nothing stored changes.
     expect(html).toContain('name="capability" value="staff" checked');
     expect(html).toContain('name="capability" value="host" checked');
@@ -263,7 +269,7 @@ describe("renderRoleGroupsPage", () => {
     expect(html).toContain(
       '<td class="kb-actions"><div class="kb-row kb-row--nowrap">',
     );
-    expect(html).toMatch(/<td><span class="kb-row"><span class="tag/);
+    expect(html).toMatch(/<td><span class="kb-row"><span class="kb-badge/);
     expect(html).not.toContain('<td class="kb-actions"><div class="kb-row">');
   });
 
@@ -272,7 +278,7 @@ describe("renderRoleGroupsPage", () => {
       props({ groups: [row({ capabilities: ["admin", "staff"] })] }),
     );
     expect(html).toMatch(
-      /<td><span class="kb-row"><span class="tag tag-info">Admin<\/span><span class="tag tag-info">Moderator<\/span><\/span><\/td>/,
+      /<td><span class="kb-row"><span class="kb-badge kb-badge--info">Admin<\/span><span class="kb-badge kb-badge--info">Moderator<\/span><\/span><\/td>/,
     );
   });
 
@@ -555,7 +561,7 @@ describe("sync with Discord (#1021)", () => {
           adminGroupLacksAdministrator: true,
         }),
       );
-      expect(html).toContain("doesn't carry Administrator");
+      expect(html).toContain("doesn&#39;t carry Administrator");
       expect(html).toContain('name="grant" value="1"');
       expect(html).not.toMatch(/name="grant"[^>]*checked/);
       expect(html).toContain('action="/admin/role-groups/admin-fix"');
@@ -703,7 +709,7 @@ describe("renderRoleDeletePage (#1184)", () => {
 
   it("shows the exact name, padding included, escaped and in a whitespace-preserving element", () => {
     const html = renderRoleDeletePage(p({ confirmName: "  A <i> " }));
-    expect(html).toContain('<pre class="mono">  A &lt;i&gt; </pre>');
+    expect(html).toContain('<pre class="kb-mono">  A &lt;i&gt; </pre>');
     expect(html).toContain("8 characters");
   });
 

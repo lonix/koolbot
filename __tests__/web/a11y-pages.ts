@@ -3996,6 +3996,69 @@ export function adminPages(): A11yPage[] {
         plan: (CLAIMS_DESTRUCTIVE_PLAN as { plan: never }).plan,
       }),
     },
+    {
+      // No groups yet: the EmptyState in the Groups panel.
+      name: "Role groups (no groups)",
+      html: renderRoleGroupsPage({ ...ROLE_GROUPS_REFUSED_BASE, groups: [] }),
+    },
+    {
+      // Problems first (#1649): drift, an unlinked group and a deleted role with their
+      // Callouts, the apply job, administrators to move, bots and the grant choice.
+      name: "Role groups (drift, unlinked, administrators to review)",
+      html: renderRoleGroupsPage({
+        ...ROLE_GROUPS_REFUSED_BASE,
+        jobId: "11111111-1111-1111-1111-111111111111",
+        groups: [
+          {
+            ...ROLE_GROUPS_REFUSED_BASE.groups[0],
+            drift: [
+              {
+                groupId: "g1",
+                groupName: "Mods",
+                kind: "permissions",
+                detail: "Permissions in Discord differ.",
+              },
+            ],
+          },
+          {
+            ...ROLE_GROUPS_REFUSED_BASE.groups[0],
+            id: "g2",
+            name: "Helpers",
+            roleId: null,
+            unlinked: true,
+            lostRoleId: "r9",
+          },
+          {
+            ...ROLE_GROUPS_REFUSED_BASE.groups[0],
+            id: "g3",
+            name: "Boosters",
+            roleId: "r4",
+            roleMissing: true,
+            capabilities: [],
+            memberCount: null,
+          },
+        ] as never,
+        adminReport: {
+          humans: [{ id: "u1", name: "Bob", viaRoleIds: ["legacy"] }],
+          bots: [
+            { id: "b2", name: "Music", viaRoleIds: ["bots"], self: false },
+          ],
+        },
+        adminGroupLacksAdministrator: true,
+        roleNames: { legacy: "Old admins", bots: "Bots" },
+        planUnavailable: "Roles could not be read.",
+      }),
+    },
+    {
+      name: "Role groups (members unavailable, plan blocked)",
+      html: renderRoleGroupsPage({
+        ...ROLE_GROUPS_REFUSED_BASE,
+        membersUnavailable: true,
+        botScanUnavailable: true,
+        extraErrors: [{ code: "admin-lockout", message: "Your own access" }],
+        plan: (CLAIMS_DESTRUCTIVE_PLAN as { plan: never }).plan,
+      }),
+    },
     ...[true, false].map((enabled) => ({
       name: enabled ? "Reaction roles" : "Reaction roles (feature off)",
       html: renderReactionRolesPage({
