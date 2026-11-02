@@ -696,6 +696,7 @@ one):
 | Parse/validate a cron string from config | `sanitizeCronExpression`, `validateCronExpression` | `src/utils/cron.ts` |
 | Wait for the gateway before the first fetch | `waitForClientReady` | `src/utils/discord.ts` |
 | Reconnect Mongo before a query | `MongoConnectionGuard` | `src/utils/mongo.ts` |
+| Serialise writes that create channels, per server (the Channel Manager and `applyChannelPlan` share it; not re-entrant) | `withChannelLock` | `src/web/channel-write-lock.ts` |
 | Escape a value into HTML | `escapeHtml`, `escapeJsInAttr` | `src/web/html.ts` |
 | Pick an embed accent colour (never a hex literal; a guard test fails on one) | `embedColor(kind)` | `src/utils/embed-style.ts` |
 | Create the channel or category a setting points at (plan with nothing written, apply that re-checks the live server, rollback on failure; no permission overwrites; run under a per-server lock) | `planChannels`, `applyChannelPlan` | `src/web/channel-create.ts` |

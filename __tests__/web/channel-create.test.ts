@@ -21,6 +21,8 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
 
 const { applyChannelPlan, normaliseChannelName, planChannels } =
   await import("../../src/web/channel-create.js");
+const { withChannelLock, CHANNEL_LOCK_WAIT_MS, CHANNEL_LOCK_BUSY_MESSAGE } =
+  await import("../../src/web/channel-write-lock.js");
 
 const view = (
   id: string,
@@ -614,5 +616,210 @@ describe("errors wrapped by makeDiscordApiCall (the cause chain)", () => {
     (a as { cause?: unknown }).cause = b;
     const result = await run(a, { afterFirst: false });
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("applyChannelPlan serialises per server (#1714)", () => {
+  const entry = { kind: "text" as const, name: "bot-log" };
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  };
+
+  /** One shared server: a create adds to what the next read returns. */
+  function sharedServer(guildId = "1") {
+    const channels: ManagedChannelView[] = [...live];
+    let release: (() => void) | null = null;
+    let hold: Promise<void> | null = null;
+    const post = jest.fn(
+      async (_route: string, opts: { body: Record<string, unknown> }) => {
+        if (hold) await hold;
+        const id = String(900 + channels.length).padStart(18, "0");
+        channels.push(view(id, opts.body.name as string, "text", null));
+        return { id, name: opts.body.name as string };
+      },
+    );
+    const del = jest
+      .fn<(route: string, opts: unknown) => Promise<void>>()
+      .mockResolvedValue(undefined);
+    const deps: ChannelCreateDeps = {
+      guildId,
+      rest: { post, delete: del } as unknown as ChannelCreateDeps["rest"],
+      call: (fn) => fn(new AbortController().signal),
+      listChannels: async () => [...channels],
+      reason: "test",
+    };
+    return {
+      deps,
+      post,
+      del,
+      channels,
+      holdCreates: () => {
+        hold = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      },
+      releaseCreates: () => release?.(),
+    };
+  }
+
+  it("two concurrent applies for the same name create one channel", async () => {
+    const server = sharedServer();
+    const reviewed = planChannels([entry], server.channels);
+    if (!reviewed.ok) throw new Error("plan");
+    server.holdCreates();
+    const first = applyChannelPlan(server.deps, [entry], reviewed.planId);
+    const second = applyChannelPlan(server.deps, [entry], reviewed.planId);
+    await flush();
+    expect(server.post).toHaveBeenCalledTimes(1);
+    server.releaseCreates();
+    const results = await Promise.all([first, second]);
+    expect(server.post).toHaveBeenCalledTimes(1);
+    expect(results[0].ok).toBe(true);
+    // The second one re-planned inside the lock, saw the name, and wrote nothing.
+    expect(results[1]).toMatchObject({ ok: false, removed: [], stuck: [] });
+    expect(server.channels.filter((c) => c.name === "bot-log")).toHaveLength(1);
+  });
+
+  it("an apply waits for another writer of the same server and re-reads after it", async () => {
+    const server = sharedServer();
+    const reviewed = planChannels([entry], server.channels);
+    if (!reviewed.ok) throw new Error("plan");
+    let finishOther!: () => void;
+    const other = withChannelLock("1", async () => {
+      await new Promise<void>((resolve) => {
+        finishOther = resolve;
+      });
+      // The other writer (the Channel Manager) creates the same name.
+      server.channels.push(view("777777777777777777", "bot-log", "text"));
+    });
+    const apply = applyChannelPlan(server.deps, [entry], reviewed.planId);
+    await flush();
+    expect(server.post).not.toHaveBeenCalled();
+    finishOther();
+    await other;
+    const result = await apply;
+    expect(server.post).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(server.channels.filter((c) => c.name === "bot-log")).toHaveLength(1);
+  });
+
+  it("releases the lock after a failed apply and after its rollback", async () => {
+    const server = sharedServer();
+    const two = [entry, { kind: "text" as const, name: "second" }];
+    const reviewed = planChannels(two, server.channels);
+    if (!reviewed.ok) throw new Error("plan");
+    server.post
+      .mockImplementationOnce(async (_r, opts) => ({
+        id: "888888888888888881",
+        name: opts.body.name as string,
+      }))
+      .mockRejectedValueOnce(apiError(50013, "Missing Permissions"));
+    const failed = await applyChannelPlan(server.deps, two, reviewed.planId);
+    expect(failed).toMatchObject({
+      ok: false,
+      removed: ["888888888888888881"],
+    });
+    expect(server.del).toHaveBeenCalledTimes(1);
+    expect(await withChannelLock("1", async () => "free")).toEqual({
+      ok: true,
+      value: "free",
+    });
+  });
+
+  it("releases the lock when the rollback itself fails", async () => {
+    const server = sharedServer();
+    const two = [entry, { kind: "text" as const, name: "second" }];
+    const reviewed = planChannels(two, server.channels);
+    if (!reviewed.ok) throw new Error("plan");
+    server.post
+      .mockImplementationOnce(async (_r, opts) => ({
+        id: "888888888888888881",
+        name: opts.body.name as string,
+      }))
+      .mockRejectedValueOnce(apiError(50013, "Missing Permissions"));
+    server.del.mockRejectedValue(apiError(50013, "Missing Permissions"));
+    const failed = await applyChannelPlan(server.deps, two, reviewed.planId);
+    expect(failed).toMatchObject({ ok: false, stuck: ["888888888888888881"] });
+    expect(await withChannelLock("1", async () => "free")).toEqual({
+      ok: true,
+      value: "free",
+    });
+  });
+
+  it("releases the lock when the channels cannot be read", async () => {
+    const server = sharedServer();
+    const deps = {
+      ...server.deps,
+      listChannels: async () => {
+        throw new Error("down");
+      },
+    };
+    const result = await applyChannelPlan(deps, [entry], "whatever");
+    expect(result.ok).toBe(false);
+    expect(await withChannelLock("1", async () => "free")).toEqual({
+      ok: true,
+      value: "free",
+    });
+  });
+
+  it("releases the lock after a create that timed out", async () => {
+    const server = sharedServer();
+    const reviewed = planChannels([entry], server.channels);
+    if (!reviewed.ok) throw new Error("plan");
+    server.post.mockRejectedValueOnce(new Error("Request timeout"));
+    const result = await applyChannelPlan(
+      server.deps,
+      [entry],
+      reviewed.planId,
+    );
+    expect(result.ok).toBe(false);
+    expect(await withChannelLock("1", async () => "free")).toEqual({
+      ok: true,
+      value: "free",
+    });
+  });
+
+  it("a caller that waits too long gets the busy message in the unchanged result shape and writes nothing", async () => {
+    jest.useFakeTimers();
+    try {
+      const server = sharedServer();
+      let finish!: () => void;
+      const holder = withChannelLock("1", async () => {
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+      });
+      const waiting = applyChannelPlan(server.deps, [entry], "any");
+      await jest.advanceTimersByTimeAsync(CHANNEL_LOCK_WAIT_MS);
+      expect(await waiting).toEqual({
+        ok: false,
+        error: CHANNEL_LOCK_BUSY_MESSAGE,
+        removed: [],
+        stuck: [],
+      });
+      finish();
+      await holder;
+      expect(server.post).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("a different server is not blocked", async () => {
+    const busy = sharedServer("1");
+    const free = sharedServer("2");
+    const reviewed = planChannels([entry], free.channels);
+    if (!reviewed.ok) throw new Error("plan");
+    let finish!: () => void;
+    const holder = withChannelLock("1", async () => {
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    });
+    const result = await applyChannelPlan(free.deps, [entry], reviewed.planId);
+    expect(result.ok).toBe(true);
+    expect(busy.post).not.toHaveBeenCalled();
+    finish();
+    await holder;
   });
 });

@@ -31,9 +31,10 @@
  *    what Discord gives it from its category, or the server defaults. The one
  *    place to change that is `overwritesFor`.
  *
- * This helper does not serialise anything: two applies, or an apply and another
- * write to the same server (the Channel Manager), can both pass the re-check and
- * both create, giving a duplicate name. The bot-permission check is the caller's;
+ * An apply runs inside the shared per-server lock (`channel-write-lock.ts`, #1714),
+ * which the Channel Manager's writes take too, so two applies, or an apply and a
+ * Channel Manager write, cannot both pass the re-check and both create the same
+ * name. Do not call it from inside work that holds that lock. The bot-permission check is the caller's;
  * a refusal from Discord (missing permission, rate limit) is reported here.
  * A create that timed out is in neither `removed` nor `stuck`: whether it exists
  * is unknown, and the error tells the admin to check Discord.
@@ -62,6 +63,10 @@ import {
   type ManageableKind,
   type ManagedChannelView,
 } from "./channel-manager.js";
+import {
+  CHANNEL_LOCK_BUSY_MESSAGE,
+  withChannelLock,
+} from "./channel-write-lock.js";
 import { describeWriteFailure } from "./channel-write-rest.js";
 import logger from "../utils/logger.js";
 
@@ -266,9 +271,29 @@ export type ChannelApplyResult =
 
 /**
  * Plan again from the live server and create only if that is the plan Review
- * showed. On a failure, what this call created is deleted again.
+ * showed. On a failure, what this call created is deleted again. The whole
+ * apply, the re-read included, runs inside the shared per-server lock
+ * (`channel-write-lock.ts`); a caller that waits too long for it gets
+ * `CHANNEL_LOCK_BUSY_MESSAGE` and nothing is written.
  */
 export async function applyChannelPlan(
+  deps: ChannelCreateDeps,
+  entries: readonly ChannelPlanEntry[],
+  reviewedPlanId: string,
+): Promise<ChannelApplyResult> {
+  const held = await withChannelLock(deps.guildId, () =>
+    applyLocked(deps, entries, reviewedPlanId),
+  );
+  if (held.ok) return held.value;
+  return {
+    ok: false,
+    error: CHANNEL_LOCK_BUSY_MESSAGE,
+    removed: [],
+    stuck: [],
+  };
+}
+
+async function applyLocked(
   deps: ChannelCreateDeps,
   entries: readonly ChannelPlanEntry[],
   reviewedPlanId: string,

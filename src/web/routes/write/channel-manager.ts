@@ -22,7 +22,10 @@ import {
 } from "discord.js";
 import logger from "../../../utils/logger.js";
 import { CommandManager } from "../../../services/command-manager.js";
-import { createKeyedLock } from "../../../utils/keyed-lock.js";
+import {
+  CHANNEL_LOCK_BUSY_MESSAGE,
+  withChannelLock,
+} from "../../channel-write-lock.js";
 import { recordAudit } from "../../audit.js";
 import {
   cancellableCall,
@@ -199,10 +202,10 @@ export function createChannelManagerRouter(
 ): Router {
   const router = Router();
 
-  // Writes to one server run one at a time, each from a fresh read of the
-  // channels: two saves of the same page cannot both pass their checks against
-  // the same snapshot and then silently overwrite each other.
-  const writeLock = createKeyedLock();
+  // Writes to one server run one at a time (the shared lock in
+  // `channel-write-lock.ts`, which `applyChannelPlan` takes too), each from a
+  // fresh read of the channels: two saves of the same page cannot both pass
+  // their checks against the same snapshot and then silently overwrite each other.
 
   // Created on first use: the token exists once the bot has logged in.
   let cachedRest: REST | null = writeRest ?? null;
@@ -255,7 +258,7 @@ export function createChannelManagerRouter(
       const session = requireSessionContext(req);
       const params = { id: String(req.params.id ?? "") };
       let outcome: Outcome = refuse("");
-      await writeLock.run(session.guildId, async () => {
+      const held = await withChannelLock(session.guildId, async () => {
         try {
           const guild = await fetchGuild(session.guildId);
           if (!guild) {
@@ -289,6 +292,7 @@ export function createChannelManagerRouter(
           outcome = refuse(describeWriteFailure(error));
         }
       });
+      if (!held.ok) outcome = refuse(CHANNEL_LOCK_BUSY_MESSAGE);
       await recordAudit(session, {
         action: `channels.${name}`,
         targetId: outcome.targetId ?? (params.id || null),
