@@ -1487,6 +1487,14 @@ A page that does not pass the flag renders exactly as before, with the same pick
 `parsePickerCreateValue` and the creation is a separate step. The rest of #1394 (labels
 on voice stats, the bot permissions page, the events and host pages, the server scan pages and the Voice Channels status line) is not done yet.
 
+**Whether the bot can create (#1660, a proposal for the owner).** A page sets the create flag from `canBotCreate` (`bot-create-check.ts`), which reads the
+same snapshot of the server as **Bot permissions** and never guesses. The bot can create a channel or category when it has Manage Channels server-wide
+(Administrator counts); a channel under a category also needs Manage Channels in that category, where an overwrite can deny it. There are three
+answers. Yes: the create row shows. No: no row, and the Picker's help line names the permission, where to fix it and the **Bot permissions** page
+(`CREATE_REASON`); the line shows only where a create row would otherwise be offered. Unknown, when the server, the bot's own membership or the
+category could not be read: no row and no line, because the page cannot say which is true. `toPickerCreate` turns an answer into the Picker's
+flag. No page uses it yet; the pages that offer creation wire it in.
+
 The **Setup Wizard** (`/admin/wizard`) walks through the features you pick,
 one step each: voice channels, voice tracking, quotes, achievements, reaction
 roles, announcements, notices, polls, LFG, name history, moderation, events,
