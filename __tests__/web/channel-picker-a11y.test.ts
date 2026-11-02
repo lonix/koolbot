@@ -2,7 +2,7 @@
  * @jest-environment <rootDir>/__tests__/jsdom-node-env.cjs
  */
 
-/* global document, HTMLElement, HTMLInputElement, HTMLButtonElement, Event */
+/* global document, HTMLElement, HTMLInputElement, HTMLButtonElement, Event, KeyboardEvent */
 /**
  * Axe over every state of the script-built channel picker (#1394). The page
  * fixtures in `a11y-pages.ts` drop inline scripts, so they only cover the
@@ -11,7 +11,10 @@
  */
 import { describe, it, expect } from "@jest/globals";
 import { axe, toHaveNoViolations } from "jest-axe";
-import { CHANNEL_PICKER_SCRIPT } from "../../src/web/setting-pickers.js";
+import {
+  CHANNEL_PICKER_CREATE_SCRIPT,
+  CHANNEL_PICKER_SCRIPT,
+} from "../../src/web/setting-pickers.js";
 import { channelKindIcons } from "../../src/web/discord-labels.js";
 
 expect.extend(toHaveNoViolations);
@@ -204,6 +207,95 @@ describe("multi-select channel picker accessibility (axe, #1473)", () => {
   it("open", async () => {
     MULTI();
     trigger().click();
+    expect(await axe(document.body, OPTIONS)).toHaveNoViolations();
+  });
+});
+
+describe("create row accessibility (axe, #1658)", () => {
+  const meta = (create: unknown): string =>
+    JSON.stringify({
+      items: [null, ...CHANNELS, ["missing", "77", ""]],
+      create,
+    }).replace(/"/g, "&quot;");
+
+  function mountCreate(create: unknown): void {
+    document.body.innerHTML = `<main><h1>Settings</h1><label for="f">Announce channel</label>${SELECT().replace(
+      /data-picker-meta="[^"]*"/,
+      `data-picker-meta="${meta(create)}"`,
+    )}</main>`;
+    (0, eval)(CHANNEL_PICKER_CREATE_SCRIPT);
+  }
+
+  it("offered row, open and typed", async () => {
+    mountCreate({ kind: "channel", ok: true });
+    trigger().click();
+    typeInto("Support");
+    const row = document.querySelector("[data-create]") as HTMLElement;
+    expect(row.hidden).toBe(false);
+    expect(row.getAttribute("role")).toBe("option");
+    expect(search().getAttribute("aria-activedescendant")).toBe(row.id);
+    expect(await axe(document.body, OPTIONS)).toHaveNoViolations();
+  });
+
+  it("the reason line when creating cannot work", async () => {
+    mountCreate({
+      kind: "channel",
+      ok: false,
+      reason: "The bot needs Manage Channels.",
+    });
+    trigger().click();
+    typeInto("Support");
+    expect(await axe(document.body, OPTIONS)).toHaveNoViolations();
+  });
+
+  it("a name that is too long", async () => {
+    mountCreate({ kind: "channel", ok: true });
+    trigger().click();
+    typeInto("a".repeat(101));
+    expect(await axe(document.body, OPTIONS)).toHaveNoViolations();
+  });
+
+  it("the pending trigger state and its live region", async () => {
+    mountCreate({ kind: "channel", ok: true });
+    trigger().click();
+    typeInto("Support");
+    search().dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(trigger().textContent).toContain("Support (will be created)");
+    expect(
+      document.querySelector(".kb-picker > .kb-visually-hidden[role=status]")
+        ?.textContent,
+    ).toBe("Will be created: channel 'Support'. Choose another row to undo.");
+    expect(await axe(document.body, OPTIONS)).toHaveNoViolations();
+  });
+
+  it("a pending chip in a multi-select", async () => {
+    document.body.innerHTML = `<main><h1>Settings</h1><label for="f">Roles</label><span class="kb-picker" data-picker data-picker-meta="${JSON.stringify(
+      { items: [["role", "Mods", ""]], create: { kind: "role", ok: true } },
+    ).replace(
+      /"/g,
+      "&quot;",
+    )}"><select class="kb-select" id="f" name="v" multiple><option value="9">x</option></select></span></main>`;
+    (0, eval)(CHANNEL_PICKER_CREATE_SCRIPT);
+    trigger().click();
+    typeInto("Helpers");
+    search().dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(
+      document.querySelector(
+        ".kb-picker__chip-remove[aria-label='Remove @Helpers (will be created)']",
+      ),
+    ).not.toBeNull();
     expect(await axe(document.body, OPTIONS)).toHaveNoViolations();
   });
 });
