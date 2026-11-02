@@ -424,7 +424,8 @@ export function channelPickerScript(create: boolean): string {
     c(
       "var nm=cfg?nameOf(inp.value,p):null,ex=nm?findName(nm):-1,offer=false,cmsg='',cnt,q=inp.value.trim(),msg;" +
         "if(nm){if(nm.length>MAXN)cmsg='Names can be up to '+MAXN+' characters.';else if(ex<0){if(cfg.ok){offer=true;vis.push(CR)}else if(cfg.reason)cmsg=cfg.reason}}" +
-        "if(crow){crow.hidden=!offer;if(offer){crow.textContent='';crow.appendChild(svg(PLUS));crow.appendChild(document.createTextNode('Create new '+cfg.kind+\": '\"+nm+\"'\"))}}" +
+        // The text is wrapped in a span: a bare text node would leave the plus icon as the row's last element child, which kb.css pushes to the right edge.
+        "if(crow){crow.hidden=!offer;if(offer){crow.textContent='';crow.appendChild(svg(PLUS));crow.appendChild(el('span','','Create new '+cfg.kind+\": '\"+nm+\"'\"))}}" +
         "cnt=vis.length-(offer?1:0);" +
         // The active row: an existing item with this exact name; none when the name is already chosen to be created (Enter must not pick a neighbour); else the chosen row, else the first.
         "var on=-1,f0;for(f0=0;f0<vis.length&&on<0;f0++)if(vis[f0]!==CR&&isOn(vis[f0]))on=f0;" +

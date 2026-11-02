@@ -1013,4 +1013,20 @@ describe("review findings on #1699", () => {
       expect(posted(dom)).toEqual(["create:Aa"]);
     });
   });
+
+  describe("fifth review: the create row's markup", () => {
+    it("the plus icon is not the last element child (kb.css pushes such an icon to the right)", () => {
+      const dom = mount(page("channel", "1", () => ok("channel")));
+      const inp = open(dom);
+      type(dom, "Support");
+      const r = createRow(dom);
+      expect(r.querySelector("svg")?.matches(":last-child")).toBe(false);
+      expect(r.textContent).toBe("Create new channel: 'Support'");
+      // The row is still the active descendant, and its name is its text.
+      expect(inp.getAttribute("aria-activedescendant")).toBe(r.id);
+      expect(r.getAttribute("role")).toBe("option");
+      key(dom, inp, "Enter");
+      expect($<HTMLSelectElement>(dom, "select").value).toBe("create:Support");
+    });
+  });
 });
