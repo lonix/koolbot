@@ -315,9 +315,10 @@ describe("POST /bot-status/entry/:id/{update,delete}", () => {
     expect(r.errorLines["bot-status-edit-entry-1-text-error"]).toBe(
       "Enter the status text.",
     );
-    expect(r.html).toContain(
-      '<details class="helper edit-details" open><summary>Chatting with {user}</summary>',
+    expect(r.html).toMatch(
+      /<details class="kb-disclosure" open><summary><svg[^>]*>.*?<\/svg>Edit<\/summary>/s,
     );
+    expect(r.html).toContain('<th scope="row">Chatting with {user}');
     expect(r.html).toContain('value="  "');
     expect(mockEntrySave).not.toHaveBeenCalled();
   });
@@ -385,7 +386,7 @@ describe("POST /bot-status/pool/:pool/import", () => {
     // The disclosure holding the form is open, or the message would be hidden;
     // the append choice and the pasted text come back as typed.
     expect(r.html).toMatch(
-      /<details class="helper" open>\s*<summary>Import \/ export<\/summary>/,
+      /<details class="kb-disclosure" open>\s*<summary>.*Import \/ export<\/summary>/s,
     );
     expect(r.html).toMatch(/value="append" checked/);
     expect(r.html).toContain("\n  \n \n</textarea>");

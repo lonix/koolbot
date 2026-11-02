@@ -132,7 +132,7 @@ describe("a form that was not refused", () => {
     for (const html of [render(), render(null), render(OTHER)]) {
       expect(html).not.toMatch(/<(input|select|textarea)[^>]*aria-invalid/);
       expect(html).not.toContain('class="kb-field__error"');
-      expect(html).not.toContain('class="helper edit-details" open');
+      expect(html).not.toContain('class="kb-disclosure" open');
       expect(html).not.toContain("<details open>");
     }
   });
@@ -241,7 +241,9 @@ describe("the per-row edit forms", () => {
         values: { title: "", content: "New", category: "rules" },
       }),
     );
-    const open = d.querySelectorAll("details.edit-details[open]");
+    const open = d.querySelectorAll(
+      "td.kb-actions details.kb-disclosure[open]",
+    );
     expect(open).toHaveLength(1);
     expect(open[0].querySelector("form")?.getAttribute("action")).toBe(
       "/admin/notices/n1/update",
@@ -297,7 +299,9 @@ describe("the per-row edit forms", () => {
         values: { text: "" },
       }),
     );
-    const open = d.querySelectorAll("details.edit-details[open]");
+    const open = d.querySelectorAll(
+      "td.kb-actions details.kb-disclosure[open]",
+    );
     expect(open).toHaveLength(1);
     expect(open[0].querySelector("form")?.getAttribute("action")).toBe(
       "/admin/bot-status/entry/e0/update",

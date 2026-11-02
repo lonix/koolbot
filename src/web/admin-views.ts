@@ -25,7 +25,7 @@ import {
   PERMANENT_CONFIRM_ITEMS,
   REVIEW_JOB_NOTE,
 } from "../utils/moderation-labels.js";
-import { icon, toneIcon } from "./icons.js";
+import { icon, toneIcon, type IconName } from "./icons.js";
 import { commandSyncStatus } from "./command-sync-text.js";
 import type { CommandSyncReport } from "../services/command-manager.js";
 import {
@@ -3025,34 +3025,70 @@ function roleOptionsHtml(options: RoleOption[], selectedId?: string): string {
   return out.join("");
 }
 
-const PLACEHOLDER_REFERENCE_HTML = `
-<details class="helper">
-  <summary>Available placeholders</summary>
-  <ul class="mono">
-    <li><code>{server_name}</code> — guild name</li>
-    <li><code>{member_count}</code> — total members</li>
-    <li><code>{online_count}</code> — members currently online (best effort; shows 0 without presence data)</li>
-    <li><code>{owner}</code> — server owner mention</li>
-    <li><code>{boost_count}</code> — active Nitro boosts</li>
-    <li><code>{boost_tier}</code> — Nitro boost tier (0–3)</li>
-    <li><code>{channel_count}</code> — number of channels</li>
-    <li><code>{role_count}</code> — number of roles</li>
-    <li><code>{random_member}</code> — a random member mention</li>
-    <li><code>{date}</code> — current date</li>
-    <li><code>{time}</code> — current time</li>
-    <li><code>{day}</code> — current weekday</li>
-    <li><code>{month}</code> — current month</li>
-    <li><code>{year}</code> — current year</li>
-    <li><code>{date_iso}</code> — ISO date (YYYY-MM-DD)</li>
-    <li><code>{time_iso}</code> — ISO time (HH:MM:SS, UTC)</li>
-    <li><code>{datetime_iso}</code> — full ISO 8601 timestamp (UTC)</li>
-  </ul>
-  <p class="muted">Tick "Process placeholders" on the announcement to expand them at send time.</p>
-</details>`;
+/** The placeholders an announcement can use, name then meaning. */
+const PLACEHOLDER_REFERENCE: ReadonlyArray<readonly [string, string]> = [
+  ["{server_name}", "guild name"],
+  ["{member_count}", "total members"],
+  [
+    "{online_count}",
+    "members currently online (best effort; shows 0 without presence data)",
+  ],
+  ["{owner}", "server owner mention"],
+  ["{boost_count}", "active Nitro boosts"],
+  ["{boost_tier}", "Nitro boost tier (0–3)"],
+  ["{channel_count}", "number of channels"],
+  ["{role_count}", "number of roles"],
+  ["{random_member}", "a random member mention"],
+  ["{date}", "current date"],
+  ["{time}", "current time"],
+  ["{day}", "current weekday"],
+  ["{month}", "current month"],
+  ["{year}", "current year"],
+  ["{date_iso}", "ISO date (YYYY-MM-DD)"],
+  ["{time_iso}", "ISO time (HH:MM:SS, UTC)"],
+  ["{datetime_iso}", "full ISO 8601 timestamp (UTC)"],
+];
+
+/** The placeholder list as an inline Disclosure holding a KeyValue. */
+const PLACEHOLDER_REFERENCE_HTML = `<details class="kb-disclosure kb-disclosure--inline"><summary>${CHEVRON_ICON}Available placeholders</summary><div class="kb-disclosure__body"><dl class="kb-kv">${PLACEHOLDER_REFERENCE.map(
+  ([name, meaning]) =>
+    `<dt class="kb-mono">${escapeHtml(name)}</dt><dd>${escapeHtml(meaning)}</dd>`,
+).join(
+  "",
+)}</dl><p class="kb-help">Tick "Process placeholders" on the announcement to expand them at send time.</p></div></details>`;
+
+/** An EmptyState with the icon of the page it sits on: what is missing, and how the area fills up. */
+function kbEmptyState(iconName: IconName, title: string, text: string): string {
+  return `<div class="kb-empty"><div class="kb-empty__icon">${icon(iconName)}</div><p class="kb-empty__title">${escapeHtml(title)}</p><p class="kb-empty__text">${escapeHtml(text)}</p></div>`;
+}
 
 /** Form ids of the Announcements page, shared with the write routes (#1517). */
 export const ANNOUNCEMENT_CREATE_FORM = "announcement-create";
 export const ANNOUNCEMENT_ONCE_FORM = "announcement-once";
+
+/**
+ * The fields the create form and the one-off form share: channel, message,
+ * placeholders, and the optional embed. The create form adds the schedule.
+ */
+function renderAnnouncementFields(
+  f: FormView,
+  textChannels: ChannelOption[],
+  withSchedule: boolean,
+): string {
+  return `${pollSelect(f, "channelId", "Channel", channelOptionsHtml(textChannels, f.selected("channelId") || undefined), true)}
+    ${withSchedule ? renderCronField(f, "cron", "Schedule", "0 9 * * *") : ""}
+    ${pollField(f, "message", "Message", `<textarea class="kb-textarea" name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"${fieldControlAttrs(f.control("message"))}>${f.textareaContent("message")}</textarea>`)}
+    <label class="kb-switch"><input type="checkbox" role="switch" name="placeholders" value="1"${f.checked("placeholders") ? " checked" : ""}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span><span>Process placeholders (replace <code>{server_name}</code>, <code>{date}</code>, etc.)</span></label>
+    ${PLACEHOLDER_REFERENCE_HTML}
+    <fieldset class="kb-field">
+      <legend class="kb-label">Optional embed</legend>
+      <div class="kb-stack">
+        ${pollField(f, "embedTitle", "Title", `<input class="kb-input" type="text" name="embedTitle" maxlength="256"${f.valueAttr("embedTitle")}${fieldControlAttrs(f.control("embedTitle"))}>`)}
+        ${pollField(f, "embedDescription", "Description", `<textarea class="kb-textarea" name="embedDescription" rows="3" maxlength="4000"${fieldControlAttrs(f.control("embedDescription"))}>${f.textareaContent("embedDescription")}</textarea>`)}
+        ${renderColourField(f, "embedColor", "Colour", "", "No colour")}
+      </div>
+    </fieldset>`;
+}
 
 export function renderAnnouncementsPage(props: AnnouncementsProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
@@ -3060,105 +3096,79 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
   const once = formView(props.refusedForm, ANNOUNCEMENT_ONCE_FORM);
 
   const tableRows = props.rows
-    .map(
-      (a) => `<tr>
-<th scope="row" class="mono">${escapeHtml(a.id)}</th>
+    .map((a) => {
+      const base = `/admin/announcements/${escapeHtml(a.id)}`;
+      return `<tr>
+<th scope="row" class="kb-mono">${escapeHtml(a.id)}</th>
 <td>${channelMention({ name: a.channelName, type: a.channelType })}</td>
-<td class="mono">${escapeHtml(a.cron)}</td>
-<td>${tagOnOff(a.enabled)}</td>
-<td>${escapeHtml(a.messagePreview)}${a.embedTitle ? `<div class="muted mono">embed: ${escapeHtml(a.embedTitle)}</div>` : ""}</td>
-<td>${a.placeholders ? '<span class="tag tag-info">yes</span>' : '<span class="muted">no</span>'}</td>
-<td class="muted">${escapeHtml(a.createdAt)}</td>
-<td class="actions">
-  <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/post-now">${csrfInput}<button type="submit" class="btn">Post now</button></form>
-  <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/toggle">${csrfInput}<button type="submit" class="btn">${a.enabled ? "Disable" : "Enable"}</button></form>
-  <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/delete" data-confirm="Delete announcement ${escapeHtml(a.id)}?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
-</td>
-</tr>`,
-    )
+<td class="kb-mono">${escapeHtml(a.cron)}</td>
+<td>${kbOnOff(a.enabled)}</td>
+<td>${escapeHtml(a.messagePreview)}${a.embedTitle ? `<div class="kb-muted kb-mono">embed: ${escapeHtml(a.embedTitle)}</div>` : ""}</td>
+<td>${a.placeholders ? '<span class="kb-badge kb-badge--info">yes</span>' : '<span class="kb-muted">no</span>'}</td>
+<td class="kb-muted">${escapeHtml(a.createdAt)}</td>
+<td class="kb-actions"><div class="kb-row kb-row--nowrap">
+  <form method="POST" action="${base}/post-now">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm">Post now</button></form>
+  <form method="POST" action="${base}/toggle">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm">${a.enabled ? "Disable" : "Enable"}</button></form>
+  <form method="POST" action="${base}/delete" data-confirm="Delete announcement ${escapeHtml(a.id)}?">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger">Delete</button></form>
+</div></td>
+</tr>`;
+    })
     .join("");
 
   const tableHtml =
     props.rows.length === 0
-      ? `<div class="empty">No scheduled announcements configured.</div>`
-      : `<table><thead><tr><th scope="col">ID</th><th scope="col">Channel</th><th scope="col">Cron</th><th scope="col">Status</th><th scope="col">Message</th><th scope="col">Placeholders</th><th scope="col">Created</th><th scope="col">Actions</th></tr></thead><tbody>${tableRows}</tbody></table>`;
+      ? `<div class="kb-panel__body">${kbEmptyState("megaphone", "No scheduled announcements configured.", "A schedule posts its message in a channel on a cron. Create one below.")}</div>`
+      : `<div class="kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">Schedules</caption><thead><tr><th scope="col">ID</th><th scope="col">Channel</th><th scope="col">Cron</th><th scope="col">Status</th><th scope="col">Message</th><th scope="col">Placeholders</th><th scope="col">Created</th><th scope="col">Actions</th></tr></thead><tbody>${tableRows}</tbody></table></div>`;
+
+  const schedulesHtml = `<section class="kb-panel" id="announcements-schedules" aria-labelledby="announcements-schedules-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="announcements-schedules-h">Schedules</h2><span class="kb-panel__meta">${props.rows.length}</span></header>
+  ${tableHtml}
+  <div class="kb-panel__body">
+    <form method="POST" action="/admin/announcements/post-vc-stats" class="kb-row">
+      ${csrfInput}
+      <button type="submit" class="kb-btn">Post weekly VC stats now</button>
+      <span class="kb-help">Posts the weekly voice-stats announcement immediately, off schedule.</span>
+    </form>
+  </div>
+</section>`;
+
+  const createHtml = pollPanel(
+    "announcements-create",
+    "Create a new announcement",
+    `<form method="POST" action="/admin/announcements/create" class="kb-stack">
+    ${csrfInput}
+    ${renderAnnouncementFields(create, props.textChannels, true)}
+    <div class="kb-row"><button type="submit" class="${mainKbButtonClass(props.enabled)}">Create announcement</button></div>
+  </form>`,
+  );
+  const onceHtml = pollPanel(
+    "announcements-once",
+    "Compose & send once",
+    `<form method="POST" action="/admin/announcements/post-once" class="kb-stack">
+    ${csrfInput}
+    <p class="kb-help">Post a one-off announcement immediately — no cron schedule is stored.</p>
+    ${renderAnnouncementFields(once, props.textChannels, false)}
+    <div class="kb-row"><button type="submit" class="kb-btn">Post now</button></div>
+  </form>`,
+  );
 
   const body = `
-<h1>Announcements</h1>
-<p class="subtitle">Scheduled announcements posted on a cron.</p>
+<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Announcements</h1>
+    <p class="kb-pagehead__sub">Scheduled announcements posted on a cron.</p>
+    ${renderStatusLine({
+      enabled: props.enabled,
+      chips: [{ text: countOf(props.rows.length, "schedule") }],
+    })}
+  </div>
+</header>
 ${renderPageFlash(props.flash)}
 ${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Announcements", featureKey: "announcements.enabled", returnTo: "/admin/announcements", csrfToken: props.csrfToken })}
-${renderStatusLine({
-  enabled: props.enabled,
-  chips: [{ text: countOf(props.rows.length, "schedule") }],
-})}
-
-<div class="card">
-  <h2>Schedules</h2>${tableHtml}
-  <form method="POST" action="/admin/announcements/post-vc-stats" class="inline-form">
-    ${csrfInput}
-    <button type="submit" class="btn">Post weekly VC stats now</button>
-    <span class="muted">Posts the weekly voice-stats announcement immediately, off schedule.</span>
-  </form>
-</div>
-<div class="card">
-  <h2>Create a new announcement</h2>
-  <form method="POST" action="/admin/announcements/create" class="stack">
-    ${csrfInput}
-    <label>Channel
-      <select name="channelId" required${create.attrs("channelId")}>${channelOptionsHtml(props.textChannels, create.selected("channelId") || undefined)}</select>
-    </label>${create.error("channelId")}
-    ${renderCronField(create, "cron", "Schedule", "0 9 * * *")}
-    <label>Message
-      <textarea name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"${create.attrs("message")}>${create.textareaContent("message")}</textarea>
-    </label>${create.error("message")}
-    <label class="checkbox">
-      <input type="checkbox" name="placeholders" value="1"${create.checked("placeholders") ? " checked" : ""}>
-      Process placeholders (replace <code>{server_name}</code>, <code>{date}</code>, etc.)
-    </label>
-    ${PLACEHOLDER_REFERENCE_HTML}
-    <fieldset>
-      <legend>Optional embed</legend>
-      <label>Title
-        <input type="text" name="embedTitle" maxlength="256"${create.valueAttr("embedTitle")}${create.attrs("embedTitle")}>
-      </label>${create.error("embedTitle")}
-      <label>Description
-        <textarea name="embedDescription" rows="3" maxlength="4000"${create.attrs("embedDescription")}>${create.textareaContent("embedDescription")}</textarea>
-      </label>${create.error("embedDescription")}
-      ${renderColourField(create, "embedColor", "Colour", "", "No colour")}
-    </fieldset>
-    <button type="submit" class="${mainButtonClass(props.enabled)}">Create announcement</button>
-  </form>
-</div>
-<div class="card">
-  <h2>Compose &amp; send once</h2>
-  <p class="subtitle">Post a one-off announcement immediately — no cron schedule is stored.</p>
-  <form method="POST" action="/admin/announcements/post-once" class="stack">
-    ${csrfInput}
-    <label>Channel
-      <select name="channelId" required${once.attrs("channelId")}>${channelOptionsHtml(props.textChannels, once.selected("channelId") || undefined)}</select>
-    </label>${once.error("channelId")}
-    <label>Message
-      <textarea name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"${once.attrs("message")}>${once.textareaContent("message")}</textarea>
-    </label>${once.error("message")}
-    <label class="checkbox">
-      <input type="checkbox" name="placeholders" value="1"${once.checked("placeholders") ? " checked" : ""}>
-      Process placeholders (replace <code>{server_name}</code>, <code>{date}</code>, etc.)
-    </label>
-    ${PLACEHOLDER_REFERENCE_HTML}
-    <fieldset>
-      <legend>Optional embed</legend>
-      <label>Title
-        <input type="text" name="embedTitle" maxlength="256"${once.valueAttr("embedTitle")}${once.attrs("embedTitle")}>
-      </label>${once.error("embedTitle")}
-      <label>Description
-        <textarea name="embedDescription" rows="3" maxlength="4000"${once.attrs("embedDescription")}>${once.textareaContent("embedDescription")}</textarea>
-      </label>${once.error("embedDescription")}
-      ${renderColourField(once, "embedColor", "Colour", "", "No colour")}
-    </fieldset>
-    <button type="submit" class="btn">Post now</button>
-  </form>
-</div>
+${schedulesHtml}
+${createHtml}
+${onceHtml}
 ${renderFeatureSettingsCard({
   intro:
     "Switch scheduled announcements on or off here without leaving the page. Saved through the shared settings route.",
@@ -3171,6 +3181,7 @@ ${renderFeatureSettingsCard({
   enabled: props.enabled,
   flash: props.flash,
 })}
+</div>
 `;
   return renderAdminPage({
     title: "Announcements",
@@ -4903,77 +4914,104 @@ export function renderNoticesPage(props: NoticesProps): string {
   const create = formView(props.refusedForm, NOTICE_CREATE_FORM);
   const groupSections =
     props.groups.length === 0
-      ? `<div class="empty">No notices stored.</div>`
+      ? `<section class="kb-panel" id="notices-empty" aria-labelledby="notices-empty-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="notices-empty-h">Notices</h2></header>
+  <div class="kb-panel__body">${kbEmptyState("sticky-note", "No notices stored.", "Notices you create below are listed here by category, in the order they post.")}</div>
+</section>`
       : props.groups
-          .map((g) => {
+          .map((g, groupIndex) => {
             const shownOrder = orderToken(g.rows.map((n) => n.id));
             const rows = g.rows
               .map((n, index) => {
                 const f = formView(props.refusedForm, noticeEditForm(n.id));
                 return `<tr${reorderRowAttrs(`notice-${n.id}`, n.title)}>
 <td>${renderReorderCell({ action: `/admin/notices/${n.id}/move`, scope: n.category, csrfInput, index, count: g.rows.length, orderToken: shownOrder, label: n.title })}</td>
-<th scope="row">${escapeHtml(n.title)}<div class="muted mono">id: ${escapeHtml(n.id)}</div></th>
-<td class="muted">${escapeHtml(n.preview)}</td>
-<td class="mono muted">${escapeHtml(n.messageId)}</td>
-<td class="muted">${escapeHtml(n.updatedAt)}</td>
-<td class="actions">
-  <details class="helper edit-details"${f.open()}><summary>Edit</summary>
-    <form method="POST" action="/admin/notices/${escapeHtml(n.id)}/update" class="stack">${csrfInput}
-      <label>Title<input type="text" name="title" maxlength="256" value="${escapeHtml(f.value("title", n.title))}" required${f.attrs("title")}></label>${f.error("title")}
-      <label>Content<textarea name="content" rows="6" maxlength="4000" required${f.attrs("content")}>${f.textareaContent("content", n.content)}</textarea></label>${f.error("content")}
-      <label>Category<select name="category"${f.attrs("category")}>${noticeCategoryOptionsHtml(props.categoryOptions, f.selected("category", n.category))}</select></label>${f.error("category")}
-      <button type="submit" class="btn">Save changes</button>
-    </form>
+<th scope="row">${escapeHtml(n.title)}<div class="kb-muted kb-mono">id: ${escapeHtml(n.id)}</div></th>
+<td class="kb-muted">${escapeHtml(n.preview)}</td>
+<td class="kb-mono kb-muted">${escapeHtml(n.messageId)}</td>
+<td class="kb-muted">${escapeHtml(n.updatedAt)}</td>
+<td class="kb-actions"><div class="kb-row kb-row--nowrap">
+  <details class="kb-disclosure"${f.open()}><summary>${CHEVRON_ICON}Edit</summary>
+    <div class="kb-disclosure__body"><form method="POST" action="/admin/notices/${escapeHtml(n.id)}/update" class="kb-stack">${csrfInput}
+      ${pollField(f, "title", "Title", `<input class="kb-input" type="text" name="title" maxlength="256" value="${escapeHtml(f.value("title", n.title))}" required${fieldControlAttrs(f.control("title"))}>`)}
+      ${pollField(f, "content", "Content", `<textarea class="kb-textarea" name="content" rows="6" maxlength="4000" required${fieldControlAttrs(f.control("content"))}>${f.textareaContent("content", n.content)}</textarea>`)}
+      ${pollSelect(f, "category", "Category", noticeCategoryOptionsHtml(props.categoryOptions, f.selected("category", n.category)))}
+      <div class="kb-row"><button type="submit" class="kb-btn">Save changes</button></div>
+    </form></div>
   </details>
-  <form method="POST" action="/admin/notices/${escapeHtml(n.id)}/delete" data-confirm="Delete notice '${escapeHtml(n.title)}'?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
-</td>
+  <form method="POST" action="/admin/notices/${escapeHtml(n.id)}/delete" data-confirm="Delete notice '${escapeHtml(n.title)}'?">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger">Delete</button></form>
+</div></td>
 </tr>`;
               })
               .join("");
-            return `<div class="card">
-  <h2>${escapeHtml(g.category)} <span class="muted">(${g.rows.length})</span></h2>
-  <table><thead><tr><th scope="col">Order</th><th scope="col">Title</th><th scope="col">Content</th><th scope="col">Message ID</th><th scope="col">Updated</th><th scope="col">Actions</th></tr></thead><tbody${reorderListAttrs(g.category)}>${rows}</tbody></table>
-</div>`;
+            const panelId = `notices-group-${groupIndex}`;
+            return `<section class="kb-panel" id="${panelId}" aria-labelledby="${panelId}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${panelId}-h">${escapeHtml(g.category)}</h2><span class="kb-panel__meta">${g.rows.length}</span></header>
+  <div class="kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">${escapeHtml(g.category)} notices</caption><thead><tr><th scope="col">Order</th><th scope="col">Title</th><th scope="col">Content</th><th scope="col">Message ID</th><th scope="col">Updated</th><th scope="col">Actions</th></tr></thead><tbody${reorderListAttrs(g.category)}>${rows}</tbody></table></div>
+</section>`;
           })
           .join("");
 
+  const createHtml = pollPanel(
+    "notices-create",
+    "Create a notice",
+    `<form method="POST" action="/admin/notices/create" class="kb-stack">
+    ${csrfInput}
+    ${pollField(create, "title", "Title", `<input class="kb-input" type="text" name="title" maxlength="256" required${create.valueAttr("title")}${fieldControlAttrs(create.control("title"))}>`)}
+    ${pollField(create, "content", "Content", `<textarea class="kb-textarea" name="content" rows="5" maxlength="4000" required${fieldControlAttrs(create.control("content"))}>${create.textareaContent("content")}</textarea>`)}
+    ${pollSelect(create, "category", "Category", noticeCategoryOptionsHtml(props.categoryOptions, create.selected("category") || undefined), true)}
+    <div class="kb-row"><button type="submit" class="${mainKbButtonClass(props.enabled)}">Create notice</button></div>
+  </form>`,
+  );
+
+  const resyncHtml = pollPanel(
+    "notices-resync",
+    "Resync to the channel",
+    `<form method="POST" action="/admin/notices/sync" class="kb-row" data-confirm="Resync all notices? This deletes and reposts every notice message."${confirmListAttr(
+      [
+        "The bot's own messages among the latest 100 in the notices channel are deleted; the header stays.",
+        "Every notice is posted again from the saved list.",
+      ],
+    )}>
+    ${csrfInput}
+    <button type="submit" class="kb-btn kb-btn--danger">Resync notices to channel</button>
+    <span class="kb-help">Deletes and reposts every notice message in the channel.</span>
+  </form>`,
+  );
+
   const body = `
-<h1>Notices</h1>
-<p class="subtitle">Notice posts grouped by category. Within a category, notices post in the order listed here. Use <em>Move up</em> and <em>Move down</em> on a row to change its place, or drag a row by its handle.</p>
+<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Notices</h1>
+    <p class="kb-pagehead__sub">Notice posts grouped by category. Within a category, notices post in the order listed here. Use <em>Move up</em> and <em>Move down</em> on a row to change its place, or drag a row by its handle.</p>
+    ${renderStatusLine({
+      enabled: props.enabled,
+      chips: [
+        props.channel
+          ? {
+              text: `Channel ${channelText({ name: props.channel.name, type: props.channel.type })}`,
+            }
+          : {
+              text: "No channel set",
+              warn: true,
+              href: props.settingsUnavailable
+                ? undefined
+                : settingHref("notices.channel_id"),
+            },
+        { text: countOf(props.total, "notice") },
+      ],
+    })}
+  </div>
+</header>
 ${renderPageFlash(props.flash)}
 ${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Notices", featureKey: "notices.enabled", returnTo: "/admin/notices", csrfToken: props.csrfToken })}
-
-${renderStatusLine({
-  enabled: props.enabled,
-  chips: [
-    props.channel
-      ? {
-          text: `Channel ${channelText({ name: props.channel.name, type: props.channel.type })}`,
-        }
-      : {
-          text: "No channel set",
-          warn: true,
-          href: props.settingsUnavailable
-            ? undefined
-            : settingHref("notices.channel_id"),
-        },
-    { text: countOf(props.total, "notice") },
-  ],
-})}${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
-<div class="card">
-  <h2>Create a notice</h2>
-  <form method="POST" action="/admin/notices/create" class="stack">
-    ${csrfInput}
-    <label>Title<input type="text" name="title" maxlength="256" required${create.valueAttr("title")}${create.attrs("title")}></label>${create.error("title")}
-    <label>Content<textarea name="content" rows="5" maxlength="4000" required${create.attrs("content")}>${create.refused ? create.textareaContent("content") : ""}</textarea></label>${create.error("content")}
-    <label>Category<select name="category" required${create.attrs("category")}>${noticeCategoryOptionsHtml(props.categoryOptions, create.selected("category") || undefined)}</select></label>${create.error("category")}
-    <button type="submit" class="${mainButtonClass(props.enabled)}">Create notice</button>
-  </form>
-</div>
-<p class="muted" id="notices-order-note">A new order shows in the Discord channel after <em>Resync notices to channel</em>. Moving a notice does not touch the channel on its own. A new notice goes last in its category.</p>
+${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
+<p class="kb-help" id="notices-order-note">A new order shows in the Discord channel after <em>Resync notices to channel</em>. Moving a notice does not touch the channel on its own. A new notice goes last in its category.</p>
 ${REORDER_STATUS_HTML}
 ${groupSections}
 ${scriptTag(REORDER_SCRIPT)}
+${createHtml}
 ${renderRepostCard({
   id: "repost-header",
   heading: "Header post",
@@ -4997,19 +5035,7 @@ ${renderRepostCard({
         ? "Set the notices channel first."
         : null,
 })}
-<div class="card">
-  <h2>Resync to the channel</h2>
-  <form method="POST" action="/admin/notices/sync" class="inline-form" data-confirm="Resync all notices? This deletes and reposts every notice message."${confirmListAttr(
-    [
-      "The bot's own messages among the latest 100 in the notices channel are deleted; the header stays.",
-      "Every notice is posted again from the saved list.",
-    ],
-  )}>
-    ${csrfInput}
-    <button type="submit" class="btn">Resync notices to channel</button>
-    <span class="muted">Deletes and reposts every notice message in the channel.</span>
-  </form>
-</div>
+${resyncHtml}
 ${renderFeatureSettingsCard({
   intro:
     "Change notices settings here without leaving the page. Changing the channel does not move notices already posted: after saving, use Resync notices to channel above to repost them in the new channel.",
@@ -5023,6 +5049,7 @@ ${renderFeatureSettingsCard({
   needsSetup: !props.channel,
   flash: props.flash,
 })}
+</div>
 `;
   return renderAdminPage({
     title: "Notices",
@@ -5891,63 +5918,74 @@ export function renderStringArrayEditor(
     opts.refusedForm,
     botStatusImportForm(opts.collectionId),
   );
+  const panelId = `pool-${opts.collectionId}`;
 
   const shownOrder = orderToken(opts.items.map((item) => item.id));
-  const rows =
-    opts.items.length === 0
-      ? `<tr><td colspan="3"><span class="muted">No entries stored.</span></td></tr>`
-      : opts.items
-          .map((item, index) => {
-            const f = formView(opts.refusedForm, botStatusEditForm(item.id));
-            return `<tr${reorderRowAttrs(`entry-${item.id}`, item.text)}>
+  const rows = opts.items
+    .map((item, index) => {
+      const f = formView(opts.refusedForm, botStatusEditForm(item.id));
+      return `<tr${reorderRowAttrs(`entry-${item.id}`, item.text)}>
 <td>${renderReorderCell({ action: `${entryPath(item.id)}/move`, scope: opts.collectionId, csrfInput, index, count: opts.items.length, orderToken: shownOrder, label: item.text })}</td>
-<th scope="row">
-  <details class="helper edit-details"${f.open()}><summary>${escapeHtml(item.text)}</summary>
-    <form method="POST" action="${entryPath(item.id)}/update" class="stack">${csrfInput}
-      <label>Text<input type="text" name="text" maxlength="${opts.maxLength}" value="${escapeHtml(f.value("text", item.text))}" required${f.attrs("text")}></label>${f.error("text")}
-      <button type="submit" class="btn">Save changes</button>
-    </form>
+<th scope="row">${escapeHtml(item.text)}<div class="kb-muted kb-mono">id: ${escapeHtml(item.id)}</div></th>
+<td class="kb-actions"><div class="kb-row kb-row--nowrap">
+  <details class="kb-disclosure"${f.open()}><summary>${CHEVRON_ICON}Edit</summary>
+    <div class="kb-disclosure__body"><form method="POST" action="${entryPath(item.id)}/update" class="kb-stack">${csrfInput}
+      ${pollField(f, "text", "Text", `<input class="kb-input" type="text" name="text" maxlength="${opts.maxLength}" value="${escapeHtml(f.value("text", item.text))}" required${fieldControlAttrs(f.control("text"))}>`)}
+      <div class="kb-row"><button type="submit" class="kb-btn">Save changes</button></div>
+    </form></div>
   </details>
-  <div class="muted mono">id: ${escapeHtml(item.id)}</div>
-</th>
-<td class="actions"><form method="POST" action="${entryPath(item.id)}/delete" data-confirm="Delete this entry?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form></td>
+  <form method="POST" action="${entryPath(item.id)}/delete" data-confirm="Delete this entry?">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger">Delete</button></form>
+</div></td>
 </tr>`;
-          })
-          .join("");
+    })
+    .join("");
 
   const defaultsBanner = opts.defaultsNotice
-    ? `<div class="notice warn">${escapeHtml(opts.defaultsNotice)}
-  <form method="POST" action="${poolPath}/seed" class="inline-form">${csrfInput}<button type="submit" class="btn">Seed defaults into store</button></form>
+    ? `<div class="kb-callout kb-callout--warn kb-callout--wrap" role="status">
+  ${toneIcon("warn")}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(opts.defaultsNotice)}</p></div>
+  <div class="kb-callout__actions"><form method="POST" action="${poolPath}/seed">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm">Seed defaults into store</button></form></div>
 </div>`
     : "";
 
-  const hint = opts.inputHint
-    ? `<span class="muted">${escapeHtml(opts.inputHint)}</span>`
-    : "";
+  const intro =
+    opts.description || defaultsBanner
+      ? `<div class="kb-panel__body kb-stack">${opts.description ? `<p class="kb-help">${escapeHtml(opts.description)}</p>` : ""}${defaultsBanner}</div>`
+      : "";
 
-  return `<div class="card">
-  <h2>${escapeHtml(opts.title)} <span class="muted">(${opts.items.length})</span></h2>
-  ${opts.description ? `<p class="subtitle">${escapeHtml(opts.description)}</p>` : ""}
-  ${defaultsBanner}
-  <table><thead><tr><th scope="col">Order</th><th scope="col">Text</th><th scope="col">Actions</th></tr></thead><tbody${reorderListAttrs(opts.title)}>${rows}</tbody></table>
-  <form method="POST" action="${poolPath}/add" class="stack">
-    ${csrfInput}
-    <label>Add entry<input type="text" name="text" maxlength="${opts.maxLength}" required${add.valueAttr("text")}${add.attrs("text")}></label>${add.error("text")}
-    ${hint}
-    <button type="submit" class="btn">Add</button>
-  </form>
-  <details class="helper"${imp.open()}>
-    <summary>Import / export</summary>
-    <form method="POST" action="${poolPath}/import" class="stack">
+  const listHtml =
+    opts.items.length === 0
+      ? `<div class="kb-panel__body">${kbEmptyState("activity", "No entries stored.", "Add an entry or import a list below.")}</div>`
+      : `<div class="kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">${escapeHtml(opts.title)}</caption><thead><tr><th scope="col">Order</th><th scope="col">Text</th><th scope="col">Actions</th></tr></thead><tbody${reorderListAttrs(opts.title)}>${rows}</tbody></table></div>`;
+
+  const hintId = `${add.id("text")}-hint`;
+  const hint = opts.inputHint
+    ? `<p class="kb-help" id="${escapeHtml(hintId)}">${escapeHtml(opts.inputHint)}</p>`
+    : "";
+  const replaceChecked = imp.selected("mode", "replace") !== "append";
+
+  return `<section class="kb-panel" id="${escapeHtml(panelId)}" aria-labelledby="${escapeHtml(panelId)}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${escapeHtml(panelId)}-h">${escapeHtml(opts.title)}</h2><span class="kb-panel__meta">${opts.items.length}</span></header>
+  ${intro}
+  ${listHtml}
+  <div class="kb-panel__body kb-stack">
+    <form method="POST" action="${poolPath}/add" class="kb-stack">
       ${csrfInput}
-      <p class="muted">Paste one entry per line, or a JSON array of strings. Exporting: the textarea below shows the current effective list — copy it to back up.</p>
-      <label>Entries<textarea name="items" rows="8"${imp.attrs("items")}>${imp.textareaContent("items", opts.exportText)}</textarea></label>${imp.error("items")}
-      <label class="inline-form"><input type="radio" name="mode" value="replace"${imp.selected("mode", "replace") !== "append" ? " checked" : ""}> Replace pool</label>
-      <label class="inline-form"><input type="radio" name="mode" value="append"${imp.selected("mode", "replace") === "append" ? " checked" : ""}> Append to pool</label>
-      <button type="submit" class="btn">Import</button>
+      ${pollField(add, "text", "Add entry", `<input class="kb-input" type="text" name="text" maxlength="${opts.maxLength}" required${add.valueAttr("text")}${fieldControlAttrs(add.control("text", opts.inputHint ? hintId : ""))}>`)}
+      ${hint}
+      <div class="kb-row"><button type="submit" class="kb-btn">Add</button></div>
     </form>
-  </details>
-</div>`;
+    <details class="kb-disclosure"${imp.open()}>
+      <summary>${CHEVRON_ICON}Import / export</summary>
+      <div class="kb-disclosure__body"><form method="POST" action="${poolPath}/import" class="kb-stack">
+        ${csrfInput}
+        <p class="kb-help">Paste one entry per line, or a JSON array of strings. Exporting: the textarea below shows the current effective list — copy it to back up.</p>
+        ${pollField(imp, "items", "Entries", `<textarea class="kb-textarea" name="items" rows="8"${fieldControlAttrs(imp.control("items"))}>${imp.textareaContent("items", opts.exportText)}</textarea>`)}
+        <div class="kb-segmented" role="radiogroup" aria-label="What to do with the pool"><label><input type="radio" name="mode" value="replace"${replaceChecked ? " checked" : ""}><span>Replace pool</span></label><label><input type="radio" name="mode" value="append"${replaceChecked ? "" : " checked"}><span>Append to pool</span></label></div>
+        <div class="kb-row"><button type="submit" class="kb-btn">Import</button></div>
+      </form></div>
+    </details>
+  </div>
+</section>`;
 }
 
 // ---------- Bot Status (issue #557) ----------
@@ -6000,7 +6038,7 @@ ${monitorPageHead("Presence", 'The "Watching …" presence messages the bot rota
 </div>
 ${renderFlash(props.flash)}
 ${REORDER_STATUS_HTML}
-${editors}
+<div class="kb-stack">${editors}</div>
 ${scriptTag(REORDER_SCRIPT)}
 `;
   return renderAdminPage({
@@ -7145,11 +7183,11 @@ function moderationActionTag(action: ModerationAction): string {
   // "undo" actions (unban / untimeout) read as positive (green).
   const cls =
     action === "unban" || action === "untimeout" || action === "raid_clear"
-      ? "tag-on"
+      ? "kb-badge--on"
       : action === "ban" || action === "kick" || action === "raid_lockdown"
-        ? "tag-off"
-        : "tag-warn";
-  return `<span class="tag ${cls}">${escapeHtml(label)}</span>`;
+        ? "kb-badge--off"
+        : "kb-badge--warn";
+  return `<span class="kb-badge ${cls}">${escapeHtml(label)}</span>`;
 }
 
 function buildModerationQueryString(
@@ -7173,24 +7211,24 @@ export const CASE_OUTCOME_LABELS: Record<string, string> = CASE_OUTCOME_WORDS;
 function caseStatusTag(status: string): string {
   const cls =
     status === "under_review"
-      ? "tag-warn"
+      ? "kb-badge--warn"
       : status === "lifted"
-        ? "tag-on"
-        : status === "upheld"
-          ? "tag-off"
-          : "tag-off";
-  return `<span class="tag ${cls}">${escapeHtml(CASE_STATUS_LABELS[status] ?? status)}</span>`;
+        ? "kb-badge--on"
+        : "kb-badge--off";
+  return `<span class="kb-badge ${cls}">${escapeHtml(CASE_STATUS_LABELS[status] ?? status)}</span>`;
 }
 
-/** The Case column: the case's number and status, or a form to open one. */
+/** The Case column's cell: the case's number and status, or a form to open one. */
 function renderRowCaseCell(row: ModerationRow, props: ModerationProps): string {
   if (row.caseNumber !== null) {
-    return `#${row.caseNumber} ${caseStatusTag(row.caseStatus ?? "open")}`;
+    return `<td>#${row.caseNumber} ${caseStatusTag(row.caseStatus ?? "open")}</td>`;
   }
   if (row.action !== "kick" && row.action !== "ban") {
-    return '<span class="muted">—</span>';
+    return '<td><span class="kb-muted">—</span></td>';
   }
   const f = formView(props.refusedForm, moderationCaseOpenForm(row.entryId));
+  const days = f.control("review_in_days", `${f.id("review_in_days")}-help`);
+  const note = f.control("note");
   // The log is paged and filtered by the query string; a refused save has no
   // query, so the form hands its page's query back to draw the same rows.
   const query = buildModerationQueryString(
@@ -7200,46 +7238,45 @@ function renderRowCaseCell(row: ModerationRow, props: ModerationProps): string {
       Math.max(1, Math.ceil(props.total / props.pageSize)),
     ),
   );
-  return `<details class="helper edit-details"${f.open()}><summary>Open case</summary>
-    <form method="POST" action="/admin/moderation/cases/open" class="stack">
+  return `<td class="kb-actions"><details class="kb-disclosure"${f.open()}><summary>${CHEVRON_ICON}Open case<span class="kb-visually-hidden"> for ${escapeHtml(row.userLabel)}</span></summary>
+    <div class="kb-disclosure__body"><form method="POST" action="/admin/moderation/cases/open" class="kb-stack">
       <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
       <input type="hidden" name="entry_id" value="${escapeHtml(row.entryId)}">${query ? `\n      <input type="hidden" name="view_query" value="${escapeHtml(query)}">` : ""}
-      <label>Review in (days)<input type="number" name="review_in_days" min="1" max="3650" value="${escapeHtml(f.value("review_in_days", String(props.defaultReviewDays ?? 90)))}"${f.attrs("review_in_days", "")}></label>${f.error("review_in_days")}
-      <p class="muted">Clear the days for a case with no review date.</p>
-      <label>Note<input type="text" name="note" maxlength="500"${f.valueAttr("note")}${f.attrs("note")}></label>${f.error("note")}
-      <button type="submit" class="btn btn-sm">Open case</button>
-    </form>
-  </details>`;
+      <div class="kb-field"><label class="kb-label" for="${escapeHtml(days.id)}">Review in (days)</label><input class="kb-input kb-input--sm kb-input--num" type="number" name="review_in_days" min="1" max="3650" value="${escapeHtml(f.value("review_in_days", String(props.defaultReviewDays ?? 90)))}"${fieldControlAttrs(days)}><p class="kb-help" id="${escapeHtml(f.id("review_in_days"))}-help">Clear the days for a case with no review date.</p>${f.error("review_in_days")}</div>
+      <div class="kb-field"><label class="kb-label" for="${escapeHtml(note.id)}">Note</label><input class="kb-input" type="text" name="note" maxlength="500"${f.valueAttr("note")}${fieldControlAttrs(note)}>${f.error("note")}</div>
+      <div class="kb-row"><button type="submit" class="kb-btn kb-btn--sm">Open case</button></div>
+    </form></div>
+  </details></td>`;
 }
 
 function renderCaseHistory(c: CaseView): string {
   if (c.history.length === 0) {
-    return '<p class="muted">No earlier actions on file.</p>';
+    return '<p class="kb-help">No earlier actions on file.</p>';
   }
   const items = c.history
     .map(
       (h) =>
-        `<li><span class="mono muted">${escapeHtml(h.createdAt.slice(0, 10))}</span> ${moderationActionTag(h.action)} ${
+        `<li><span class="kb-mono kb-muted">${escapeHtml(h.createdAt.slice(0, 10))}</span>${moderationActionTag(h.action)}<span class="kb-list__main">${
           h.reason
             ? escapeHtml(h.reason.slice(0, 200))
-            : '<span class="muted">no reason</span>'
-        }</li>`,
+            : '<span class="kb-muted">no reason</span>'
+        }</span></li>`,
     )
     .join("");
-  return `<ul class="muted">${items}</ul>`;
+  return `<ul class="kb-list">${items}</ul>`;
 }
 
 function renderCaseEvents(c: CaseView): string {
-  return `<ul class="muted">${c.events
+  return `<ul class="kb-list">${c.events
     .map((e) => {
       const what = e.outcome
         ? escapeHtml(CASE_OUTCOME_LABELS[e.outcome] ?? e.outcome)
         : e.to === "under_review"
           ? "marked as needing a decision"
           : "opened";
-      return `<li><span class="mono">${escapeHtml(e.at.slice(0, 10))}</span> ${what} by ${escapeHtml(e.byLabel)}${
+      return `<li><span class="kb-mono">${escapeHtml(e.at.slice(0, 10))}</span><span class="kb-list__main">${what} by ${escapeHtml(e.byLabel)}${
         e.note && e.note !== REVIEW_JOB_NOTE ? ` — ${escapeHtml(e.note)}` : ""
-      }</li>`;
+      }</span></li>`;
     })
     .join("")}</ul>`;
 }
@@ -7248,73 +7285,148 @@ function renderCaseActions(c: CaseView, props: ModerationProps): string {
   const base = `/admin/moderation/cases/${encodeURIComponent(c.id)}`;
   const days = props.defaultReviewDays ?? 90;
   const f = formView(props.refusedForm, moderationCaseDecideForm(c.id));
-  return `<form method="POST" action="${base}/uphold" class="stack">
+  const daysControl = f.control("next_review_in_days");
+  const noteControl = f.control("note", `${f.id("note")}-help`);
+  return `<form method="POST" action="${base}/uphold" class="kb-stack">
       <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
-      <label>Next review in (days)<input type="number" name="next_review_in_days" min="1" max="3650" value="${escapeHtml(f.value("next_review_in_days", String(days)))}"${f.attrs("next_review_in_days")}></label>${f.error("next_review_in_days")}
-      <label>Note<input type="text" name="note" maxlength="500"${f.valueAttr("note")}${f.attrs("note")}></label>${f.error("note")}
-      <div class="inline-form">
-        <button type="submit" class="btn btn-sm">${DECISION_LABELS.uphold}</button>
-        <button type="submit" class="btn btn-sm" formaction="${base}/extend">${DECISION_LABELS.extend}</button>
-        <button type="submit" class="btn btn-sm btn-danger" formaction="${base}/permanent" data-confirm="${escapeHtml(DECISION_CONFIRM_TEXT.permanent ?? "")}"${confirmListAttr(
+      <div class="kb-fields">
+        <div class="kb-field"><label class="kb-label" for="${escapeHtml(daysControl.id)}">Next review in (days)</label><input class="kb-input kb-input--sm kb-input--num" type="number" name="next_review_in_days" min="1" max="3650" value="${escapeHtml(f.value("next_review_in_days", String(days)))}"${fieldControlAttrs(daysControl)}>${f.error("next_review_in_days")}</div>
+        <div class="kb-field"><label class="kb-label" for="${escapeHtml(noteControl.id)}">Note</label><input class="kb-input" type="text" name="note" maxlength="500"${f.valueAttr("note")}${fieldControlAttrs(noteControl)}>${f.error("note")}</div>
+      </div>
+      <div class="kb-row">
+        <button type="submit" class="kb-btn">${DECISION_LABELS.uphold}</button>
+        <button type="submit" class="kb-btn" formaction="${base}/extend">${DECISION_LABELS.extend}</button>
+        <button type="submit" class="kb-btn kb-btn--danger" formaction="${base}/permanent" data-confirm="${escapeHtml(DECISION_CONFIRM_TEXT.permanent ?? "")}"${confirmListAttr(
           PERMANENT_CONFIRM_ITEMS,
         )}>${DECISION_LABELS.permanent}</button>
-        <button type="submit" class="btn btn-sm" formaction="${base}/readmit" data-confirm="${escapeHtml(DECISION_CONFIRM_TEXT.readmit ?? "")}"${CONFIRM_NEUTRAL_ATTR}>${DECISION_LABELS.readmit}</button>
+        <button type="submit" class="kb-btn" formaction="${base}/readmit" data-confirm="${escapeHtml(DECISION_CONFIRM_TEXT.readmit ?? "")}"${CONFIRM_NEUTRAL_ATTR}>${DECISION_LABELS.readmit}</button>
       </div>
-      <p class="muted">${DECISION_LABELS.uphold}: the member stays out and the next review is set (clear the days for none). ${DECISION_LABELS.extend}: needs a new date. ${DECISION_LABELS.permanent}: closes the case with no more reviews. ${DECISION_LABELS.readmit}: records the decision only; lift the ban in Discord yourself.</p>
+      <p class="kb-help" id="${escapeHtml(f.id("note"))}-help">${DECISION_LABELS.uphold}: the member stays out and the next review is set (clear the days for none). ${DECISION_LABELS.extend}: needs a new date. ${DECISION_LABELS.permanent}: closes the case with no more reviews. ${DECISION_LABELS.readmit}: records the decision only; lift the ban in Discord yourself.</p>
     </form>`;
 }
 
 function renderCaseCard(c: CaseView, props: ModerationProps): string {
-  const review = c.reviewAt
-    ? `review ${escapeHtml(c.reviewAt.slice(0, 10))}`
-    : "no review date";
-  return `<div class="card">
-  <h3>Case #${c.caseNumber} · <span title="${escapeHtml(c.userId)}">${escapeHtml(c.userLabel)}</span> ${moderationActionTag(c.action)} ${caseStatusTag(c.status)}</h3>
-  <p class="muted">${c.live ? review : `closed ${escapeHtml(c.events[c.events.length - 1]?.at.slice(0, 10) ?? "")}`} · opened ${escapeHtml(c.openedAt.slice(0, 10))} by ${escapeHtml(c.openedByLabel)}${
+  const timing = c.live
+    ? `<dt>Review</dt><dd>${c.reviewAt ? escapeHtml(c.reviewAt.slice(0, 10)) : "no review date"}</dd>`
+    : `<dt>Closed</dt><dd>${escapeHtml(c.events[c.events.length - 1]?.at.slice(0, 10) ?? "")}</dd>`;
+  const facts = [
+    timing,
+    `<dt>Opened</dt><dd>${escapeHtml(c.openedAt.slice(0, 10))} by ${escapeHtml(c.openedByLabel)}</dd>`,
     c.originModeratorLabel
-      ? ` · action by ${escapeHtml(c.originModeratorLabel)}`
-      : ""
-  }</p>
-  <p>${c.reason ? escapeHtml(c.reason.slice(0, 300)) : '<span class="muted">No reason recorded.</span>'}</p>
-  <details class="helper" ${c.live ? "open" : ""}><summary>Earlier actions</summary>${renderCaseHistory(c)}</details>
-  <details class="helper"><summary>Decisions</summary>${renderCaseEvents(c)}</details>
-  ${c.live ? renderCaseActions(c, props) : ""}
-</div>`;
+      ? `<dt>Action by</dt><dd>${escapeHtml(c.originModeratorLabel)}</dd>`
+      : "",
+    `<dt>Reason</dt><dd>${c.reason ? escapeHtml(c.reason.slice(0, 300)) : '<span class="kb-muted">No reason recorded.</span>'}</dd>`,
+  ].join("\n    ");
+  const headId = `case-${escapeHtml(c.id)}-h`;
+  return `<section class="kb-panel" aria-labelledby="${headId}">
+  <header class="kb-panel__head"><h3 class="kb-panel__title kb-row" id="${headId}">Case #${c.caseNumber} · <span title="${escapeHtml(c.userId)}">${escapeHtml(c.userLabel)}</span> ${moderationActionTag(c.action)} ${caseStatusTag(c.status)}</h3></header>
+  <div class="kb-panel__body kb-stack">
+    <dl class="kb-kv">
+    ${facts}
+    </dl>
+    <details class="kb-disclosure"${c.live ? " open" : ""}><summary>${CHEVRON_ICON}Earlier actions</summary><div class="kb-disclosure__body">${renderCaseHistory(c)}</div></details>
+    <details class="kb-disclosure"><summary>${CHEVRON_ICON}Decisions</summary><div class="kb-disclosure__body">${renderCaseEvents(c)}</div></details>
+    ${c.live ? renderCaseActions(c, props) : ""}
+  </div>
+</section>`;
 }
 
+/** One queue group as its own Panel: the title with a count, then its cases or an EmptyState. */
 function renderCaseGroup(
+  id: string,
   title: string,
-  empty: string,
+  empty: { title: string; text: string },
   cases: CaseView[],
   props: ModerationProps,
+  warn = false,
 ): string {
-  return `<h3>${escapeHtml(title)} (${cases.length})</h3>${
+  const count = `<span class="kb-badge kb-badge--count${warn && cases.length > 0 ? " kb-badge--warn" : ""}">${cases.length}</span>`;
+  return `<section class="kb-panel" id="cases-${id}" aria-labelledby="cases-${id}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title kb-row" id="cases-${id}-h">${escapeHtml(title)} ${count}</h2></header>
+  ${
     cases.length === 0
-      ? `<div class="empty">${escapeHtml(empty)}</div>`
-      : cases.map((c) => renderCaseCard(c, props)).join("")
-  }`;
+      ? `<div class="kb-panel__body"><div class="kb-empty"><p class="kb-empty__title">${escapeHtml(empty.title)}</p><p class="kb-empty__text">${escapeHtml(empty.text)}</p></div></div>`
+      : `<div class="kb-panel__body kb-stack">${cases.map((c) => renderCaseCard(c, props)).join("")}</div>`
+  }
+</section>`;
 }
 
-/** The Cases section: the review queue, grouped. Empty string when off. */
+/** The Cases section: the review queue, one Panel per group, problems first. Empty string when off. */
 function renderCasesSection(props: ModerationProps): string {
   if (!props.casesEnabled) return "";
   const groups = props.caseGroups;
-  const body = groups
-    ? `${renderCaseGroup("Needs a decision", "No case is waiting for a decision.", groups.overdue, props)}
-${renderCaseGroup("Review in the next 7 days", "No review date falls in the next 7 days.", groups.dueSoon, props)}
-${renderCaseGroup("Review later", "No open case has a review date more than 7 days away.", groups.scheduled, props)}
-${renderCaseGroup("No review date", "No open case is without a review date.", groups.indefinite, props)}
-${renderCaseGroup("Closed in the last 30 days", "No case was closed in the last 30 days.", groups.recentlyResolved, props)}`
-    : '<div class="notice">The case queue could not be read. Check the bot\'s logs and reload the page.</div>';
-  return `<div class="card">
-  <h2>Cases</h2>
-  <p class="subtitle">A case adds a review date to a kick or ban and records what staff decided once the review date passed. Staff always make the decision. Open a case from the <strong>Case</strong> column of the log below.</p>
-  <form method="POST" action="/admin/moderation/cases/run-review" class="inline-form" data-confirm="Mark every case whose review date has passed as needing a decision now?"${CONFIRM_NEUTRAL_ATTR}>
-    <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
-    <button type="submit" class="btn btn-sm">Check review dates now</button>
-  </form>
-  ${body}
-</div>`;
+  const queue = groups
+    ? [
+        renderCaseGroup(
+          "overdue",
+          "Needs a decision",
+          {
+            title: "No case is waiting for a decision.",
+            text: "A case shows up here once its review date has passed.",
+          },
+          groups.overdue,
+          props,
+          true,
+        ),
+        renderCaseGroup(
+          "soon",
+          "Review in the next 7 days",
+          {
+            title: "No review date falls in the next 7 days.",
+            text: "Cases whose review date is within a week show up here.",
+          },
+          groups.dueSoon,
+          props,
+        ),
+        renderCaseGroup(
+          "later",
+          "Review later",
+          {
+            title: "No open case has a review date more than 7 days away.",
+            text: "Cases with a later review date show up here.",
+          },
+          groups.scheduled,
+          props,
+        ),
+        renderCaseGroup(
+          "undated",
+          "No review date",
+          {
+            title: "No open case is without a review date.",
+            text: "A case opened with no days stays here until staff decide.",
+          },
+          groups.indefinite,
+          props,
+        ),
+        renderCaseGroup(
+          "closed",
+          "Closed in the last 30 days",
+          {
+            title: "No case was closed in the last 30 days.",
+            text: "Closed cases stay here for 30 days.",
+          },
+          groups.recentlyResolved,
+          props,
+        ),
+      ].join("\n")
+    : "";
+  const unreadable = groups
+    ? ""
+    : `<div class="kb-callout kb-callout--err" role="alert">${toneIcon("err")}<div class="kb-callout__body"><p class="kb-callout__title">The case queue could not be read.</p><p class="kb-callout__text">Check the bot's logs and reload the page.</p></div></div>`;
+  return `<section class="kb-panel" id="cases" aria-labelledby="cases-h">
+  <header class="kb-panel__head">
+    <h2 class="kb-panel__title" id="cases-h">Cases</h2>
+    <div class="kb-panel__actions">
+      <form method="POST" action="/admin/moderation/cases/run-review" class="kb-row" data-confirm="Mark every case whose review date has passed as needing a decision now?"${CONFIRM_NEUTRAL_ATTR}>
+        <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
+        <button type="submit" class="kb-btn kb-btn--sm">Check review dates now</button>
+      </form>
+    </div>
+  </header>
+  <div class="kb-panel__body kb-stack">
+    <p class="kb-help">A case adds a review date to a kick or ban and records what staff decided once the review date passed. Staff always make the decision. Open a case from the <strong>Case</strong> column of the log below.</p>${unreadable ? `\n    ${unreadable}` : ""}
+  </div>
+</section>${queue ? `\n${queue}` : ""}`;
 }
 
 export function renderModerationPage(props: ModerationProps): string {
@@ -7342,8 +7454,8 @@ export function renderModerationPage(props: ModerationProps): string {
 
   const rowsHtml =
     props.rows.length === 0
-      ? `<div class="empty">No moderation actions match the current filters.</div>`
-      : `<table>
+      ? `<div class="kb-panel__body"><div class="kb-empty"><p class="kb-empty__title">No moderation actions match the current filters.</p><p class="kb-empty__text">Actions show up here as moderators use <code>/warn</code>, <code>/timeout</code> and <code>/ban</code>, or act in Discord itself.</p></div></div>`
+      : `<div class="kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">Moderation actions</caption>
 <thead><tr>
 <th scope="col">When</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Moderator</th>
 <th scope="col">Reason</th><th scope="col">Source</th>${props.casesEnabled ? '<th scope="col">Case</th>' : ""}
@@ -7354,74 +7466,70 @@ export function renderModerationPage(props: ModerationProps): string {
               ? `<span title="${escapeHtml(r.moderatorId)}">${escapeHtml(
                   r.moderatorLabel ?? r.moderatorId,
                 )}</span>`
-              : '<span class="muted">Unknown</span>';
+              : '<span class="kb-muted">Unknown</span>';
             return `<tr>
-<th scope="row" class="muted mono">${escapeHtml(r.createdAt)}</th>
+<th scope="row" class="kb-muted kb-mono">${escapeHtml(r.createdAt)}</th>
 <td title="${escapeHtml(r.userId)}">${escapeHtml(r.userLabel)}</td>
 <td>${moderationActionTag(r.action)}</td>
 <td>${moderator}</td>
-<td class="muted">${r.reason ? escapeHtml(r.reason.slice(0, 200)) : "—"}</td>
-<td class="muted">${escapeHtml(r.source)}</td>
-${props.casesEnabled ? `<td>${renderRowCaseCell(r, props)}</td>` : ""}
+<td class="kb-muted">${r.reason ? escapeHtml(r.reason.slice(0, 200)) : "—"}</td>
+<td class="kb-muted">${escapeHtml(r.source)}</td>
+${props.casesEnabled ? renderRowCaseCell(r, props) : ""}
 </tr>`;
           })
-          .join("")}</tbody></table>`;
+          .join("")}</tbody></table></div>`;
 
-  const prevLink =
-    page > 1
-      ? `<a class="btn btn-sm" href="/admin/moderation${buildModerationQueryString(props.filters, page - 1)}">← Prev</a>`
-      : `<button class="btn btn-sm" disabled>← Prev</button>`;
-  const nextLink =
-    page < totalPages
-      ? `<a class="btn btn-sm" href="/admin/moderation${buildModerationQueryString(props.filters, page + 1)}">Next →</a>`
-      : `<button class="btn btn-sm" disabled>Next →</button>`;
+  const statusLine = renderStatusLine({
+    enabled: props.enabled,
+    onLabel: "Log on",
+    offLabel: "Log off",
+    chips: [{ text: `${countOf(props.total, "action")} matched` }],
+  });
 
   const body = `
-<h1>Moderation log</h1>
-<p class="subtitle">Actions recorded via <code>/warn</code>, <code>/timeout</code> and <code>/ban</code> plus kicks, bans and timeouts made in Discord itself, copied in from the server's audit log. Query per-member history in Discord with <code>/modlog</code>.</p>
+<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Moderation log</h1>
+    <p class="kb-pagehead__sub">Actions recorded via <code>/warn</code>, <code>/timeout</code> and <code>/ban</code> plus kicks, bans and timeouts made in Discord itself, copied in from the server's audit log. Query per-member history in Discord with <code>/modlog</code>.</p>
+    ${statusLine}
+  </div>
+</header>
 ${renderPageFlash(props.flash)}
 ${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Moderation", featureKey: "moderation.enabled", returnTo: "/admin/moderation", csrfToken: props.csrfToken })}
-
-${renderStatusLine({
-  enabled: props.enabled,
-  onLabel: "Log on",
-  offLabel: "Log off",
-  chips: [{ text: `${countOf(props.total, "action")} matched` }],
-})}${permissionNote ? `\n${permissionNote}` : ""}
-<p class="muted">Actions made in Discord itself need the bot to have the <strong>View Audit Log</strong> permission.</p>
-
-
+${permissionNote}
 ${renderCasesSection(props)}
-
-<div class="card">
-  <h2>Filters</h2>
-  <form method="GET" action="/admin/moderation" class="inline-form">
-    <label>Action
-      <select name="action">
+<section class="kb-panel" id="moderation-actions" aria-labelledby="moderation-actions-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="moderation-actions-h">Actions</h2><span class="kb-panel__meta">${props.pageSize} per page</span></header>
+  <div class="kb-panel__body kb-stack">
+    <p class="kb-help">Actions made in Discord itself need the bot to have the <strong>View Audit Log</strong> permission.</p>
+    <form method="GET" action="/admin/moderation" class="kb-row" role="search">
+      <div class="kb-field"><label class="kb-label" for="moderation-filter-action">Action</label><select class="kb-select" id="moderation-filter-action" name="action">
         <option value="">— any —</option>
         ${actionOptionsHtml}
-      </select>
-    </label>
-    <label>User
-      <select name="user">
+      </select></div>
+      <div class="kb-field"><label class="kb-label" for="moderation-filter-user">User</label><select class="kb-select" id="moderation-filter-user" name="user">
         <option value="">— any —</option>
         ${userOptionsHtml}
-      </select>
-    </label>
-    <button type="submit" class="btn btn-sm">Apply</button>
-    <a class="btn btn-sm" href="/admin/moderation">Reset</a>
-  </form>
-</div>
-
-<div class="card">
-  <h2>Actions (page ${page} of ${totalPages})</h2>
-  ${rowsHtml}
-  <div class="inline-form" style="margin-top:.75rem">
-    ${prevLink}
-    ${nextLink}
-    <span class="muted">${props.pageSize} per page</span>
+      </select></div>
+      <button type="submit" class="kb-btn">Apply</button>
+      <a class="kb-btn" href="/admin/moderation">Reset</a>
+    </form>
   </div>
-</div>
+  ${rowsHtml}
+  ${renderListPager({
+    prevHref:
+      page > 1
+        ? `/admin/moderation${buildModerationQueryString(props.filters, page - 1)}`
+        : null,
+    nextHref:
+      page < totalPages
+        ? `/admin/moderation${buildModerationQueryString(props.filters, page + 1)}`
+        : null,
+    page,
+    totalPages,
+  })}
+</section>
 ${renderFeatureSettingsCard({
   intro:
     "Change moderation-log settings here without leaving the page, including the Discord channel moderation actions are logged to. Saved through the shared settings route.",
@@ -7435,6 +7543,7 @@ ${renderFeatureSettingsCard({
   enabled: props.enabled,
   flash: props.flash,
 })}
+</div>
 `;
   return renderAdminPage({
     title: "Moderation log",
