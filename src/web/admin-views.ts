@@ -5087,17 +5087,6 @@ function quotesQueryString(search: string, page: number): string {
   return parts.length === 0 ? "" : `?${parts.join("&")}`;
 }
 
-/** The attributes of a Field's control from a form view: its id, and the error link when refused. */
-function fieldControlAttrs(c: FormControlAttrs): string {
-  return ` id="${escapeHtml(c.id)}"${
-    c.invalid
-      ? ` aria-invalid="true" aria-describedby="${escapeHtml(c.describedBy ?? "")}"`
-      : c.describedBy
-        ? ` aria-describedby="${escapeHtml(c.describedBy)}"`
-        : ""
-  }`;
-}
-
 /**
  * The pager at the foot of a list Panel: Previous and Next as small buttons
  * (disabled at either end) around "Page n of m". The links are written as
