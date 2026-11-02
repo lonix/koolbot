@@ -7016,11 +7016,11 @@ function moderationActionTag(action: ModerationAction): string {
   // "undo" actions (unban / untimeout) read as positive (green).
   const cls =
     action === "unban" || action === "untimeout" || action === "raid_clear"
-      ? "tag-on"
+      ? "kb-badge--on"
       : action === "ban" || action === "kick" || action === "raid_lockdown"
-        ? "tag-off"
-        : "tag-warn";
-  return `<span class="tag ${cls}">${escapeHtml(label)}</span>`;
+        ? "kb-badge--off"
+        : "kb-badge--warn";
+  return `<span class="kb-badge ${cls}">${escapeHtml(label)}</span>`;
 }
 
 function buildModerationQueryString(
@@ -7044,24 +7044,24 @@ export const CASE_OUTCOME_LABELS: Record<string, string> = CASE_OUTCOME_WORDS;
 function caseStatusTag(status: string): string {
   const cls =
     status === "under_review"
-      ? "tag-warn"
+      ? "kb-badge--warn"
       : status === "lifted"
-        ? "tag-on"
-        : status === "upheld"
-          ? "tag-off"
-          : "tag-off";
-  return `<span class="tag ${cls}">${escapeHtml(CASE_STATUS_LABELS[status] ?? status)}</span>`;
+        ? "kb-badge--on"
+        : "kb-badge--off";
+  return `<span class="kb-badge ${cls}">${escapeHtml(CASE_STATUS_LABELS[status] ?? status)}</span>`;
 }
 
-/** The Case column: the case's number and status, or a form to open one. */
+/** The Case column's cell: the case's number and status, or a form to open one. */
 function renderRowCaseCell(row: ModerationRow, props: ModerationProps): string {
   if (row.caseNumber !== null) {
-    return `#${row.caseNumber} ${caseStatusTag(row.caseStatus ?? "open")}`;
+    return `<td>#${row.caseNumber} ${caseStatusTag(row.caseStatus ?? "open")}</td>`;
   }
   if (row.action !== "kick" && row.action !== "ban") {
-    return '<span class="muted">—</span>';
+    return '<td><span class="kb-muted">—</span></td>';
   }
   const f = formView(props.refusedForm, moderationCaseOpenForm(row.entryId));
+  const days = f.control("review_in_days", `${f.id("review_in_days")}-help`);
+  const note = f.control("note");
   // The log is paged and filtered by the query string; a refused save has no
   // query, so the form hands its page's query back to draw the same rows.
   const query = buildModerationQueryString(
@@ -7071,46 +7071,45 @@ function renderRowCaseCell(row: ModerationRow, props: ModerationProps): string {
       Math.max(1, Math.ceil(props.total / props.pageSize)),
     ),
   );
-  return `<details class="helper edit-details"${f.open()}><summary>Open case</summary>
-    <form method="POST" action="/admin/moderation/cases/open" class="stack">
+  return `<td class="kb-actions"><details class="kb-disclosure"${f.open()}><summary>${CHEVRON_ICON}Open case<span class="kb-visually-hidden"> for ${escapeHtml(row.userLabel)}</span></summary>
+    <div class="kb-disclosure__body"><form method="POST" action="/admin/moderation/cases/open" class="kb-stack">
       <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
       <input type="hidden" name="entry_id" value="${escapeHtml(row.entryId)}">${query ? `\n      <input type="hidden" name="view_query" value="${escapeHtml(query)}">` : ""}
-      <label>Review in (days)<input type="number" name="review_in_days" min="1" max="3650" value="${escapeHtml(f.value("review_in_days", String(props.defaultReviewDays ?? 90)))}"${f.attrs("review_in_days", "")}></label>${f.error("review_in_days")}
-      <p class="muted">Clear the days for a case with no review date.</p>
-      <label>Note<input type="text" name="note" maxlength="500"${f.valueAttr("note")}${f.attrs("note")}></label>${f.error("note")}
-      <button type="submit" class="btn btn-sm">Open case</button>
-    </form>
-  </details>`;
+      <div class="kb-field"><label class="kb-label" for="${escapeHtml(days.id)}">Review in (days)</label><input class="kb-input kb-input--sm kb-input--num" type="number" name="review_in_days" min="1" max="3650" value="${escapeHtml(f.value("review_in_days", String(props.defaultReviewDays ?? 90)))}"${fieldControlAttrs(days)}><p class="kb-help" id="${escapeHtml(f.id("review_in_days"))}-help">Clear the days for a case with no review date.</p>${f.error("review_in_days")}</div>
+      <div class="kb-field"><label class="kb-label" for="${escapeHtml(note.id)}">Note</label><input class="kb-input" type="text" name="note" maxlength="500"${f.valueAttr("note")}${fieldControlAttrs(note)}>${f.error("note")}</div>
+      <div class="kb-row"><button type="submit" class="kb-btn kb-btn--sm">Open case</button></div>
+    </form></div>
+  </details></td>`;
 }
 
 function renderCaseHistory(c: CaseView): string {
   if (c.history.length === 0) {
-    return '<p class="muted">No earlier actions on file.</p>';
+    return '<p class="kb-help">No earlier actions on file.</p>';
   }
   const items = c.history
     .map(
       (h) =>
-        `<li><span class="mono muted">${escapeHtml(h.createdAt.slice(0, 10))}</span> ${moderationActionTag(h.action)} ${
+        `<li><span class="kb-mono kb-muted">${escapeHtml(h.createdAt.slice(0, 10))}</span>${moderationActionTag(h.action)}<span class="kb-list__main">${
           h.reason
             ? escapeHtml(h.reason.slice(0, 200))
-            : '<span class="muted">no reason</span>'
-        }</li>`,
+            : '<span class="kb-muted">no reason</span>'
+        }</span></li>`,
     )
     .join("");
-  return `<ul class="muted">${items}</ul>`;
+  return `<ul class="kb-list">${items}</ul>`;
 }
 
 function renderCaseEvents(c: CaseView): string {
-  return `<ul class="muted">${c.events
+  return `<ul class="kb-list">${c.events
     .map((e) => {
       const what = e.outcome
         ? escapeHtml(CASE_OUTCOME_LABELS[e.outcome] ?? e.outcome)
         : e.to === "under_review"
           ? "marked as needing a decision"
           : "opened";
-      return `<li><span class="mono">${escapeHtml(e.at.slice(0, 10))}</span> ${what} by ${escapeHtml(e.byLabel)}${
+      return `<li><span class="kb-mono">${escapeHtml(e.at.slice(0, 10))}</span><span class="kb-list__main">${what} by ${escapeHtml(e.byLabel)}${
         e.note && e.note !== REVIEW_JOB_NOTE ? ` — ${escapeHtml(e.note)}` : ""
-      }</li>`;
+      }</span></li>`;
     })
     .join("")}</ul>`;
 }
@@ -7119,73 +7118,148 @@ function renderCaseActions(c: CaseView, props: ModerationProps): string {
   const base = `/admin/moderation/cases/${encodeURIComponent(c.id)}`;
   const days = props.defaultReviewDays ?? 90;
   const f = formView(props.refusedForm, moderationCaseDecideForm(c.id));
-  return `<form method="POST" action="${base}/uphold" class="stack">
+  const daysControl = f.control("next_review_in_days");
+  const noteControl = f.control("note", `${f.id("note")}-help`);
+  return `<form method="POST" action="${base}/uphold" class="kb-stack">
       <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
-      <label>Next review in (days)<input type="number" name="next_review_in_days" min="1" max="3650" value="${escapeHtml(f.value("next_review_in_days", String(days)))}"${f.attrs("next_review_in_days")}></label>${f.error("next_review_in_days")}
-      <label>Note<input type="text" name="note" maxlength="500"${f.valueAttr("note")}${f.attrs("note")}></label>${f.error("note")}
-      <div class="inline-form">
-        <button type="submit" class="btn btn-sm">${DECISION_LABELS.uphold}</button>
-        <button type="submit" class="btn btn-sm" formaction="${base}/extend">${DECISION_LABELS.extend}</button>
-        <button type="submit" class="btn btn-sm btn-danger" formaction="${base}/permanent" data-confirm="${escapeHtml(DECISION_CONFIRM_TEXT.permanent ?? "")}"${confirmListAttr(
+      <div class="kb-fields">
+        <div class="kb-field"><label class="kb-label" for="${escapeHtml(daysControl.id)}">Next review in (days)</label><input class="kb-input kb-input--sm kb-input--num" type="number" name="next_review_in_days" min="1" max="3650" value="${escapeHtml(f.value("next_review_in_days", String(days)))}"${fieldControlAttrs(daysControl)}>${f.error("next_review_in_days")}</div>
+        <div class="kb-field"><label class="kb-label" for="${escapeHtml(noteControl.id)}">Note</label><input class="kb-input" type="text" name="note" maxlength="500"${f.valueAttr("note")}${fieldControlAttrs(noteControl)}>${f.error("note")}</div>
+      </div>
+      <div class="kb-row">
+        <button type="submit" class="kb-btn">${DECISION_LABELS.uphold}</button>
+        <button type="submit" class="kb-btn" formaction="${base}/extend">${DECISION_LABELS.extend}</button>
+        <button type="submit" class="kb-btn kb-btn--danger" formaction="${base}/permanent" data-confirm="${escapeHtml(DECISION_CONFIRM_TEXT.permanent ?? "")}"${confirmListAttr(
           PERMANENT_CONFIRM_ITEMS,
         )}>${DECISION_LABELS.permanent}</button>
-        <button type="submit" class="btn btn-sm" formaction="${base}/readmit" data-confirm="${escapeHtml(DECISION_CONFIRM_TEXT.readmit ?? "")}"${CONFIRM_NEUTRAL_ATTR}>${DECISION_LABELS.readmit}</button>
+        <button type="submit" class="kb-btn" formaction="${base}/readmit" data-confirm="${escapeHtml(DECISION_CONFIRM_TEXT.readmit ?? "")}"${CONFIRM_NEUTRAL_ATTR}>${DECISION_LABELS.readmit}</button>
       </div>
-      <p class="muted">${DECISION_LABELS.uphold}: the member stays out and the next review is set (clear the days for none). ${DECISION_LABELS.extend}: needs a new date. ${DECISION_LABELS.permanent}: closes the case with no more reviews. ${DECISION_LABELS.readmit}: records the decision only; lift the ban in Discord yourself.</p>
+      <p class="kb-help" id="${escapeHtml(f.id("note"))}-help">${DECISION_LABELS.uphold}: the member stays out and the next review is set (clear the days for none). ${DECISION_LABELS.extend}: needs a new date. ${DECISION_LABELS.permanent}: closes the case with no more reviews. ${DECISION_LABELS.readmit}: records the decision only; lift the ban in Discord yourself.</p>
     </form>`;
 }
 
 function renderCaseCard(c: CaseView, props: ModerationProps): string {
-  const review = c.reviewAt
-    ? `review ${escapeHtml(c.reviewAt.slice(0, 10))}`
-    : "no review date";
-  return `<div class="card">
-  <h3>Case #${c.caseNumber} · <span title="${escapeHtml(c.userId)}">${escapeHtml(c.userLabel)}</span> ${moderationActionTag(c.action)} ${caseStatusTag(c.status)}</h3>
-  <p class="muted">${c.live ? review : `closed ${escapeHtml(c.events[c.events.length - 1]?.at.slice(0, 10) ?? "")}`} · opened ${escapeHtml(c.openedAt.slice(0, 10))} by ${escapeHtml(c.openedByLabel)}${
+  const timing = c.live
+    ? `<dt>Review</dt><dd>${c.reviewAt ? escapeHtml(c.reviewAt.slice(0, 10)) : "no review date"}</dd>`
+    : `<dt>Closed</dt><dd>${escapeHtml(c.events[c.events.length - 1]?.at.slice(0, 10) ?? "")}</dd>`;
+  const facts = [
+    timing,
+    `<dt>Opened</dt><dd>${escapeHtml(c.openedAt.slice(0, 10))} by ${escapeHtml(c.openedByLabel)}</dd>`,
     c.originModeratorLabel
-      ? ` · action by ${escapeHtml(c.originModeratorLabel)}`
-      : ""
-  }</p>
-  <p>${c.reason ? escapeHtml(c.reason.slice(0, 300)) : '<span class="muted">No reason recorded.</span>'}</p>
-  <details class="helper" ${c.live ? "open" : ""}><summary>Earlier actions</summary>${renderCaseHistory(c)}</details>
-  <details class="helper"><summary>Decisions</summary>${renderCaseEvents(c)}</details>
-  ${c.live ? renderCaseActions(c, props) : ""}
-</div>`;
+      ? `<dt>Action by</dt><dd>${escapeHtml(c.originModeratorLabel)}</dd>`
+      : "",
+    `<dt>Reason</dt><dd>${c.reason ? escapeHtml(c.reason.slice(0, 300)) : '<span class="kb-muted">No reason recorded.</span>'}</dd>`,
+  ].join("\n    ");
+  const headId = `case-${escapeHtml(c.id)}-h`;
+  return `<section class="kb-panel" aria-labelledby="${headId}">
+  <header class="kb-panel__head"><h3 class="kb-panel__title kb-row" id="${headId}">Case #${c.caseNumber} · <span title="${escapeHtml(c.userId)}">${escapeHtml(c.userLabel)}</span> ${moderationActionTag(c.action)} ${caseStatusTag(c.status)}</h3></header>
+  <div class="kb-panel__body kb-stack">
+    <dl class="kb-kv">
+    ${facts}
+    </dl>
+    <details class="kb-disclosure"${c.live ? " open" : ""}><summary>${CHEVRON_ICON}Earlier actions</summary><div class="kb-disclosure__body">${renderCaseHistory(c)}</div></details>
+    <details class="kb-disclosure"><summary>${CHEVRON_ICON}Decisions</summary><div class="kb-disclosure__body">${renderCaseEvents(c)}</div></details>
+    ${c.live ? renderCaseActions(c, props) : ""}
+  </div>
+</section>`;
 }
 
+/** One queue group as its own Panel: the title with a count, then its cases or an EmptyState. */
 function renderCaseGroup(
+  id: string,
   title: string,
-  empty: string,
+  empty: { title: string; text: string },
   cases: CaseView[],
   props: ModerationProps,
+  warn = false,
 ): string {
-  return `<h3>${escapeHtml(title)} (${cases.length})</h3>${
+  const count = `<span class="kb-badge kb-badge--count${warn && cases.length > 0 ? " kb-badge--warn" : ""}">${cases.length}</span>`;
+  return `<section class="kb-panel" id="cases-${id}" aria-labelledby="cases-${id}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title kb-row" id="cases-${id}-h">${escapeHtml(title)} ${count}</h2></header>
+  ${
     cases.length === 0
-      ? `<div class="empty">${escapeHtml(empty)}</div>`
-      : cases.map((c) => renderCaseCard(c, props)).join("")
-  }`;
+      ? `<div class="kb-panel__body"><div class="kb-empty"><p class="kb-empty__title">${escapeHtml(empty.title)}</p><p class="kb-empty__text">${escapeHtml(empty.text)}</p></div></div>`
+      : `<div class="kb-panel__body kb-stack">${cases.map((c) => renderCaseCard(c, props)).join("")}</div>`
+  }
+</section>`;
 }
 
-/** The Cases section: the review queue, grouped. Empty string when off. */
+/** The Cases section: the review queue, one Panel per group, problems first. Empty string when off. */
 function renderCasesSection(props: ModerationProps): string {
   if (!props.casesEnabled) return "";
   const groups = props.caseGroups;
-  const body = groups
-    ? `${renderCaseGroup("Needs a decision", "No case is waiting for a decision.", groups.overdue, props)}
-${renderCaseGroup("Review in the next 7 days", "No review date falls in the next 7 days.", groups.dueSoon, props)}
-${renderCaseGroup("Review later", "No open case has a review date more than 7 days away.", groups.scheduled, props)}
-${renderCaseGroup("No review date", "No open case is without a review date.", groups.indefinite, props)}
-${renderCaseGroup("Closed in the last 30 days", "No case was closed in the last 30 days.", groups.recentlyResolved, props)}`
-    : '<div class="notice">The case queue could not be read. Check the bot\'s logs and reload the page.</div>';
-  return `<div class="card">
-  <h2>Cases</h2>
-  <p class="subtitle">A case adds a review date to a kick or ban and records what staff decided once the review date passed. Staff always make the decision. Open a case from the <strong>Case</strong> column of the log below.</p>
-  <form method="POST" action="/admin/moderation/cases/run-review" class="inline-form" data-confirm="Mark every case whose review date has passed as needing a decision now?"${CONFIRM_NEUTRAL_ATTR}>
-    <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
-    <button type="submit" class="btn btn-sm">Check review dates now</button>
-  </form>
-  ${body}
-</div>`;
+  const queue = groups
+    ? [
+        renderCaseGroup(
+          "overdue",
+          "Needs a decision",
+          {
+            title: "No case is waiting for a decision.",
+            text: "A case shows up here once its review date has passed.",
+          },
+          groups.overdue,
+          props,
+          true,
+        ),
+        renderCaseGroup(
+          "soon",
+          "Review in the next 7 days",
+          {
+            title: "No review date falls in the next 7 days.",
+            text: "Cases whose review date is within a week show up here.",
+          },
+          groups.dueSoon,
+          props,
+        ),
+        renderCaseGroup(
+          "later",
+          "Review later",
+          {
+            title: "No open case has a review date more than 7 days away.",
+            text: "Cases with a later review date show up here.",
+          },
+          groups.scheduled,
+          props,
+        ),
+        renderCaseGroup(
+          "undated",
+          "No review date",
+          {
+            title: "No open case is without a review date.",
+            text: "A case opened with no days stays here until staff decide.",
+          },
+          groups.indefinite,
+          props,
+        ),
+        renderCaseGroup(
+          "closed",
+          "Closed in the last 30 days",
+          {
+            title: "No case was closed in the last 30 days.",
+            text: "Closed cases stay here for 30 days.",
+          },
+          groups.recentlyResolved,
+          props,
+        ),
+      ].join("\n")
+    : "";
+  const unreadable = groups
+    ? ""
+    : `<div class="kb-callout kb-callout--err" role="alert">${toneIcon("err")}<div class="kb-callout__body"><p class="kb-callout__title">The case queue could not be read.</p><p class="kb-callout__text">Check the bot's logs and reload the page.</p></div></div>`;
+  return `<section class="kb-panel" id="cases" aria-labelledby="cases-h">
+  <header class="kb-panel__head">
+    <h2 class="kb-panel__title" id="cases-h">Cases</h2>
+    <div class="kb-panel__actions">
+      <form method="POST" action="/admin/moderation/cases/run-review" class="kb-row" data-confirm="Mark every case whose review date has passed as needing a decision now?"${CONFIRM_NEUTRAL_ATTR}>
+        <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
+        <button type="submit" class="kb-btn kb-btn--sm">Check review dates now</button>
+      </form>
+    </div>
+  </header>
+  <div class="kb-panel__body kb-stack">
+    <p class="kb-help">A case adds a review date to a kick or ban and records what staff decided once the review date passed. Staff always make the decision. Open a case from the <strong>Case</strong> column of the log below.</p>${unreadable ? `\n    ${unreadable}` : ""}
+  </div>
+</section>${queue ? `\n${queue}` : ""}`;
 }
 
 export function renderModerationPage(props: ModerationProps): string {
@@ -7213,8 +7287,8 @@ export function renderModerationPage(props: ModerationProps): string {
 
   const rowsHtml =
     props.rows.length === 0
-      ? `<div class="empty">No moderation actions match the current filters.</div>`
-      : `<table>
+      ? `<div class="kb-panel__body"><div class="kb-empty"><p class="kb-empty__title">No moderation actions match the current filters.</p><p class="kb-empty__text">Actions show up here as moderators use <code>/warn</code>, <code>/timeout</code> and <code>/ban</code>, or act in Discord itself.</p></div></div>`
+      : `<div class="kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">Moderation actions</caption>
 <thead><tr>
 <th scope="col">When</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Moderator</th>
 <th scope="col">Reason</th><th scope="col">Source</th>${props.casesEnabled ? '<th scope="col">Case</th>' : ""}
@@ -7225,74 +7299,70 @@ export function renderModerationPage(props: ModerationProps): string {
               ? `<span title="${escapeHtml(r.moderatorId)}">${escapeHtml(
                   r.moderatorLabel ?? r.moderatorId,
                 )}</span>`
-              : '<span class="muted">Unknown</span>';
+              : '<span class="kb-muted">Unknown</span>';
             return `<tr>
-<th scope="row" class="muted mono">${escapeHtml(r.createdAt)}</th>
+<th scope="row" class="kb-muted kb-mono">${escapeHtml(r.createdAt)}</th>
 <td title="${escapeHtml(r.userId)}">${escapeHtml(r.userLabel)}</td>
 <td>${moderationActionTag(r.action)}</td>
 <td>${moderator}</td>
-<td class="muted">${r.reason ? escapeHtml(r.reason.slice(0, 200)) : "—"}</td>
-<td class="muted">${escapeHtml(r.source)}</td>
-${props.casesEnabled ? `<td>${renderRowCaseCell(r, props)}</td>` : ""}
+<td class="kb-muted">${r.reason ? escapeHtml(r.reason.slice(0, 200)) : "—"}</td>
+<td class="kb-muted">${escapeHtml(r.source)}</td>
+${props.casesEnabled ? renderRowCaseCell(r, props) : ""}
 </tr>`;
           })
-          .join("")}</tbody></table>`;
+          .join("")}</tbody></table></div>`;
 
-  const prevLink =
-    page > 1
-      ? `<a class="btn btn-sm" href="/admin/moderation${buildModerationQueryString(props.filters, page - 1)}">← Prev</a>`
-      : `<button class="btn btn-sm" disabled>← Prev</button>`;
-  const nextLink =
-    page < totalPages
-      ? `<a class="btn btn-sm" href="/admin/moderation${buildModerationQueryString(props.filters, page + 1)}">Next →</a>`
-      : `<button class="btn btn-sm" disabled>Next →</button>`;
+  const statusLine = renderStatusLine({
+    enabled: props.enabled,
+    onLabel: "Log on",
+    offLabel: "Log off",
+    chips: [{ text: `${countOf(props.total, "action")} matched` }],
+  });
 
   const body = `
-<h1>Moderation log</h1>
-<p class="subtitle">Actions recorded via <code>/warn</code>, <code>/timeout</code> and <code>/ban</code> plus kicks, bans and timeouts made in Discord itself, copied in from the server's audit log. Query per-member history in Discord with <code>/modlog</code>.</p>
+<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Moderation log</h1>
+    <p class="kb-pagehead__sub">Actions recorded via <code>/warn</code>, <code>/timeout</code> and <code>/ban</code> plus kicks, bans and timeouts made in Discord itself, copied in from the server's audit log. Query per-member history in Discord with <code>/modlog</code>.</p>
+    ${statusLine}
+  </div>
+</header>
 ${renderPageFlash(props.flash)}
 ${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Moderation", featureKey: "moderation.enabled", returnTo: "/admin/moderation", csrfToken: props.csrfToken })}
-
-${renderStatusLine({
-  enabled: props.enabled,
-  onLabel: "Log on",
-  offLabel: "Log off",
-  chips: [{ text: `${countOf(props.total, "action")} matched` }],
-})}${permissionNote ? `\n${permissionNote}` : ""}
-<p class="muted">Actions made in Discord itself need the bot to have the <strong>View Audit Log</strong> permission.</p>
-
-
+${permissionNote}
 ${renderCasesSection(props)}
-
-<div class="card">
-  <h2>Filters</h2>
-  <form method="GET" action="/admin/moderation" class="inline-form">
-    <label>Action
-      <select name="action">
+<section class="kb-panel" id="moderation-actions" aria-labelledby="moderation-actions-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="moderation-actions-h">Actions</h2><span class="kb-panel__meta">${props.pageSize} per page</span></header>
+  <div class="kb-panel__body kb-stack">
+    <p class="kb-help">Actions made in Discord itself need the bot to have the <strong>View Audit Log</strong> permission.</p>
+    <form method="GET" action="/admin/moderation" class="kb-row" role="search">
+      <div class="kb-field"><label class="kb-label" for="moderation-filter-action">Action</label><select class="kb-select" id="moderation-filter-action" name="action">
         <option value="">— any —</option>
         ${actionOptionsHtml}
-      </select>
-    </label>
-    <label>User
-      <select name="user">
+      </select></div>
+      <div class="kb-field"><label class="kb-label" for="moderation-filter-user">User</label><select class="kb-select" id="moderation-filter-user" name="user">
         <option value="">— any —</option>
         ${userOptionsHtml}
-      </select>
-    </label>
-    <button type="submit" class="btn btn-sm">Apply</button>
-    <a class="btn btn-sm" href="/admin/moderation">Reset</a>
-  </form>
-</div>
-
-<div class="card">
-  <h2>Actions (page ${page} of ${totalPages})</h2>
-  ${rowsHtml}
-  <div class="inline-form" style="margin-top:.75rem">
-    ${prevLink}
-    ${nextLink}
-    <span class="muted">${props.pageSize} per page</span>
+      </select></div>
+      <button type="submit" class="kb-btn">Apply</button>
+      <a class="kb-btn" href="/admin/moderation">Reset</a>
+    </form>
   </div>
-</div>
+  ${rowsHtml}
+  ${renderListPager({
+    prevHref:
+      page > 1
+        ? `/admin/moderation${buildModerationQueryString(props.filters, page - 1)}`
+        : null,
+    nextHref:
+      page < totalPages
+        ? `/admin/moderation${buildModerationQueryString(props.filters, page + 1)}`
+        : null,
+    page,
+    totalPages,
+  })}
+</section>
 ${renderFeatureSettingsCard({
   intro:
     "Change moderation-log settings here without leaving the page, including the Discord channel moderation actions are logged to. Saved through the shared settings route.",
@@ -7306,6 +7376,7 @@ ${renderFeatureSettingsCard({
   enabled: props.enabled,
   flash: props.flash,
 })}
+</div>
 `;
   return renderAdminPage({
     title: "Moderation log",
