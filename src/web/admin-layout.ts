@@ -517,12 +517,15 @@ const STYLE = [
   ".notice.ok{background:var(--ok-bg);color:var(--ok-text)}",
   ".notice.warn{background:var(--warn-bg);color:var(--warn-text)}",
   ".notice.err{background:var(--err-bg);color:var(--err-text)}",
-  // The flash is a kb-callout now (#1684). A kb-stack gives it its spacing; on
-  // a page not yet migrated it sits straight in <main> (or a disclosure body)
-  // and keeps the 1rem the old .notice had. Goes with the other old classes
-  // when #1652 removes them.
-  "main>.kb-callout[data-flash],.kb-disclosure__body>.kb-callout[data-flash],.card>.kb-callout.section-flash{margin:0 0 var(--space-4)}",
-  // Disabled-feature banner (#610): explanatory text on the left, inline
+  // The flash is a kb-callout now (#1684) and a Callout has no margin. The
+  // old .notice kept 1rem below it, so the flash keeps that wherever it lands:
+  // straight in <main>, a card, a disclosure body or a Panel body (the AJAX
+  // flash is inserted before the form, whatever its parent is). A kb-stack
+  // spaces its children by its gap, so there it adds nothing. The stack rule
+  // is more specific, so the order does not matter. Goes away with the old
+  // classes (#1652).
+  ".kb-callout[data-flash],.kb-callout.section-flash{margin:0 0 var(--space-4)}",
+  ".kb-stack>.kb-callout[data-flash],.kb-stack>.kb-callout.section-flash{margin:0}", // Disabled-feature banner (#610): explanatory text on the left, inline
   // enable action + Settings link on the right; wraps on narrow screens.
   "form.stack{display:flex;flex-direction:column;gap:.6rem}",
   // A legacy form's buttons keep their natural width instead of stretching across the column (#1512).
