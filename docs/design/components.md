@@ -458,7 +458,8 @@ The container for one topic on a page: a header with title, a meta note and acti
 
 - One topic per panel. If a panel needs sub-headings, split it or use SettingRow groups.
 - Put the panel's status in the head (a badge after the title), not as the first line of the body.
-- The title is a wrapping flex row: a badge or a long name after the title text drops to the next line at phone width instead of overflowing. Do not add `kb-row` to a title for that.
+- The title is a wrapping flex row: a badge or a long name after the title text drops to the next line at phone width instead of
+  overflowing. Do not add `kb-row` to a title for that.
 - Fine print (where data comes from, what is not sent) goes in the footer, in muted.
 - A panel nested in a panel, and team cards inside one, drop to `bg`.
 - A list row with a second line (a badge's description and date) puts them in `span.kb-list__desc` under the name inside `kb-list__main`.
