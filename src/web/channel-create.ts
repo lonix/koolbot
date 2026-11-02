@@ -65,6 +65,7 @@ import {
 } from "./channel-manager.js";
 import {
   CHANNEL_LOCK_BUSY_MESSAGE,
+  readWithin,
   withChannelLock,
 } from "./channel-write-lock.js";
 import { describeWriteFailure } from "./channel-write-rest.js";
@@ -313,7 +314,7 @@ async function applyLocked(
   });
   let live: ManagedChannelView[];
   try {
-    live = await deps.listChannels();
+    live = await readWithin(() => deps.listChannels());
   } catch (error) {
     logger.warn("channel create: could not read the channels", error);
     return nothing(

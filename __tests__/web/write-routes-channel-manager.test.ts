@@ -61,11 +61,13 @@ let protection = new Map<string, string[]>();
 let canManage = true;
 let protectionFails = false;
 let channelReads = 0;
+let channelReadHangs = false;
 let failChannelReadsFrom: number | null = null;
 let recent: unknown = [];
 jest.unstable_mockModule("../../src/web/channel-manager-data.js", () => ({
   fetchChannelViews: async () => {
     channelReads++;
+    if (channelReadHangs) return new Promise<never>(() => undefined);
     if (failChannelReadsFrom !== null && channelReads >= failChannelReadsFrom) {
       throw new Error("channels unreadable");
     }
@@ -85,8 +87,13 @@ const { createChannelManagerRouter, postedValues } =
   await import("../../src/web/routes/write/channel-manager.js");
 const { applyChannelPlan, planChannels } =
   await import("../../src/web/channel-create.js");
-const { withChannelLock, CHANNEL_LOCK_BUSY_MESSAGE, CHANNEL_LOCK_WAIT_MS } =
-  await import("../../src/web/channel-write-lock.js");
+const {
+  withChannelLock,
+  CHANNEL_LOCK_BUSY_MESSAGE,
+  CHANNEL_LOCK_WAIT_MS,
+  CHANNEL_READ_TIMEOUT_MS,
+  CHANNEL_READ_TIMEOUT_MESSAGE,
+} = await import("../../src/web/channel-write-lock.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
 
@@ -2059,5 +2066,81 @@ describe("the shared per-server channel lock (#1714)", () => {
       finish();
       await held;
     }
+  });
+
+  it("a stalled read inside the lock refuses before any write and frees the lock", async () => {
+    await mount();
+    channelReadHangs = true;
+    const realSetTimeout = globalThis.setTimeout;
+    const spy = jest
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
+        realSetTimeout(
+          fn,
+          ms === CHANNEL_READ_TIMEOUT_MS ? 5 : ms,
+          ...rest,
+        )) as unknown as typeof setTimeout);
+    try {
+      const res = await harness.post("/channels/create", {
+        type: "text",
+        name: "x",
+      });
+      expect(flashOf(res)).toMatchObject({ type: "err" });
+      expect(flashOf(res).msg).toBe(CHANNEL_READ_TIMEOUT_MESSAGE);
+      expect(mockCreate).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+      channelReadHangs = false;
+    }
+    expect(await withChannelLock(session.guildId, async () => "free")).toEqual({
+      ok: true,
+      value: "free",
+    });
+  });
+
+  it("a client that left during session validation never has its write run, even on a free lock", async () => {
+    let arrived!: () => void;
+    const arrivedP = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    // Stands in for the async session middleware: holds the request until the
+    // client has gone, then lets it on to the router.
+    const slowSession = (
+      _req: unknown,
+      res: import("express").Response,
+      next: () => void,
+    ): void => {
+      arrived();
+      res.once("close", () => next());
+    };
+    harness = await startAdminHarness([
+      stubRequireSession(session),
+      slowSession as never,
+      requireAdminRoleMiddleware(),
+      requireCsrf,
+      createChannelManagerRouter(makeClient(), mockRest as never),
+    ]);
+    const abort = new AbortController();
+    const sent = fetch(`${harness.baseUrl}/admin/channels/create`, {
+      method: "POST",
+      redirect: "manual",
+      signal: abort.signal,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `koolbot_csrf=${encodeURIComponent(TEST_CSRF_TOKEN)}`,
+      },
+      body: new globalThis.URLSearchParams({
+        _csrf: TEST_CSRF_TOKEN,
+        type: "text",
+        name: "late",
+      }).toString(),
+    }).catch(() => null);
+    await arrivedP;
+    abort.abort();
+    await sent;
+    // The router ran after the close; give its queued work its turn.
+    await withChannelLock(session.guildId, async () => undefined);
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    expect(mockCreate).not.toHaveBeenCalled();
   });
 });

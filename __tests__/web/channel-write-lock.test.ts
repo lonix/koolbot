@@ -11,6 +11,9 @@ const {
   channelWriteLock,
   CHANNEL_LOCK_WAIT_MS,
   CHANNEL_LOCK_BUSY_MESSAGE,
+  CHANNEL_READ_TIMEOUT_MS,
+  ChannelReadTimeoutError,
+  readWithin,
 } = await import("../../src/web/channel-write-lock.js");
 
 const flush = async (): Promise<void> => {
@@ -162,5 +165,39 @@ describe("withChannelLock", () => {
     jest.useFakeTimers();
     await withChannelLock("g1", async () => 1);
     expect(jest.getTimerCount()).toBe(0);
+  });
+});
+
+describe("readWithin", () => {
+  it("returns what the read returns and leaves no timer behind", async () => {
+    jest.useFakeTimers();
+    expect(await readWithin(async () => "rows")).toBe("rows");
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("passes a failing read on unchanged", async () => {
+    jest.useFakeTimers();
+    await expect(
+      readWithin(async () => {
+        throw new Error("db down");
+      }),
+    ).rejects.toThrow("db down");
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("rejects with ChannelReadTimeoutError when the read stalls, and ignores its late failure", async () => {
+    jest.useFakeTimers();
+    let fail!: (e: Error) => void;
+    const stalled = readWithin(
+      () =>
+        new Promise<never>((_, reject) => {
+          fail = reject;
+        }),
+    );
+    const outcome = stalled.catch((e: unknown) => e);
+    await jest.advanceTimersByTimeAsync(CHANNEL_READ_TIMEOUT_MS);
+    expect(await outcome).toBeInstanceOf(ChannelReadTimeoutError);
+    fail(new Error("late"));
+    await flush();
   });
 });

@@ -24,6 +24,8 @@ import logger from "../../../utils/logger.js";
 import { CommandManager } from "../../../services/command-manager.js";
 import {
   CHANNEL_LOCK_BUSY_MESSAGE,
+  ChannelReadTimeoutError,
+  readWithin,
   withChannelLock,
 } from "../../channel-write-lock.js";
 import { recordAudit } from "../../audit.js";
@@ -153,7 +155,10 @@ async function moveRefusal(
   errors: FormErrors,
 ): Promise<boolean> {
   try {
-    const verdict = moveVerdict(target, await loadProtection(guild, channels));
+    const verdict = moveVerdict(
+      target,
+      await readWithin(() => loadProtection(guild, channels)),
+    );
     if (verdict.ok) return false;
     addFieldError(errors, "parent", verdict.message);
   } catch (error) {
@@ -265,16 +270,19 @@ export function createChannelManagerRouter(
         if (!res.writableEnded) gone.abort();
       };
       res.once("close", onClose);
+      // The session checks before this handler are async: the client may have
+      // left already, and its "close" event was then missed.
+      if (res.destroyed) onClose();
       const held = await withChannelLock(
         session.guildId,
         async () => {
           try {
-            const guild = await fetchGuild(session.guildId);
+            const guild = await readWithin(() => fetchGuild(session.guildId));
             if (!guild) {
               outcome = refuse(
                 "Discord couldn't be reached, so nothing changed.",
               );
-            } else if (!(await botCanManageChannels(guild))) {
+            } else if (!(await readWithin(() => botCanManageChannels(guild)))) {
               outcome = refuse(
                 "KoolBot doesn't have the Manage Channels permission. Grant it in Discord, then try again.",
               );
@@ -286,7 +294,7 @@ export function createChannelManagerRouter(
               const manager = CommandManager.getInstance(client);
               outcome = await handler({
                 guild,
-                channels: await fetchChannelViews(guild),
+                channels: await readWithin(() => fetchChannelViews(guild)),
                 maxBitrate: maxBitrateOf(guild),
                 body: (req.body as Record<string, unknown> | undefined) ?? {},
                 params,
@@ -298,7 +306,11 @@ export function createChannelManagerRouter(
             }
           } catch (error) {
             logger.error(`channel manager: ${name} failed`, error);
-            outcome = refuse(describeWriteFailure(error));
+            outcome = refuse(
+              error instanceof ChannelReadTimeoutError
+                ? error.message
+                : describeWriteFailure(error),
+            );
           }
         },
         gone.signal,
@@ -837,7 +849,7 @@ export function createChannelManagerRouter(
         verdict = deleteVerdict(
           target,
           ctx.channels,
-          await loadProtection(ctx.guild, ctx.channels),
+          await readWithin(() => loadProtection(ctx.guild, ctx.channels)),
         );
       } catch (error) {
         logger.warn("channel manager: protection check failed", error);

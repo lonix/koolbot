@@ -40,6 +40,48 @@ export const CHANNEL_LOCK_WAIT_MS = 25_000;
 export const CHANNEL_LOCK_BUSY_MESSAGE =
   "Another change to this server's channels is still running, so nothing was changed. Try again in a moment.";
 
+/**
+ * How long one read made while holding the lock may take (20 s). Discord reads
+ * are also bounded by the REST client's own timeout and retries; the Mongo
+ * queries behind `loadProtection` are not, so the bound is visible here, at
+ * the call sites (`readWithin`). It applies to reads only: a read that times
+ * out stops the write before anything is changed, and the lock is released
+ * with nothing left running that can still mutate channels.
+ */
+export const CHANNEL_READ_TIMEOUT_MS = 20_000;
+
+/** What an admin reads when a read inside the lock timed out. */
+export const CHANNEL_READ_TIMEOUT_MESSAGE =
+  "Discord didn't answer in time, so nothing was changed. Try again in a moment.";
+
+export class ChannelReadTimeoutError extends Error {
+  constructor() {
+    super(CHANNEL_READ_TIMEOUT_MESSAGE);
+    this.name = "ChannelReadTimeoutError";
+  }
+}
+
+/**
+ * Run one READ made inside the lock with its own timeout. Rejects with
+ * `ChannelReadTimeoutError`, which the caller turns into a refusal before any
+ * write. Never wrap a write in this: the timeout cannot stop the write, and the
+ * lock would be released while it can still change channels. The abandoned read
+ * keeps running but changes nothing.
+ */
+export function readWithin<T>(read: () => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const pending = read();
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new ChannelReadTimeoutError()),
+      CHANNEL_READ_TIMEOUT_MS,
+    );
+  });
+  // A read that fails after the timeout already won must not be unhandled.
+  pending.catch(() => undefined);
+  return Promise.race([pending, timedOut]).finally(() => clearTimeout(timer));
+}
+
 export const channelWriteLock = createKeyedLock();
 
 export type ChannelLockResult<T> =

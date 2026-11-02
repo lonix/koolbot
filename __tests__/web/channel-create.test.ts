@@ -21,8 +21,12 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
 
 const { applyChannelPlan, normaliseChannelName, planChannels } =
   await import("../../src/web/channel-create.js");
-const { withChannelLock, CHANNEL_LOCK_WAIT_MS, CHANNEL_LOCK_BUSY_MESSAGE } =
-  await import("../../src/web/channel-write-lock.js");
+const {
+  withChannelLock,
+  CHANNEL_LOCK_WAIT_MS,
+  CHANNEL_LOCK_BUSY_MESSAGE,
+  CHANNEL_READ_TIMEOUT_MS,
+} = await import("../../src/web/channel-write-lock.js");
 
 const view = (
   id: string,
@@ -841,6 +845,34 @@ describe("applyChannelPlan serialises per server (#1714)", () => {
       ok: true,
       value: "free",
     });
+  });
+
+  it("a stalled read of the channels stops the apply before any write and frees the lock", async () => {
+    jest.useFakeTimers();
+    try {
+      const server = sharedServer();
+      const reviewed = planChannels([entry], server.channels);
+      if (!reviewed.ok) throw new Error("plan");
+      const deps = {
+        ...server.deps,
+        listChannels: () => new Promise<ManagedChannelView[]>(() => undefined),
+      };
+      const applying = applyChannelPlan(deps, [entry], reviewed.planId);
+      await jest.advanceTimersByTimeAsync(CHANNEL_READ_TIMEOUT_MS);
+      const result = await applying;
+      expect(result).toMatchObject({ ok: false, removed: [], stuck: [] });
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error).toMatch(
+        /couldn't read the channels.*nothing was created/,
+      );
+      expect(server.post).not.toHaveBeenCalled();
+      expect(await withChannelLock("1", async () => "free")).toEqual({
+        ok: true,
+        value: "free",
+      });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("a different server is not blocked", async () => {
