@@ -119,7 +119,7 @@ const pages: [string, (n: PermissionNotice | null) => string, string][] = [
         permissionNotice: n,
       }),
     // This page has no status line: the notice leads the first card.
-    "<h2>Groups</h2>",
+    '<section class="kb-panel"',
   ],
 ];
 

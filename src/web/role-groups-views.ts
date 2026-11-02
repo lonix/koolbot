@@ -10,7 +10,7 @@ import {
   renderFlash,
   type FlashMessage,
 } from "./admin-views.js";
-import { icon } from "./icons.js";
+import { icon, toneIcon, type Tone } from "./icons.js";
 import {
   REORDER_SCRIPT,
   REORDER_STATUS_HTML,
@@ -70,6 +70,83 @@ export const ROLE_LOCK_LABELS: Record<RoleLock, string> = {
   managed: "managed by an integration",
   hierarchy: "at or above the bot's role",
 };
+
+/** The page's PageHeader: the title and one line of what the page is for. */
+function pageHeader(title: string, sub: string): string {
+  return `<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">${escapeHtml(title)}</h1>
+    <p class="kb-pagehead__sub">${escapeHtml(sub)}</p>
+  </div>
+</header>`;
+}
+
+/** A Panel for one topic: title (and a count) in its head, an optional footer note. */
+function panel(
+  id: string,
+  title: string,
+  body: string,
+  opts: {
+    meta?: string;
+    flush?: boolean;
+    foot?: string;
+    danger?: boolean;
+    /** Space the body's children (a help line, Callouts, a form). */
+    stack?: boolean;
+  } = {},
+): string {
+  const meta = opts.meta
+    ? `<span class="kb-panel__meta">${escapeHtml(opts.meta)}</span>`
+    : "";
+  const foot = opts.foot
+    ? `\n  <footer class="kb-panel__foot">${opts.foot}</footer>`
+    : "";
+  return `<section class="kb-panel${opts.danger ? " kb-panel--danger" : ""}" id="${id}" aria-labelledby="${id}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${id}-h">${escapeHtml(title)}</h2>${meta}</header>
+  <div class="kb-panel__body${opts.flush ? " kb-panel__body--flush" : ""}">${opts.stack ? `<div class="kb-stack">${body}</div>` : body}</div>${foot}
+</section>`;
+}
+
+/** An EmptyState: what is missing, and how the area fills up. */
+function emptyState(title: string, text: string): string {
+  return `<div class="kb-empty"><div class="kb-empty__icon">${icon("users")}</div><p class="kb-empty__title">${escapeHtml(title)}</p><p class="kb-empty__text">${escapeHtml(text)}</p></div>`;
+}
+
+/**
+ * A Callout. `title` is plain text; `text` and `actions` are HTML the caller
+ * has escaped. A failure is an alert, everything else a status.
+ */
+function callout(o: {
+  tone: Tone;
+  title: string;
+  text?: string;
+  actions?: string;
+  id?: string;
+  wrap?: boolean;
+}): string {
+  const role = o.tone === "err" ? "alert" : "status";
+  const cls = [
+    "kb-callout",
+    o.tone ? `kb-callout--${o.tone}` : "",
+    o.wrap ? "kb-callout--wrap" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const titleId = o.id ? ` id="${escapeHtml(o.id)}"` : "";
+  return `<div class="${cls}" role="${role}">${toneIcon(o.tone)}<div class="kb-callout__body"><p class="kb-callout__title"${titleId}>${escapeHtml(o.title)}</p>${o.text ? `<p class="kb-callout__text">${o.text}</p>` : ""}</div>${o.actions ? `<div class="kb-callout__actions">${o.actions}</div>` : ""}</div>`;
+}
+
+/** The plan's blocking problems that the plan itself does not list: one error Callout, a code badge and a message each. */
+function issuesCallout(issues: PlanIssue[]): string {
+  if (issues.length === 0) return "";
+  const items = issues
+    .map(
+      (i) =>
+        `<li><span class="kb-badge kb-badge--off">${escapeHtml(i.code)}</span> ${escapeHtml(i.message)}</li>`,
+    )
+    .join("");
+  return `<div class="kb-callout kb-callout--err" role="alert">${toneIcon("err")}<div class="kb-callout__body"><p class="kb-callout__title">Needs attention (${issues.length})</p><div class="kb-callout__text"><ul>${items}</ul></div></div></div>`;
+}
 
 export interface RoleGroupRow extends RoleGroupView {
   roleName: string | null;
@@ -308,12 +385,12 @@ const POLICY_LABELS: Record<string, string> = {
 
 function driftCell(g: RoleGroupRow): string {
   if (g.drift.length === 0) return "";
-  return `<ul class="drift">${g.drift
+  return `<div class="kb-stack">${g.drift
     .map(
       (d) =>
-        `<li><span class="tag tag-warn">${escapeHtml(d.kind)}</span> ${escapeHtml(d.detail)}</li>`,
+        `<div class="kb-row"><span class="kb-badge kb-badge--warn">${escapeHtml(d.kind)}</span><span class="kb-help">${escapeHtml(d.detail)}</span></div>`,
     )
-    .join("")}</ul>`;
+    .join("")}</div>`;
 }
 
 function relinkForm(
@@ -337,28 +414,37 @@ function relinkForm(
     .join("");
   const recreate = g.gateOnly
     ? ""
-    : `<form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/relink" class="inline-form">${csrf}<input type="hidden" name="mode" value="recreate"><button type="submit" class="btn">Create a new role</button></form>`;
-  return `<div class="notice warn" role="status"><strong>Unlinked:</strong> the Discord role${(g.lostRoleId ?? g.roleId) ? ` <span class="mono">${escapeHtml(g.lostRoleId ?? g.roleId ?? "")}</span>` : ""} was deleted. KoolBot does not recreate it on its own.
-${recreate}
-<form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/relink" class="inline-form">${csrf}<input type="hidden" name="mode" value="link"><label>Link another role <select name="roleId" required><option value="">Choose…</option>${choices}</select></label> <button type="submit" class="btn">Link</button></form></div>`;
+    : `<form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/relink" class="kb-row">${csrf}<input type="hidden" name="mode" value="recreate"><button type="submit" class="kb-btn kb-btn--sm">Create a new role</button></form>`;
+  const lost = g.lostRoleId ?? g.roleId;
+  const selectId = `relink-${escapeHtml(g.id)}`;
+  const link = `<form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/relink" class="kb-row">${csrf}<input type="hidden" name="mode" value="link"><label class="kb-label" for="${selectId}">Link another role</label><select class="kb-select" id="${selectId}" name="roleId" required><option value="">Choose…</option>${choices}</select><button type="submit" class="kb-btn kb-btn--sm">Link</button></form>`;
+  return callout({
+    tone: "warn",
+    wrap: true,
+    title: "Unlinked: the Discord role was deleted.",
+    text: `${lost ? `<span class="kb-mono">${escapeHtml(lost)}</span> is gone. ` : ""}KoolBot does not recreate it on its own.`,
+    actions: `${recreate}${link}`,
+  });
 }
 
 function roleCell(g: RoleGroupRow): string {
   if (g.unlinked) {
-    return `<span class="tag tag-warn">unlinked: role deleted</span>`;
+    return `<span class="kb-badge kb-badge--warn">unlinked: role deleted</span>`;
   }
   if (g.roleId === null) {
-    return `<span class="tag tag-info">new role — created on apply</span>`;
+    return `<span class="kb-badge kb-badge--info">new role — created on apply</span>`;
   }
   const name = g.roleName ? roleMention(g.roleName) : "";
   const badges = [
-    g.roleMissing ? `<span class="tag tag-warn">role not found</span>` : "",
-    g.gateOnly ? `<span class="tag tag-info">gate-only</span>` : "",
+    g.roleMissing
+      ? `<span class="kb-badge kb-badge--warn">role not found</span>`
+      : "",
+    g.gateOnly ? `<span class="kb-badge kb-badge--info">gate-only</span>` : "",
     g.roleLock
-      ? `<span class="tag tag-warn">locked: ${escapeHtml(ROLE_LOCK_LABELS[g.roleLock])}</span>`
+      ? `<span class="kb-badge kb-badge--warn">locked: ${escapeHtml(ROLE_LOCK_LABELS[g.roleLock])}</span>`
       : "",
   ].join(" ");
-  return `${name} <span class="mono muted">${escapeHtml(g.roleId)}</span> ${badges}`;
+  return `${name} <span class="kb-mono kb-muted">${escapeHtml(g.roleId)}</span> ${badges}`;
 }
 
 function editForm(
@@ -369,7 +455,7 @@ function editForm(
 ): string {
   const f = formView(refused, roleGroupEditForm(g.id));
   const locked = g.gateOnly || g.roleLock !== null;
-  const capabilityHelp = `Features ask for capabilities instead of role ids. <strong>Admin</strong> also counts as <strong>Moderator</strong> and <strong>Event host</strong>. <strong>Event host</strong> lets members open the host panel of events they created, from <code>/me</code>; <strong>Moderator</strong> opens the moderation pages in <code>/me</code>; neither opens the admin console. <strong>Bot</strong> groups only ever match bot accounts.${g.gateOnly ? " Integration-managed roles become gate-only groups: they can be used for gating but never carry capabilities." : ""}`;
+  const capabilityHelp = `Features ask for capabilities instead of role ids. <strong>Admin</strong> also counts as <strong>Moderator</strong> and <strong>Event host</strong>. <strong>Event host</strong> lets members open the host panel of events they created, from <code class="kb-mono">/me</code>; <strong>Moderator</strong> opens the moderation pages in <code>/me</code>; neither opens the admin console. <strong>Bot</strong> groups only ever match bot accounts.${g.gateOnly ? " Integration-managed roles become gate-only groups: they can be used for gating but never carry capabilities." : ""}`;
   const nameControl = f.control("name");
   return `<details class="kb-disclosure"${f.open()}><summary>${icon("chevron-right", { className: "kb-chev" })}Edit<span class="kb-visually-hidden">: ${escapeHtml(g.name)}</span></summary>
 <div class="kb-disclosure__body"><form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/edit" class="kb-stack">
@@ -459,41 +545,33 @@ export interface RoleDeletePageProps {
 /** Preview of deleting a group's Discord role, applied by POST (#1184). */
 export function renderRoleDeletePage(props: RoleDeletePageProps): string {
   const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
-  const errors = props.extraErrors.length
-    ? `<div class="card adoption-issues blockers"><h3>Needs attention (${props.extraErrors.length})</h3><ul>${props.extraErrors
-        .map(
-          (i) =>
-            `<li><span class="tag tag-off">${escapeHtml(i.code)}</span> ${escapeHtml(i.message)}</li>`,
-        )
-        .join("")}</ul></div>`
-    : "";
   const applicable =
     props.plan.errors.length === 0 &&
     props.extraErrors.length === 0 &&
     props.confirmName !== null &&
     props.reviewToken !== null;
+  const confirmName = props.confirmName ?? "";
   const form = applicable
-    ? `<form method="POST" action="/admin/role-groups/${escapeHtml(props.groupId)}/delete-role/apply" class="stack" data-confirm="Delete this role in Discord and remove the group? A snapshot is saved first, but the role's ID and its member assignments can't be restored."${confirmListAttr(
+    ? `<form method="POST" action="/admin/role-groups/${escapeHtml(props.groupId)}/delete-role/apply" class="kb-stack" data-confirm="Delete this role in Discord and remove the group? A snapshot is saved first, but the role's ID and its member assignments can't be restored."${confirmListAttr(
         [
           "The role is deleted in Discord, so everyone who holds it loses it.",
           "The group is removed from KoolBot.",
           "A snapshot is saved first, but the role's ID and its member assignments cannot be restored.",
         ],
       )}>${csrf}<input type="hidden" name="planId" value="${escapeHtml(props.plan.id)}"><input type="hidden" name="approvedAt" value="${escapeHtml(props.approvedAt)}"><input type="hidden" name="reviewToken" value="${escapeHtml(props.reviewToken ?? "")}">
-<p>The role is named exactly (spaces included, ${(props.confirmName ?? "").length} characters):</p>
-<pre class="mono">${escapeHtml(props.confirmName ?? "")}</pre>
+<p>The role is named exactly (spaces included, ${confirmName.length} characters):</p>
+<pre class="kb-mono">${escapeHtml(confirmName)}</pre>
 <p>I understand that deleting this role removes it from every member who holds it. A rollback can recreate a role with the same settings, but not its role ID or its member assignments, so anything that referred to the old ID stays disconnected.</p>
-<label>Type the role name to confirm <input type="text" name="confirmName" required autocomplete="off" placeholder="${escapeHtml(props.confirmName ?? "")}"></label>
-<button type="submit" class="btn btn-danger">Delete role and group</button> <a class="btn" href="/admin/role-groups">Cancel</a>
-<span class="muted">This review is valid for ${props.validForMinutes} minutes. A snapshot is saved first.</span></form>`
-    : `<a class="btn" href="/admin/role-groups">Back</a>`;
+<div class="kb-field"><label class="kb-label" for="rg-confirm-name">Type the role name to confirm</label><input class="kb-input" type="text" id="rg-confirm-name" name="confirmName" required autocomplete="off" placeholder="${escapeHtml(confirmName)}"></div>
+<div class="kb-row"><button type="submit" class="kb-btn kb-btn--danger">Delete role and group</button><a class="kb-btn kb-btn--ghost" href="/admin/role-groups">Cancel</a></div>
+<p class="kb-help">This review is valid for ${props.validForMinutes} minutes. A snapshot is saved first.</p></form>`
+    : `<div class="kb-row"><a class="kb-btn" href="/admin/role-groups">Back</a></div>`;
   const body = `
-<h1>Delete group "${escapeHtml(props.groupName)}" and its role</h1>
-<p class="subtitle">Review what would change in Discord. Nothing is deleted until you confirm below.</p>
-<h2>Plan</h2>
-${errors}${renderAdoptionDiff(props.plan)}
-<h2>Confirm</h2>
-${form}`;
+<div class="kb-stack">
+${pageHeader(`Delete group "${props.groupName}" and its role`, "Review what would change in Discord. Nothing is deleted until you confirm below.")}
+${panel("rg-delete-plan", "Plan", `<div class="kb-stack">${issuesCallout(props.extraErrors)}${renderAdoptionDiff(props.plan)}</div>`)}
+${panel("rg-delete-confirm", "Confirm", form, { danger: true })}
+</div>`;
   return renderAdminPage({
     title: "Role Groups",
     active: "/admin/role-groups",
@@ -506,7 +584,14 @@ ${form}`;
 
 function renderGroups(props: RoleGroupsPageProps, csrf: string): string {
   if (props.groups.length === 0) {
-    return `<div class="empty">No groups yet. Groups are optional: with none, every feature keeps its current behaviour.</div>`;
+    return panel(
+      "rg-groups",
+      "Groups",
+      emptyState(
+        "No groups yet",
+        "Groups are optional: with none, every feature keeps its current behaviour.",
+      ),
+    );
   }
   const shownOrder = orderToken(props.groups.map((g) => g.id));
   const rows = props.groups
@@ -515,23 +600,27 @@ function renderGroups(props: RoleGroupsPageProps, csrf: string): string {
         ? `<span class="kb-row">${g.capabilities
             .map(
               (c) =>
-                `<span class="tag tag-info">${escapeHtml(capabilityLabel(c))}</span>`,
+                `<span class="kb-badge kb-badge--info">${escapeHtml(capabilityLabel(c))}</span>`,
             )
             .join("")}</span>`
-        : `<span class="muted">none (gating only)</span>`;
+        : `<span class="kb-muted">none (gating only)</span>`;
       return `<tr${reorderRowAttrs(`role-group-${g.id}`, g.name)}>
 <td>${renderReorderCell({ action: `/admin/role-groups/${g.id}/move`, scope: ROLE_GROUP_REORDER_SCOPE, csrfInput: csrf, index: i, count: props.groups.length, orderToken: shownOrder, label: g.name })}</td>
-<th scope="row"><strong>${escapeHtml(g.name)}</strong></th>
+<th scope="row">${escapeHtml(g.name)}</th>
 <td>${roleCell(g)}${driftCell(g)}${g.unlinked || g.roleMissing ? relinkForm(g, csrf, props.roleOptions) : ""}</td>
-<td>${g.memberCount === null ? `<span class="muted">?</span>` : g.memberCount}</td>
+<td class="kb-num">${g.memberCount === null ? `<span class="kb-muted">?</span>` : g.memberCount}</td>
 <td>${caps}</td>
 <td class="kb-actions"><div class="kb-row kb-row--nowrap">${editForm(g, csrf, props.globalPolicy, props.refusedForm)}${deleteForm(g, csrf)}${deleteRoleLink(g)}</div></td>
 </tr>`;
     })
     .join("");
-  return `<table class="kb-table"><thead><tr><th scope="col">Rank</th><th scope="col">Group</th><th scope="col">Role</th><th scope="col">Members</th><th scope="col">Capabilities</th><th scope="col"><span class="kb-visually-hidden">Actions</span></th></tr></thead><tbody${reorderListAttrs("Role groups")}>${rows}</tbody></table>
-${REORDER_STATUS_HTML}
-<p class="muted">Listed highest first: a group ranks above the ones below it, and role positions in Discord follow this order when applied. Member counts come from Discord without loading every member.</p>`;
+  const table = `<table class="kb-table"><thead><tr><th scope="col">Rank</th><th scope="col">Group</th><th scope="col">Role</th><th scope="col" class="kb-num">Members</th><th scope="col">Capabilities</th><th scope="col"><span class="kb-visually-hidden">Actions</span></th></tr></thead><tbody${reorderListAttrs("Role groups")}>${rows}</tbody></table>
+${REORDER_STATUS_HTML}`;
+  return panel("rg-groups", "Groups", table, {
+    meta: String(props.groups.length),
+    flush: true,
+    foot: "Listed highest first: a group ranks above the ones below it, and role positions in Discord follow this order when applied. Member counts come from Discord without loading every member.",
+  });
 }
 
 /** True when the page shows a plan whose Apply plan button is offered; that is then the view's primary (#1512). */
@@ -591,26 +680,55 @@ ${renderColourField(f, "colour", "Colour", "", "No colour")}
 
 function renderPlan(props: RoleGroupsPageProps, csrf: string): string {
   if (props.planUnavailable) {
-    return `<div class="notice warn" role="status">${escapeHtml(props.planUnavailable)}</div>`;
+    return callout({ tone: "warn", title: props.planUnavailable });
   }
   if (!props.plan) return "";
-  const extra = props.extraErrors.length
-    ? `<div class="card adoption-issues blockers"><h3>Needs attention (${props.extraErrors.length})</h3><ul>${props.extraErrors
-        .map(
-          (i) =>
-            `<li><span class="tag tag-off">${escapeHtml(i.code)}</span> ${escapeHtml(i.message)}</li>`,
-        )
-        .join("")}</ul></div>`
-    : "";
   const bots = props.botScanUnavailable
-    ? `<div class="notice warn" role="status">Bot accounts couldn't be listed (the Server Members intent is off), so no bot-group grants are planned.</div>`
+    ? callout({
+        tone: "warn",
+        title:
+          "Bot accounts couldn't be listed (the Server Members intent is off), so no bot-group grants are planned.",
+      })
     : props.botsMissing > 0
-      ? `<p class="muted">${props.botsMissing} bot(s) are not in the bot group; the plan adds the shared role. Their own managed roles are untouched.</p>`
+      ? `<p class="kb-help">${props.botsMissing} bot(s) are not in the bot group; the plan adds the shared role. Their own managed roles are untouched.</p>`
       : "";
   const form = planCanApply(props)
-    ? `<form method="POST" action="/admin/role-groups/apply" data-confirm="Apply this plan to Discord? A snapshot is saved first so it can be rolled back."${CONFIRM_NEUTRAL_ATTR}>${csrf}<input type="hidden" name="planId" value="${escapeHtml(props.plan.id)}"><button type="submit" class="btn btn-primary">Apply plan</button> <span class="muted">A snapshot of everything touched is saved first.</span></form>`
+    ? `<form method="POST" action="/admin/role-groups/apply" class="kb-row" data-confirm="Apply this plan to Discord? A snapshot is saved first so it can be rolled back."${CONFIRM_NEUTRAL_ATTR}>${csrf}<input type="hidden" name="planId" value="${escapeHtml(props.plan.id)}"><button type="submit" class="kb-btn kb-btn--primary">Apply plan</button><span class="kb-help">A snapshot of everything touched is saved first.</span></form>`
     : "";
-  return `${extra}${bots}${renderAdoptionDiff(props.plan)}${form}`;
+  return `${issuesCallout(props.extraErrors)}${bots}${renderAdoptionDiff(props.plan)}${form}`;
+}
+
+/** A group of Switch rows under one overline, the markup the Capabilities and Permissions rows use. */
+function switchGroup(
+  id: string,
+  title: string,
+  rows: string,
+  intro = "",
+): string {
+  return `<div class="kb-settings"><div class="kb-settings__group" role="group" aria-labelledby="${id}-title"><p class="kb-overline" id="${id}-title">${escapeHtml(title)}</p>
+${intro}${rows}
+</div></div>`;
+}
+
+/** One Switch row that posts `name=value` while on. It starts off: nothing is selected for the admin. */
+function choiceRow(
+  id: string,
+  name: string,
+  label: string,
+  value: string,
+  line = "",
+): string {
+  return renderSettingRow({
+    id,
+    name: label,
+    line,
+    control: renderSwitch(name, false, {
+      id: `${id}-input`,
+      labelledBy: `${id}-name`,
+      describedBy: line ? `${id}-desc` : undefined,
+      onValue: value,
+    }),
+  });
 }
 
 function renderAdminSync(props: RoleGroupsPageProps): string {
@@ -619,25 +737,42 @@ function renderAdminSync(props: RoleGroupsPageProps): string {
   const report = props.adminReport;
   const humans = report?.humans ?? [];
   const grant = props.adminGroupLacksAdministrator
-    ? `<fieldset><legend>Give the admin group Administrator</legend>
-<label class="check"><input type="checkbox" name="grant" value="1"> Add the Administrator permission to the admin group's role. Everyone holding that role gets it.</label></fieldset>`
+    ? switchGroup(
+        "rg-sync-grant",
+        "Give the admin group Administrator",
+        choiceRow(
+          "rg-sync-grant-row",
+          "grant",
+          "Add the Administrator permission to the admin group's role",
+          "1",
+          "Everyone holding that role gets it.",
+        ),
+      )
     : "";
   const intro = props.adminGroupLacksAdministrator
-    ? `<div class="notice warn" role="status">The admin group's role doesn't carry Administrator. That is a choice, not something applied automatically: tick it below and review the plan.</div>`
+    ? callout({
+        tone: "warn",
+        title:
+          "The admin group's role doesn't carry Administrator. That is a choice, not something applied automatically: tick it below and review the plan.",
+      })
     : "";
   const unavailable = props.membersUnavailable
-    ? `<div class="notice warn" role="status">Other administrators can't be checked: the Server Members intent is off, so the member list is unavailable.</div>`
+    ? callout({
+        tone: "warn",
+        title:
+          "Other administrators can't be checked: the Server Members intent is off, so the member list is unavailable.",
+      })
     : "";
   if (!report && !props.membersUnavailable && !grant) {
-    return `<p class="muted">No admin group with a role is defined, so there is nothing to sync. The server owner counts as admin for web sign-in on their own, and nobody is flagged.</p>`;
+    return `<p class="kb-help">No admin group with a role is defined, so there is nothing to sync. The server owner counts as admin for web sign-in on their own, and nobody is flagged.</p>`;
   }
   const bots = report?.bots.length
-    ? `<h3>Bots with Administrator (${report.bots.length})</h3>
-<p class="muted">Bots are never counted as out-of-group administrators and are never touched. Consider reducing each to the permissions it actually needs.</p>
-<ul>${report.bots
+    ? `<p class="kb-overline">Bots with Administrator (${report.bots.length})</p>
+<p class="kb-help">Bots are never counted as out-of-group administrators and are never touched. Consider reducing each to the permissions it actually needs.</p>
+<ul class="kb-list">${report.bots
         .map(
           (bot) =>
-            `<li>${escapeHtml(bot.name)}${bot.self ? " (KoolBot)" : ""} <span class="muted">via ${bot.viaRoleIds.map(roleName).join(", ")}</span></li>`,
+            `<li><span class="kb-list__main">${escapeHtml(bot.name)}${bot.self ? " (KoolBot)" : ""}</span><span class="kb-muted">via ${bot.viaRoleIds.map(roleName).join(", ")}</span></li>`,
         )
         .join("")}</ul>`
     : "";
@@ -649,34 +784,51 @@ function renderAdminSync(props: RoleGroupsPageProps): string {
   );
   const fixes =
     humans.length > 0
-      ? `<fieldset><legend>Move into the admin group (adds the admin role; removes nothing)</legend>${humans
-          .map(
-            (h) =>
-              `<label class="check"><input type="checkbox" name="move" value="${escapeHtml(h.id)}"> ${escapeHtml(h.name)} <span class="muted">via ${h.viaRoleIds.map(roleName).join(", ")}</span></label>`,
-          )
-          .join(" ")}</fieldset>
-<fieldset><legend>Or drop Administrator from the other role (edits the role for everyone in it)</legend>${viaRoles
-          .map(
-            (id) =>
-              `<label class="check"><input type="checkbox" name="drop" value="${escapeHtml(id)}"> @${roleName(id)}</label>`,
-          )
-          .join(" ")}
-<p class="muted">Integration-managed roles and KoolBot's own role can't be edited. You can't drop a role if that would remove your own Administrator access.</p></fieldset>`
+      ? `${switchGroup(
+          "rg-sync-move",
+          "Move into the admin group (adds the admin role; removes nothing)",
+          humans
+            .map((h, i) =>
+              choiceRow(
+                `rg-sync-move-${i}`,
+                "move",
+                h.name,
+                h.id,
+                `via ${h.viaRoleIds.map((id) => props.roleNames[id] ?? id).join(", ")}`,
+              ),
+            )
+            .join("\n"),
+        )}
+${switchGroup(
+  "rg-sync-drop",
+  "Or drop Administrator from the other role (edits the role for everyone in it)",
+  viaRoles
+    .map((id, i) =>
+      choiceRow(
+        `rg-sync-drop-${i}`,
+        "drop",
+        `@${props.roleNames[id] ?? id}`,
+        id,
+      ),
+    )
+    .join("\n"),
+  `<p class="kb-help">Integration-managed roles and KoolBot's own role can't be edited. You can't drop a role if that would remove your own Administrator access.</p>\n`,
+)}`
       : "";
   const status =
     report && humans.length === 0
-      ? `<p class="muted">Everyone with Administrator is in the admin group (or is the server owner).</p>`
+      ? `<p class="kb-help">Everyone with Administrator is in the admin group (or is the server owner).</p>`
       : humans.length > 0
         ? `<p>${humans.length} member(s) hold Administrator through a role outside the admin group. Choose what to do, then review the plan: nothing is selected for you.</p>`
         : "";
   const form =
     fixes || grant
-      ? `<form method="GET" action="/admin/role-groups/admin-fix" class="stack">
+      ? `<form method="GET" action="/admin/role-groups/admin-fix" class="kb-stack">
 ${grant}${fixes}
-<button type="submit" class="btn">Preview the plan</button>
+<div class="kb-row"><button type="submit" class="kb-btn">Preview the plan</button></div>
 </form>`
       : "";
-  return `${intro}${unavailable}${status}${form}${bots}`;
+  return `<div class="kb-stack">${intro}${unavailable}${status}${form}${bots}</div>`;
 }
 
 export interface AdminFixPageProps {
@@ -696,16 +848,11 @@ export interface AdminFixPageProps {
 /** Preview of an out-of-group administrator fix (#1021), applied by POST. */
 export function renderAdminFixPage(props: AdminFixPageProps): string {
   const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
-  const errors = props.extraErrors.length
-    ? `<div class="card adoption-issues blockers"><h3>Needs attention (${props.extraErrors.length})</h3><ul>${props.extraErrors
-        .map(
-          (i) =>
-            `<li><span class="tag tag-off">${escapeHtml(i.code)}</span> ${escapeHtml(i.message)}</li>`,
-        )
-        .join("")}</ul></div>`
-    : "";
   const losing = props.losing.length
-    ? `<div class="notice warn" role="status">${props.losing.length} member(s) lose Administrator and are not moved into the admin group: ${props.losing.map(escapeHtml).join(", ")}.</div>`
+    ? callout({
+        tone: "warn",
+        title: `${props.losing.length} member(s) lose Administrator and are not moved into the admin group: ${props.losing.join(", ")}.`,
+      })
     : "";
   const applicable =
     props.plan.errors.length === 0 &&
@@ -721,13 +868,13 @@ export function renderAdminFixPage(props: AdminFixPageProps): string {
     ...(props.grant ? [`<input type="hidden" name="grant" value="1">`] : []),
   ].join("");
   const form = applicable
-    ? `<form method="POST" action="/admin/role-groups/admin-fix/apply" data-confirm="Apply this plan to Discord? A snapshot is saved first so it can be rolled back."${CONFIRM_NEUTRAL_ATTR}>${csrf}${hidden}<input type="hidden" name="planId" value="${escapeHtml(props.plan.id)}"><button type="submit" class="btn btn-primary">Apply plan</button> <a class="btn" href="/admin/role-groups">Back</a></form>`
-    : `<a class="btn" href="/admin/role-groups">Back</a>`;
+    ? `<form method="POST" action="/admin/role-groups/admin-fix/apply" class="kb-row" data-confirm="Apply this plan to Discord? A snapshot is saved first so it can be rolled back."${CONFIRM_NEUTRAL_ATTR}>${csrf}${hidden}<input type="hidden" name="planId" value="${escapeHtml(props.plan.id)}"><button type="submit" class="kb-btn kb-btn--primary">Apply plan</button><a class="kb-btn" href="/admin/role-groups">Back</a></form>`
+    : `<div class="kb-row"><a class="kb-btn" href="/admin/role-groups">Back</a></div>`;
   const body = `
-<h1>Administrators outside the admin group</h1>
-<p class="subtitle">Review what would change in Discord. Nothing is written until you apply, and a snapshot is saved first.</p>
-<h2>Plan</h2>
-${errors}${losing}${renderAdoptionDiff(props.plan)}${form}`;
+<div class="kb-stack">
+${pageHeader("Administrators outside the admin group", "Review what would change in Discord. Nothing is written until you apply, and a snapshot is saved first.")}
+${panel("rg-fix-plan", "Plan", `<div class="kb-stack">${issuesCallout(props.extraErrors)}${losing}${renderAdoptionDiff(props.plan)}${form}</div>`)}
+</div>`;
   return renderAdminPage({
     title: "Role Groups",
     active: "/admin/role-groups",
@@ -748,39 +895,32 @@ export const JOB_SCRIPT = (jobId: string): string =>
 function renderDriftSummary(props: RoleGroupsPageProps): string {
   const drifted = props.groups.filter((g) => g.drift.length > 0 || g.unlinked);
   if (drifted.length === 0) return "";
-  return `<div class="notice warn" role="status"><strong>${drifted.length} group(s) differ from Discord.</strong> Sync policy: ${escapeHtml(POLICY_LABELS[props.globalPolicy] ?? props.globalPolicy)}. Changes made in Discord are shown per group below; fix them by applying the plan, or set a group's policy to adopt or enforce.</div>`;
+  return callout({
+    tone: "warn",
+    title: `${drifted.length} group(s) differ from Discord.`,
+    text: `Sync policy: ${escapeHtml(POLICY_LABELS[props.globalPolicy] ?? props.globalPolicy)}. Changes made in Discord are shown per group below; fix them by applying the plan, or set a group's policy to adopt or enforce.`,
+  });
 }
 
 export function renderRoleGroupsPage(props: RoleGroupsPageProps): string {
   const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+  // `JOB_SCRIPT` sets the text of #rg-job, so the id sits on the Callout's title.
   const job = props.jobId
-    ? `<div class="notice" id="rg-job" role="status">Applying…</div>`
+    ? callout({ tone: "", title: "Applying…", id: "rg-job" })
     : "";
+  const plan = renderPlan(props, csrf);
   const body = `
-<h1>Role Groups</h1>
-<p class="subtitle">Name the roles that matter on your server (Admin, Mod, VIP, Friends, Bots …), rank them, and let features ask for a capability instead of a role id. Groups are optional.</p>
+<div class="kb-stack">
+${pageHeader("Role Groups", "Name the roles that matter on your server (Admin, Mod, VIP, Friends, Bots …), rank them, and let features ask for a capability instead of a role id. Groups are optional.")}
 ${renderFlash(props.flash)}
 ${job}${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
-<div class="card">
-  <h2>Groups</h2>
-  ${renderGroups(props, csrf)}
-</div>
 ${renderDriftSummary(props)}
-<div class="card">
-  <h2>Plan</h2>
-  <p class="muted">Saving a group only records what you want. This is what applying would change in Discord: nothing is written until you apply, and every apply is snapshotted.</p>
-  ${renderPlan(props, csrf)}
+${renderGroups(props, csrf)}
+${panel("rg-plan", "Plan", `<p class="kb-help">Saving a group only records what you want. This is what applying would change in Discord: nothing is written until you apply, and every apply is snapshotted.</p>${plan}`, { stack: true })}
+${panel("rg-admins", "Administrators and the admin group", `<p class="kb-help">The group flagged <code class="kb-mono">admin</code> carries Discord's Administrator permission. If the role lacks it you can add it here, as a separate choice you review first. Web sign-in accepts either the admin group or Administrator.</p>${renderAdminSync(props)}`, { stack: true })}
+${panel("rg-add", "Add a group", renderAddForm(props, csrf))}
+<p class="kb-help">The server owner and members with the Administrator permission always count as <code class="kb-mono">admin</code>, with or without a group.</p>
 </div>
-<div class="card">
-  <h2>Administrators and the admin group</h2>
-  <p class="muted">The group flagged <code>admin</code> carries Discord's Administrator permission. If the role lacks it you can add it below, as a separate choice you review first. Web sign-in accepts either the admin group or Administrator.</p>
-  ${renderAdminSync(props)}
-</div>
-<div class="card">
-  <h2>Add a group</h2>
-  ${renderAddForm(props, csrf)}
-</div>
-<p class="muted">The server owner and members with the Administrator permission always count as <code>admin</code>, with or without a group.</p>
 ${scriptTag(PRESET_SCRIPT)}
 ${props.groups.length > 0 ? scriptTag(REORDER_SCRIPT) : ""}
 ${props.jobId ? `${scriptTag(JOB_SCRIPT(props.jobId))}` : ""}
