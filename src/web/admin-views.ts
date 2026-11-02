@@ -151,7 +151,11 @@ import type { TicketStatus } from "../models/ticket.js";
 import type { CaseGroups, CaseView } from "./moderation-case-groups.js";
 import type { VersionCheckSnapshot } from "../services/version-check-service.js";
 import { ROLE_GROUP_SETTING_KEYS } from "../services/role-group-access.js";
-import { renderDashboardBody, renderVersionCard } from "./dashboard-view.js";
+import {
+  renderDashboardBody,
+  renderVersionCard,
+  tile as statTile,
+} from "./dashboard-view.js";
 import type { DashboardData } from "./dashboard-data.js";
 import {
   renderAccessReview,
@@ -5585,28 +5589,161 @@ function retentionWindowLabel(value: number, unit: string): string {
   return value === 0 ? "keep forever" : `${value} ${unit}`;
 }
 
+/** A Badge: a word and a colour, never colour alone. */
+function monitorBadge(tone: "on" | "off" | "warn", text: string): string {
+  return `<span class="kb-badge kb-badge--${tone}">${escapeHtml(text)}</span>`;
+}
+
+/**
+ * A page header (PageHeader) for the monitoring pages: the title, one line of
+ * what the page is for and, where the page has a switch, its status line.
+ */
+function monitorPageHead(
+  title: string,
+  subHtml: string,
+  statusLineHtml = "",
+): string {
+  return `<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">${escapeHtml(title)}</h1>
+    <p class="kb-pagehead__sub">${subHtml}</p>
+    ${statusLineHtml}
+  </div>
+</header>`;
+}
+
+/** A plain (info) Callout: the title states the fact, the text says what it means. */
+function monitorCallout(title: string, textHtml: string): string {
+  return `<div class="kb-callout">${toneIcon("")}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(title)}</p><p class="kb-callout__text">${textHtml}</p></div></div>`;
+}
+
+/** A Panel: head with title and meta, a body (flush for a table) and an optional footer note. */
+function monitorPanel(o: {
+  id: string;
+  title: string;
+  meta?: string;
+  body: string;
+  flush?: boolean;
+  /** Fine print, as HTML. */
+  foot?: string;
+}): string {
+  const meta = o.meta
+    ? `<span class="kb-panel__meta">${escapeHtml(o.meta)}</span>`
+    : "";
+  const body = o.flush
+    ? `<div class="kb-panel__body--flush">${o.body}</div>`
+    : `<div class="kb-panel__body">${o.body}</div>`;
+  const foot = o.foot
+    ? `<footer class="kb-panel__foot">${o.foot}</footer>`
+    : "";
+  return `<section class="kb-panel" id="${o.id}" aria-labelledby="${o.id}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${o.id}-h">${escapeHtml(o.title)}</h2>${meta}</header>
+  ${body}${foot}
+</section>`;
+}
+
+/** What a Panel shows with nothing in it: what is missing and how it fills up (EmptyState). */
+function monitorEmpty(title: string, textHtml: string): string {
+  return `<div class="kb-empty"><p class="kb-empty__title">${escapeHtml(title)}</p><p class="kb-empty__text">${textHtml}</p></div>`;
+}
+
+/** A DataTable: a hidden caption, column headings and the rows; `num` columns are right-aligned. */
+function monitorTable(
+  caption: string,
+  columns: ReadonlyArray<{ label: string; num?: boolean }>,
+  rowsHtml: string,
+): string {
+  const head = columns
+    .map(
+      (c) =>
+        `<th scope="col"${c.num ? ' class="kb-num"' : ""}>${escapeHtml(c.label)}</th>`,
+    )
+    .join("");
+  return `<table class="kb-table"><caption class="kb-visually-hidden">${escapeHtml(caption)}</caption><thead><tr>${head}</tr></thead><tbody>${rowsHtml}</tbody></table>`;
+}
+
+/** A bar list (Heatmap, components.md): label, bar and figure, with the top row marked `is-peak`. */
+function monitorBars(
+  rows: ReadonlyArray<{ label: string; weight: number; value: string }>,
+  peak: number | null,
+): string {
+  const max = rows.reduce((m, r) => (r.weight > m ? r.weight : m), 0);
+  return `<div class="kb-bars">${rows
+    .map((r, i) => {
+      const pct = max > 0 ? (r.weight / max) * 100 : 0;
+      return `<div class="kb-bars__row${i === peak ? " is-peak" : ""}"><span>${escapeHtml(r.label)}</span><span class="kb-bars__track"><span class="kb-bars__fill" style="width:${pct.toFixed(1)}%"></span></span><span class="kb-bars__val">${escapeHtml(r.value)}</span></div>`;
+    })
+    .join("")}</div>`;
+}
+
 export function renderDatabasePage(props: DatabaseProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
-  const collectionsHtml =
-    props.collections.length === 0
-      ? `<div class="empty">No collection statistics available.</div>`
-      : `<table><thead><tr><th scope="col">Collection</th><th scope="col">Documents (est.)</th></tr></thead><tbody>${props.collections.map((c) => `<tr><th scope="row" class="mono">${escapeHtml(c.name)}</th><td>${c.count}</td></tr>`).join("")}</tbody></table>`;
+  const connected = props.connection.state === "connected";
+  const totalDocuments = props.collections.reduce((n, c) => n + c.count, 0);
 
+  const collectionsPanel = monitorPanel({
+    id: "db-collections",
+    title: "Collections",
+    flush: props.collections.length > 0,
+    body:
+      props.collections.length === 0
+        ? monitorEmpty(
+            "No collection statistics available.",
+            "They show up here once the database is connected and has collections.",
+          )
+        : monitorTable(
+            "Collections",
+            [{ label: "Collection" }, { label: "Documents (est.)", num: true }],
+            props.collections
+              .map(
+                (c) =>
+                  `<tr><th scope="row" class="kb-mono">${escapeHtml(c.name)}</th><td class="kb-num">${c.count}</td></tr>`,
+              )
+              .join(""),
+          ),
+  });
+
+  const latest = props.trunkHistory[0];
+  const historyTable = monitorTable(
+    "Last 10 cleanup runs",
+    [
+      { label: "When" },
+      { label: "Result" },
+      { label: "Sessions removed", num: true },
+      { label: "Users processed", num: true },
+      { label: "Time", num: true },
+      { label: "Errors" },
+    ],
+    props.trunkHistory
+      .map(
+        (h) => `<tr>
+<th scope="row" class="kb-muted">${escapeHtml(h.ranAt)}</th>
+<td>${h.result === "success" ? monitorBadge("on", "ok") : monitorBadge("off", "failed")}</td>
+<td class="kb-num">${h.sessionsRemoved}</td>
+<td class="kb-num">${h.dataAggregated}</td>
+<td class="kb-num kb-muted">${h.executionMs}ms</td>
+<td class="kb-muted">${h.errors === 0 ? "—" : `${h.errors}${h.errorMessage ? `: ${escapeHtml(h.errorMessage.slice(0, 80))}` : ""}`}</td>
+</tr>`,
+      )
+      .join(""),
+  );
+  // Closed unless the newest run failed: a failure is the one thing in it to read first.
   const historyHtml =
     props.trunkHistory.length === 0
-      ? `<div class="empty">No prior cleanup runs recorded.</div>`
-      : `<table><thead><tr><th scope="col">When</th><th scope="col">Result</th><th scope="col">Sessions removed</th><th scope="col">Users processed</th><th scope="col">Time</th><th scope="col">Errors</th></tr></thead><tbody>${props.trunkHistory
-          .map(
-            (h) => `<tr>
-<th scope="row" class="muted">${escapeHtml(h.ranAt)}</th>
-<td>${h.result === "success" ? '<span class="tag tag-on">ok</span>' : '<span class="tag tag-off">failed</span>'}</td>
-<td>${h.sessionsRemoved}</td>
-<td>${h.dataAggregated}</td>
-<td class="muted">${h.executionMs}ms</td>
-<td class="muted">${h.errors === 0 ? "—" : `${h.errors}${h.errorMessage ? `: ${escapeHtml(h.errorMessage.slice(0, 80))}` : ""}`}</td>
-</tr>`,
-          )
-          .join("")}</tbody></table>`;
+      ? monitorPanel({
+          id: "db-history",
+          title: "Last 10 cleanup runs",
+          body: monitorEmpty(
+            "No prior cleanup runs recorded.",
+            "Runs show up here after the scheduled cleanup, or Run cleanup now, has run.",
+          ),
+        })
+      : `<section class="kb-panel" id="db-history">
+  <details class="kb-disclosure"${latest.result === "failure" ? " open" : ""}>
+    <summary>${CHEVRON_ICON}Last 10 cleanup runs <span class="kb-badge kb-badge--count">${props.trunkHistory.length}</span><span class="kb-disclosure__hint">Latest: ${latest.result === "success" ? "ok" : "failed"}</span></summary>
+    <div class="kb-disclosure__body kb-panel__body--flush">${historyTable}</div>
+  </details>
+</section>`;
 
   const runDisabled = props.trunk.isRunning || !props.trunk.enabled;
   const runHint = !props.trunk.enabled
@@ -5615,41 +5752,64 @@ export function renderDatabasePage(props: DatabaseProps): string {
       ? "A cleanup is already running."
       : "Runs the cleanup now. Subject to the 24-hour minimum interval.";
 
+  const tiles = `<div class="kb-tiles">
+${statTile({
+  label: "Connection",
+  href: "#db-collections",
+  value: escapeHtml(props.connection.state),
+  detail: `${props.connection.name} on ${props.connection.host}`,
+  warn: !connected,
+})}
+${statTile({
+  label: "Voice-tracking cleanup",
+  href: "#db-cleanup",
+  value: props.trunk.enabled ? "On" : "Off",
+  detail: !props.trunk.enabled
+    ? "The feature is switched off."
+    : props.trunk.isRunning
+      ? "Running now."
+      : `Last run ${props.trunk.lastRun}`,
+})}
+${statTile({
+  label: "Documents (est.)",
+  href: "#db-collections",
+  value: props.collections.length === 0 ? "—" : String(totalDocuments),
+  detail:
+    props.collections.length === 0
+      ? "No collection statistics available."
+      : `In ${countOf(props.collections.length, "collection")}`,
+})}
+</div>`;
+
   const body = `
-<h1>Database</h1>
-<p class="subtitle">MongoDB connection state and the scheduled voice-tracking data cleanup.</p>
+<div class="kb-stack">
+${monitorPageHead("Database", "MongoDB connection state and the scheduled voice-tracking data cleanup.")}
 ${renderFlash(props.flash)}
-<div class="card">
-  <h2>Connection</h2>
-  <dl class="kv">
-    <dt>State</dt><dd>${tagOnOff(props.connection.state === "connected", props.connection.state, props.connection.state)}</dd>
-    <dt>Database</dt><dd class="mono">${escapeHtml(props.connection.name)}</dd>
-    <dt>Host</dt><dd class="mono">${escapeHtml(props.connection.host)}</dd>
-  </dl>
+${tiles}
+${monitorPanel({
+  id: "db-cleanup",
+  title: "Voice-tracking cleanup",
+  body: `<div class="kb-stack">
+    <dl class="kb-kv">
+      <dt>Feature</dt><dd>${props.trunk.enabled ? monitorBadge("on", "enabled") : monitorBadge("off", "disabled")}</dd>
+      <dt>Schedule</dt><dd class="kb-mono">${escapeHtml(props.trunk.schedule || "(unset)")}</dd>
+      <dt>Scheduled</dt><dd>${props.trunk.isScheduled ? monitorBadge("on", "yes") : monitorBadge("off", "no")}</dd>
+      <dt>Currently running</dt><dd>${props.trunk.isRunning ? monitorBadge("warn", "yes") : monitorBadge("on", "idle")}</dd>
+      <dt>Last run</dt><dd class="kb-muted">${escapeHtml(props.trunk.lastRun)}</dd>
+      <dt>Detailed sessions retention</dt><dd>${retentionWindowLabel(props.trunk.detailedDays, "days")}</dd>
+      <dt>Monthly summaries retention</dt><dd>${retentionWindowLabel(props.trunk.monthlyMonths, "months")}</dd>
+      <dt>Yearly summaries retention</dt><dd>${retentionWindowLabel(props.trunk.yearlyYears, "years")}</dd>
+    </dl>
+    <form method="POST" action="/admin/database/run-cleanup" class="kb-row" data-confirm="Run voice-channel data cleanup now?">
+      ${csrfInput}
+      <button type="submit" class="kb-btn kb-btn--primary"${runDisabled ? " disabled" : ""}>Run cleanup now</button>
+      <span class="kb-help">${runHint}</span>
+    </form>
+  </div>`,
+})}
+${historyHtml}
+${collectionsPanel}
 </div>
-<div class="card">
-  <h2>Voice-tracking cleanup</h2>
-  <dl class="kv">
-    <dt>Feature</dt><dd>${tagOnOff(props.trunk.enabled, "enabled", "disabled")}</dd>
-    <dt>Schedule</dt><dd class="mono">${escapeHtml(props.trunk.schedule || "(unset)")}</dd>
-    <dt>Scheduled</dt><dd>${props.trunk.isScheduled ? '<span class="tag tag-on">yes</span>' : '<span class="tag tag-off">no</span>'}</dd>
-    <dt>Currently running</dt><dd>${props.trunk.isRunning ? '<span class="tag tag-warn">yes</span>' : '<span class="tag tag-on">idle</span>'}</dd>
-    <dt>Last run</dt><dd class="muted">${escapeHtml(props.trunk.lastRun)}</dd>
-    <dt>Detailed sessions retention</dt><dd>${retentionWindowLabel(props.trunk.detailedDays, "days")}</dd>
-    <dt>Monthly summaries retention</dt><dd>${retentionWindowLabel(props.trunk.monthlyMonths, "months")}</dd>
-    <dt>Yearly summaries retention</dt><dd>${retentionWindowLabel(props.trunk.yearlyYears, "years")}</dd>
-  </dl>
-  <form method="POST" action="/admin/database/run-cleanup" class="inline-form" data-confirm="Run voice-channel data cleanup now?">
-    ${csrfInput}
-    <button type="submit" class="btn btn-primary"${runDisabled ? " disabled" : ""}>Run cleanup now</button>
-    <span class="muted">${runHint}</span>
-  </form>
-</div>
-<div class="card">
-  <h2>Last 10 cleanup runs</h2>
-  ${historyHtml}
-</div>
-<div class="card"><h2>Collections</h2>${collectionsHtml}</div>
 `;
   return renderAdminPage({
     title: "Database",
@@ -5834,9 +5994,10 @@ export function renderBotStatusPage(props: BotStatusProps): string {
     .join("");
 
   const body = `
-<h1>Presence</h1>
-<p class="subtitle">The "Watching …" presence messages the bot rotates through, picked by how many users are in voice. Edit, import, or export each pool below — changes take effect without a redeploy. Empty pools fall back to the built-in defaults.</p>
-<p class="muted">The bot picks one message at random, so the order only decides how a pool reads here and in its export. Use <em>Move up</em> and <em>Move down</em> on a row to change its place, or drag a row by its handle. A new entry goes last.</p>
+<div class="kb-stack">
+${monitorPageHead("Presence", 'The "Watching …" presence messages the bot rotates through, picked by how many users are in voice. Edit, import, or export each pool below — changes take effect without a redeploy. Empty pools fall back to the built-in defaults.')}
+<p class="kb-help">The bot picks one message at random, so the order only decides how a pool reads here and in its export. Use <em>Move up</em> and <em>Move down</em> on a row to change its place, or drag a row by its handle. A new entry goes last.</p>
+</div>
 ${renderFlash(props.flash)}
 ${REORDER_STATUS_HTML}
 ${editors}
@@ -6742,9 +6903,9 @@ export interface CommandAuditProps extends CommonProps {
 }
 
 function resultTag(result: "success" | "error" | "denied"): string {
-  if (result === "success") return '<span class="tag tag-on">success</span>';
-  if (result === "denied") return '<span class="tag tag-warn">denied</span>';
-  return '<span class="tag tag-off">error</span>';
+  if (result === "success") return monitorBadge("on", "success");
+  if (result === "denied") return monitorBadge("warn", "denied");
+  return monitorBadge("off", "error");
 }
 
 function buildAuditQueryString(
@@ -6785,102 +6946,107 @@ export function renderCommandAuditPage(props: CommandAuditProps): string {
     return `<option value="${escapeHtml(val)}"${sel}>${escapeHtml(label)}</option>`;
   };
 
+  const filtered = Object.values(props.filters).some((v) => v !== "");
   const rowsHtml =
     props.rows.length === 0
-      ? `<div class="empty">No command invocations match the current filters.</div>`
-      : `<table>
-<thead><tr>
-<th scope="col">When</th><th scope="col">User</th><th scope="col">Command</th><th scope="col">Channel</th>
-<th scope="col">Result</th><th scope="col">Duration</th><th scope="col">Error</th>
-</tr></thead>
-<tbody>${props.rows
-          .map((r) => {
-            // Component rows (#1147) are not slash commands: no leading "/".
-            const lead = r.commandName.startsWith("component:") ? "" : "/";
-            const cmd = r.subcommand
-              ? `${lead}${escapeHtml(r.commandName)} ${escapeHtml(r.subcommand)}`
-              : `${lead}${escapeHtml(r.commandName)}`;
-            return `<tr>
-<th scope="row" class="muted mono">${escapeHtml(r.createdAt)}</th>
+      ? `<div class="kb-panel__body">${monitorEmpty(
+          "No command invocations match the current filters.",
+          filtered
+            ? "Try other filters, or reset them."
+            : "Commands show up here as people run them in Discord, while logging is on.",
+        )}</div>`
+      : `<div class="kb-panel__body--flush">${monitorTable(
+          "Invocations",
+          [
+            { label: "When" },
+            { label: "User" },
+            { label: "Command" },
+            { label: "Channel" },
+            { label: "Result" },
+            { label: "Duration", num: true },
+            { label: "Error" },
+          ],
+          props.rows
+            .map((r) => {
+              // Component rows (#1147) are not slash commands: no leading "/".
+              const lead = r.commandName.startsWith("component:") ? "" : "/";
+              const cmd = r.subcommand
+                ? `${lead}${escapeHtml(r.commandName)} ${escapeHtml(r.subcommand)}`
+                : `${lead}${escapeHtml(r.commandName)}`;
+              return `<tr>
+<th scope="row" class="kb-muted kb-mono">${escapeHtml(r.createdAt)}</th>
 <td title="${escapeHtml(r.discordUserId)}">${escapeHtml(r.userLabel)}</td>
-<td class="mono">${cmd}</td>
-<td class="muted">${r.channelId ? channelMention({ name: r.channelLabel ?? r.channelId, type: r.channelType, storedName: r.channelStoredName }) : "—"}</td>
+<td class="kb-mono">${cmd}</td>
+<td class="kb-muted">${r.channelId ? channelMention({ name: r.channelLabel ?? r.channelId, type: r.channelType, storedName: r.channelStoredName }) : "—"}</td>
 <td>${resultTag(r.result)}</td>
-<td class="muted">${r.durationMs}ms</td>
-<td class="muted">${r.errorMessage ? escapeHtml(r.errorMessage.slice(0, 80)) : "—"}</td>
+<td class="kb-num kb-muted">${r.durationMs}ms</td>
+<td class="kb-muted">${r.errorMessage ? escapeHtml(r.errorMessage.slice(0, 80)) : "—"}</td>
 </tr>`;
-          })
-          .join("")}</tbody></table>`;
+            })
+            .join(""),
+        )}</div>`;
 
-  const prevLink =
-    page > 1
-      ? `<a class="btn btn-sm" href="/admin/audit/commands${buildAuditQueryString(props.filters, page - 1)}">← Prev</a>`
-      : `<button class="btn btn-sm" disabled>← Prev</button>`;
-  const nextLink =
-    page < totalPages
-      ? `<a class="btn btn-sm" href="/admin/audit/commands${buildAuditQueryString(props.filters, page + 1)}">Next →</a>`
-      : `<button class="btn btn-sm" disabled>Next →</button>`;
+  const filters = `<div class="kb-panel__body">
+    <form method="GET" action="/admin/audit/commands" class="kb-stack" role="search">
+      <div class="kb-fields">
+        <div class="kb-field"><label class="kb-label" for="audit-command">Command</label>
+          <select class="kb-select" id="audit-command" name="command">
+            <option value="">— any —</option>
+            ${commandOptionsHtml}
+          </select></div>
+        <div class="kb-field"><label class="kb-label" for="audit-user">User</label>
+          <select class="kb-select" id="audit-user" name="user">
+            <option value="">— any —</option>
+            ${userOptionsHtml}
+          </select></div>
+        <div class="kb-field"><label class="kb-label" for="audit-result">Result</label>
+          <select class="kb-select" id="audit-result" name="result">
+            <option value="">— any —</option>
+            ${resultOpt("success", "success")}
+            ${resultOpt("error", "error")}
+            ${resultOpt("denied", "denied")}
+          </select></div>
+        <div class="kb-field"><label class="kb-label" for="audit-from">From</label>
+          <input class="kb-input" type="date" id="audit-from" name="from" value="${escapeHtml(props.filters.from)}"></div>
+        <div class="kb-field"><label class="kb-label" for="audit-to">To</label>
+          <input class="kb-input" type="date" id="audit-to" name="to" value="${escapeHtml(props.filters.to)}"></div>
+      </div>
+      <div class="kb-row"><button type="submit" class="kb-btn">Apply</button><a class="kb-btn kb-btn--ghost" href="/admin/audit/commands">Reset</a></div>
+    </form>
+  </div>`;
+
+  const statusLine = renderStatusLine({
+    enabled: props.enabled,
+    onLabel: "Logging on",
+    offLabel: "Logging off",
+    chips: [
+      { text: `Kept for ${countOf(props.retentionDays, "day")}` },
+      { text: `${countOf(props.total, "row")} matched` },
+    ],
+  });
 
   const body = `
-<h1>Slash-command audit log</h1>
-<p class="subtitle">One row per Discord slash-command invocation, and per button, select-menu or modal interaction (listed as <code>component:&hellip;</code>). Raw command arguments, custom ids and submitted text are deliberately omitted.</p>
+<div class="kb-stack">
+${monitorPageHead("Slash-command audit log", "One row per Discord slash-command invocation, and per button, select-menu or modal interaction (listed as <code>component:&hellip;</code>). Raw command arguments, custom ids and submitted text are deliberately omitted.", statusLine)}
 ${renderPageFlash(props.flash)}
-
-${renderStatusLine({
-  enabled: props.enabled,
-  onLabel: "Logging on",
-  offLabel: "Logging off",
-  chips: [
-    { text: `Kept for ${countOf(props.retentionDays, "day")}` },
-    { text: `${countOf(props.total, "row")} matched` },
-  ],
-})}
-${props.enabled ? "" : `<p class="muted">Enable <code>core.command_audit.enabled</code> ${props.settingsUnavailable ? "once settings can be loaded again" : "in the settings below"} to start recording.</p>`}
-
-
-<div class="card">
-  <h2>Filters</h2>
-  <form method="GET" action="/admin/audit/commands" class="inline-form">
-    <label>Command
-      <select name="command">
-        <option value="">— any —</option>
-        ${commandOptionsHtml}
-      </select>
-    </label>
-    <label>User
-      <select name="user">
-        <option value="">— any —</option>
-        ${userOptionsHtml}
-      </select>
-    </label>
-    <label>Result
-      <select name="result">
-        <option value="">— any —</option>
-        ${resultOpt("success", "success")}
-        ${resultOpt("error", "error")}
-        ${resultOpt("denied", "denied")}
-      </select>
-    </label>
-    <label>From
-      <input type="date" name="from" value="${escapeHtml(props.filters.from)}">
-    </label>
-    <label>To
-      <input type="date" name="to" value="${escapeHtml(props.filters.to)}">
-    </label>
-    <button type="submit" class="btn btn-sm">Apply</button>
-    <a class="btn btn-sm" href="/admin/audit/commands">Reset</a>
-  </form>
-</div>
-
-<div class="card">
-  <h2>Invocations (page ${page} of ${totalPages})</h2>
+${props.enabled ? "" : monitorCallout("Audit logging is off.", `Enable <code>core.command_audit.enabled</code> ${props.settingsUnavailable ? "once settings can be loaded again" : "in the settings below"} to start recording.`)}
+<section class="kb-panel" id="audit-invocations" aria-labelledby="audit-invocations-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="audit-invocations-h">Invocations</h2><span class="kb-panel__meta">${props.pageSize} per page</span></header>
+  ${filters}
   ${rowsHtml}
-  <div class="inline-form" style="margin-top:.75rem">
-    ${prevLink}
-    ${nextLink}
-    <span class="muted">${props.pageSize} per page</span>
-  </div>
-</div>
+  ${renderListPager({
+    prevHref:
+      page > 1
+        ? `/admin/audit/commands${buildAuditQueryString(props.filters, page - 1)}`
+        : null,
+    nextHref:
+      page < totalPages
+        ? `/admin/audit/commands${buildAuditQueryString(props.filters, page + 1)}`
+        : null,
+    page,
+    totalPages,
+  })}
+</section>
 ${renderFeatureSettingsCard({
   intro:
     "Change audit logging and retention here without leaving the page. Saved through the shared settings route.",
@@ -6892,6 +7058,7 @@ ${renderFeatureSettingsCard({
   enabled: props.enabled,
   flash: props.flash,
 })}
+</div>
 `;
   return renderAdminPage({
     title: "Command audit",
@@ -7525,12 +7692,12 @@ function formatPct(fraction: number): string {
 
 function errorRateTag(rate: number): string {
   if (rate >= METRICS_ERROR_SPOTLIGHT) {
-    return `<span class="tag tag-off">${formatPct(rate)}</span>`;
+    return monitorBadge("off", formatPct(rate));
   }
   if (rate > 0) {
-    return `<span class="tag tag-warn">${formatPct(rate)}</span>`;
+    return monitorBadge("warn", formatPct(rate));
   }
-  return `<span class="tag tag-on">0%</span>`;
+  return monitorBadge("on", "0%");
 }
 
 /** The time-window choice as a labelled `kb-tabs` strip; the current one has `aria-current` (#1545). */
@@ -7554,63 +7721,108 @@ export function renderCommandMetricsPage(props: CommandMetricsProps): string {
     [7, 30],
     props.windowDays,
   );
+  const threshold = formatPct(METRICS_ERROR_SPOTLIGHT);
 
-  const usageRowsHtml =
-    props.rows.length === 0
-      ? `<div class="empty">No command metrics recorded in the last ${props.windowDays} days.</div>`
-      : `<table>
-<thead><tr>
-<th scope="col">Command</th><th scope="col">Invocations</th><th scope="col">Error rate</th><th scope="col">Avg response</th><th scope="col">Last used</th>
-</tr></thead>
-<tbody>${props.rows
-          .map(
-            (r) => `<tr>
-<th scope="row" class="mono">/${escapeHtml(r.command)}</th>
-<td>${r.usageCount}</td>
-<td>${errorRateTag(r.errorRate)} <span class="muted">(${r.errorCount})</span></td>
-<td class="muted">${formatMs(r.avgResponseMs)}</td>
-<td class="muted mono">${r.lastUsedAt ? escapeHtml(r.lastUsedAt) : "—"}</td>
-</tr>`,
+  const usagePanel = monitorPanel({
+    id: "metrics-usage",
+    title: "Commands by usage",
+    flush: props.rows.length > 0,
+    body:
+      props.rows.length === 0
+        ? monitorEmpty(
+            `No command metrics recorded in the last ${props.windowDays} days.`,
+            "Commands show up here as people use them, while recording is on.",
           )
-          .join("")}</tbody></table>`;
+        : monitorTable(
+            "Commands by usage",
+            [
+              { label: "Command" },
+              { label: "Invocations", num: true },
+              { label: "Error rate" },
+              { label: "Avg response", num: true },
+              { label: "Last used" },
+            ],
+            props.rows
+              .map(
+                (r) => `<tr>
+<th scope="row" class="kb-mono">/${escapeHtml(r.command)}</th>
+<td class="kb-num">${r.usageCount}</td>
+<td>${errorRateTag(r.errorRate)} <span class="kb-muted">(${r.errorCount})</span></td>
+<td class="kb-num kb-muted">${formatMs(r.avgResponseMs)}</td>
+<td class="kb-muted kb-mono">${r.lastUsedAt ? escapeHtml(r.lastUsedAt) : "—"}</td>
+</tr>`,
+              )
+              .join(""),
+          ),
+  });
 
   const spotlight = props.rows.filter(
     (r) => r.errorRate >= METRICS_ERROR_SPOTLIGHT,
   );
-  const spotlightHtml =
-    spotlight.length === 0
-      ? `<p class="muted">No command exceeded a ${formatPct(METRICS_ERROR_SPOTLIGHT)} error rate. 🎉</p>`
-      : `<table>
-<thead><tr><th scope="col">Command</th><th scope="col">Error rate</th><th scope="col">Errors</th><th scope="col">Invocations</th></tr></thead>
-<tbody>${spotlight
-          .map(
-            (r) => `<tr>
-<th scope="row" class="mono">/${escapeHtml(r.command)}</th>
-<td>${errorRateTag(r.errorRate)}</td>
-<td>${r.errorCount}</td>
-<td class="muted">${r.usageCount}</td>
-</tr>`,
+  const spotlightPanel = monitorPanel({
+    id: "metrics-errors",
+    title: "Error spotlight",
+    meta: `At or above ${threshold} over ${props.windowDays} days`,
+    flush: spotlight.length > 0,
+    body:
+      spotlight.length === 0
+        ? monitorEmpty(
+            `No command exceeded a ${threshold} error rate.`,
+            `Commands at or above ${threshold} over the window show up here.`,
           )
-          .join("")}</tbody></table>`;
+        : monitorTable(
+            "Error spotlight",
+            [
+              { label: "Command" },
+              { label: "Error rate" },
+              { label: "Errors", num: true },
+              { label: "Invocations", num: true },
+            ],
+            spotlight
+              .map(
+                (r) => `<tr>
+<th scope="row" class="kb-mono">/${escapeHtml(r.command)}</th>
+<td>${errorRateTag(r.errorRate)}</td>
+<td class="kb-num">${r.errorCount}</td>
+<td class="kb-num kb-muted">${r.usageCount}</td>
+</tr>`,
+              )
+              .join(""),
+          ),
+  });
 
   const slowest = [...props.rows]
     .filter((r) => r.usageCount > 0)
     .sort((a, b) => b.avgResponseMs - a.avgResponseMs)
     .slice(0, 10);
-  const slowestHtml =
-    slowest.length === 0
-      ? `<div class="empty">No data yet.</div>`
-      : `<table>
-<thead><tr><th scope="col">Command</th><th scope="col">Avg response</th><th scope="col">Invocations</th></tr></thead>
-<tbody>${slowest
-          .map(
-            (r) => `<tr>
-<th scope="row" class="mono">/${escapeHtml(r.command)}</th>
-<td>${formatMs(r.avgResponseMs)}</td>
-<td class="muted">${r.usageCount}</td>
-</tr>`,
+  const slowestPanel = monitorPanel({
+    id: "metrics-slowest",
+    title: "Slowest commands",
+    flush: slowest.length > 0,
+    body:
+      slowest.length === 0
+        ? monitorEmpty(
+            "No data yet.",
+            "The slowest commands show up here once some have run.",
           )
-          .join("")}</tbody></table>`;
+        : monitorTable(
+            "Slowest commands",
+            [
+              { label: "Command" },
+              { label: "Avg response", num: true },
+              { label: "Invocations", num: true },
+            ],
+            slowest
+              .map(
+                (r) => `<tr>
+<th scope="row" class="kb-mono">/${escapeHtml(r.command)}</th>
+<td class="kb-num">${formatMs(r.avgResponseMs)}</td>
+<td class="kb-num kb-muted">${r.usageCount}</td>
+</tr>`,
+              )
+              .join(""),
+          ),
+  });
 
   const maxDaily = props.dailyTotals.reduce(
     (max, d) => Math.max(max, d.usageCount),
@@ -7620,61 +7832,74 @@ export function renderCommandMetricsPage(props: CommandMetricsProps): string {
     maxDaily > 0
       ? props.dailyTotals.findIndex((d) => d.usageCount === maxDaily)
       : -1;
-  const trendHtml =
-    props.dailyTotals.length === 0
-      ? `<div class="empty">No data yet.</div>`
-      : `<div class="kb-bars">${props.dailyTotals
-          .map((d, i) => {
-            const pct = maxDaily > 0 ? (d.usageCount / maxDaily) * 100 : 0;
-            return `<div class="kb-bars__row${i === peakIndex ? " is-peak" : ""}"><span title="${escapeHtml(d.date)}">${escapeHtml(d.date.slice(5))}</span><span class="kb-bars__track"><span class="kb-bars__fill" style="width:${pct.toFixed(1)}%"></span></span><span class="kb-bars__val">${d.usageCount}</span></div>`;
-          })
-          .join("")}</div>${
-          peakIndex >= 0
-            ? `<p class="muted">Busiest day: ${escapeHtml(props.dailyTotals[peakIndex].date)}, ${countOf(maxDaily, "invocation")}.</p>`
-            : ""
-        }`;
+  const trendPanel = monitorPanel({
+    id: "metrics-trend",
+    title: "Usage trend",
+    body:
+      props.dailyTotals.length === 0
+        ? monitorEmpty(
+            "No data yet.",
+            "The daily totals show up here once commands have run.",
+          )
+        : `<div class="kb-bars">${props.dailyTotals
+            .map((d, i) => {
+              const pct = maxDaily > 0 ? (d.usageCount / maxDaily) * 100 : 0;
+              return `<div class="kb-bars__row${i === peakIndex ? " is-peak" : ""}"><span title="${escapeHtml(d.date)}">${escapeHtml(d.date.slice(5))}</span><span class="kb-bars__track"><span class="kb-bars__fill" style="width:${pct.toFixed(1)}%"></span></span><span class="kb-bars__val">${d.usageCount}</span></div>`;
+            })
+            .join("")}</div>`,
+    foot:
+      props.dailyTotals.length > 0 && peakIndex >= 0
+        ? `Busiest day: ${escapeHtml(props.dailyTotals[peakIndex].date)}, ${countOf(maxDaily, "invocation")}.`
+        : undefined,
+  });
+
+  const rate =
+    props.totalUsage > 0
+      ? formatPct(props.totalErrors / props.totalUsage)
+      : "—";
+  const tiles = `<div class="kb-tiles">
+${statTile({
+  label: "Invocations",
+  href: "#metrics-usage",
+  value: String(props.totalUsage),
+  detail: `In the last ${props.windowDays} days`,
+})}
+${statTile({
+  label: "Errors",
+  href: "#metrics-errors",
+  value: String(props.totalErrors),
+  detail: `In the last ${props.windowDays} days`,
+})}
+${statTile({
+  label: "Error rate",
+  href: "#metrics-errors",
+  value: rate,
+  detail: `${countOf(spotlight.length, "command")} at or above ${threshold}`,
+  warn: spotlight.length > 0,
+})}
+</div>`;
+
+  const statusLine = renderStatusLine({
+    enabled: props.enabled,
+    onLabel: "Recording on",
+    offLabel: "Recording off",
+    chips: [{ text: `Kept for ${countOf(props.retentionDays, "day")}` }],
+  });
+
+  // Problems first: a command over the threshold leads the panels.
+  const panels =
+    spotlight.length > 0
+      ? [spotlightPanel, usagePanel, slowestPanel, trendPanel]
+      : [usagePanel, spotlightPanel, slowestPanel, trendPanel];
 
   const body = `
-<h1>Command metrics</h1>
-<p class="subtitle">Historical per-command usage, error rate, and latency persisted to MongoDB. Complements the live in-memory view and the Prometheus <code>/metrics</code> endpoint.</p>
+<div class="kb-stack">
+${monitorPageHead("Command metrics", "Historical per-command usage, error rate, and latency persisted to MongoDB. Complements the live in-memory view and the Prometheus <code>/metrics</code> endpoint.", statusLine)}
 ${renderPageFlash(props.flash)}
-
-${renderStatusLine({
-  enabled: props.enabled,
-  onLabel: "Recording on",
-  offLabel: "Recording off",
-  chips: [
-    { text: `Kept for ${countOf(props.retentionDays, "day")}` },
-    {
-      text: `${countOf(props.totalUsage, "invocation")} in ${props.windowDays} days`,
-    },
-    { text: `${countOf(props.totalErrors, "error")}` },
-  ],
-})}
-${props.enabled ? "" : `<p class="muted">Enable <code>monitoring.metrics_persistence.enabled</code> ${props.settingsUnavailable ? "once settings can be loaded again" : "in the settings below"} to start recording. Counts already shown were captured before it was disabled.</p>`}
-
-
-<div class="card">
-  <h2>Commands by usage</h2>
-  ${windowToggle}
-  ${usageRowsHtml}
-</div>
-
-<div class="card">
-  <h2>Error spotlight</h2>
-  <p class="subtitle">Commands with an error rate at or above ${formatPct(METRICS_ERROR_SPOTLIGHT)} over the window.</p>
-  ${spotlightHtml}
-</div>
-
-<div class="card">
-  <h2>Slowest commands</h2>
-  ${slowestHtml}
-</div>
-
-<div class="card">
-  <h2>Usage trend</h2>
-  ${trendHtml}
-</div>
+${props.enabled ? "" : monitorCallout("Metrics recording is off.", `Enable <code>monitoring.metrics_persistence.enabled</code> ${props.settingsUnavailable ? "once settings can be loaded again" : "in the settings below"} to start recording. Counts already shown were captured before it was disabled.`)}
+${windowToggle}
+${tiles}
+${panels.join("\n")}
 ${renderFeatureSettingsCard({
   intro:
     "Change metrics persistence and retention here without leaving the page. Saved through the shared settings route.",
@@ -7686,6 +7911,7 @@ ${renderFeatureSettingsCard({
   enabled: props.enabled,
   flash: props.flash,
 })}
+</div>
 `;
   return renderAdminPage({
     title: "Command metrics",
@@ -7728,9 +7954,12 @@ export function renderAnalyticsPage(props: AnalyticsProps): string {
 
   const disabledNotice = props.enabled
     ? ""
-    : '<div class="card"><p class="muted">Voice tracking is currently disabled (<code>voicetracking.enabled</code>), so no new sessions are being recorded. Any data below was captured before it was turned off.</p></div>';
+    : monitorCallout(
+        "Voice tracking is off.",
+        "Voice tracking is currently disabled (<code>voicetracking.enabled</code>), so no new sessions are being recorded. Any data below was captured before it was turned off.",
+      );
 
-  // Largest single cell drives the colour intensity scale.
+  // Largest single cell drives the shade (data-l 1..4) of each cell.
   const maxCell = heatmap.matrix.reduce(
     (max, row) => row.reduce((m, v) => (v > m ? v : m), max),
     0,
@@ -7738,38 +7967,36 @@ export function renderAnalyticsPage(props: AnalyticsProps): string {
 
   let grid: string;
   if (heatmap.totalMinutes <= 0) {
-    grid = `<div class="empty">No voice activity recorded in the last ${props.windowDays} days.</div>`;
+    grid = monitorEmpty(
+      `No voice activity recorded in the last ${props.windowDays} days.`,
+      "Activity shows up here as people spend time in voice channels.",
+    );
   } else {
     const header =
-      '<div class="hg-corner"></div>' +
+      "<span></span>" +
       Array.from({ length: 24 }, (_unused, h) => {
         // Label every third hour to keep the axis readable.
         const label = h % 3 === 0 ? String(h).padStart(2, "0") : "";
-        return `<div class="hg-col">${label}</div>`;
+        return `<span class="kb-heatmap__col">${label}</span>`;
       }).join("");
 
     const rows = heatmap.matrix
       .map((row, day) => {
         const cells = row
           .map((minutes, hour) => {
-            const alpha =
+            const level =
               maxCell > 0 && minutes > 0
-                ? Math.max(0.08, minutes / maxCell)
+                ? Math.min(4, Math.max(1, Math.ceil((minutes / maxCell) * 4)))
                 : 0;
             const isPeak =
               heatmap.peak !== null &&
               heatmap.peak.day === day &&
               heatmap.peak.hour === hour;
-            const style =
-              alpha > 0
-                ? ` style="background:rgba(129,140,248,${alpha.toFixed(3)})"`
-                : "";
-            const cls = isPeak ? "hg-cell peak" : "hg-cell";
             const title = `${escapeHtml(DAY_NAMES[day])} ${escapeHtml(formatHourLabel(hour))} — ${escapeHtml(heatMinutes(minutes))}`;
-            return `<div class="${cls}"${style} title="${title}"></div>`;
+            return `<span class="kb-heatmap__cell${isPeak ? " is-peak" : ""}" data-l="${level}" title="${title}"></span>`;
           })
           .join("");
-        return `<div class="hg-rowlabel">${escapeHtml(DAY_NAMES[day].slice(0, 3))}</div>${cells}`;
+        return `<span class="kb-heatmap__row">${escapeHtml(DAY_NAMES[day].slice(0, 3))}</span>${cells}`;
       })
       .join("");
 
@@ -7780,57 +8007,75 @@ export function renderAnalyticsPage(props: AnalyticsProps): string {
     const peakText = heatmap.peak
       ? ` Busiest slot: ${DAY_NAMES[heatmap.peak.day]} at ${formatHourLabel(heatmap.peak.hour)}.`
       : "";
-    grid = `<div class="heatgrid" role="img" aria-label="${escapeHtml(`Voice activity heatmap by weekday and hour of day.${peakText} Per-weekday and per-hour totals are listed below.`)}">${header}${rows}</div>`;
+    // The panel is flush (it scrolls the wide grid sideways inside itself), so the body here keeps the padding.
+    grid = `<div class="kb-panel__body"><div class="kb-heatmap" role="img" aria-label="${escapeHtml(`Voice activity heatmap by weekday and hour of day.${peakText} Per-weekday and per-hour totals are listed below.`)}">${header}${rows}</div></div>`;
   }
 
-  const peakLine = heatmap.peak
-    ? `<dt>Busiest slot</dt><dd>${escapeHtml(DAY_NAMES[heatmap.peak.day])} at ${escapeHtml(formatHourLabel(heatmap.peak.hour))} <span class="muted">(${escapeHtml(heatMinutes(heatmap.peak.minutes))})</span></dd>`
-    : "";
+  const topIndex = (values: readonly number[]): number | null => {
+    const max = values.reduce((m, v) => (v > m ? v : m), 0);
+    return max > 0 ? values.indexOf(max) : null;
+  };
+  const dayBars = monitorBars(
+    heatmap.byDay.map((v, d) => ({
+      label: DAY_NAMES[d].slice(0, 3),
+      weight: v,
+      value: heatMinutes(v),
+    })),
+    topIndex(heatmap.byDay),
+  );
+  const hourBars = monitorBars(
+    heatmap.byHour.map((v, h) => ({
+      label: formatHourLabel(h),
+      weight: v,
+      value: heatMinutes(v),
+    })),
+    topIndex(heatmap.byHour),
+  );
 
-  const maxDay = heatmap.byDay.reduce((m, v) => (v > m ? v : m), 0);
-  const dayBars = heatmap.byDay
-    .map((v, d) => {
-      const pct = maxDay > 0 ? (v / maxDay) * 100 : 0;
-      return `<div class="hbar"><span class="lbl">${escapeHtml(DAY_NAMES[d].slice(0, 3))}</span><span class="track"><span class="fill" style="width:${pct.toFixed(1)}%"></span></span><span class="val">${escapeHtml(heatMinutes(v))}</span></div>`;
-    })
-    .join("");
-
-  const maxHour = heatmap.byHour.reduce((m, v) => (v > m ? v : m), 0);
-  const hourBars = heatmap.byHour
-    .map((v, h) => {
-      const pct = maxHour > 0 ? (v / maxHour) * 100 : 0;
-      return `<div class="hbar"><span class="lbl">${escapeHtml(formatHourLabel(h))}</span><span class="track"><span class="fill" style="width:${pct.toFixed(1)}%"></span></span><span class="val">${escapeHtml(heatMinutes(v))}</span></div>`;
-    })
-    .join("");
+  const peak = heatmap.peak;
+  const tiles = `<div class="kb-tiles">
+${statTile({
+  label: "Total voice time",
+  href: "#voice-heatmap",
+  value: escapeHtml(heatMinutes(heatmap.totalMinutes)),
+  detail: `In the last ${props.windowDays} days`,
+})}
+${statTile({
+  label: "Busiest slot",
+  href: "#voice-heatmap",
+  value: peak
+    ? escapeHtml(`${DAY_NAMES[peak.day]} ${formatHourLabel(peak.hour)}`)
+    : "—",
+  detail: peak
+    ? `${heatMinutes(peak.minutes)} in that hour`
+    : "No voice activity yet",
+})}
+${statTile({
+  label: "Timezone",
+  href: "#voice-heatmap",
+  value: `<span class="kb-mono">${escapeHtml(heatmap.timeZone)}</span>`,
+  detail: "Sessions count in the hour they started",
+})}
+</div>`;
 
   const body = `
-<h1>Voice analytics</h1>
-<p class="subtitle">Guild-wide voice activity by hour and weekday, aggregated from tracked sessions. Use it to pick high-reach times for digests, announcements, and polls.</p>
+<div class="kb-stack">
+${monitorPageHead("Voice analytics", "Guild-wide voice activity by hour and weekday, aggregated from tracked sessions. Use it to pick high-reach times for digests, announcements, and polls.")}
 ${disabledNotice}
-<div class="card">
-  <h2>Overview</h2>
-  ${windowToggle}
-  <dl class="kv">
-    <dt>Timezone</dt><dd class="mono">${escapeHtml(heatmap.timeZone)}</dd>
-    <dt>Total voice time</dt><dd>${escapeHtml(heatMinutes(heatmap.totalMinutes))}</dd>
-    ${peakLine}
-  </dl>
-  <p class="muted">Each cell is total voice minutes for that hour×weekday; darker is busier. Sessions are bucketed by their start time in the server timezone.</p>
-</div>
-
-<div class="card">
-  <h2>Hour × weekday heatmap</h2>
-  ${grid}
-</div>
-
-<div class="card">
-  <h2>By weekday</h2>
-  <div class="heat-bars">${dayBars}</div>
-</div>
-
-<div class="card">
-  <h2>By hour of day</h2>
-  <div class="heat-bars">${hourBars}</div>
+${windowToggle}
+${tiles}
+${monitorPanel({
+  id: "voice-heatmap",
+  title: "Hour × weekday heatmap",
+  body: grid,
+  flush: heatmap.totalMinutes > 0,
+  foot:
+    heatmap.totalMinutes > 0
+      ? "Each cell is total voice minutes for that hour×weekday; darker is busier. Sessions are bucketed by their start time in the server timezone."
+      : undefined,
+})}
+${monitorPanel({ id: "voice-weekday", title: "By weekday", body: dayBars })}
+${monitorPanel({ id: "voice-hour", title: "By hour of day", body: hourBars })}
 </div>
 `;
   return renderAdminPage({

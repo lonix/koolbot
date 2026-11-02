@@ -168,7 +168,7 @@ export function renderVersionCard(
 
 // ---- tiles -----------------------------------------------------------------
 
-function tile(opts: {
+export function tile(opts: {
   label: string;
   href: string;
   value: string;
