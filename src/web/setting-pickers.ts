@@ -150,6 +150,8 @@ export type PickerCreateKind = "channel" | "category" | "role";
  */
 export interface PickerCreate {
   kind: PickerCreateKind;
+  /** For a channel: the subtype it is created as, so the pending mention and the `#` / `#!` filter agree with the setting. Defaults to text. */
+  channelKind?: "text" | "voice";
   ok: boolean;
   /** Why creating is not possible, shown under the search box when `ok` is false. */
   reason?: string;
@@ -203,6 +205,9 @@ export function pickerMetaAttr(meta: unknown[], create?: PickerCreate): string {
             items: meta,
             create: {
               kind: create.kind,
+              ...(create.channelKind
+                ? { channelKind: create.channelKind }
+                : {}),
               ok: create.ok,
               ...(create.reason ? { reason: create.reason } : {}),
             },
@@ -251,7 +256,7 @@ export function channelPickerScript(create: boolean): string {
     c(
       `var ICONS=${JSON.stringify(channelKindIcons())},CHEVRON=${JSON.stringify(PICKER_CHEVRON)},CHECK=${JSON.stringify(PICKER_CHECK)},XICON=${JSON.stringify(PICKER_X)},PLUS=${JSON.stringify(PICKER_PLUS)},PFX=${JSON.stringify(PICKER_CREATE_PREFIX)},MAXN=${PICKER_NAME_MAX};` +
         "var KINDS={text:{text:1,announcement:1,forum:1,thread:1},voice:{voice:1,stage:1},role:{role:1}},uid=0,CR=1e6;" +
-        "var CK={channel:{text:1,announcement:1,forum:1,thread:1,voice:1,stage:1},category:{category:1},role:{role:1}};",
+        "var CK={channel:1,category:1,role:1};",
       `var ICONS=${JSON.stringify(channelKindIcons())},CHEVRON=${JSON.stringify(PICKER_CHEVRON)},CHECK=${JSON.stringify(PICKER_CHECK)},XICON=${JSON.stringify(PICKER_X)};` +
         "var KINDS={text:{text:1,announcement:1,forum:1,thread:1},voice:{voice:1,stage:1},role:{role:1}},uid=0;",
     ) +
@@ -261,7 +266,10 @@ export function channelPickerScript(create: boolean): string {
     "function one(o,group){var m=meta[out.length]||[];return{value:o.value,kind:m[0]||'',name:m[1]||o.textContent,cat:m[2]||'',group:group,text:o.textContent}}" +
     "for(i=0;i<sel.children.length;i++){c=sel.children[i];" +
     "if(c.tagName==='OPTGROUP'){g=c.getAttribute('label')||'';for(j=0;j<c.children.length;j++)out.push(one(c.children[j],g))}" +
-    "else out.push(one(c,''))}return out}" +
+    c(
+      "else if(!c.hasAttribute('data-create'))out.push(one(c,''))}return out}",
+      "else out.push(one(c,''))}return out}",
+    ) +
     "function mention(it){var m=el('span','kb-mention'+(it.kind==='category'?' kb-mention--category':''));" +
     "if(it.kind==='role')m.textContent='@'+it.name;" +
     "else if(ICONS[it.kind]){m.appendChild(svg(ICONS[it.kind]));m.appendChild(document.createTextNode(it.name))}" +
@@ -273,7 +281,7 @@ export function channelPickerScript(create: boolean): string {
     "function init(box){var sel=box.querySelector('select');if(!sel||box.hasAttribute('data-ready'))return;box.setAttribute('data-ready','');" +
     c(
       "var meta=[],cfg=null;try{var mm=JSON.parse(box.getAttribute('data-picker-meta')||'[]')||[];" +
-        "if(Array.isArray(mm))meta=mm;else{meta=mm.items||[];cfg=mm.create&&CK[mm.create.kind]?mm.create:null}}catch(err){}",
+        "if(Array.isArray(mm))meta=mm;else{meta=mm.items||[];cfg=mm.create&&CK[mm.create.kind]?mm.create:null;if(cfg)cfg.sub=cfg.channelKind==='voice'?'voice':'text'}}catch(err){}",
       "var meta=[];try{meta=JSON.parse(box.getAttribute('data-picker-meta')||'[]')||[]}catch(err){}",
     ) +
     "var n=++uid,items=read(sel,meta),rows=[],heads=[],vis=[],act=-1,open=false,i,lastGroup=null;" +
@@ -331,10 +339,17 @@ export function channelPickerScript(create: boolean): string {
         "function say(t){if(live){live.textContent='';live.textContent=t}}" +
         "function rowAt(k){return k===CR?crow:rows[k]}" +
         "function itm(k){if(items[k])return items[k];var o=sel.options[k];if(!o||!cfg)return null;" +
-        "return{value:o.value,kind:cfg.kind==='channel'?'text':cfg.kind,name:o.getAttribute('data-name')||o.textContent,cat:'',pending:true,text:o.textContent}}" +
+        "return{value:o.value,kind:cfg.kind==='channel'?cfg.sub:cfg.kind,name:o.getAttribute('data-name')||o.textContent,cat:'',pending:true,text:o.textContent}}" +
         "function pendOpts(){var o=[],k;for(k=items.length;k<sel.options.length;k++)if(sel.options[k].hasAttribute('data-create'))o.push(sel.options[k]);return o}" +
         "function pendName(o){return o.getAttribute('data-name')||''}" +
-        "function undo(o){return'Removed: new '+cfg.kind+\" '\"+pendName(o)+\"'\"}",
+        "function undo(o){return'Removed: new '+cfg.kind+\" '\"+pendName(o)+\"'\"}" +
+        // The pending names the select holds now, and the ones the last paint showed, so a Discard can say what it took away.
+        "var shownPend=[];" +
+        "function pendNames(){var r=[],po=pendOpts(),k;for(k=0;k<po.length;k++)if(po[k].selected)r.push(pendName(po[k]));return r}" +
+        "function restored(){var now=pendNames(),gone=[],lab=[],k;for(k=0;k<shownPend.length;k++)if(now.indexOf(shownPend[k])<0)gone.push(shownPend[k]);if(!gone.length)return;" +
+        "for(k=0;k<sel.options.length;k++)if(sel.options[k].selected&&sel.options[k].value!=='')lab.push(chipLabel(itm(k)));" +
+        "say('Removed: new '+cfg.kind+\" '\"+gone.join(\"', '\")+\"'. \"+(lab.length?'Restored: '+lab.join(', '):'Nothing selected')+'.')}" +
+        "function onChange(e){var r=e&&e.kbRestore;if(r)restored();paint();shownPend=pendNames();if(r&&open)filter()}",
       "box.appendChild(trig);box.appendChild(pop);",
     ) +
     "function isOn(k){return multi?sel.options[k].selected:k===sel.selectedIndex}" +
@@ -359,7 +374,7 @@ export function channelPickerScript(create: boolean): string {
     "if(sels.length>lim){b=el('button','kb-picker__more','+'+(sels.length-lim)+' more');b.type='button';b.setAttribute('data-more','');" +
     "b.setAttribute('aria-label','Show '+(sels.length-lim)+' more selected');chips.appendChild(b)}}" +
     c(
-      "function paint(){var po=pendOpts(),q0,cur;for(q0=0;q0<po.length;q0++)if(!po[q0].selected)sel.removeChild(po[q0]);" +
+      "function paint(){var cur;" +
         "cur=sel.selectedIndex>=items.length?itm(sel.selectedIndex):(items[sel.selectedIndex]||items[0]);trig.textContent='';" +
         "if(multi){paintChips();trig.appendChild(el('span','kb-picker__add','Add'))}else if(cur){trig.appendChild(mention(cur));var pk=pmark(cur);if(pk)trig.appendChild(pk)}trig.appendChild(svg(CHEVRON));attrs();",
       "function paint(){var cur=items[sel.selectedIndex]||items[0];trig.textContent='';" +
@@ -389,13 +404,16 @@ export function channelPickerScript(create: boolean): string {
     // old height is not left outside the cut one.
     c(
       "function reveal(){var r=rowAt(act);if(r&&r.scrollIntoView)r.scrollIntoView({block:'nearest'})}" +
-        // The name the admin typed, without the `#`, `#!` or `@` filter prefix; null when the prefix is for another kind (a `@` in a channel picker).
-        "function nameOf(raw,p){var q=raw.trim();if(cfg.kind==='category')return q;" +
-        "if(p.k&&(cfg.kind==='channel'?p.k==='role':p.k!=='role'))return null;" +
+        // The name the admin typed, without the `#`, `#!` or `@` filter prefix; null when the prefix is not one a name of this kind may have (a `@` in a channel picker, any prefix in a category picker, `#!` for a text setting).
+        "function nameOf(raw,p){var q=raw.trim();" +
+        "if(cfg.kind==='category')return p.k?null:q;" +
+        "if(p.k&&(cfg.kind==='role'?p.k!=='role':p.k!==cfg.sub))return null;" +
         "if(p.k==='voice')q=q.slice(2);else if(p.k)q=q.slice(1);return q.trim()}" +
+        // Whether a listed item stands for an existing Discord channel, category or role of this kind (a role group is not a role).
+        "function ck(it){if(cfg.kind==='category')return it.kind==='category';if(cfg.kind==='role')return it.kind==='role'&&it.value.indexOf('group:')!==0;return!!KINDS[cfg.sub][it.kind]}" +
         // An existing item of the kind with this name (case-insensitive), or a pending one.
-        "function findName(nm){var l=nm.toLowerCase(),k,po=pendOpts();for(k=0;k<items.length;k++)if(CK[cfg.kind][items[k].kind]&&items[k].name.toLowerCase()===l)return k;" +
-        "for(k=0;k<po.length;k++)if(pendName(po[k]).toLowerCase()===l)return CR;return -1}",
+        "function findName(nm){var l=nm.toLowerCase(),k,po=pendOpts();for(k=0;k<items.length;k++)if(ck(items[k])&&items[k].name.toLowerCase()===l)return k;" +
+        "for(k=0;k<po.length;k++)if(po[k].selected&&pendName(po[k]).toLowerCase()===l)return CR;return -1}",
       "function reveal(){var r=rows[act];if(r&&r.scrollIntoView)r.scrollIntoView({block:'nearest'})}",
     ) +
     "function filter(){var p=parse(inp.value),k,shown={};vis=[];" +
@@ -446,10 +464,11 @@ export function channelPickerScript(create: boolean): string {
     // `paint()` runs while open scrolls to the row just toggled and not back to the
     // row that was active before.
     c(
-      "function createChoose(){var nm=cfg&&nameOf(inp.value,parse(inp.value)),po,o,k;if(!nm||nm.length>MAXN||!cfg.ok||findName(nm)>=0)return;" +
-        "if(!multi){po=pendOpts();for(k=0;k<po.length;k++)sel.removeChild(po[k])}" +
-        "o=document.createElement('option');o.value=PFX+nm;o.setAttribute('data-create','');o.setAttribute('data-name',nm);o.textContent=nm+' (will be created)';" +
-        "sel.appendChild(o);o.selected=true;" +
+      // A pending option is never removed: the save bar remembers options by index, so a deselected one stays (unposted, unlisted) and is reused for the same name.
+      "function createChoose(){var nm=cfg&&nameOf(inp.value,parse(inp.value)),po,o=null,k;if(!nm||nm.length>MAXN||!cfg.ok||findName(nm)>=0)return;" +
+        "po=pendOpts();for(k=0;k<po.length;k++)if(pendName(po[k])===nm)o=po[k];" +
+        "if(!o){o=document.createElement('option');o.value=PFX+nm;o.setAttribute('data-create','');o.setAttribute('data-name',nm);o.textContent=nm+' (will be created)';sel.appendChild(o)}" +
+        "o.selected=true;" +
         "say('Will be created: '+cfg.kind+\" '\"+nm+\"'. Choose another row to undo.\");fireBoth();" +
         "if(multi){inp.value='';filter();paint()}else{paint();close(true)}}" +
         "function choose(k){if(k===CR){createChoose();return}if(k<0||!items[k])return;" +
@@ -460,7 +479,7 @@ export function channelPickerScript(create: boolean): string {
     "if(sel.selectedIndex!==k){sel.selectedIndex=k;fireBoth()}paint();close(true)}" +
     c(
       "function drop(k){var o=sel.options[k];if(!o||!o.selected||sel.disabled)return;" +
-        "if(k>=items.length&&o.hasAttribute('data-create')){say(undo(o));sel.removeChild(o)}else o.selected=false;fireBoth();paint()}" +
+        "if(k>=items.length&&o.hasAttribute('data-create'))say(undo(o));o.selected=false;fireBoth();paint();if(open)filter()}" +
         "function lastOn(){for(var k=sel.options.length-1;k>=0;k--)if(sel.options[k].selected)return k;return -1}",
       "function drop(k){if(!sel.options[k]||!sel.options[k].selected||sel.disabled)return;sel.options[k].selected=false;fireBoth();paint()}" +
         "function lastOn(){for(var k=items.length-1;k>=0;k--)if(sel.options[k].selected)return k;return -1}",
@@ -500,9 +519,14 @@ export function channelPickerScript(create: boolean): string {
     "if(p.indexOf(box)<0&&p.indexOf(pop)<0&&!inside(e.target))close(false)});" +
     "function leave(e){if(open&&e.relatedTarget&&!inside(e.relatedTarget))close(false)}" +
     "box.addEventListener('focusout',leave);pop.addEventListener('focusout',leave);" +
-    "sel.addEventListener('change',paint);" +
+    c(
+      "sel.addEventListener('change',onChange);",
+      "sel.addEventListener('change',paint);",
+    ) +
     "Array.prototype.forEach.call(document.querySelectorAll('[data-cascade-master]'),function(m){m.addEventListener('change',paint)});" +
-    "paint()}" +
+    "paint()" +
+    c(";shownPend=pendNames()") +
+    "}" +
     "Array.prototype.forEach.call(document.querySelectorAll('[data-picker]'),init)" +
     "})();"
   );

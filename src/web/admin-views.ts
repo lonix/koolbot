@@ -53,6 +53,8 @@ import {
   renderStepper,
   renderTimezoneSelect,
   pickerMetaAttr,
+  pickerCreateValue,
+  parsePickerCreateValue,
   type PickerCreate,
 } from "./setting-pickers.js";
 import type { ReactionRoleMessageOptions } from "./reaction-role-messages.js";
@@ -644,10 +646,24 @@ function buildOptionsHtml(
   includeNoneRow: boolean,
   meta?: PickerMeta[],
   noneLabel = "(none)",
+  create?: PickerCreate,
 ): string {
   const parts: string[] = [];
+  // A posted create value (#1658) is drawn again as a pending option, not as an
+  // unavailable id, so a refused form keeps what the admin chose. Only when the
+  // caller offers the create row: without it the value stays what it is today.
+  const pending: string[] = [];
+  const noneSel = selected.size === 0 ? " selected" : "";
+  if (create) {
+    selected = new Set(selected);
+    for (const v of [...selected]) {
+      const parsed = parsePickerCreateValue(v);
+      if (!parsed?.ok) continue;
+      selected.delete(v);
+      if (!pending.includes(parsed.name)) pending.push(parsed.name);
+    }
+  }
   if (includeNoneRow) {
-    const noneSel = selected.size === 0 ? " selected" : "";
     parts.push(`<option value=""${noneSel}>${escapeHtml(noneLabel)}</option>`);
     meta?.push(null);
   }
@@ -694,6 +710,13 @@ function buildOptionsHtml(
       `<option value="${escapeHtml(id)}" selected>${escapeHtml(missingText(id))}</option>`,
     );
     meta?.push(["missing", id, ""]);
+  }
+  // Last, after every listed and missing option and without a `meta` entry, so
+  // the script's option indexes still line up with the list.
+  for (const name of pending) {
+    parts.push(
+      `<option value="${escapeHtml(pickerCreateValue(name))}" data-create data-name="${escapeHtml(name)}" selected>${escapeHtml(name)} (will be created)</option>`,
+    );
   }
   return parts.join("");
 }
@@ -1192,6 +1215,8 @@ export function renderRolePicker(opts: {
     new Set(opts.selected),
     false,
     meta,
+    undefined,
+    opts.create,
   );
   const describedBy = opts.describedBy
     ? ` aria-describedby="${escapeHtml(opts.describedBy)}"`
@@ -1232,6 +1257,7 @@ export function renderRoleSelectPicker(opts: {
     true,
     meta,
     opts.emptyLabel,
+    opts.create,
   );
   const describedBy = opts.describedBy
     ? ` aria-describedby="${escapeHtml(opts.describedBy)}"`
@@ -1505,9 +1531,26 @@ function renderControlInput(
     // `span.kb-picker` is where `CHANNEL_PICKER_SCRIPT` puts its search box
     // (#1394); without JavaScript this is just the select it wraps.
     const meta: PickerMeta[] = [];
-    const optionsHtml = buildOptionsHtml(options, selected, true, meta);
-    // #1658: the create row, only when the caller says creation can work.
-    const createFor = pickers.create?.(r);
+    // #1658: the create row, only when the caller says creation can work. A
+    // channel setting carries its text or voice subtype with it.
+    const created = pickers.create?.(r);
+    const createFor =
+      created && r.type === "channel"
+        ? {
+            ...created,
+            channelKind:
+              created.channelKind ??
+              (r.channelKind === "voice" ? "voice" : "text"),
+          }
+        : created;
+    const optionsHtml = buildOptionsHtml(
+      options,
+      selected,
+      true,
+      meta,
+      undefined,
+      createFor,
+    );
     return (
       `<span class="kb-picker" data-picker data-picker-meta="${pickerMetaAttr(meta, createFor)}">` +
       `<select class="kb-select"${a11yAttr} name="${valueName}"${lockAttr}>` +
@@ -1530,9 +1573,17 @@ function renderControlInput(
     // turns the multiple select into chips plus a toggling popover. Without
     // JavaScript it is the native list and the "Selected:" summary below.
     const meta: PickerMeta[] = [];
-    const optionsHtml = buildOptionsHtml(options, selected, false, meta);
+    const createFor = r.type === "role_list" ? pickers.create?.(r) : undefined;
+    const optionsHtml = buildOptionsHtml(
+      options,
+      selected,
+      false,
+      meta,
+      undefined,
+      createFor,
+    );
     return (
-      `<span class="kb-picker" data-picker data-picker-meta="${pickerMetaAttr(meta, r.type === "role_list" ? pickers.create?.(r) : undefined)}">` +
+      `<span class="kb-picker" data-picker data-picker-meta="${pickerMetaAttr(meta, createFor)}">` +
       `<select${a11yAttr} name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}"${lockAttr}>` +
       optionsHtml +
       `</select></span>` +

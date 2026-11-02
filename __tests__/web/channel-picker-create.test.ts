@@ -16,6 +16,7 @@ import {
   pickerMetaAttr,
   type PickerCreate,
 } from "../../src/web/setting-pickers.js";
+import { channelKindIcons } from "../../src/web/discord-labels.js";
 import { renderSaveBar, SAVEBAR_SCRIPT } from "../../src/web/savebar.js";
 import {
   renderRolePicker,
@@ -275,7 +276,8 @@ describe("single select: states", () => {
     type(dom, "general");
     key(dom, inp, "Enter");
     expect(sel.value).toBe("1");
-    expect(sel.options.length).toBe(3);
+    // The pending option stays (the save bar remembers options by index) but is not selected, so not posted.
+    expect(sel.options.length).toBe(4);
     expect(posted(dom)).toEqual(["1"]);
     expect(live(dom)).toContain("Removed: new channel 'Support'");
     expect($(dom, ".kb-picker__trigger").textContent).not.toContain(
@@ -329,9 +331,11 @@ describe("single select: states", () => {
   it("a filter prefix is not part of the name; a prefix for another kind offers nothing", () => {
     const dom = mount(html);
     open(dom);
-    type(dom, "#!Chat room");
+    type(dom, "#Chat room");
     expect(createRow(dom).textContent).toBe("Create new channel: 'Chat room'");
     type(dom, "@Chat");
+    expect(createRow(dom).hidden).toBe(true);
+    type(dom, "#!Chat");
     expect(createRow(dom).hidden).toBe(true);
   });
 
@@ -517,5 +521,258 @@ describe("script variants", () => {
     expect(flagged).toContain("pendOpts");
     expect(plain).not.toContain("pendOpts");
     expect(plain).toContain("function init(box)");
+  });
+});
+
+function errorsOf(dom: JSDOM): unknown[] {
+  const errs: unknown[] = [];
+  dom.window.addEventListener("error", (e) => errs.push(e.error ?? e.message));
+  return errs;
+}
+
+describe("review findings on #1699", () => {
+  it("1: picking an existing row while a pending choice is being saved does not break the save bar", () => {
+    const dom = mount(page("channel", "1", () => ok("channel")));
+    const errs = errorsOf(dom);
+    let inp = open(dom);
+    type(dom, "Support");
+    key(dom, inp, "Enter");
+    const form = $<HTMLFormElement>(dom, "form");
+    form.dispatchEvent(
+      new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+    );
+    inp = open(dom);
+    type(dom, "news");
+    key(dom, inp, "Enter");
+    form.dispatchEvent(new dom.window.Event("kb-saved", { bubbles: true }));
+    expect(errs).toEqual([]);
+    const sel = $<HTMLSelectElement>(dom, "select");
+    // The saved baseline is the pending choice; the live choice is News, so the form is dirty.
+    expect(sel.value).toBe("2");
+    expect($<HTMLElement>(dom, ".kb-savebar").hidden).toBe(false);
+    $<HTMLButtonElement>(dom, "[data-savebar-discard]").click();
+    expect(sel.value).toBe("create:Support");
+  });
+
+  const refs: Array<[string, () => string]> = [
+    [
+      "renderRoleSelectPicker",
+      () =>
+        renderRoleSelectPicker({
+          name: "value_x.y",
+          options: ROLES,
+          selected: "create:Helpers",
+          emptyLabel: "None",
+          create: ok("role"),
+        }),
+    ],
+    [
+      "renderRolePicker",
+      () =>
+        renderRolePicker({
+          id: "f",
+          name: "value_x.y",
+          options: ROLES,
+          selected: ["create:Helpers"],
+          create: ok("role"),
+        }).replace(' id="f"', ""),
+    ],
+    [
+      "settings role row",
+      () => page("role", "create:Helpers", () => ok("role")),
+    ],
+  ];
+  it.each(refs)(
+    "2: %s draws a posted create value again as a pending option",
+    (_n, html) => {
+      const h = html();
+      expect(h).not.toContain("unavailable");
+      expect(h).toContain(
+        '<option value="create:Helpers" data-create data-name="Helpers" selected>Helpers (will be created)</option>',
+      );
+      const dom = mount(h);
+      expect($(dom, ".kb-picker").textContent).toContain("(will be created)");
+      const inp = open(dom);
+      type(dom, "helpers");
+      expect(createRow(dom).hidden).toBe(true);
+      expect(posted(dom)).toEqual(["create:Helpers"]);
+      key(dom, inp, "Escape");
+    },
+  );
+  it("2: without the flag a create value stays an unavailable id, and a blank one is not pending", () => {
+    expect(
+      renderRoleSelectPicker({
+        name: "n",
+        options: ROLES,
+        selected: "create:Helpers",
+        emptyLabel: "None",
+      }),
+    ).toContain("unavailable");
+    expect(
+      renderRoleSelectPicker({
+        name: "n",
+        options: ROLES,
+        selected: "create:  ",
+        emptyLabel: "None",
+        create: ok("role"),
+      }),
+    ).toContain("unavailable");
+  });
+
+  function voicePage(sub: "voice" | "text", current = ""): string {
+    const html = renderSettingsPage({
+      csrfToken: "t",
+      guildName: "G",
+      flash: null,
+      groups: [
+        {
+          category: "x",
+          rows: [
+            {
+              ...row("channel", current),
+              ...(sub === "voice" ? { channelKind: "voice" } : {}),
+            },
+          ],
+        },
+      ],
+      textChannels: [],
+      voiceChannels: [],
+      categoryChannels: [],
+      roles: [],
+      pickerCreate: () => ok("channel"),
+    } as unknown as Parameters<typeof renderSettingsPage>[0]);
+    return (
+      html.match(
+        /<span class="kb-picker" data-picker [^>]*>[\s\S]*?<\/select><\/span>/,
+      ) as RegExpMatchArray
+    )[0];
+  }
+  const subs: Array<["voice" | "text", string, string, boolean]> = [
+    ["voice", "#!Lobby", "Lobby", true],
+    ["voice", "#Lobby", "", false],
+    ["text", "#Lobby", "Lobby", true],
+    ["text", "#!Lobby", "", false],
+    ["voice", "Lobby", "Lobby", true],
+  ];
+  it.each(subs)(
+    "3: a %s setting, typing %j, with an empty list",
+    (sub, typed, name, offered) => {
+      const dom = mount(voicePage(sub));
+      const inp = open(dom);
+      type(dom, typed);
+      expect(createRow(dom).hidden).toBe(!offered);
+      if (!offered) return;
+      expect(createRow(dom).textContent).toBe(`Create new channel: '${name}'`);
+      key(dom, inp, "Enter");
+      const icon = $(dom, ".kb-picker__trigger .kb-mention svg").outerHTML;
+      const probe = dom.window.document.createElement("span");
+      probe.innerHTML = channelKindIcons()[sub];
+      expect(icon).toBe((probe.firstChild as HTMLElement).outerHTML);
+    },
+  );
+
+  it.each([["@Staff"], ["#Staff"], ["#!Staff"]])(
+    "5: a category picker offers nothing for %j",
+    (typed) => {
+      const dom = mount(page("category", "20", () => ok("category")));
+      open(dom);
+      type(dom, typed);
+      expect(createRow(dom).hidden).toBe(true);
+      type(dom, "Staff");
+      expect(createRow(dom).hidden).toBe(false);
+    },
+  );
+
+  describe("6: role groups are not roles", () => {
+    const withGroup = (extra: Array<{ id: string; name: string }>): string =>
+      renderRoleSelectPicker({
+        name: "value_x.y",
+        options: [{ id: "group:7", name: "Staff (group)" }, ...ROLES, ...extra],
+        selected: "",
+        emptyLabel: "None",
+        create: ok("role"),
+      });
+    it("a group name does not suppress creating a role of that name", () => {
+      const dom = mount(withGroup([]));
+      const inp = open(dom);
+      type(dom, "Staff (group)");
+      expect(createRow(dom).hidden).toBe(false);
+      key(dom, inp, "ArrowDown");
+      key(dom, inp, "Enter");
+      expect($<HTMLSelectElement>(dom, "select").value).toBe(
+        "create:Staff (group)",
+      );
+    });
+    it("a real role of that name wins over the group", () => {
+      const dom = mount(withGroup([{ id: "55", name: "Staff (group)" }]));
+      const inp = open(dom);
+      type(dom, "staff (group)");
+      expect(createRow(dom).hidden).toBe(true);
+      key(dom, inp, "Enter");
+      expect($<HTMLSelectElement>(dom, "select").value).toBe("55");
+    });
+  });
+
+  it("7: removing a pending chip while its name is in the search offers the row again", () => {
+    const dom = mount(
+      renderRolePicker({
+        id: "f",
+        name: "value_x.y",
+        options: ROLES,
+        selected: [],
+        create: ok("role"),
+      }).replace(' id="f"', ""),
+    );
+    const inp = open(dom);
+    type(dom, "Helpers");
+    key(dom, inp, "Enter");
+    type(dom, "Helpers");
+    expect(createRow(dom).hidden).toBe(true);
+    $<HTMLButtonElement>(dom, ".kb-picker__chip-remove").click();
+    expect(createRow(dom).hidden).toBe(false);
+    key(dom, inp, "Enter");
+    expect(posted(dom)).toEqual(["create:Helpers"]);
+  });
+
+  describe("4: Discard announces what it took away", () => {
+    it("single select", () => {
+      const dom = mount(page("channel", "1", () => ok("channel")));
+      const inp = open(dom);
+      type(dom, "Support");
+      key(dom, inp, "Enter");
+      $<HTMLButtonElement>(dom, "[data-savebar-discard]").click();
+      expect(live(dom)).toBe(
+        "Removed: new channel 'Support'. Restored: # general · CHAT.".replace(
+          "# general · CHAT",
+          "#general",
+        ),
+      );
+    });
+    it("multi-select, two pending names", () => {
+      const dom = mount(
+        renderRolePicker({
+          id: "f",
+          name: "value_x.y",
+          options: ROLES,
+          selected: ["9"],
+          create: ok("role"),
+        }).replace(' id="f"', ""),
+      );
+      const inp = open(dom);
+      for (const n of ["A1", "B1"]) {
+        type(dom, n);
+        key(dom, inp, "Enter");
+      }
+      $<HTMLButtonElement>(dom, "[data-savebar-discard]").click();
+      expect(live(dom)).toBe("Removed: new role 'A1', 'B1'. Restored: @Mods.");
+    });
+    it("a Discard that removes nothing pending says nothing new", () => {
+      const dom = mount(page("channel", "1", () => ok("channel")));
+      const inp = open(dom);
+      key(dom, inp, "ArrowDown");
+      key(dom, inp, "Enter");
+      $<HTMLButtonElement>(dom, "[data-savebar-discard]").click();
+      expect(live(dom)).toBe("");
+    });
   });
 });
