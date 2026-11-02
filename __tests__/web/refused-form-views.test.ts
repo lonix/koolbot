@@ -116,7 +116,7 @@ describe("a refused Announcements form", () => {
   });
 
   it("keeps the typed values in that form only", () => {
-    const forms = doc.querySelectorAll("form.stack");
+    const forms = doc.querySelectorAll("form.kb-stack");
     const create = Array.from(forms).find((f) =>
       f.getAttribute("action")?.endsWith("/announcements/create"),
     ) as Element;

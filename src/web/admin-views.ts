@@ -25,7 +25,7 @@ import {
   PERMANENT_CONFIRM_ITEMS,
   REVIEW_JOB_NOTE,
 } from "../utils/moderation-labels.js";
-import { icon, toneIcon } from "./icons.js";
+import { icon, toneIcon, type IconName } from "./icons.js";
 import { commandSyncStatus } from "./command-sync-text.js";
 import type { CommandSyncReport } from "../services/command-manager.js";
 import {
@@ -3021,34 +3021,70 @@ function roleOptionsHtml(options: RoleOption[], selectedId?: string): string {
   return out.join("");
 }
 
-const PLACEHOLDER_REFERENCE_HTML = `
-<details class="helper">
-  <summary>Available placeholders</summary>
-  <ul class="mono">
-    <li><code>{server_name}</code> — guild name</li>
-    <li><code>{member_count}</code> — total members</li>
-    <li><code>{online_count}</code> — members currently online (best effort; shows 0 without presence data)</li>
-    <li><code>{owner}</code> — server owner mention</li>
-    <li><code>{boost_count}</code> — active Nitro boosts</li>
-    <li><code>{boost_tier}</code> — Nitro boost tier (0–3)</li>
-    <li><code>{channel_count}</code> — number of channels</li>
-    <li><code>{role_count}</code> — number of roles</li>
-    <li><code>{random_member}</code> — a random member mention</li>
-    <li><code>{date}</code> — current date</li>
-    <li><code>{time}</code> — current time</li>
-    <li><code>{day}</code> — current weekday</li>
-    <li><code>{month}</code> — current month</li>
-    <li><code>{year}</code> — current year</li>
-    <li><code>{date_iso}</code> — ISO date (YYYY-MM-DD)</li>
-    <li><code>{time_iso}</code> — ISO time (HH:MM:SS, UTC)</li>
-    <li><code>{datetime_iso}</code> — full ISO 8601 timestamp (UTC)</li>
-  </ul>
-  <p class="muted">Tick "Process placeholders" on the announcement to expand them at send time.</p>
-</details>`;
+/** The placeholders an announcement can use, name then meaning. */
+const PLACEHOLDER_REFERENCE: ReadonlyArray<readonly [string, string]> = [
+  ["{server_name}", "guild name"],
+  ["{member_count}", "total members"],
+  [
+    "{online_count}",
+    "members currently online (best effort; shows 0 without presence data)",
+  ],
+  ["{owner}", "server owner mention"],
+  ["{boost_count}", "active Nitro boosts"],
+  ["{boost_tier}", "Nitro boost tier (0–3)"],
+  ["{channel_count}", "number of channels"],
+  ["{role_count}", "number of roles"],
+  ["{random_member}", "a random member mention"],
+  ["{date}", "current date"],
+  ["{time}", "current time"],
+  ["{day}", "current weekday"],
+  ["{month}", "current month"],
+  ["{year}", "current year"],
+  ["{date_iso}", "ISO date (YYYY-MM-DD)"],
+  ["{time_iso}", "ISO time (HH:MM:SS, UTC)"],
+  ["{datetime_iso}", "full ISO 8601 timestamp (UTC)"],
+];
+
+/** The placeholder list as an inline Disclosure holding a KeyValue. */
+const PLACEHOLDER_REFERENCE_HTML = `<details class="kb-disclosure kb-disclosure--inline"><summary>${CHEVRON_ICON}Available placeholders</summary><div class="kb-disclosure__body"><dl class="kb-kv">${PLACEHOLDER_REFERENCE.map(
+  ([name, meaning]) =>
+    `<dt class="kb-mono">${escapeHtml(name)}</dt><dd>${escapeHtml(meaning)}</dd>`,
+).join(
+  "",
+)}</dl><p class="kb-help">Tick "Process placeholders" on the announcement to expand them at send time.</p></div></details>`;
+
+/** An EmptyState with the icon of the page it sits on: what is missing, and how the area fills up. */
+function kbEmptyState(iconName: IconName, title: string, text: string): string {
+  return `<div class="kb-empty"><div class="kb-empty__icon">${icon(iconName)}</div><p class="kb-empty__title">${escapeHtml(title)}</p><p class="kb-empty__text">${escapeHtml(text)}</p></div>`;
+}
 
 /** Form ids of the Announcements page, shared with the write routes (#1517). */
 export const ANNOUNCEMENT_CREATE_FORM = "announcement-create";
 export const ANNOUNCEMENT_ONCE_FORM = "announcement-once";
+
+/**
+ * The fields the create form and the one-off form share: channel, message,
+ * placeholders, and the optional embed. The create form adds the schedule.
+ */
+function renderAnnouncementFields(
+  f: FormView,
+  textChannels: ChannelOption[],
+  withSchedule: boolean,
+): string {
+  return `${pollSelect(f, "channelId", "Channel", channelOptionsHtml(textChannels, f.selected("channelId") || undefined), true)}
+    ${withSchedule ? renderCronField(f, "cron", "Schedule", "0 9 * * *") : ""}
+    ${pollField(f, "message", "Message", `<textarea class="kb-textarea" name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"${fieldControlAttrs(f.control("message"))}>${f.textareaContent("message")}</textarea>`)}
+    <label class="kb-switch"><input type="checkbox" role="switch" name="placeholders" value="1"${f.checked("placeholders") ? " checked" : ""}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Process placeholders (replace <code>{server_name}</code>, <code>{date}</code>, etc.)</label>
+    ${PLACEHOLDER_REFERENCE_HTML}
+    <fieldset class="kb-field">
+      <legend class="kb-label">Optional embed</legend>
+      <div class="kb-stack">
+        ${pollField(f, "embedTitle", "Title", `<input class="kb-input" type="text" name="embedTitle" maxlength="256"${f.valueAttr("embedTitle")}${fieldControlAttrs(f.control("embedTitle"))}>`)}
+        ${pollField(f, "embedDescription", "Description", `<textarea class="kb-textarea" name="embedDescription" rows="3" maxlength="4000"${fieldControlAttrs(f.control("embedDescription"))}>${f.textareaContent("embedDescription")}</textarea>`)}
+        ${renderColourField(f, "embedColor", "Colour", "", "No colour")}
+      </div>
+    </fieldset>`;
+}
 
 export function renderAnnouncementsPage(props: AnnouncementsProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
@@ -3056,105 +3092,79 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
   const once = formView(props.refusedForm, ANNOUNCEMENT_ONCE_FORM);
 
   const tableRows = props.rows
-    .map(
-      (a) => `<tr>
-<th scope="row" class="mono">${escapeHtml(a.id)}</th>
+    .map((a) => {
+      const base = `/admin/announcements/${escapeHtml(a.id)}`;
+      return `<tr>
+<th scope="row" class="kb-mono">${escapeHtml(a.id)}</th>
 <td>${channelMention({ name: a.channelName, type: a.channelType })}</td>
-<td class="mono">${escapeHtml(a.cron)}</td>
-<td>${tagOnOff(a.enabled)}</td>
-<td>${escapeHtml(a.messagePreview)}${a.embedTitle ? `<div class="muted mono">embed: ${escapeHtml(a.embedTitle)}</div>` : ""}</td>
-<td>${a.placeholders ? '<span class="tag tag-info">yes</span>' : '<span class="muted">no</span>'}</td>
-<td class="muted">${escapeHtml(a.createdAt)}</td>
-<td class="actions">
-  <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/post-now">${csrfInput}<button type="submit" class="btn">Post now</button></form>
-  <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/toggle">${csrfInput}<button type="submit" class="btn">${a.enabled ? "Disable" : "Enable"}</button></form>
-  <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/delete" data-confirm="Delete announcement ${escapeHtml(a.id)}?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
-</td>
-</tr>`,
-    )
+<td class="kb-mono">${escapeHtml(a.cron)}</td>
+<td>${kbOnOff(a.enabled)}</td>
+<td>${escapeHtml(a.messagePreview)}${a.embedTitle ? `<div class="kb-muted kb-mono">embed: ${escapeHtml(a.embedTitle)}</div>` : ""}</td>
+<td>${a.placeholders ? '<span class="kb-badge kb-badge--info">yes</span>' : '<span class="kb-muted">no</span>'}</td>
+<td class="kb-muted">${escapeHtml(a.createdAt)}</td>
+<td class="kb-actions"><div class="kb-row kb-row--nowrap">
+  <form method="POST" action="${base}/post-now">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm">Post now</button></form>
+  <form method="POST" action="${base}/toggle">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm">${a.enabled ? "Disable" : "Enable"}</button></form>
+  <form method="POST" action="${base}/delete" data-confirm="Delete announcement ${escapeHtml(a.id)}?">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger">Delete</button></form>
+</div></td>
+</tr>`;
+    })
     .join("");
 
   const tableHtml =
     props.rows.length === 0
-      ? `<div class="empty">No scheduled announcements configured.</div>`
-      : `<table><thead><tr><th scope="col">ID</th><th scope="col">Channel</th><th scope="col">Cron</th><th scope="col">Status</th><th scope="col">Message</th><th scope="col">Placeholders</th><th scope="col">Created</th><th scope="col">Actions</th></tr></thead><tbody>${tableRows}</tbody></table>`;
+      ? `<div class="kb-panel__body">${kbEmptyState("megaphone", "No scheduled announcements configured.", "A schedule posts its message in a channel on a cron. Create one below.")}</div>`
+      : `<div class="kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">Schedules</caption><thead><tr><th scope="col">ID</th><th scope="col">Channel</th><th scope="col">Cron</th><th scope="col">Status</th><th scope="col">Message</th><th scope="col">Placeholders</th><th scope="col">Created</th><th scope="col">Actions</th></tr></thead><tbody>${tableRows}</tbody></table></div>`;
+
+  const schedulesHtml = `<section class="kb-panel" id="announcements-schedules" aria-labelledby="announcements-schedules-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="announcements-schedules-h">Schedules</h2><span class="kb-panel__meta">${props.rows.length}</span></header>
+  ${tableHtml}
+  <div class="kb-panel__body">
+    <form method="POST" action="/admin/announcements/post-vc-stats" class="kb-row">
+      ${csrfInput}
+      <button type="submit" class="kb-btn">Post weekly VC stats now</button>
+      <span class="kb-help">Posts the weekly voice-stats announcement immediately, off schedule.</span>
+    </form>
+  </div>
+</section>`;
+
+  const createHtml = pollPanel(
+    "announcements-create",
+    "Create a new announcement",
+    `<form method="POST" action="/admin/announcements/create" class="kb-stack">
+    ${csrfInput}
+    ${renderAnnouncementFields(create, props.textChannels, true)}
+    <div class="kb-row"><button type="submit" class="${mainKbButtonClass(props.enabled)}">Create announcement</button></div>
+  </form>`,
+  );
+  const onceHtml = pollPanel(
+    "announcements-once",
+    "Compose & send once",
+    `<form method="POST" action="/admin/announcements/post-once" class="kb-stack">
+    ${csrfInput}
+    <p class="kb-help">Post a one-off announcement immediately — no cron schedule is stored.</p>
+    ${renderAnnouncementFields(once, props.textChannels, false)}
+    <div class="kb-row"><button type="submit" class="kb-btn">Post now</button></div>
+  </form>`,
+  );
 
   const body = `
-<h1>Announcements</h1>
-<p class="subtitle">Scheduled announcements posted on a cron.</p>
+<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Announcements</h1>
+    <p class="kb-pagehead__sub">Scheduled announcements posted on a cron.</p>
+    ${renderStatusLine({
+      enabled: props.enabled,
+      chips: [{ text: countOf(props.rows.length, "schedule") }],
+    })}
+  </div>
+</header>
 ${renderPageFlash(props.flash)}
 ${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Announcements", featureKey: "announcements.enabled", returnTo: "/admin/announcements", csrfToken: props.csrfToken })}
-${renderStatusLine({
-  enabled: props.enabled,
-  chips: [{ text: countOf(props.rows.length, "schedule") }],
-})}
-
-<div class="card">
-  <h2>Schedules</h2>${tableHtml}
-  <form method="POST" action="/admin/announcements/post-vc-stats" class="inline-form">
-    ${csrfInput}
-    <button type="submit" class="btn">Post weekly VC stats now</button>
-    <span class="muted">Posts the weekly voice-stats announcement immediately, off schedule.</span>
-  </form>
-</div>
-<div class="card">
-  <h2>Create a new announcement</h2>
-  <form method="POST" action="/admin/announcements/create" class="stack">
-    ${csrfInput}
-    <label>Channel
-      <select name="channelId" required${create.attrs("channelId")}>${channelOptionsHtml(props.textChannels, create.selected("channelId") || undefined)}</select>
-    </label>${create.error("channelId")}
-    ${renderCronField(create, "cron", "Schedule", "0 9 * * *")}
-    <label>Message
-      <textarea name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"${create.attrs("message")}>${create.textareaContent("message")}</textarea>
-    </label>${create.error("message")}
-    <label class="checkbox">
-      <input type="checkbox" name="placeholders" value="1"${create.checked("placeholders") ? " checked" : ""}>
-      Process placeholders (replace <code>{server_name}</code>, <code>{date}</code>, etc.)
-    </label>
-    ${PLACEHOLDER_REFERENCE_HTML}
-    <fieldset>
-      <legend>Optional embed</legend>
-      <label>Title
-        <input type="text" name="embedTitle" maxlength="256"${create.valueAttr("embedTitle")}${create.attrs("embedTitle")}>
-      </label>${create.error("embedTitle")}
-      <label>Description
-        <textarea name="embedDescription" rows="3" maxlength="4000"${create.attrs("embedDescription")}>${create.textareaContent("embedDescription")}</textarea>
-      </label>${create.error("embedDescription")}
-      ${renderColourField(create, "embedColor", "Colour", "", "No colour")}
-    </fieldset>
-    <button type="submit" class="${mainButtonClass(props.enabled)}">Create announcement</button>
-  </form>
-</div>
-<div class="card">
-  <h2>Compose &amp; send once</h2>
-  <p class="subtitle">Post a one-off announcement immediately — no cron schedule is stored.</p>
-  <form method="POST" action="/admin/announcements/post-once" class="stack">
-    ${csrfInput}
-    <label>Channel
-      <select name="channelId" required${once.attrs("channelId")}>${channelOptionsHtml(props.textChannels, once.selected("channelId") || undefined)}</select>
-    </label>${once.error("channelId")}
-    <label>Message
-      <textarea name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"${once.attrs("message")}>${once.textareaContent("message")}</textarea>
-    </label>${once.error("message")}
-    <label class="checkbox">
-      <input type="checkbox" name="placeholders" value="1"${once.checked("placeholders") ? " checked" : ""}>
-      Process placeholders (replace <code>{server_name}</code>, <code>{date}</code>, etc.)
-    </label>
-    ${PLACEHOLDER_REFERENCE_HTML}
-    <fieldset>
-      <legend>Optional embed</legend>
-      <label>Title
-        <input type="text" name="embedTitle" maxlength="256"${once.valueAttr("embedTitle")}${once.attrs("embedTitle")}>
-      </label>${once.error("embedTitle")}
-      <label>Description
-        <textarea name="embedDescription" rows="3" maxlength="4000"${once.attrs("embedDescription")}>${once.textareaContent("embedDescription")}</textarea>
-      </label>${once.error("embedDescription")}
-      ${renderColourField(once, "embedColor", "Colour", "", "No colour")}
-    </fieldset>
-    <button type="submit" class="btn">Post now</button>
-  </form>
-</div>
+${schedulesHtml}
+${createHtml}
+${onceHtml}
 ${renderFeatureSettingsCard({
   intro:
     "Switch scheduled announcements on or off here without leaving the page. Saved through the shared settings route.",
@@ -3167,6 +3177,7 @@ ${renderFeatureSettingsCard({
   enabled: props.enabled,
   flash: props.flash,
 })}
+</div>
 `;
   return renderAdminPage({
     title: "Announcements",
@@ -4899,77 +4910,104 @@ export function renderNoticesPage(props: NoticesProps): string {
   const create = formView(props.refusedForm, NOTICE_CREATE_FORM);
   const groupSections =
     props.groups.length === 0
-      ? `<div class="empty">No notices stored.</div>`
+      ? `<section class="kb-panel" id="notices-empty" aria-labelledby="notices-empty-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="notices-empty-h">Notices</h2></header>
+  <div class="kb-panel__body">${kbEmptyState("sticky-note", "No notices stored.", "Notices you create below are listed here by category, in the order they post.")}</div>
+</section>`
       : props.groups
-          .map((g) => {
+          .map((g, groupIndex) => {
             const shownOrder = orderToken(g.rows.map((n) => n.id));
             const rows = g.rows
               .map((n, index) => {
                 const f = formView(props.refusedForm, noticeEditForm(n.id));
                 return `<tr${reorderRowAttrs(`notice-${n.id}`, n.title)}>
 <td>${renderReorderCell({ action: `/admin/notices/${n.id}/move`, scope: n.category, csrfInput, index, count: g.rows.length, orderToken: shownOrder, label: n.title })}</td>
-<th scope="row">${escapeHtml(n.title)}<div class="muted mono">id: ${escapeHtml(n.id)}</div></th>
-<td class="muted">${escapeHtml(n.preview)}</td>
-<td class="mono muted">${escapeHtml(n.messageId)}</td>
-<td class="muted">${escapeHtml(n.updatedAt)}</td>
-<td class="actions">
-  <details class="helper edit-details"${f.open()}><summary>Edit</summary>
-    <form method="POST" action="/admin/notices/${escapeHtml(n.id)}/update" class="stack">${csrfInput}
-      <label>Title<input type="text" name="title" maxlength="256" value="${escapeHtml(f.value("title", n.title))}" required${f.attrs("title")}></label>${f.error("title")}
-      <label>Content<textarea name="content" rows="6" maxlength="4000" required${f.attrs("content")}>${f.textareaContent("content", n.content)}</textarea></label>${f.error("content")}
-      <label>Category<select name="category"${f.attrs("category")}>${noticeCategoryOptionsHtml(props.categoryOptions, f.selected("category", n.category))}</select></label>${f.error("category")}
-      <button type="submit" class="btn">Save changes</button>
-    </form>
+<th scope="row">${escapeHtml(n.title)}<div class="kb-muted kb-mono">id: ${escapeHtml(n.id)}</div></th>
+<td class="kb-muted">${escapeHtml(n.preview)}</td>
+<td class="kb-mono kb-muted">${escapeHtml(n.messageId)}</td>
+<td class="kb-muted">${escapeHtml(n.updatedAt)}</td>
+<td class="kb-actions"><div class="kb-row kb-row--nowrap">
+  <details class="kb-disclosure"${f.open()}><summary>${CHEVRON_ICON}Edit</summary>
+    <div class="kb-disclosure__body"><form method="POST" action="/admin/notices/${escapeHtml(n.id)}/update" class="kb-stack">${csrfInput}
+      ${pollField(f, "title", "Title", `<input class="kb-input" type="text" name="title" maxlength="256" value="${escapeHtml(f.value("title", n.title))}" required${fieldControlAttrs(f.control("title"))}>`)}
+      ${pollField(f, "content", "Content", `<textarea class="kb-textarea" name="content" rows="6" maxlength="4000" required${fieldControlAttrs(f.control("content"))}>${f.textareaContent("content", n.content)}</textarea>`)}
+      ${pollSelect(f, "category", "Category", noticeCategoryOptionsHtml(props.categoryOptions, f.selected("category", n.category)))}
+      <div class="kb-row"><button type="submit" class="kb-btn">Save changes</button></div>
+    </form></div>
   </details>
-  <form method="POST" action="/admin/notices/${escapeHtml(n.id)}/delete" data-confirm="Delete notice '${escapeHtml(n.title)}'?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
-</td>
+  <form method="POST" action="/admin/notices/${escapeHtml(n.id)}/delete" data-confirm="Delete notice '${escapeHtml(n.title)}'?">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger">Delete</button></form>
+</div></td>
 </tr>`;
               })
               .join("");
-            return `<div class="card">
-  <h2>${escapeHtml(g.category)} <span class="muted">(${g.rows.length})</span></h2>
-  <table><thead><tr><th scope="col">Order</th><th scope="col">Title</th><th scope="col">Content</th><th scope="col">Message ID</th><th scope="col">Updated</th><th scope="col">Actions</th></tr></thead><tbody${reorderListAttrs(g.category)}>${rows}</tbody></table>
-</div>`;
+            const panelId = `notices-group-${groupIndex}`;
+            return `<section class="kb-panel" id="${panelId}" aria-labelledby="${panelId}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${panelId}-h">${escapeHtml(g.category)}</h2><span class="kb-panel__meta">${g.rows.length}</span></header>
+  <div class="kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">${escapeHtml(g.category)} notices</caption><thead><tr><th scope="col">Order</th><th scope="col">Title</th><th scope="col">Content</th><th scope="col">Message ID</th><th scope="col">Updated</th><th scope="col">Actions</th></tr></thead><tbody${reorderListAttrs(g.category)}>${rows}</tbody></table></div>
+</section>`;
           })
           .join("");
 
+  const createHtml = pollPanel(
+    "notices-create",
+    "Create a notice",
+    `<form method="POST" action="/admin/notices/create" class="kb-stack">
+    ${csrfInput}
+    ${pollField(create, "title", "Title", `<input class="kb-input" type="text" name="title" maxlength="256" required${create.valueAttr("title")}${fieldControlAttrs(create.control("title"))}>`)}
+    ${pollField(create, "content", "Content", `<textarea class="kb-textarea" name="content" rows="5" maxlength="4000" required${fieldControlAttrs(create.control("content"))}>${create.textareaContent("content")}</textarea>`)}
+    ${pollSelect(create, "category", "Category", noticeCategoryOptionsHtml(props.categoryOptions, create.selected("category") || undefined), true)}
+    <div class="kb-row"><button type="submit" class="${mainKbButtonClass(props.enabled)}">Create notice</button></div>
+  </form>`,
+  );
+
+  const resyncHtml = pollPanel(
+    "notices-resync",
+    "Resync to the channel",
+    `<form method="POST" action="/admin/notices/sync" class="kb-row" data-confirm="Resync all notices? This deletes and reposts every notice message."${confirmListAttr(
+      [
+        "The bot's own messages among the latest 100 in the notices channel are deleted; the header stays.",
+        "Every notice is posted again from the saved list.",
+      ],
+    )}>
+    ${csrfInput}
+    <button type="submit" class="kb-btn kb-btn--danger">Resync notices to channel</button>
+    <span class="kb-help">Deletes and reposts every notice message in the channel.</span>
+  </form>`,
+  );
+
   const body = `
-<h1>Notices</h1>
-<p class="subtitle">Notice posts grouped by category. Within a category, notices post in the order listed here. Use <em>Move up</em> and <em>Move down</em> on a row to change its place, or drag a row by its handle.</p>
+<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Notices</h1>
+    <p class="kb-pagehead__sub">Notice posts grouped by category. Within a category, notices post in the order listed here. Use <em>Move up</em> and <em>Move down</em> on a row to change its place, or drag a row by its handle.</p>
+    ${renderStatusLine({
+      enabled: props.enabled,
+      chips: [
+        props.channel
+          ? {
+              text: `Channel ${channelText({ name: props.channel.name, type: props.channel.type })}`,
+            }
+          : {
+              text: "No channel set",
+              warn: true,
+              href: props.settingsUnavailable
+                ? undefined
+                : settingHref("notices.channel_id"),
+            },
+        { text: countOf(props.total, "notice") },
+      ],
+    })}
+  </div>
+</header>
 ${renderPageFlash(props.flash)}
 ${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Notices", featureKey: "notices.enabled", returnTo: "/admin/notices", csrfToken: props.csrfToken })}
-
-${renderStatusLine({
-  enabled: props.enabled,
-  chips: [
-    props.channel
-      ? {
-          text: `Channel ${channelText({ name: props.channel.name, type: props.channel.type })}`,
-        }
-      : {
-          text: "No channel set",
-          warn: true,
-          href: props.settingsUnavailable
-            ? undefined
-            : settingHref("notices.channel_id"),
-        },
-    { text: countOf(props.total, "notice") },
-  ],
-})}${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
-<div class="card">
-  <h2>Create a notice</h2>
-  <form method="POST" action="/admin/notices/create" class="stack">
-    ${csrfInput}
-    <label>Title<input type="text" name="title" maxlength="256" required${create.valueAttr("title")}${create.attrs("title")}></label>${create.error("title")}
-    <label>Content<textarea name="content" rows="5" maxlength="4000" required${create.attrs("content")}>${create.refused ? create.textareaContent("content") : ""}</textarea></label>${create.error("content")}
-    <label>Category<select name="category" required${create.attrs("category")}>${noticeCategoryOptionsHtml(props.categoryOptions, create.selected("category") || undefined)}</select></label>${create.error("category")}
-    <button type="submit" class="${mainButtonClass(props.enabled)}">Create notice</button>
-  </form>
-</div>
-<p class="muted" id="notices-order-note">A new order shows in the Discord channel after <em>Resync notices to channel</em>. Moving a notice does not touch the channel on its own. A new notice goes last in its category.</p>
+${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
+<p class="kb-help" id="notices-order-note">A new order shows in the Discord channel after <em>Resync notices to channel</em>. Moving a notice does not touch the channel on its own. A new notice goes last in its category.</p>
 ${REORDER_STATUS_HTML}
 ${groupSections}
 ${scriptTag(REORDER_SCRIPT)}
+${createHtml}
 ${renderRepostCard({
   id: "repost-header",
   heading: "Header post",
@@ -4993,19 +5031,7 @@ ${renderRepostCard({
         ? "Set the notices channel first."
         : null,
 })}
-<div class="card">
-  <h2>Resync to the channel</h2>
-  <form method="POST" action="/admin/notices/sync" class="inline-form" data-confirm="Resync all notices? This deletes and reposts every notice message."${confirmListAttr(
-    [
-      "The bot's own messages among the latest 100 in the notices channel are deleted; the header stays.",
-      "Every notice is posted again from the saved list.",
-    ],
-  )}>
-    ${csrfInput}
-    <button type="submit" class="btn">Resync notices to channel</button>
-    <span class="muted">Deletes and reposts every notice message in the channel.</span>
-  </form>
-</div>
+${resyncHtml}
 ${renderFeatureSettingsCard({
   intro:
     "Change notices settings here without leaving the page. Changing the channel does not move notices already posted: after saving, use Resync notices to channel above to repost them in the new channel.",
@@ -5019,6 +5045,7 @@ ${renderFeatureSettingsCard({
   needsSetup: !props.channel,
   flash: props.flash,
 })}
+</div>
 `;
   return renderAdminPage({
     title: "Notices",
@@ -5731,63 +5758,74 @@ export function renderStringArrayEditor(
     opts.refusedForm,
     botStatusImportForm(opts.collectionId),
   );
+  const panelId = `pool-${opts.collectionId}`;
 
   const shownOrder = orderToken(opts.items.map((item) => item.id));
-  const rows =
-    opts.items.length === 0
-      ? `<tr><td colspan="3"><span class="muted">No entries stored.</span></td></tr>`
-      : opts.items
-          .map((item, index) => {
-            const f = formView(opts.refusedForm, botStatusEditForm(item.id));
-            return `<tr${reorderRowAttrs(`entry-${item.id}`, item.text)}>
+  const rows = opts.items
+    .map((item, index) => {
+      const f = formView(opts.refusedForm, botStatusEditForm(item.id));
+      return `<tr${reorderRowAttrs(`entry-${item.id}`, item.text)}>
 <td>${renderReorderCell({ action: `${entryPath(item.id)}/move`, scope: opts.collectionId, csrfInput, index, count: opts.items.length, orderToken: shownOrder, label: item.text })}</td>
-<th scope="row">
-  <details class="helper edit-details"${f.open()}><summary>${escapeHtml(item.text)}</summary>
-    <form method="POST" action="${entryPath(item.id)}/update" class="stack">${csrfInput}
-      <label>Text<input type="text" name="text" maxlength="${opts.maxLength}" value="${escapeHtml(f.value("text", item.text))}" required${f.attrs("text")}></label>${f.error("text")}
-      <button type="submit" class="btn">Save changes</button>
-    </form>
+<th scope="row">${escapeHtml(item.text)}<div class="kb-muted kb-mono">id: ${escapeHtml(item.id)}</div></th>
+<td class="kb-actions"><div class="kb-row kb-row--nowrap">
+  <details class="kb-disclosure"${f.open()}><summary>${CHEVRON_ICON}Edit</summary>
+    <div class="kb-disclosure__body"><form method="POST" action="${entryPath(item.id)}/update" class="kb-stack">${csrfInput}
+      ${pollField(f, "text", "Text", `<input class="kb-input" type="text" name="text" maxlength="${opts.maxLength}" value="${escapeHtml(f.value("text", item.text))}" required${fieldControlAttrs(f.control("text"))}>`)}
+      <div class="kb-row"><button type="submit" class="kb-btn">Save changes</button></div>
+    </form></div>
   </details>
-  <div class="muted mono">id: ${escapeHtml(item.id)}</div>
-</th>
-<td class="actions"><form method="POST" action="${entryPath(item.id)}/delete" data-confirm="Delete this entry?">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form></td>
+  <form method="POST" action="${entryPath(item.id)}/delete" data-confirm="Delete this entry?">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger">Delete</button></form>
+</div></td>
 </tr>`;
-          })
-          .join("");
+    })
+    .join("");
 
   const defaultsBanner = opts.defaultsNotice
-    ? `<div class="notice warn">${escapeHtml(opts.defaultsNotice)}
-  <form method="POST" action="${poolPath}/seed" class="inline-form">${csrfInput}<button type="submit" class="btn">Seed defaults into store</button></form>
+    ? `<div class="kb-callout kb-callout--warn kb-callout--wrap" role="status">
+  ${toneIcon("warn")}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(opts.defaultsNotice)}</p></div>
+  <div class="kb-callout__actions"><form method="POST" action="${poolPath}/seed">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm">Seed defaults into store</button></form></div>
 </div>`
     : "";
 
-  const hint = opts.inputHint
-    ? `<span class="muted">${escapeHtml(opts.inputHint)}</span>`
-    : "";
+  const intro =
+    opts.description || defaultsBanner
+      ? `<div class="kb-panel__body kb-stack">${opts.description ? `<p class="kb-help">${escapeHtml(opts.description)}</p>` : ""}${defaultsBanner}</div>`
+      : "";
 
-  return `<div class="card">
-  <h2>${escapeHtml(opts.title)} <span class="muted">(${opts.items.length})</span></h2>
-  ${opts.description ? `<p class="subtitle">${escapeHtml(opts.description)}</p>` : ""}
-  ${defaultsBanner}
-  <table><thead><tr><th scope="col">Order</th><th scope="col">Text</th><th scope="col">Actions</th></tr></thead><tbody${reorderListAttrs(opts.title)}>${rows}</tbody></table>
-  <form method="POST" action="${poolPath}/add" class="stack">
-    ${csrfInput}
-    <label>Add entry<input type="text" name="text" maxlength="${opts.maxLength}" required${add.valueAttr("text")}${add.attrs("text")}></label>${add.error("text")}
-    ${hint}
-    <button type="submit" class="btn">Add</button>
-  </form>
-  <details class="helper"${imp.open()}>
-    <summary>Import / export</summary>
-    <form method="POST" action="${poolPath}/import" class="stack">
+  const listHtml =
+    opts.items.length === 0
+      ? `<div class="kb-panel__body">${kbEmptyState("activity", "No entries stored.", "Add an entry or import a list below.")}</div>`
+      : `<div class="kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">${escapeHtml(opts.title)}</caption><thead><tr><th scope="col">Order</th><th scope="col">Text</th><th scope="col">Actions</th></tr></thead><tbody${reorderListAttrs(opts.title)}>${rows}</tbody></table></div>`;
+
+  const hintId = `${add.id("text")}-hint`;
+  const hint = opts.inputHint
+    ? `<p class="kb-help" id="${escapeHtml(hintId)}">${escapeHtml(opts.inputHint)}</p>`
+    : "";
+  const replaceChecked = imp.selected("mode", "replace") !== "append";
+
+  return `<section class="kb-panel" id="${escapeHtml(panelId)}" aria-labelledby="${escapeHtml(panelId)}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${escapeHtml(panelId)}-h">${escapeHtml(opts.title)}</h2><span class="kb-panel__meta">${opts.items.length}</span></header>
+  ${intro}
+  ${listHtml}
+  <div class="kb-panel__body kb-stack">
+    <form method="POST" action="${poolPath}/add" class="kb-stack">
       ${csrfInput}
-      <p class="muted">Paste one entry per line, or a JSON array of strings. Exporting: the textarea below shows the current effective list — copy it to back up.</p>
-      <label>Entries<textarea name="items" rows="8"${imp.attrs("items")}>${imp.textareaContent("items", opts.exportText)}</textarea></label>${imp.error("items")}
-      <label class="inline-form"><input type="radio" name="mode" value="replace"${imp.selected("mode", "replace") !== "append" ? " checked" : ""}> Replace pool</label>
-      <label class="inline-form"><input type="radio" name="mode" value="append"${imp.selected("mode", "replace") === "append" ? " checked" : ""}> Append to pool</label>
-      <button type="submit" class="btn">Import</button>
+      ${pollField(add, "text", "Add entry", `<input class="kb-input" type="text" name="text" maxlength="${opts.maxLength}" required${add.valueAttr("text")}${fieldControlAttrs(add.control("text", opts.inputHint ? hintId : ""))}>`)}
+      ${hint}
+      <div class="kb-row"><button type="submit" class="kb-btn">Add</button></div>
     </form>
-  </details>
-</div>`;
+    <details class="kb-disclosure"${imp.open()}>
+      <summary>${CHEVRON_ICON}Import / export</summary>
+      <div class="kb-disclosure__body"><form method="POST" action="${poolPath}/import" class="kb-stack">
+        ${csrfInput}
+        <p class="kb-help">Paste one entry per line, or a JSON array of strings. Exporting: the textarea below shows the current effective list — copy it to back up.</p>
+        ${pollField(imp, "items", "Entries", `<textarea class="kb-textarea" name="items" rows="8"${fieldControlAttrs(imp.control("items"))}>${imp.textareaContent("items", opts.exportText)}</textarea>`)}
+        <div class="kb-segmented" role="radiogroup" aria-label="What to do with the pool"><label><input type="radio" name="mode" value="replace"${replaceChecked ? " checked" : ""}><span>Replace pool</span></label><label><input type="radio" name="mode" value="append"${replaceChecked ? "" : " checked"}><span>Append to pool</span></label></div>
+        <div class="kb-row"><button type="submit" class="kb-btn">Import</button></div>
+      </form></div>
+    </details>
+  </div>
+</section>`;
 }
 
 // ---------- Bot Status (issue #557) ----------

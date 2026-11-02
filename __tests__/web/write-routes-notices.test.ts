@@ -429,12 +429,10 @@ describe("POST /notices/:id/update", () => {
     );
     // One details element is open: the refused row's. The other row keeps its
     // stored values.
-    expect(
-      r.html.match(/<details class="helper edit-details" open>/g),
-    ).toHaveLength(1);
-    expect(r.html.match(/<details class="helper edit-details">/g)).toHaveLength(
+    expect(r.html.match(/<details class="kb-disclosure" open>/g)).toHaveLength(
       1,
     );
+    expect(r.html.match(/<details class="kb-disclosure">/g)).toHaveLength(1);
     expect(r.html).toContain("\nNew text</textarea>");
     expect(r.html).toContain('<option value="rules" selected>');
     expect(r.html).toContain('value="Other title"');
