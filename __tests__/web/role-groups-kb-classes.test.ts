@@ -1,4 +1,6 @@
+/* global Element */
 import { describe, it, expect } from "@jest/globals";
+import { JSDOM } from "jsdom";
 import {
   renderAdminFixPage,
   renderRoleDeletePage,
@@ -231,42 +233,52 @@ const states: Array<[string, string]> = [
   ],
 ];
 
-/** The page's own content: `<main>` without scripts and without the shared plan diff. */
-function content(html: string): string {
-  const main = /<main[^>]*>([\s\S]*?)<\/main>/.exec(html)?.[1] ?? "";
-  return main
-    .replace(/<script[\s\S]*?<\/script>/g, "")
-    .replace(/<section class="adoption-plan">[\s\S]*?<\/section>/g, "");
+/**
+ * The page's own content as a DOM: `<main>` without the shared plan diff.
+ * Parsed, not pattern-stripped, so script text is never read as markup.
+ */
+function content(html: string): Element {
+  const main = new JSDOM(html).window.document.querySelector("main");
+  if (!main) throw new Error("page has no <main>");
+  main.querySelectorAll("section.adoption-plan").forEach((e) => e.remove());
+  return main;
 }
+
+const classTokens = (root: Element): string[] =>
+  [...root.querySelectorAll("[class]")].flatMap((e) =>
+    [...e.classList].filter(Boolean),
+  );
 
 describe.each(states)("Role groups pages: %s", (_name, html) => {
   const body = content(html);
 
   it("renders content", () => {
-    expect(body.length).toBeGreaterThan(100);
+    expect(body.textContent?.length ?? 0).toBeGreaterThan(50);
   });
 
   it("uses only kb- classes", () => {
-    const tokens = [...body.matchAll(/\bclass="([^"]*)"/g)].flatMap((m) =>
-      m[1].split(/\s+/).filter(Boolean),
+    const old = classTokens(body).filter(
+      (t) => !t.startsWith("kb-") && !JS_HOOKS.has(t),
     );
-    const old = tokens.filter((t) => !t.startsWith("kb-") && !JS_HOOKS.has(t));
     expect([...new Set(old)]).toEqual([]);
   });
 
   it("has no bare table, heading, fieldset or inline style", () => {
-    expect(body).not.toMatch(/<table(?![^>]*class="kb-table")/);
-    expect(body).not.toMatch(/<h[1-3](?![^>]*class="kb-)/);
-    expect(body).not.toContain("<fieldset");
-    expect(body).not.toMatch(/\sstyle="/);
+    const bad = (sel: string): number => body.querySelectorAll(sel).length;
+    expect(bad("table:not(.kb-table)")).toBe(0);
+    expect(bad("h1, h2, h3")).toBe(bad('[class^="kb-"]:is(h1, h2, h3)'));
+    expect(bad("fieldset")).toBe(0);
+    expect(bad("[style]")).toBe(0);
   });
 });
 
 describe("Role groups pages: one h1 and one primary button", () => {
   it.each(states)("%s", (_name, html) => {
     const body = content(html);
-    expect(body.match(/<h1[ >]/g)?.length ?? 0).toBe(1);
-    expect(body.match(/kb-btn--primary/g)?.length ?? 0).toBeLessThanOrEqual(1);
+    expect(body.querySelectorAll("h1").length).toBe(1);
+    expect(
+      body.querySelectorAll(".kb-btn--primary").length,
+    ).toBeLessThanOrEqual(1);
   });
 });
 
