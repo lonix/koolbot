@@ -525,7 +525,8 @@ const STYLE = [
   // is more specific, so the order does not matter. Goes away with the old
   // classes (#1652).
   ".kb-callout[data-flash],.kb-callout.section-flash{margin:0 0 var(--space-4)}",
-  ".kb-stack>.kb-callout[data-flash],.kb-stack>.kb-callout.section-flash{margin:0}", // Disabled-feature banner (#610): explanatory text on the left, inline
+  ".kb-stack>.kb-callout[data-flash],.kb-stack>.kb-callout.section-flash{margin:0}",
+  // Disabled-feature banner (#610): explanatory text on the left, inline
   // enable action + Settings link on the right; wraps on narrow screens.
   "form.stack{display:flex;flex-direction:column;gap:.6rem}",
   // A legacy form's buttons keep their natural width instead of stretching across the column (#1512).
