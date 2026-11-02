@@ -8,6 +8,7 @@ import { describe, it, expect } from "@jest/globals";
 import { ChannelType } from "discord.js";
 import { JSDOM } from "jsdom";
 import {
+  CHANNEL_PICKER_CREATE_SCRIPT,
   CHANNEL_PICKER_SCRIPT,
   PICKER_CREATE_PREFIX,
   parsePickerCreateValue,
@@ -86,7 +87,11 @@ function mount(inner: string): JSDOM {
     `<!doctype html><body><form><label for="f">Thing</label>${inner.replace(/<select /, '<select id="f" ')}${renderSaveBar("Save")}</form></body>`,
     { runScripts: "outside-only" },
   );
-  dom.window.eval(CHANNEL_PICKER_SCRIPT);
+  dom.window.eval(
+    inner.includes('data-picker-meta="{')
+      ? CHANNEL_PICKER_CREATE_SCRIPT
+      : CHANNEL_PICKER_SCRIPT,
+  );
   dom.window.eval(SAVEBAR_SCRIPT);
   return dom;
 }
@@ -477,5 +482,40 @@ describe("multi-select (a role list)", () => {
     expect(
       dom.window.document.querySelectorAll(".kb-picker__chip").length,
     ).toBe(1);
+  });
+});
+
+describe("script variants", () => {
+  it("the plain script holds no create code", () => {
+    for (const t of ["data-create", "will be created", "PFX", "pendOpts"]) {
+      expect(CHANNEL_PICKER_SCRIPT).not.toContain(t);
+      expect(CHANNEL_PICKER_CREATE_SCRIPT).toContain(t);
+    }
+  });
+  it("the layout sends the create script only with a flagged picker", () => {
+    const flagged = renderSettingsPage({
+      csrfToken: "t",
+      guildName: "G",
+      flash: null,
+      groups: [{ category: "x", rows: [row("channel", "1")] }],
+      textChannels: TEXT,
+      voiceChannels: [],
+      categoryChannels: [],
+      roles: [],
+      pickerCreate: () => ({ kind: "channel", ok: true }),
+    } as unknown as Parameters<typeof renderSettingsPage>[0]);
+    const plain = renderSettingsPage({
+      csrfToken: "t",
+      guildName: "G",
+      flash: null,
+      groups: [{ category: "x", rows: [row("channel", "1")] }],
+      textChannels: TEXT,
+      voiceChannels: [],
+      categoryChannels: [],
+      roles: [],
+    } as unknown as Parameters<typeof renderSettingsPage>[0]);
+    expect(flagged).toContain("pendOpts");
+    expect(plain).not.toContain("pendOpts");
+    expect(plain).toContain("function init(box)");
   });
 });

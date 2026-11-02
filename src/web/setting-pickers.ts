@@ -236,221 +236,282 @@ export function pickerMetaAttr(meta: unknown[], create?: PickerCreate): string {
  * returns to the trigger, Tab leaves. Discard's `change` (and a cascade
  * master's) re-reads the select, so the trigger never shows a stale value.
  * Option text is only ever set as text, never as markup.
+ *
+ * `channelPickerScript(create)` builds it with or without the create row
+ * (#1658). The plain build, `CHANNEL_PICKER_SCRIPT`, is exactly what pages sent
+ * before; `CHANNEL_PICKER_CREATE_SCRIPT` adds the row and its pending choice and
+ * is sent only to a page that holds a picker whose caller passed the flag, so
+ * every other page stays byte-identical.
  */
-export const CHANNEL_PICKER_SCRIPT =
-  "(function(){" +
-  `var ICONS=${JSON.stringify(channelKindIcons())},CHEVRON=${JSON.stringify(PICKER_CHEVRON)},CHECK=${JSON.stringify(PICKER_CHECK)},XICON=${JSON.stringify(PICKER_X)},PLUS=${JSON.stringify(PICKER_PLUS)},PFX=${JSON.stringify(PICKER_CREATE_PREFIX)},MAXN=${PICKER_NAME_MAX};` +
-  "var KINDS={text:{text:1,announcement:1,forum:1,thread:1},voice:{voice:1,stage:1},role:{role:1}},uid=0,CR=1e6;" +
-  "var CK={channel:{text:1,announcement:1,forum:1,thread:1,voice:1,stage:1},category:{category:1},role:{role:1}};" +
-  "function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}" +
-  "function svg(h){var s=document.createElement('span');s.innerHTML=h;return s.firstChild}" +
-  "function read(sel,meta){var out=[],i,j,c,g;" +
-  "function one(o,group){var m=meta[out.length]||[];return{value:o.value,kind:m[0]||'',name:m[1]||o.textContent,cat:m[2]||'',group:group,text:o.textContent}}" +
-  "for(i=0;i<sel.children.length;i++){c=sel.children[i];" +
-  "if(c.tagName==='OPTGROUP'){g=c.getAttribute('label')||'';for(j=0;j<c.children.length;j++)out.push(one(c.children[j],g))}" +
-  "else out.push(one(c,''))}return out}" +
-  "function mention(it){var m=el('span','kb-mention'+(it.kind==='category'?' kb-mention--category':''));" +
-  "if(it.kind==='role')m.textContent='@'+it.name;" +
-  "else if(ICONS[it.kind]){m.appendChild(svg(ICONS[it.kind]));m.appendChild(document.createTextNode(it.name))}" +
-  "else m.textContent=it.kind==='missing'?it.text:it.name;return m}" +
-  "function parse(raw){var q=raw.trim(),k=null;" +
-  "if(q.indexOf('#!')===0){k='voice';q=q.slice(2)}else if(q.charAt(0)==='#'){k='text';q=q.slice(1)}else if(q.charAt(0)==='@'){k='role';q=q.slice(1)}" +
-  "return{k:k,q:q.trim().toLowerCase()}}" +
-  "function hit(it,p){if(p.k&&!KINDS[p.k][it.kind])return false;return !p.q||(it.name+' '+it.cat).toLowerCase().indexOf(p.q)!==-1}" +
-  "function init(box){var sel=box.querySelector('select');if(!sel||box.hasAttribute('data-ready'))return;box.setAttribute('data-ready','');" +
-  "var meta=[],cfg=null;try{var mm=JSON.parse(box.getAttribute('data-picker-meta')||'[]')||[];" +
-  "if(Array.isArray(mm))meta=mm;else{meta=mm.items||[];cfg=mm.create&&CK[mm.create.kind]?mm.create:null}}catch(err){}" +
-  "var n=++uid,items=read(sel,meta),rows=[],heads=[],vis=[],act=-1,open=false,i,lastGroup=null;" +
-  "var multi=sel.multiple,expanded=false,tid='kb-picker-'+n,lid=tid+'-list',labels=[],ids=[];" +
-  "for(i=0;sel.labels&&i<sel.labels.length;i++){if(!sel.labels[i].id)sel.labels[i].id=tid+'-label'+i;labels.push(sel.labels[i].textContent.trim());ids.push(sel.labels[i].id)}" +
-  "var name=labels.join(' ')||sel.getAttribute('aria-label')||'Choose';" +
-  "var trig=el('button','kb-picker__trigger');trig.type='button';trig.id=tid;trig.setAttribute('aria-haspopup','listbox');trig.setAttribute('aria-expanded','false');" +
-  "trig.setAttribute('aria-controls',lid);" +
-  "if(ids.length){ids.push(tid);trig.setAttribute('aria-labelledby',ids.join(' '))}else trig.setAttribute('aria-label',name);" +
-  "var pop=el('div','kb-picker__pop kb-picker__pop--floating');pop.hidden=true;" +
-  "var lab=el('label','kb-picker__search'),inp=el('input');inp.type='search';inp.setAttribute('form','none');inp.autocomplete='off';inp.id=tid+'-search';" +
-  "inp.setAttribute('role','combobox');inp.setAttribute('aria-autocomplete','list');inp.setAttribute('aria-controls',lid);inp.setAttribute('aria-expanded','true');" +
-  "inp.setAttribute('aria-label','Search '+name);inp.placeholder='Search';lab.appendChild(inp);" +
-  "var ul=el('ul','kb-picker__list');ul.id=lid;ul.setAttribute('role','listbox');if(multi)ul.setAttribute('aria-multiselectable','true');ul.setAttribute('aria-label',name);" +
-  "var st=el('p','kb-picker__hint');st.setAttribute('role','status');st.hidden=true;" +
-  "var hint=el('p','kb-picker__hint'),kinds={};for(i=0;i<items.length;i++)kinds[items[i].kind]=1;" +
-  "var parts=['Arrow keys move, Enter chooses, Esc closes.'];" +
-  "if(kinds.voice||kinds.stage)parts.unshift('#! voice channels');if(kinds.text||kinds.announcement||kinds.forum||kinds.thread)parts.unshift('# text channels');" +
-  "if(kinds.role)parts.unshift('@ roles');hint.textContent=(parts.length>1?'Type '+parts.slice(0,-1).join(', ')+'. ':'')+parts[parts.length-1];" +
-  "for(i=0;i<items.length;i++){var it=items[i],li;" +
-  "if(it.group&&it.group!==lastGroup){li=el('li','kb-picker__group',it.group);li.setAttribute('role','presentation');ul.appendChild(li);heads.push({el:li,group:it.group})}" +
-  "lastGroup=it.group;li=el('li','kb-picker__opt');li.id=lid+'-'+i;li.setAttribute('role','option');li.setAttribute('data-i',String(i));" +
-  "li.appendChild(mention(it));if(it.cat)li.appendChild(el('span','kb-picker__cat',it.cat));ul.appendChild(li);rows.push(li)}" +
-  "var crow=null,live=null;" +
-  // The create row (#1658): the last row, shown only while the typed name can be created.
-  "if(cfg){crow=el('li','kb-picker__opt');crow.id=lid+'-create';crow.setAttribute('role','option');crow.setAttribute('aria-selected','false');" +
-  "crow.setAttribute('data-i',String(CR));crow.setAttribute('data-create','');crow.hidden=true;ul.appendChild(crow);" +
-  "live=el('span','kb-visually-hidden');live.setAttribute('role','status')}" +
-  "pop.appendChild(lab);pop.appendChild(ul);pop.appendChild(st);pop.appendChild(hint);" +
-  "sel.classList.add('kb-visually-hidden');sel.tabIndex=-1;sel.setAttribute('aria-hidden','true');" +
-  // The save handlers mark a rejected field on the select (`aria-invalid`,
-  // `aria-describedby`) without firing `change`, and then focus it. Mirror both
-  // onto the trigger whenever they change, and again right before focus is
-  // handed over, so the trigger never lacks the rejection or keeps a removed note.
-  "function attrs(){var d=sel.getAttribute('aria-describedby');" +
-  "if(d)trig.setAttribute('aria-describedby',d);else trig.removeAttribute('aria-describedby');" +
-  "if(sel.getAttribute('aria-invalid')==='true')trig.setAttribute('aria-invalid','true');else trig.removeAttribute('aria-invalid');" +
-  "trig.disabled=sel.disabled}" +
-  "sel.addEventListener('focus',function(){attrs();trig.focus()});" +
-  "if(window.MutationObserver)new MutationObserver(attrs).observe(sel,{attributes:true,attributeFilter:['aria-invalid','aria-describedby','disabled']});" +
-  "box.classList.add('kb-picker--enhanced');" +
-  // A multiple select shows its chips above the trigger (a button cannot hold
-  // the chips' own remove buttons), and the no-JavaScript "Selected:" line
-  // after the box becomes redundant.
-  "var chips=null;if(multi){chips=el('div','kb-picker__chips');box.appendChild(chips);" +
-  // Focusable by script only: it takes focus when a repaint leaves no button to
-  // take it (a disabled select expanding "+N more"), and is named for that.
-  "chips.tabIndex=-1;chips.setAttribute('role','group');" +
-  "if(labels.length||sel.getAttribute('aria-label'))chips.setAttribute('aria-label','Selected '+name);" +
-  "var nx=box.nextElementSibling;if(nx&&nx.hasAttribute('data-picker-summary'))nx.hidden=true}" +
-  "box.appendChild(trig);box.appendChild(pop);if(live)box.appendChild(live);" +
-  "function say(t){if(live){live.textContent='';live.textContent=t}}" +
-  "function rowAt(k){return k===CR?crow:rows[k]}" +
-  "function itm(k){if(items[k])return items[k];var o=sel.options[k];if(!o||!cfg)return null;" +
-  "return{value:o.value,kind:cfg.kind==='channel'?'text':cfg.kind,name:o.getAttribute('data-name')||o.textContent,cat:'',pending:true,text:o.textContent}}" +
-  "function pendOpts(){var o=[],k;for(k=items.length;k<sel.options.length;k++)if(sel.options[k].hasAttribute('data-create'))o.push(sel.options[k]);return o}" +
-  "function pendName(o){return o.getAttribute('data-name')||''}" +
-  "function undo(o){return'Removed: new '+cfg.kind+\" '\"+pendName(o)+\"'\"}" +
-  "function isOn(k){return multi?sel.options[k].selected:k===sel.selectedIndex}" +
-  "function chipLabel(it){return(it.kind==='role'?'@':(ICONS[it.kind]&&it.kind!=='category')?'#':'')+(it.kind==='missing'?it.text:it.name)+(it.pending?' (will be created)':'')}" +
-  "function pmark(it){return it.pending?el('span','kb-muted',' (will be created)'):null}" +
-  "function paintChips(){var sels=[],k,lim,c,b,pm;for(k=0;k<sel.options.length;k++)if(sel.options[k].selected)sels.push(k);" +
-  "chips.textContent='';if(!sels.length)chips.appendChild(el('span','kb-picker__none','None selected'));" +
-  "lim=expanded?sels.length:Math.min(sels.length,12);" +
-  "for(k=0;k<lim;k++){c=el('span','kb-picker__chip');c.appendChild(mention(itm(sels[k])));pm=pmark(itm(sels[k]));if(pm)c.appendChild(pm);" +
-  "b=el('button','kb-picker__chip-remove');b.type='button';b.setAttribute('data-rm',String(sels[k]));" +
-  "b.setAttribute('aria-label','Remove '+chipLabel(itm(sels[k])));b.disabled=sel.disabled;b.appendChild(svg(XICON));c.appendChild(b);chips.appendChild(c)}" +
-  "if(sels.length>lim){b=el('button','kb-picker__more','+'+(sels.length-lim)+' more');b.type='button';b.setAttribute('data-more','');" +
-  "b.setAttribute('aria-label','Show '+(sels.length-lim)+' more selected');chips.appendChild(b)}}" +
-  "function paint(){var po=pendOpts(),q0,cur;for(q0=0;q0<po.length;q0++)if(!po[q0].selected)sel.removeChild(po[q0]);" +
-  "cur=sel.selectedIndex>=items.length?itm(sel.selectedIndex):(items[sel.selectedIndex]||items[0]);trig.textContent='';" +
-  "if(multi){paintChips();trig.appendChild(el('span','kb-picker__add','Add'))}else if(cur){trig.appendChild(mention(cur));var pk=pmark(cur);if(pk)trig.appendChild(pk)}trig.appendChild(svg(CHEVRON));attrs();" +
-  // Without a visible label the trigger's name is the select's `aria-label`, and
-  // a fixed name would hide the choice: add it, as the label path does by
-  // pointing at the trigger's own text.
-  "if(!ids.length&&!multi&&cur)trig.setAttribute('aria-label',name+': '+chipLabel(cur));" +
-  "for(var k=0;k<rows.length;k++){var on=isOn(k),c=rows[k].querySelector('svg[data-check]');" +
-  "rows[k].setAttribute('aria-selected',on?'true':'false');" +
-  "if(on&&!c){c=svg(CHECK);c.setAttribute('data-check','');rows[k].appendChild(c)}else if(!on&&c)rows[k].removeChild(c)}" +
-  // The chips may have wrapped onto another row, which moves the Add trigger the
-  // open menu hangs from: place it again (a closed menu is placed when it opens).
-  "if(open)place()}" +
-  "function setActive(k){if(act>=0&&rowAt(act))rowAt(act).classList.remove('is-active');act=k;" +
-  "if(k<0||!rowAt(k)){inp.removeAttribute('aria-activedescendant');return}" +
-  "rowAt(k).classList.add('is-active');inp.setAttribute('aria-activedescendant',rowAt(k).id);" +
-  "reveal()}" +
-  // Scrolls the active row into the visible part of the list. `place()` runs it
-  // again after it has set the list's height, so a row that was in view at the
-  // old height is not left outside the cut one.
-  "function reveal(){var r=rowAt(act);if(r&&r.scrollIntoView)r.scrollIntoView({block:'nearest'})}" +
-  // The name the admin typed, without the `#`, `#!` or `@` filter prefix; null when the prefix is for another kind (a `@` in a channel picker).
-  "function nameOf(raw,p){var q=raw.trim();if(cfg.kind==='category')return q;" +
-  "if(p.k&&(cfg.kind==='channel'?p.k==='role':p.k!=='role'))return null;" +
-  "if(p.k==='voice')q=q.slice(2);else if(p.k)q=q.slice(1);return q.trim()}" +
-  // An existing item of the kind with this name (case-insensitive), or a pending one.
-  "function findName(nm){var l=nm.toLowerCase(),k,po=pendOpts();for(k=0;k<items.length;k++)if(CK[cfg.kind][items[k].kind]&&items[k].name.toLowerCase()===l)return k;" +
-  "for(k=0;k<po.length;k++)if(pendName(po[k]).toLowerCase()===l)return CR;return -1}" +
-  "function filter(){var p=parse(inp.value),k,shown={};vis=[];" +
-  "for(k=0;k<items.length;k++){var ok=hit(items[k],p);rows[k].hidden=!ok;if(ok){vis.push(k);shown[items[k].group]=1}}" +
-  "for(k=0;k<heads.length;k++)heads[k].el.hidden=!shown[heads[k].group];" +
-  "var nm=cfg?nameOf(inp.value,p):null,ex=nm?findName(nm):-1,offer=false,cmsg='',cnt;" +
-  "if(nm){if(nm.length>MAXN)cmsg='Names can be up to '+MAXN+' characters.';else if(ex<0){if(cfg.ok){offer=true;vis.push(CR)}else if(cfg.reason)cmsg=cfg.reason}}" +
-  "if(crow){crow.hidden=!offer;if(offer){crow.textContent='';crow.appendChild(svg(PLUS));crow.appendChild(document.createTextNode('Create new '+cfg.kind+\": '\"+nm+\"'\"))}}" +
-  "cnt=vis.length-(offer?1:0);" +
-  // A name that matches an existing item makes that item the active row, so Enter selects it rather than creating a twin.
-  "var on=-1,f0;for(f0=0;f0<vis.length&&on<0;f0++)if(vis[f0]!==CR&&isOn(vis[f0]))on=f0;" +
-  "setActive(vis.length?(ex>=0&&vis.indexOf(ex)>=0?ex:on>=0?vis[on]:vis[0]):-1);" +
-  "var q=inp.value.trim();st.hidden=!q;st.textContent=q?(cnt?cnt+(cnt===1?' match':' matches'):'No matches')+(cmsg?'. '+cmsg:''):'';" +
-  // The menu's height follows the rows and the status line, so its place does too.
-  "if(open)place()}" +
-  // The popover is moved to the end of <body> while open and positioned with
-  // `position: fixed` from the trigger's rectangle (custom properties, see
-  // kb.css), because the settings rows and cards scroll (`overflow-x: auto`),
-  // which also clips vertically and would turn a menu near the bottom into an
-  // inner scroll area. It flips above the trigger when there is no room below,
-  // and follows the trigger on scroll (any ancestor) and resize.
-  // Below the trigger when the menu fits there or there is more room below than
-  // above, otherwise above. When neither side fits it, the list's height is cut
-  // to the room on the chosen side (the search box, status and hint rows
-  // stay), so the whole menu is on screen and the list scrolls inside it.
-  "function place(){var top0=ul.scrollTop;pop.style.removeProperty('--kb-picker-list-h');" +
-  "var r=trig.getBoundingClientRect(),h=pop.offsetHeight,w=pop.offsetWidth,over=h-ul.offsetHeight," +
-  "below=window.innerHeight-r.bottom-12,above=r.top-12,down=h<=below||below>=above,room=down?below:above;" +
-  "if(h>room){var cap=Math.max(64,room-over);pop.style.setProperty('--kb-picker-list-h',cap+'px');h=over+cap}" +
-  "var y=down?r.bottom+4:r.top-4-h;" +
-  "pop.style.setProperty('--kb-picker-x',Math.max(0,Math.min(r.left,window.innerWidth-w))+'px');" +
-  "pop.style.setProperty('--kb-picker-y',Math.max(0,y)+'px');ul.scrollTop=top0;reveal()}" +
-  "function onScroll(e){var t=e.target;if(!(t&&t.nodeType&&pop.contains(t)))place()}" +
-  "function close(back){if(!open)return;open=false;pop.hidden=true;box.appendChild(pop);" +
-  "window.removeEventListener('scroll',onScroll,true);window.removeEventListener('resize',place);" +
-  "trig.setAttribute('aria-expanded','false');if(back)trig.focus()}" +
-  "function show(){if(open||sel.disabled)return;open=true;(box.closest('main')||document.body).appendChild(pop);pop.hidden=false;" +
-  "window.addEventListener('scroll',onScroll,true);window.addEventListener('resize',place);" +
-  "trig.setAttribute('aria-expanded','true');inp.value='';filter();inp.focus()}" +
-  "function fireBoth(){sel.dispatchEvent(new Event('input',{bubbles:true}));sel.dispatchEvent(new Event('change',{bubbles:true}))}" +
-  // A multiple select toggles the row and stays open, so several can be picked
-  // in a row; Escape, Tab or a click outside closes it.
-  // A click makes its row the active one, as Enter does, so the placement that
-  // `paint()` runs while open scrolls to the row just toggled and not back to the
-  // row that was active before.
-  "function createChoose(){var nm=cfg&&nameOf(inp.value,parse(inp.value)),po,o,k;if(!nm||nm.length>MAXN||!cfg.ok||findName(nm)>=0)return;" +
-  "if(!multi){po=pendOpts();for(k=0;k<po.length;k++)sel.removeChild(po[k])}" +
-  "o=document.createElement('option');o.value=PFX+nm;o.setAttribute('data-create','');o.setAttribute('data-name',nm);o.textContent=nm+' (will be created)';" +
-  "sel.appendChild(o);o.selected=true;" +
-  "say('Will be created: '+cfg.kind+\" '\"+nm+\"'. Choose another row to undo.\");fireBoth();" +
-  "if(multi){inp.value='';filter();paint()}else{paint();close(true)}}" +
-  "function choose(k){if(k===CR){createChoose();return}if(k<0||!items[k])return;" +
-  "var was=!multi&&sel.selectedIndex>=items.length&&sel.options[sel.selectedIndex]&&sel.options[sel.selectedIndex].hasAttribute('data-create')?sel.options[sel.selectedIndex]:null;" +
-  "if(was)say(undo(was)+'. '+chipLabel(items[k])+' selected.');if(multi){setActive(k);sel.options[k].selected=!sel.options[k].selected;fireBoth();paint();return}" +
-  "if(sel.selectedIndex!==k){sel.selectedIndex=k;fireBoth()}paint();close(true)}" +
-  "function drop(k){var o=sel.options[k];if(!o||!o.selected||sel.disabled)return;" +
-  "if(k>=items.length&&o.hasAttribute('data-create')){say(undo(o));sel.removeChild(o)}else o.selected=false;fireBoth();paint()}" +
-  "function lastOn(){for(var k=sel.options.length-1;k>=0;k--)if(sel.options[k].selected)return k;return -1}" +
-  "if(chips)chips.addEventListener('click',function(e){var t=e.target&&e.target.closest?e.target.closest('button'):null;if(!t)return;" +
-  // `paint()` replaces the focused "+N more" button: hand focus to the first
-  // remove button it revealed (the ones before it were already shown), or to the
-  // chip group when the select is disabled and every remove button is too.
-  "if(t.hasAttribute('data-more')){var seen=chips.querySelectorAll('[data-rm]').length;expanded=true;paint();" +
-  "var nb=chips.querySelectorAll('[data-rm]')[seen];(nb&&!nb.disabled?nb:chips).focus();return}" +
-  "if(t.hasAttribute('data-rm')){drop(Number(t.getAttribute('data-rm')));if(!trig.disabled)trig.focus()}});" +
-  "function move(by){if(!vis.length)return;var at=vis.indexOf(act),to=at<0?0:Math.min(vis.length-1,Math.max(0,at+by));setActive(vis[to])}" +
-  "trig.addEventListener('click',function(){if(open)close(true);else show()});" +
-  // Already open (focus came back to the trigger after a chip was removed): the
-  // arrows go back to the search box instead of doing nothing.
-  "trig.addEventListener('keydown',function(e){if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();if(open)inp.focus();else show()}});" +
-  "inp.addEventListener('input',filter);" +
-  "inp.addEventListener('keydown',function(e){var m=e.key;" +
-  // An input method is composing (Enter confirms the composition, Escape cancels it): leave every key to it.
-  "if(e.isComposing||e.keyCode===229)return;" +
-  "if(m==='ArrowDown'){e.preventDefault();move(1)}else if(m==='ArrowUp'){e.preventDefault();move(-1)}" +
-  "else if(m==='Home'&&vis.length){e.preventDefault();setActive(vis[0])}else if(m==='End'&&vis.length){e.preventDefault();setActive(vis[vis.length-1])}" +
-  "else if(m==='Backspace'&&multi&&!inp.value){e.preventDefault();drop(lastOn())}else if(m==='Enter'){e.preventDefault();choose(act)}else if(m==='Tab')close(true)});" +
-  // Escape closes from anywhere in the picker while it is open (the search box,
-  // the trigger, a chip's remove button, "+N more"), not only from the search
-  // box: a repaint moves focus off the box, and the open popover lives outside
-  // the wrapper, so both listen. Closed, Escape is left to the page (a dialog).
-  "function esc(e){if(!open||e.key!=='Escape'||e.isComposing||e.keyCode===229)return;e.preventDefault();e.stopPropagation();close(true)}" +
-  "box.addEventListener('keydown',esc);pop.addEventListener('keydown',esc);" +
-  "ul.addEventListener('mousedown',function(e){e.preventDefault()});" +
-  "ul.addEventListener('click',function(e){var r=e.target&&e.target.closest?e.target.closest('[data-i]'):null;if(r)choose(Number(r.getAttribute('data-i')))});" +
-  "function inside(t){return box.contains(t)||pop.contains(t)}" +
-  // A handler on the way up may have repainted and removed the clicked node (a
-  // chip's remove button, "+N more", the check on a chosen row), so it no longer
-  // sits in the picker: ask the path the event took, which was fixed at dispatch.
-  "document.addEventListener('click',function(e){if(!open)return;var p=e.composedPath?e.composedPath():[];" +
-  "if(p.indexOf(box)<0&&p.indexOf(pop)<0&&!inside(e.target))close(false)});" +
-  "function leave(e){if(open&&e.relatedTarget&&!inside(e.relatedTarget))close(false)}" +
-  "box.addEventListener('focusout',leave);pop.addEventListener('focusout',leave);" +
-  "sel.addEventListener('change',paint);" +
-  "Array.prototype.forEach.call(document.querySelectorAll('[data-cascade-master]'),function(m){m.addEventListener('change',paint)});" +
-  "paint()}" +
-  "Array.prototype.forEach.call(document.querySelectorAll('[data-picker]'),init)" +
-  "})();";
+export function channelPickerScript(create: boolean): string {
+  const c = (withCreate: string, plain = ""): string =>
+    create ? withCreate : plain;
+  return (
+    "(function(){" +
+    c(
+      `var ICONS=${JSON.stringify(channelKindIcons())},CHEVRON=${JSON.stringify(PICKER_CHEVRON)},CHECK=${JSON.stringify(PICKER_CHECK)},XICON=${JSON.stringify(PICKER_X)},PLUS=${JSON.stringify(PICKER_PLUS)},PFX=${JSON.stringify(PICKER_CREATE_PREFIX)},MAXN=${PICKER_NAME_MAX};` +
+        "var KINDS={text:{text:1,announcement:1,forum:1,thread:1},voice:{voice:1,stage:1},role:{role:1}},uid=0,CR=1e6;" +
+        "var CK={channel:{text:1,announcement:1,forum:1,thread:1,voice:1,stage:1},category:{category:1},role:{role:1}};",
+      `var ICONS=${JSON.stringify(channelKindIcons())},CHEVRON=${JSON.stringify(PICKER_CHEVRON)},CHECK=${JSON.stringify(PICKER_CHECK)},XICON=${JSON.stringify(PICKER_X)};` +
+        "var KINDS={text:{text:1,announcement:1,forum:1,thread:1},voice:{voice:1,stage:1},role:{role:1}},uid=0;",
+    ) +
+    "function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}" +
+    "function svg(h){var s=document.createElement('span');s.innerHTML=h;return s.firstChild}" +
+    "function read(sel,meta){var out=[],i,j,c,g;" +
+    "function one(o,group){var m=meta[out.length]||[];return{value:o.value,kind:m[0]||'',name:m[1]||o.textContent,cat:m[2]||'',group:group,text:o.textContent}}" +
+    "for(i=0;i<sel.children.length;i++){c=sel.children[i];" +
+    "if(c.tagName==='OPTGROUP'){g=c.getAttribute('label')||'';for(j=0;j<c.children.length;j++)out.push(one(c.children[j],g))}" +
+    "else out.push(one(c,''))}return out}" +
+    "function mention(it){var m=el('span','kb-mention'+(it.kind==='category'?' kb-mention--category':''));" +
+    "if(it.kind==='role')m.textContent='@'+it.name;" +
+    "else if(ICONS[it.kind]){m.appendChild(svg(ICONS[it.kind]));m.appendChild(document.createTextNode(it.name))}" +
+    "else m.textContent=it.kind==='missing'?it.text:it.name;return m}" +
+    "function parse(raw){var q=raw.trim(),k=null;" +
+    "if(q.indexOf('#!')===0){k='voice';q=q.slice(2)}else if(q.charAt(0)==='#'){k='text';q=q.slice(1)}else if(q.charAt(0)==='@'){k='role';q=q.slice(1)}" +
+    "return{k:k,q:q.trim().toLowerCase()}}" +
+    "function hit(it,p){if(p.k&&!KINDS[p.k][it.kind])return false;return !p.q||(it.name+' '+it.cat).toLowerCase().indexOf(p.q)!==-1}" +
+    "function init(box){var sel=box.querySelector('select');if(!sel||box.hasAttribute('data-ready'))return;box.setAttribute('data-ready','');" +
+    c(
+      "var meta=[],cfg=null;try{var mm=JSON.parse(box.getAttribute('data-picker-meta')||'[]')||[];" +
+        "if(Array.isArray(mm))meta=mm;else{meta=mm.items||[];cfg=mm.create&&CK[mm.create.kind]?mm.create:null}}catch(err){}",
+      "var meta=[];try{meta=JSON.parse(box.getAttribute('data-picker-meta')||'[]')||[]}catch(err){}",
+    ) +
+    "var n=++uid,items=read(sel,meta),rows=[],heads=[],vis=[],act=-1,open=false,i,lastGroup=null;" +
+    "var multi=sel.multiple,expanded=false,tid='kb-picker-'+n,lid=tid+'-list',labels=[],ids=[];" +
+    "for(i=0;sel.labels&&i<sel.labels.length;i++){if(!sel.labels[i].id)sel.labels[i].id=tid+'-label'+i;labels.push(sel.labels[i].textContent.trim());ids.push(sel.labels[i].id)}" +
+    "var name=labels.join(' ')||sel.getAttribute('aria-label')||'Choose';" +
+    "var trig=el('button','kb-picker__trigger');trig.type='button';trig.id=tid;trig.setAttribute('aria-haspopup','listbox');trig.setAttribute('aria-expanded','false');" +
+    "trig.setAttribute('aria-controls',lid);" +
+    "if(ids.length){ids.push(tid);trig.setAttribute('aria-labelledby',ids.join(' '))}else trig.setAttribute('aria-label',name);" +
+    "var pop=el('div','kb-picker__pop kb-picker__pop--floating');pop.hidden=true;" +
+    "var lab=el('label','kb-picker__search'),inp=el('input');inp.type='search';inp.setAttribute('form','none');inp.autocomplete='off';inp.id=tid+'-search';" +
+    "inp.setAttribute('role','combobox');inp.setAttribute('aria-autocomplete','list');inp.setAttribute('aria-controls',lid);inp.setAttribute('aria-expanded','true');" +
+    "inp.setAttribute('aria-label','Search '+name);inp.placeholder='Search';lab.appendChild(inp);" +
+    "var ul=el('ul','kb-picker__list');ul.id=lid;ul.setAttribute('role','listbox');if(multi)ul.setAttribute('aria-multiselectable','true');ul.setAttribute('aria-label',name);" +
+    "var st=el('p','kb-picker__hint');st.setAttribute('role','status');st.hidden=true;" +
+    "var hint=el('p','kb-picker__hint'),kinds={};for(i=0;i<items.length;i++)kinds[items[i].kind]=1;" +
+    "var parts=['Arrow keys move, Enter chooses, Esc closes.'];" +
+    "if(kinds.voice||kinds.stage)parts.unshift('#! voice channels');if(kinds.text||kinds.announcement||kinds.forum||kinds.thread)parts.unshift('# text channels');" +
+    "if(kinds.role)parts.unshift('@ roles');hint.textContent=(parts.length>1?'Type '+parts.slice(0,-1).join(', ')+'. ':'')+parts[parts.length-1];" +
+    "for(i=0;i<items.length;i++){var it=items[i],li;" +
+    "if(it.group&&it.group!==lastGroup){li=el('li','kb-picker__group',it.group);li.setAttribute('role','presentation');ul.appendChild(li);heads.push({el:li,group:it.group})}" +
+    "lastGroup=it.group;li=el('li','kb-picker__opt');li.id=lid+'-'+i;li.setAttribute('role','option');li.setAttribute('data-i',String(i));" +
+    "li.appendChild(mention(it));if(it.cat)li.appendChild(el('span','kb-picker__cat',it.cat));ul.appendChild(li);rows.push(li)}" +
+    c(
+      "var crow=null,live=null;" +
+        // The create row (#1658): the last row, shown only while the typed name can be created.
+        "if(cfg){crow=el('li','kb-picker__opt');crow.id=lid+'-create';crow.setAttribute('role','option');crow.setAttribute('aria-selected','false');" +
+        "crow.setAttribute('data-i',String(CR));crow.setAttribute('data-create','');crow.hidden=true;ul.appendChild(crow);" +
+        "live=el('span','kb-visually-hidden');live.setAttribute('role','status')}",
+    ) +
+    "pop.appendChild(lab);pop.appendChild(ul);pop.appendChild(st);pop.appendChild(hint);" +
+    "sel.classList.add('kb-visually-hidden');sel.tabIndex=-1;sel.setAttribute('aria-hidden','true');" +
+    // The save handlers mark a rejected field on the select (`aria-invalid`,
+    // `aria-describedby`) without firing `change`, and then focus it. Mirror both
+    // onto the trigger whenever they change, and again right before focus is
+    // handed over, so the trigger never lacks the rejection or keeps a removed note.
+    "function attrs(){var d=sel.getAttribute('aria-describedby');" +
+    "if(d)trig.setAttribute('aria-describedby',d);else trig.removeAttribute('aria-describedby');" +
+    "if(sel.getAttribute('aria-invalid')==='true')trig.setAttribute('aria-invalid','true');else trig.removeAttribute('aria-invalid');" +
+    "trig.disabled=sel.disabled}" +
+    "sel.addEventListener('focus',function(){attrs();trig.focus()});" +
+    "if(window.MutationObserver)new MutationObserver(attrs).observe(sel,{attributes:true,attributeFilter:['aria-invalid','aria-describedby','disabled']});" +
+    "box.classList.add('kb-picker--enhanced');" +
+    // A multiple select shows its chips above the trigger (a button cannot hold
+    // the chips' own remove buttons), and the no-JavaScript "Selected:" line
+    // after the box becomes redundant.
+    "var chips=null;if(multi){chips=el('div','kb-picker__chips');box.appendChild(chips);" +
+    // Focusable by script only: it takes focus when a repaint leaves no button to
+    // take it (a disabled select expanding "+N more"), and is named for that.
+    "chips.tabIndex=-1;chips.setAttribute('role','group');" +
+    "if(labels.length||sel.getAttribute('aria-label'))chips.setAttribute('aria-label','Selected '+name);" +
+    "var nx=box.nextElementSibling;if(nx&&nx.hasAttribute('data-picker-summary'))nx.hidden=true}" +
+    c(
+      "box.appendChild(trig);box.appendChild(pop);if(live)box.appendChild(live);" +
+        "function say(t){if(live){live.textContent='';live.textContent=t}}" +
+        "function rowAt(k){return k===CR?crow:rows[k]}" +
+        "function itm(k){if(items[k])return items[k];var o=sel.options[k];if(!o||!cfg)return null;" +
+        "return{value:o.value,kind:cfg.kind==='channel'?'text':cfg.kind,name:o.getAttribute('data-name')||o.textContent,cat:'',pending:true,text:o.textContent}}" +
+        "function pendOpts(){var o=[],k;for(k=items.length;k<sel.options.length;k++)if(sel.options[k].hasAttribute('data-create'))o.push(sel.options[k]);return o}" +
+        "function pendName(o){return o.getAttribute('data-name')||''}" +
+        "function undo(o){return'Removed: new '+cfg.kind+\" '\"+pendName(o)+\"'\"}",
+      "box.appendChild(trig);box.appendChild(pop);",
+    ) +
+    "function isOn(k){return multi?sel.options[k].selected:k===sel.selectedIndex}" +
+    c(
+      "function chipLabel(it){return(it.kind==='role'?'@':(ICONS[it.kind]&&it.kind!=='category')?'#':'')+(it.kind==='missing'?it.text:it.name)+(it.pending?' (will be created)':'')}" +
+        "function pmark(it){return it.pending?el('span','kb-muted',' (will be created)'):null}" +
+        "function paintChips(){var sels=[],k,lim,c,b,pm;for(k=0;k<sel.options.length;k++)if(sel.options[k].selected)sels.push(k);",
+      "function chipLabel(it){return(it.kind==='role'?'@':(ICONS[it.kind]&&it.kind!=='category')?'#':'')+(it.kind==='missing'?it.text:it.name)}" +
+        "function paintChips(){var sels=[],k,lim,c,b;for(k=0;k<items.length;k++)if(isOn(k))sels.push(k);",
+    ) +
+    "chips.textContent='';if(!sels.length)chips.appendChild(el('span','kb-picker__none','None selected'));" +
+    "lim=expanded?sels.length:Math.min(sels.length,12);" +
+    c(
+      "for(k=0;k<lim;k++){c=el('span','kb-picker__chip');c.appendChild(mention(itm(sels[k])));pm=pmark(itm(sels[k]));if(pm)c.appendChild(pm);",
+      "for(k=0;k<lim;k++){c=el('span','kb-picker__chip');c.appendChild(mention(items[sels[k]]));",
+    ) +
+    "b=el('button','kb-picker__chip-remove');b.type='button';b.setAttribute('data-rm',String(sels[k]));" +
+    c(
+      "b.setAttribute('aria-label','Remove '+chipLabel(itm(sels[k])));b.disabled=sel.disabled;b.appendChild(svg(XICON));c.appendChild(b);chips.appendChild(c)}",
+      "b.setAttribute('aria-label','Remove '+chipLabel(items[sels[k]]));b.disabled=sel.disabled;b.appendChild(svg(XICON));c.appendChild(b);chips.appendChild(c)}",
+    ) +
+    "if(sels.length>lim){b=el('button','kb-picker__more','+'+(sels.length-lim)+' more');b.type='button';b.setAttribute('data-more','');" +
+    "b.setAttribute('aria-label','Show '+(sels.length-lim)+' more selected');chips.appendChild(b)}}" +
+    c(
+      "function paint(){var po=pendOpts(),q0,cur;for(q0=0;q0<po.length;q0++)if(!po[q0].selected)sel.removeChild(po[q0]);" +
+        "cur=sel.selectedIndex>=items.length?itm(sel.selectedIndex):(items[sel.selectedIndex]||items[0]);trig.textContent='';" +
+        "if(multi){paintChips();trig.appendChild(el('span','kb-picker__add','Add'))}else if(cur){trig.appendChild(mention(cur));var pk=pmark(cur);if(pk)trig.appendChild(pk)}trig.appendChild(svg(CHEVRON));attrs();",
+      "function paint(){var cur=items[sel.selectedIndex]||items[0];trig.textContent='';" +
+        "if(multi){paintChips();trig.appendChild(el('span','kb-picker__add','Add'))}else if(cur)trig.appendChild(mention(cur));trig.appendChild(svg(CHEVRON));attrs();",
+    ) +
+    // Without a visible label the trigger's name is the select's `aria-label`, and
+    // a fixed name would hide the choice: add it, as the label path does by
+    // pointing at the trigger's own text.
+    "if(!ids.length&&!multi&&cur)trig.setAttribute('aria-label',name+': '+chipLabel(cur));" +
+    "for(var k=0;k<rows.length;k++){var on=isOn(k),c=rows[k].querySelector('svg[data-check]');" +
+    "rows[k].setAttribute('aria-selected',on?'true':'false');" +
+    "if(on&&!c){c=svg(CHECK);c.setAttribute('data-check','');rows[k].appendChild(c)}else if(!on&&c)rows[k].removeChild(c)}" +
+    // The chips may have wrapped onto another row, which moves the Add trigger the
+    // open menu hangs from: place it again (a closed menu is placed when it opens).
+    "if(open)place()}" +
+    c(
+      "function setActive(k){if(act>=0&&rowAt(act))rowAt(act).classList.remove('is-active');act=k;" +
+        "if(k<0||!rowAt(k)){inp.removeAttribute('aria-activedescendant');return}" +
+        "rowAt(k).classList.add('is-active');inp.setAttribute('aria-activedescendant',rowAt(k).id);",
+      "function setActive(k){if(act>=0&&rows[act])rows[act].classList.remove('is-active');act=k;" +
+        "if(k<0||!rows[k]){inp.removeAttribute('aria-activedescendant');return}" +
+        "rows[k].classList.add('is-active');inp.setAttribute('aria-activedescendant',rows[k].id);",
+    ) +
+    "reveal()}" +
+    // Scrolls the active row into the visible part of the list. `place()` runs it
+    // again after it has set the list's height, so a row that was in view at the
+    // old height is not left outside the cut one.
+    c(
+      "function reveal(){var r=rowAt(act);if(r&&r.scrollIntoView)r.scrollIntoView({block:'nearest'})}" +
+        // The name the admin typed, without the `#`, `#!` or `@` filter prefix; null when the prefix is for another kind (a `@` in a channel picker).
+        "function nameOf(raw,p){var q=raw.trim();if(cfg.kind==='category')return q;" +
+        "if(p.k&&(cfg.kind==='channel'?p.k==='role':p.k!=='role'))return null;" +
+        "if(p.k==='voice')q=q.slice(2);else if(p.k)q=q.slice(1);return q.trim()}" +
+        // An existing item of the kind with this name (case-insensitive), or a pending one.
+        "function findName(nm){var l=nm.toLowerCase(),k,po=pendOpts();for(k=0;k<items.length;k++)if(CK[cfg.kind][items[k].kind]&&items[k].name.toLowerCase()===l)return k;" +
+        "for(k=0;k<po.length;k++)if(pendName(po[k]).toLowerCase()===l)return CR;return -1}",
+      "function reveal(){var r=rows[act];if(r&&r.scrollIntoView)r.scrollIntoView({block:'nearest'})}",
+    ) +
+    "function filter(){var p=parse(inp.value),k,shown={};vis=[];" +
+    "for(k=0;k<items.length;k++){var ok=hit(items[k],p);rows[k].hidden=!ok;if(ok){vis.push(k);shown[items[k].group]=1}}" +
+    "for(k=0;k<heads.length;k++)heads[k].el.hidden=!shown[heads[k].group];" +
+    c(
+      "var nm=cfg?nameOf(inp.value,p):null,ex=nm?findName(nm):-1,offer=false,cmsg='',cnt;" +
+        "if(nm){if(nm.length>MAXN)cmsg='Names can be up to '+MAXN+' characters.';else if(ex<0){if(cfg.ok){offer=true;vis.push(CR)}else if(cfg.reason)cmsg=cfg.reason}}" +
+        "if(crow){crow.hidden=!offer;if(offer){crow.textContent='';crow.appendChild(svg(PLUS));crow.appendChild(document.createTextNode('Create new '+cfg.kind+\": '\"+nm+\"'\"))}}" +
+        "cnt=vis.length-(offer?1:0);" +
+        // A name that matches an existing item makes that item the active row, so Enter selects it rather than creating a twin.
+        "var on=-1,f0;for(f0=0;f0<vis.length&&on<0;f0++)if(vis[f0]!==CR&&isOn(vis[f0]))on=f0;" +
+        "setActive(vis.length?(ex>=0&&vis.indexOf(ex)>=0?ex:on>=0?vis[on]:vis[0]):-1);" +
+        "var q=inp.value.trim();st.hidden=!q;st.textContent=q?(cnt?cnt+(cnt===1?' match':' matches'):'No matches')+(cmsg?'. '+cmsg:''):'';",
+      "var on=-1,f0;for(f0=0;f0<vis.length&&on<0;f0++)if(isOn(vis[f0]))on=f0;setActive(vis.length?(on>=0?vis[on]:vis[0]):-1);" +
+        "var q=inp.value.trim();st.hidden=!q;st.textContent=q?(vis.length?vis.length+(vis.length===1?' match':' matches'):'No matches'):'';",
+    ) +
+    // The menu's height follows the rows and the status line, so its place does too.
+    "if(open)place()}" +
+    // The popover is moved to the end of <body> while open and positioned with
+    // `position: fixed` from the trigger's rectangle (custom properties, see
+    // kb.css), because the settings rows and cards scroll (`overflow-x: auto`),
+    // which also clips vertically and would turn a menu near the bottom into an
+    // inner scroll area. It flips above the trigger when there is no room below,
+    // and follows the trigger on scroll (any ancestor) and resize.
+    // Below the trigger when the menu fits there or there is more room below than
+    // above, otherwise above. When neither side fits it, the list's height is cut
+    // to the room on the chosen side (the search box, status and hint rows
+    // stay), so the whole menu is on screen and the list scrolls inside it.
+    "function place(){var top0=ul.scrollTop;pop.style.removeProperty('--kb-picker-list-h');" +
+    "var r=trig.getBoundingClientRect(),h=pop.offsetHeight,w=pop.offsetWidth,over=h-ul.offsetHeight," +
+    "below=window.innerHeight-r.bottom-12,above=r.top-12,down=h<=below||below>=above,room=down?below:above;" +
+    "if(h>room){var cap=Math.max(64,room-over);pop.style.setProperty('--kb-picker-list-h',cap+'px');h=over+cap}" +
+    "var y=down?r.bottom+4:r.top-4-h;" +
+    "pop.style.setProperty('--kb-picker-x',Math.max(0,Math.min(r.left,window.innerWidth-w))+'px');" +
+    "pop.style.setProperty('--kb-picker-y',Math.max(0,y)+'px');ul.scrollTop=top0;reveal()}" +
+    "function onScroll(e){var t=e.target;if(!(t&&t.nodeType&&pop.contains(t)))place()}" +
+    "function close(back){if(!open)return;open=false;pop.hidden=true;box.appendChild(pop);" +
+    "window.removeEventListener('scroll',onScroll,true);window.removeEventListener('resize',place);" +
+    "trig.setAttribute('aria-expanded','false');if(back)trig.focus()}" +
+    "function show(){if(open||sel.disabled)return;open=true;(box.closest('main')||document.body).appendChild(pop);pop.hidden=false;" +
+    "window.addEventListener('scroll',onScroll,true);window.addEventListener('resize',place);" +
+    "trig.setAttribute('aria-expanded','true');inp.value='';filter();inp.focus()}" +
+    "function fireBoth(){sel.dispatchEvent(new Event('input',{bubbles:true}));sel.dispatchEvent(new Event('change',{bubbles:true}))}" +
+    // A multiple select toggles the row and stays open, so several can be picked
+    // in a row; Escape, Tab or a click outside closes it.
+    // A click makes its row the active one, as Enter does, so the placement that
+    // `paint()` runs while open scrolls to the row just toggled and not back to the
+    // row that was active before.
+    c(
+      "function createChoose(){var nm=cfg&&nameOf(inp.value,parse(inp.value)),po,o,k;if(!nm||nm.length>MAXN||!cfg.ok||findName(nm)>=0)return;" +
+        "if(!multi){po=pendOpts();for(k=0;k<po.length;k++)sel.removeChild(po[k])}" +
+        "o=document.createElement('option');o.value=PFX+nm;o.setAttribute('data-create','');o.setAttribute('data-name',nm);o.textContent=nm+' (will be created)';" +
+        "sel.appendChild(o);o.selected=true;" +
+        "say('Will be created: '+cfg.kind+\" '\"+nm+\"'. Choose another row to undo.\");fireBoth();" +
+        "if(multi){inp.value='';filter();paint()}else{paint();close(true)}}" +
+        "function choose(k){if(k===CR){createChoose();return}if(k<0||!items[k])return;" +
+        "var was=!multi&&sel.selectedIndex>=items.length&&sel.options[sel.selectedIndex]&&sel.options[sel.selectedIndex].hasAttribute('data-create')?sel.options[sel.selectedIndex]:null;" +
+        "if(was)say(undo(was)+'. '+chipLabel(items[k])+' selected.');if(multi){setActive(k);sel.options[k].selected=!sel.options[k].selected;fireBoth();paint();return}",
+      "function choose(k){if(k<0||!items[k])return;if(multi){setActive(k);sel.options[k].selected=!sel.options[k].selected;fireBoth();paint();return}",
+    ) +
+    "if(sel.selectedIndex!==k){sel.selectedIndex=k;fireBoth()}paint();close(true)}" +
+    c(
+      "function drop(k){var o=sel.options[k];if(!o||!o.selected||sel.disabled)return;" +
+        "if(k>=items.length&&o.hasAttribute('data-create')){say(undo(o));sel.removeChild(o)}else o.selected=false;fireBoth();paint()}" +
+        "function lastOn(){for(var k=sel.options.length-1;k>=0;k--)if(sel.options[k].selected)return k;return -1}",
+      "function drop(k){if(!sel.options[k]||!sel.options[k].selected||sel.disabled)return;sel.options[k].selected=false;fireBoth();paint()}" +
+        "function lastOn(){for(var k=items.length-1;k>=0;k--)if(sel.options[k].selected)return k;return -1}",
+    ) +
+    "if(chips)chips.addEventListener('click',function(e){var t=e.target&&e.target.closest?e.target.closest('button'):null;if(!t)return;" +
+    // `paint()` replaces the focused "+N more" button: hand focus to the first
+    // remove button it revealed (the ones before it were already shown), or to the
+    // chip group when the select is disabled and every remove button is too.
+    "if(t.hasAttribute('data-more')){var seen=chips.querySelectorAll('[data-rm]').length;expanded=true;paint();" +
+    "var nb=chips.querySelectorAll('[data-rm]')[seen];(nb&&!nb.disabled?nb:chips).focus();return}" +
+    "if(t.hasAttribute('data-rm')){drop(Number(t.getAttribute('data-rm')));if(!trig.disabled)trig.focus()}});" +
+    "function move(by){if(!vis.length)return;var at=vis.indexOf(act),to=at<0?0:Math.min(vis.length-1,Math.max(0,at+by));setActive(vis[to])}" +
+    "trig.addEventListener('click',function(){if(open)close(true);else show()});" +
+    // Already open (focus came back to the trigger after a chip was removed): the
+    // arrows go back to the search box instead of doing nothing.
+    "trig.addEventListener('keydown',function(e){if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();if(open)inp.focus();else show()}});" +
+    "inp.addEventListener('input',filter);" +
+    "inp.addEventListener('keydown',function(e){var m=e.key;" +
+    // An input method is composing (Enter confirms the composition, Escape cancels it): leave every key to it.
+    "if(e.isComposing||e.keyCode===229)return;" +
+    "if(m==='ArrowDown'){e.preventDefault();move(1)}else if(m==='ArrowUp'){e.preventDefault();move(-1)}" +
+    "else if(m==='Home'&&vis.length){e.preventDefault();setActive(vis[0])}else if(m==='End'&&vis.length){e.preventDefault();setActive(vis[vis.length-1])}" +
+    "else if(m==='Backspace'&&multi&&!inp.value){e.preventDefault();drop(lastOn())}else if(m==='Enter'){e.preventDefault();choose(act)}else if(m==='Tab')close(true)});" +
+    // Escape closes from anywhere in the picker while it is open (the search box,
+    // the trigger, a chip's remove button, "+N more"), not only from the search
+    // box: a repaint moves focus off the box, and the open popover lives outside
+    // the wrapper, so both listen. Closed, Escape is left to the page (a dialog).
+    "function esc(e){if(!open||e.key!=='Escape'||e.isComposing||e.keyCode===229)return;e.preventDefault();e.stopPropagation();close(true)}" +
+    "box.addEventListener('keydown',esc);pop.addEventListener('keydown',esc);" +
+    "ul.addEventListener('mousedown',function(e){e.preventDefault()});" +
+    "ul.addEventListener('click',function(e){var r=e.target&&e.target.closest?e.target.closest('[data-i]'):null;if(r)choose(Number(r.getAttribute('data-i')))});" +
+    "function inside(t){return box.contains(t)||pop.contains(t)}" +
+    // A handler on the way up may have repainted and removed the clicked node (a
+    // chip's remove button, "+N more", the check on a chosen row), so it no longer
+    // sits in the picker: ask the path the event took, which was fixed at dispatch.
+    "document.addEventListener('click',function(e){if(!open)return;var p=e.composedPath?e.composedPath():[];" +
+    "if(p.indexOf(box)<0&&p.indexOf(pop)<0&&!inside(e.target))close(false)});" +
+    "function leave(e){if(open&&e.relatedTarget&&!inside(e.relatedTarget))close(false)}" +
+    "box.addEventListener('focusout',leave);pop.addEventListener('focusout',leave);" +
+    "sel.addEventListener('change',paint);" +
+    "Array.prototype.forEach.call(document.querySelectorAll('[data-cascade-master]'),function(m){m.addEventListener('change',paint)});" +
+    "paint()}" +
+    "Array.prototype.forEach.call(document.querySelectorAll('[data-picker]'),init)" +
+    "})();"
+  );
+}
+
+/** The script without the create row: exactly what pages sent before #1658. */
+export const CHANNEL_PICKER_SCRIPT = channelPickerScript(false);
+/** The script with the create row, for a page that holds a flagged picker. */
+export const CHANNEL_PICKER_CREATE_SCRIPT = channelPickerScript(true);
 
 // ---------- Colour ----------
 

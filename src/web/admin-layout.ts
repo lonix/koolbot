@@ -16,6 +16,7 @@ import {
   DURATION_PRESETS_SCRIPT,
   STEPPER_SCRIPT,
   TIMEZONE_SELECT_SCRIPT,
+  CHANNEL_PICKER_CREATE_SCRIPT,
   CHANNEL_PICKER_SCRIPT,
 } from "./setting-pickers.js";
 import { groupRowsScript } from "./event-group-form.js";
@@ -1059,8 +1060,16 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     ...(opts.body.includes("data-colour")
       ? [`${scriptTag(COLOUR_INPUT_SCRIPT)}`]
       : []),
+    // A flagged picker (#1658) has an object `data-picker-meta`; every other
+    // page keeps getting the script it always had.
     ...(opts.body.includes("data-picker")
-      ? [`${scriptTag(CHANNEL_PICKER_SCRIPT)}`]
+      ? [
+          `${scriptTag(
+            opts.body.includes('data-picker-meta="{')
+              ? CHANNEL_PICKER_CREATE_SCRIPT
+              : CHANNEL_PICKER_SCRIPT,
+          )}`,
+        ]
       : []),
     ...(opts.body.includes("data-stepper")
       ? [`${scriptTag(STEPPER_SCRIPT)}`]

@@ -11,7 +11,10 @@
  */
 import { describe, it, expect } from "@jest/globals";
 import { axe, toHaveNoViolations } from "jest-axe";
-import { CHANNEL_PICKER_SCRIPT } from "../../src/web/setting-pickers.js";
+import {
+  CHANNEL_PICKER_CREATE_SCRIPT,
+  CHANNEL_PICKER_SCRIPT,
+} from "../../src/web/setting-pickers.js";
 import { channelKindIcons } from "../../src/web/discord-labels.js";
 
 expect.extend(toHaveNoViolations);
@@ -220,7 +223,7 @@ describe("create row accessibility (axe, #1658)", () => {
       /data-picker-meta="[^"]*"/,
       `data-picker-meta="${meta(create)}"`,
     )}</main>`;
-    (0, eval)(CHANNEL_PICKER_SCRIPT);
+    (0, eval)(CHANNEL_PICKER_CREATE_SCRIPT);
   }
 
   it("offered row, open and typed", async () => {
@@ -278,7 +281,7 @@ describe("create row accessibility (axe, #1658)", () => {
       /"/g,
       "&quot;",
     )}"><select class="kb-select" id="f" name="v" multiple><option value="9">x</option></select></span></main>`;
-    (0, eval)(CHANNEL_PICKER_SCRIPT);
+    (0, eval)(CHANNEL_PICKER_CREATE_SCRIPT);
     trigger().click();
     typeInto("Helpers");
     search().dispatchEvent(
