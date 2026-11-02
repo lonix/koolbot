@@ -852,4 +852,125 @@ describe("review findings on #1699", () => {
       expect(posted(dom)).toEqual(["create:Fresh"]);
     });
   });
+
+  describe("third review: the state model", () => {
+    const R = [...ROLES, { id: "11", name: "Helpers Extra" }];
+    const single = (): JSDOM =>
+      mount(
+        renderRoleSelectPicker({
+          name: "value_x.y",
+          options: R,
+          selected: "",
+          emptyLabel: "None",
+          create: ok("role"),
+        }),
+      );
+    const multi = (): JSDOM =>
+      mount(
+        renderRolePicker({
+          id: "f",
+          name: "value_x.y",
+          options: R,
+          selected: [],
+          create: ok("role"),
+        }).replace(' id="f"', ""),
+      );
+    const status = (dom: JSDOM): string =>
+      $(dom, ".kb-picker__pop .kb-picker__hint[role=status]").textContent ?? "";
+    const activeText = (dom: JSDOM): string | null => {
+      const id = $<HTMLInputElement>(
+        dom,
+        ".kb-picker__search input",
+      ).getAttribute("aria-activedescendant");
+      return id
+        ? (dom.window.document.getElementById(id)?.textContent ?? "")
+        : null;
+    };
+
+    // typed text -> [create row shown, active row text, status]
+    const table: Array<[string, boolean, string | null, string]> = [
+      [
+        "zzz",
+        true,
+        "Create new role: 'zzz'",
+        "No existing role matches. You can create 'zzz'.",
+      ],
+      ["Help", true, "@Helpers Extra", "1 match, or create 'Help'."],
+      ["helpers extra", false, "@Helpers Extra", "1 match"],
+    ];
+    it.each(table)("no pending: %j", (typed, row, active, text) => {
+      for (const make of [single, multi]) {
+        const dom = make();
+        open(dom);
+        type(dom, typed);
+        expect(createRow(dom).hidden).toBe(!row);
+        expect(activeText(dom)).toBe(active);
+        expect(status(dom)).toBe(text);
+      }
+    });
+
+    it.each([
+      ["single", single],
+      ["multi", multi],
+    ] as const)(
+      "%s: an exact pending name leaves no row active, so Enter cannot pick a neighbour",
+      (_m, make) => {
+        const dom = make();
+        const inp = open(dom);
+        type(dom, "Helpers");
+        // "Helpers Extra" matches partly; the create row is below it.
+        expect(createRow(dom).hidden).toBe(false);
+        key(dom, inp, "ArrowDown");
+        key(dom, inp, "Enter");
+        expect(posted(dom)).toEqual(["create:Helpers"]);
+        const inp2 = open(dom);
+        type(dom, "helpers");
+        expect(createRow(dom).hidden).toBe(true);
+        expect(activeText(dom)).toBeNull();
+        expect(status(dom)).toBe("'helpers' is already chosen to be created.");
+        key(dom, inp2, "Enter");
+        expect(posted(dom)).toEqual(["create:Helpers"]);
+      },
+    );
+
+    it("the undo instruction is the one that works in each mode", () => {
+      for (const [make, text] of [
+        [single, "Choose another row to undo."],
+        [
+          multi,
+          "Press Backspace in the empty search, or use its remove button, to undo.",
+        ],
+      ] as const) {
+        const dom = make();
+        const inp = open(dom);
+        type(dom, "Zed");
+        key(dom, inp, "Enter");
+        expect(live(dom)).toBe(`Will be created: role 'Zed'. ${text}`);
+      }
+      // ...and in the multi-select that instruction does what it says.
+      const dom = multi();
+      const inp = open(dom);
+      type(dom, "Zed");
+      key(dom, inp, "Enter");
+      key(dom, inp, "Backspace");
+      expect(posted(dom)).toEqual([]);
+    });
+
+    it("the pending marker is a nowrap kb-pill, in the trigger and in a chip", () => {
+      let dom = single();
+      let inp = open(dom);
+      type(dom, "Zed");
+      key(dom, inp, "Enter");
+      expect($(dom, ".kb-picker__trigger .kb-pill").textContent).toContain(
+        "(will be created)",
+      );
+      dom = multi();
+      inp = open(dom);
+      type(dom, "Zed");
+      key(dom, inp, "Enter");
+      expect($(dom, ".kb-picker__chip .kb-pill").textContent).toContain(
+        "(will be created)",
+      );
+    });
+  });
 });

@@ -357,7 +357,7 @@ export function channelPickerScript(create: boolean): string {
     "function isOn(k){return multi?sel.options[k].selected:k===sel.selectedIndex}" +
     c(
       "function chipLabel(it){return(it.kind==='role'?'@':(ICONS[it.kind]&&it.kind!=='category')?'#':'')+(it.kind==='missing'?it.text:it.name)+(it.pending?' (will be created)':'')}" +
-        "function pmark(it){return it.pending?el('span','kb-muted',' (will be created)'):null}" +
+        "function pmark(it){return it.pending?el('span','kb-pill',' (will be created)'):null}" +
         "function paintChips(){var sels=[],k,lim,c,b,pm;for(k=0;k<sel.options.length;k++)if(sel.options[k].selected)sels.push(k);",
       "function chipLabel(it){return(it.kind==='role'?'@':(ICONS[it.kind]&&it.kind!=='category')?'#':'')+(it.kind==='missing'?it.text:it.name)}" +
         "function paintChips(){var sels=[],k,lim,c,b;for(k=0;k<items.length;k++)if(isOn(k))sels.push(k);",
@@ -422,14 +422,18 @@ export function channelPickerScript(create: boolean): string {
     "for(k=0;k<items.length;k++){var ok=hit(items[k],p);rows[k].hidden=!ok;if(ok){vis.push(k);shown[items[k].group]=1}}" +
     "for(k=0;k<heads.length;k++)heads[k].el.hidden=!shown[heads[k].group];" +
     c(
-      "var nm=cfg?nameOf(inp.value,p):null,ex=nm?findName(nm):-1,offer=false,cmsg='',cnt;" +
+      "var nm=cfg?nameOf(inp.value,p):null,ex=nm?findName(nm):-1,offer=false,cmsg='',cnt,q=inp.value.trim(),msg;" +
         "if(nm){if(nm.length>MAXN)cmsg='Names can be up to '+MAXN+' characters.';else if(ex<0){if(cfg.ok){offer=true;vis.push(CR)}else if(cfg.reason)cmsg=cfg.reason}}" +
         "if(crow){crow.hidden=!offer;if(offer){crow.textContent='';crow.appendChild(svg(PLUS));crow.appendChild(document.createTextNode('Create new '+cfg.kind+\": '\"+nm+\"'\"))}}" +
         "cnt=vis.length-(offer?1:0);" +
-        // A name that matches an existing item makes that item the active row, so Enter selects it rather than creating a twin.
+        // The active row: an existing item with this exact name; none when the name is already chosen to be created (Enter must not pick a neighbour); else the chosen row, else the first.
         "var on=-1,f0;for(f0=0;f0<vis.length&&on<0;f0++)if(vis[f0]!==CR&&isOn(vis[f0]))on=f0;" +
-        "setActive(vis.length?(ex>=0&&vis.indexOf(ex)>=0?ex:on>=0?vis[on]:vis[0]):-1);" +
-        "var q=inp.value.trim();st.hidden=!q;st.textContent=q?(cnt?cnt+(cnt===1?' match':' matches'):'No matches')+(cmsg?'. '+cmsg:''):'';",
+        "setActive(vis.length?(ex===CR?-1:ex>=0&&vis.indexOf(ex)>=0?ex:on>=0?vis[on]:vis[0]):-1);" +
+        // The status says what Enter can do: pick an existing match, create the name, or nothing because it is already chosen.
+        'if(ex===CR)msg="\'"+nm+"\' is already chosen to be created.";' +
+        "else if(offer)msg=(cnt?cnt+(cnt===1?' match':' matches')+', or create ':'No existing '+cfg.kind+' matches. You can create ')+\"'\"+nm+\"'.\";" +
+        "else msg=(cnt?cnt+(cnt===1?' match':' matches'):'No matches')+(cmsg?'. '+cmsg:'');" +
+        "st.hidden=!q;st.textContent=q?msg:'';",
       "var on=-1,f0;for(f0=0;f0<vis.length&&on<0;f0++)if(isOn(vis[f0]))on=f0;setActive(vis.length?(on>=0?vis[on]:vis[0]):-1);" +
         "var q=inp.value.trim();st.hidden=!q;st.textContent=q?(vis.length?vis.length+(vis.length===1?' match':' matches'):'No matches'):'';",
     ) +
@@ -472,7 +476,7 @@ export function channelPickerScript(create: boolean): string {
         "if(!o){o=document.createElement('option');o.value=PFX+nm;o.setAttribute('data-create','');o.setAttribute('data-name',nm);o.textContent=nm+' (will be created)';sel.appendChild(o)}" +
         // A single select drops the pending name it held when this one is selected: say so in the same announcement.
         "var prev=multi?[]:pendNames();o.selected=true;" +
-        "say('Will be created: '+cfg.kind+\" '\"+nm+\"'. \"+(prev.length?'Removed: new '+cfg.kind+names(prev)+'. ':'')+'Choose another row to undo.');fireBoth();" +
+        "say('Will be created: '+cfg.kind+\" '\"+nm+\"'. \"+(prev.length?'Removed: new '+cfg.kind+names(prev)+'. ':'')+(multi?'Press Backspace in the empty search, or use its remove button, to undo.':'Choose another row to undo.'));fireBoth();" +
         "if(multi){inp.value='';filter();paint()}else{paint();close(true)}}" +
         "function choose(k){if(k===CR){createChoose();return}if(k<0||!items[k])return;" +
         "var was=!multi&&sel.selectedIndex>=items.length&&sel.options[sel.selectedIndex]&&sel.options[sel.selectedIndex].hasAttribute('data-create')?sel.options[sel.selectedIndex]:null;" +
