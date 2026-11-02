@@ -1283,6 +1283,7 @@ export function renderRoleSelectPicker(opts: {
 function renderSelectionSummary(
   options: ChannelOption[] | RoleOption[],
   selected: Set<string>,
+  create?: PickerCreate,
 ): string {
   if (selected.size === 0) return "";
   const byId = new Map<string, ChannelOption | RoleOption>(
@@ -1290,7 +1291,10 @@ function renderSelectionSummary(
   );
   const tokens = Array.from(selected).map((id) => {
     const opt = byId.get(id);
-    return opt ? optionText(opt) : missingText(id);
+    if (opt) return optionText(opt);
+    // A posted create value the page draws as pending (#1658), not as a lost id.
+    const pending = create ? parsePickerCreateValue(id) : null;
+    return pending?.ok ? `${pending.name} (will be created)` : missingText(id);
   });
   return (
     `<div class="settings-selected muted" data-picker-summary style="margin-top:.4rem;font-size:.85em">` +
@@ -1563,11 +1567,16 @@ function renderControlInput(
       r.type === "channel_list"
         ? channelOptionsFor(r, pickers)
         : rolesFor(r, pickers);
+    // A list stored as text splits on commas (ids never hold one). A caller
+    // drawing a refused form again may pass the posted values as an array, so a
+    // pending name that holds a comma (#1658) stays one value.
     const selected = new Set(
-      currentStr
-        .split(",")
-        .map((v) => v.trim())
-        .filter((v) => v !== ""),
+      Array.isArray(r.current)
+        ? r.current.map((v) => String(v)).filter((v) => v !== "")
+        : currentStr
+            .split(",")
+            .map((v) => v.trim())
+            .filter((v) => v !== ""),
     );
     // The same `span.kb-picker` as the single pickers (#1473): the script
     // turns the multiple select into chips plus a toggling popover. Without
@@ -1587,7 +1596,7 @@ function renderControlInput(
       `<select${a11yAttr} name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}"${lockAttr}>` +
       optionsHtml +
       `</select></span>` +
-      renderSelectionSummary(options, selected)
+      renderSelectionSummary(options, selected, createFor)
     );
   }
   if (r.type === "cron") {

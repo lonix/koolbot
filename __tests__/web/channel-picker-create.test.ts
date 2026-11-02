@@ -775,4 +775,81 @@ describe("review findings on #1699", () => {
       expect(live(dom)).toBe("");
     });
   });
+
+  describe("second review", () => {
+    function listPage(current: unknown): string {
+      const html = renderSettingsPage({
+        csrfToken: "t",
+        guildName: "G",
+        flash: null,
+        groups: [{ category: "x", rows: [{ ...row("role_list"), current }] }],
+        textChannels: [],
+        voiceChannels: [],
+        categoryChannels: [],
+        roles: ROLES,
+        pickerCreate: () => ok("role"),
+      } as unknown as Parameters<typeof renderSettingsPage>[0]);
+      return html;
+    }
+    it("a: a pending name with a comma stays one value when the caller passes an array", () => {
+      const html = listPage(["9", "create:Community, Support"]);
+      expect(html).not.toContain("unavailable");
+      expect(html).toContain(
+        '<option value="create:Community, Support" data-create data-name="Community, Support" selected>Community, Support (will be created)</option>',
+      );
+      expect(html).toContain(
+        "Selected: @Mods, Community, Support (will be created)",
+      );
+      const dom = mount(
+        (
+          html.match(
+            /<span class="kb-picker" data-picker [^>]*>[\s\S]*?<\/select><\/span>/,
+          ) as RegExpMatchArray
+        )[0],
+      );
+      expect(posted(dom)).toEqual(["9", "create:Community, Support"]);
+    });
+    it("a: a stored CSV string still splits on commas (ids hold none)", () => {
+      const html = listPage("9,10");
+      expect(html.match(/ selected>/g)?.length).toBe(2);
+    });
+
+    it("2: Discard announces a pending choice it brings back", () => {
+      const dom = mount(
+        renderRoleSelectPicker({
+          name: "value_x.y",
+          options: ROLES,
+          selected: "create:Helpers",
+          emptyLabel: "None",
+          create: ok("role"),
+        }),
+      );
+      const inp = open(dom);
+      key(dom, inp, "ArrowDown");
+      key(dom, inp, "ArrowDown");
+      key(dom, inp, "Enter");
+      expect($<HTMLSelectElement>(dom, "select").value).not.toBe(
+        "create:Helpers",
+      );
+      // The refused page's pending choice is the baseline; Discard restores it.
+      $<HTMLButtonElement>(dom, "[data-savebar-discard]").click();
+      expect($<HTMLSelectElement>(dom, "select").value).toBe("create:Helpers");
+      expect(live(dom)).toBe(
+        "Will be created: role 'Helpers'. Restored: @Helpers (will be created).",
+      );
+    });
+
+    it("4: replacing a pending name in a single select says the old one is dropped", () => {
+      const dom = mount(page("channel", "1", () => ok("channel")));
+      for (const n of ["Old", "Fresh"]) {
+        const inp = open(dom);
+        type(dom, n);
+        key(dom, inp, "Enter");
+      }
+      expect(live(dom)).toBe(
+        "Will be created: channel 'Fresh'. Removed: new channel 'Old'. Choose another row to undo.",
+      );
+      expect(posted(dom)).toEqual(["create:Fresh"]);
+    });
+  });
 });

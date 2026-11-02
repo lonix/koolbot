@@ -346,9 +346,11 @@ export function channelPickerScript(create: boolean): string {
         // The pending names the select holds now, and the ones the last paint showed, so a Discard can say what it took away.
         "var shownPend=[];" +
         "function pendNames(){var r=[],po=pendOpts(),k;for(k=0;k<po.length;k++)if(po[k].selected)r.push(pendName(po[k]));return r}" +
-        "function restored(){var now=pendNames(),gone=[],lab=[],k;for(k=0;k<shownPend.length;k++)if(now.indexOf(shownPend[k])<0)gone.push(shownPend[k]);if(!gone.length)return;" +
+        'function names(a){return" \'"+a.join("\', \'")+"\'"}' +
+        "function restored(){var now=pendNames(),gone=[],back=[],lab=[],k;for(k=0;k<shownPend.length;k++)if(now.indexOf(shownPend[k])<0)gone.push(shownPend[k]);" +
+        "for(k=0;k<now.length;k++)if(shownPend.indexOf(now[k])<0)back.push(now[k]);if(!gone.length&&!back.length)return;" +
         "for(k=0;k<sel.options.length;k++)if(sel.options[k].selected&&sel.options[k].value!=='')lab.push(chipLabel(itm(k)));" +
-        "say('Removed: new '+cfg.kind+\" '\"+gone.join(\"', '\")+\"'. \"+(lab.length?'Restored: '+lab.join(', '):'Nothing selected')+'.')}" +
+        "say((gone.length?'Removed: new '+cfg.kind+names(gone)+'. ':'')+(back.length?'Will be created: '+cfg.kind+names(back)+'. ':'')+(lab.length?'Restored: '+lab.join(', '):'Nothing selected')+'.')}" +
         "function onChange(e){var r=e&&e.kbRestore;if(r)restored();paint();shownPend=pendNames();if(r&&open)filter()}",
       "box.appendChild(trig);box.appendChild(pop);",
     ) +
@@ -468,8 +470,9 @@ export function channelPickerScript(create: boolean): string {
       "function createChoose(){var nm=cfg&&nameOf(inp.value,parse(inp.value)),po,o=null,k;if(!nm||nm.length>MAXN||!cfg.ok||findName(nm)>=0)return;" +
         "po=pendOpts();for(k=0;k<po.length;k++)if(pendName(po[k])===nm)o=po[k];" +
         "if(!o){o=document.createElement('option');o.value=PFX+nm;o.setAttribute('data-create','');o.setAttribute('data-name',nm);o.textContent=nm+' (will be created)';sel.appendChild(o)}" +
-        "o.selected=true;" +
-        "say('Will be created: '+cfg.kind+\" '\"+nm+\"'. Choose another row to undo.\");fireBoth();" +
+        // A single select drops the pending name it held when this one is selected: say so in the same announcement.
+        "var prev=multi?[]:pendNames();o.selected=true;" +
+        "say('Will be created: '+cfg.kind+\" '\"+nm+\"'. \"+(prev.length?'Removed: new '+cfg.kind+names(prev)+'. ':'')+'Choose another row to undo.');fireBoth();" +
         "if(multi){inp.value='';filter();paint()}else{paint();close(true)}}" +
         "function choose(k){if(k===CR){createChoose();return}if(k<0||!items[k])return;" +
         "var was=!multi&&sel.selectedIndex>=items.length&&sel.options[sel.selectedIndex]&&sel.options[sel.selectedIndex].hasAttribute('data-create')?sel.options[sel.selectedIndex]:null;" +
