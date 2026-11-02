@@ -771,7 +771,7 @@ const SETTINGS_SAVE_SCRIPT =
   "var FLASH_ICONS=" +
   FLASH_ICONS_JSON +
   ";" +
-  "function flashEl(form){var card=form.closest('.card');if(!card)return null;" +
+  "function flashEl(form){var card=form.closest('.card,.kb-panel');if(!card)return null;" +
   "var n=card.querySelector('.section-flash');" +
   // The node is a live region, so every save result (success, CSRF failure,
   // rate-limit, network error) is announced (#855). A result is a polite

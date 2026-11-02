@@ -117,6 +117,7 @@ describe("GET /permissions", () => {
     const html = await page();
     expect(html).toContain("unknown (role groups unavailable)");
     expect(html).not.toContain("Moderators only (default)");
-    expect(html).toContain("couldn't be read");
+    // The EmptyState text is escaped like any text, so the apostrophe is an entity.
+    expect(html).toContain("couldn&#39;t be read");
   });
 });

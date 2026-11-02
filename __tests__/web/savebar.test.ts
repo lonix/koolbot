@@ -124,19 +124,15 @@ describe("the save bar markup (no JavaScript)", () => {
     expect(text()).toBe("Save your changes");
   });
 
-  it("sits in a card that opts out of scrolling, so sticky reaches the viewport", () => {
+  it("sits in a Panel (which never scrolls), so sticky reaches the viewport", () => {
     mount(cardHtml());
-    expect(bar().closest(".card")?.classList.contains("card--savebar")).toBe(
-      true,
-    );
+    expect(bar().closest(".kb-panel")).not.toBeNull();
     const doc = new DOMParser().parseFromString(
       pageHtml([{ category: "x", rows: ROWS }]),
       "text/html",
     );
     for (const b of doc.querySelectorAll("[data-savebar]")) {
-      expect(b.closest(".card")?.classList.contains("card--savebar")).toBe(
-        true,
-      );
+      expect(b.closest(".kb-panel")).not.toBeNull();
       // The scrolling rows container is the bar's sibling, never its ancestor.
       expect(b.closest(".kb-settings")).toBeNull();
       expect(

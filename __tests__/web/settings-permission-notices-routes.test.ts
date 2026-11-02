@@ -142,11 +142,11 @@ afterEach(async () => {
   await harness.close();
 });
 
-/** The card of one section, from its id to the next card. */
+/** The Panel of one section, from its id to the next Panel. */
 function section(html: string, category: string): string {
   const start = html.indexOf(`id="section-${category}"`);
   expect(start).toBeGreaterThan(-1);
-  const next = html.indexOf('class="card', start + 10);
+  const next = html.indexOf("<section", start + 10);
   return html.slice(start, next === -1 ? undefined : next);
 }
 

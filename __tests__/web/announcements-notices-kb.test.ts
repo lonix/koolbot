@@ -340,9 +340,7 @@ describe("the Announcements page renders only kb- components (#1642)", () => {
         ],
       }),
     );
-    for (const el of body.querySelectorAll(
-      "[data-flash], .card, .notice, #feature-settings",
-    )) {
+    for (const el of body.querySelectorAll("[data-flash], .notice")) {
       el.remove();
     }
     expect(oldClassesIn(body)).toEqual([]);
@@ -674,9 +672,7 @@ describe("the Notices page renders only kb- components (#1642)", () => {
         ],
       }),
     );
-    for (const el of body.querySelectorAll(
-      "[data-flash], .card, .notice, #feature-settings",
-    )) {
+    for (const el of body.querySelectorAll("[data-flash], .notice")) {
       el.remove();
     }
     expect(oldClassesIn(body)).toEqual([]);

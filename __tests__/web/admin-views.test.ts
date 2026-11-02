@@ -276,7 +276,7 @@ describe("renderSettingsPage", () => {
     // so they stay available.
     expect(html).toContain('action="/admin/settings/import"');
     // The wizard pre-fills from the same store, so its link is hidden too.
-    expect(html).not.toContain('class="btn">Setup wizard</a>');
+    expect(html).not.toContain('class="kb-btn">Setup wizard</a>');
   });
 
   it("renders the human label as primary text and the dotted key as a muted reference", () => {
@@ -330,11 +330,11 @@ describe("renderSettingsPage", () => {
       ],
     });
     // Human title, not the slug.
-    expect(html).toContain("<h2>Voice Channels</h2>");
-    expect(html).not.toContain("<h2>voicechannels</h2>");
-    // Category description rendered as muted helper text under the title.
+    expect(html).toContain('id="section-voicechannels-h">Voice Channels</h2>');
+    expect(html).not.toContain(">voicechannels</h2>");
+    // Category description rendered as help text under the title.
     expect(html).toMatch(
-      /<p class="muted"[^>]*>Dynamic voice channel management/,
+      /<p class="kb-help"[^>]*>Dynamic voice channel management/,
     );
   });
 
@@ -613,7 +613,9 @@ describe("renderSettingsPage", () => {
     expect(html).toContain('href="/admin/settings/export"');
     expect(html).toContain('href="/admin/wizard"');
     expect(html).toContain('action="/admin/settings/import"');
-    expect(html).toContain('<textarea id="import-yaml" name="yaml"');
+    expect(html).toContain(
+      '<textarea class="kb-textarea" id="import-yaml" name="yaml"',
+    );
   });
 
   it("renders a flash banner when provided", () => {
@@ -1317,7 +1319,7 @@ describe("renderPermissionsPage with role groups (#1023)", () => {
       '<option value="group:g1+" selected>@Mods and above (group)</option>',
     );
     expect(html).toContain("Mods and above");
-    expect(html).toContain('class="tag tag-warn">restricted');
+    expect(html).toContain('class="kb-badge kb-badge--warn">restricted');
     expect(html).not.toContain("No restricted commands");
   });
 
@@ -1350,11 +1352,11 @@ describe("renderPermissionsPage with role groups (#1023)", () => {
       staffDefaultActive: true,
       staffDefaultCommands: new Set(["warn"]),
     });
-    const matrix = html.slice(html.indexOf("<caption"));
+    const matrix = html.slice(html.indexOf('id="perm-matrix"'));
     expect(matrix).toContain("Moderators only (default)");
     // ...and the restricted command keeps its own status, nothing says open.
-    expect(matrix).toContain('class="tag tag-warn">restricted');
-    expect(matrix).not.toContain('class="tag tag-info">open');
+    expect(matrix).toContain('class="kb-badge kb-badge--warn">restricted');
+    expect(matrix).not.toContain('class="kb-badge kb-badge--info">open');
   });
 
   it("explains the staff default in the empty matrix text", () => {
@@ -1429,7 +1431,7 @@ describe("renderPermissionsPage", () => {
       perCommand: new Map([["dbtrunk", ["r1"]]]),
     });
     expect(html).toContain(">Admins<");
-    expect(html).toContain('class="tag tag-warn">restricted');
+    expect(html).toContain('class="kb-badge kb-badge--warn">restricted');
   });
 
   it("exposes the matrix as a real 2D grid to assistive tech (#855)", () => {
@@ -1448,18 +1450,18 @@ describe("renderPermissionsPage", () => {
     expect(html).toContain('<th scope="col">Command</th>');
     expect(html).toContain('<th scope="col" title="r1">Admins</th>');
     // The command name is the row header rather than a plain cell.
-    expect(html).toContain('<th scope="row" class="mono">/dbtrunk</th>');
-    expect(html).not.toContain('<td class="mono">/dbtrunk</td>');
+    expect(html).toContain('<th scope="row" class="kb-mono">/dbtrunk</th>');
+    expect(html).not.toContain('<td class="kb-mono">/dbtrunk</td>');
     // A cell is never just a glyph: hidden text says what it means.
     expect(html).toMatch(
       /<span class="kb-perm kb-perm--has"><svg class="kb-icon"[^>]*aria-hidden="true"[^>]*>.*?<\/svg>Allowed<\/span>/,
     );
     expect(html).not.toContain('<span aria-hidden="true">✓</span>');
     expect(html).toContain(
-      '<span class="muted" aria-hidden="true">—</span><span class="visually-hidden">Not allowed</span>',
+      '<span class="kb-muted" aria-hidden="true">—</span><span class="kb-visually-hidden">Not allowed</span>',
     );
     expect(html).toContain(
-      '<caption class="visually-hidden">Which roles may run each restricted command</caption>',
+      '<caption class="kb-visually-hidden">Which roles may run each restricted command</caption>',
     );
   });
 
@@ -3847,7 +3849,9 @@ describe("renderFeatureSettingsCard (#971)", () => {
         row({ key: "digest.cron", type: "cron", current: "0 9 * * 1" }),
       ],
     });
-    expect(html).toContain("<h2>Digest settings</h2>");
+    expect(html).toContain(
+      '<h2 class="kb-panel__title" id="feature-settings-h">Digest settings</h2>',
+    );
     expect(html).toContain("Settings could not be loaded");
     // No form, so nothing can post schema defaults over the stored values.
     expect(html).not.toContain("<form");
@@ -3861,11 +3865,13 @@ describe("renderFeatureSettingsCard (#971)", () => {
       unavailable: true,
       settingRows: [],
     });
-    expect(html).toContain("<h2>Settings</h2>");
-    expect(html).toContain("Settings could not be loaded");
-    // Same focus/announce hook as the flash banner (#855).
     expect(html).toContain(
-      '<div class="notice warn" role="status" tabindex="-1" data-flash>',
+      '<h2 class="kb-panel__title" id="feature-settings-h">Settings</h2>',
+    );
+    expect(html).toContain("Settings could not be loaded");
+    // Same focus/announce hook as the flash banner (#855), now a Callout.
+    expect(html).toContain(
+      '<div class="kb-callout kb-callout--warn" role="status" tabindex="-1" data-flash>',
     );
   });
 
@@ -5999,11 +6005,13 @@ describe("Settings page accessibility (#854)", () => {
 
   it("labels the YAML import textarea and links its help paragraph", () => {
     const html = renderSettingsPage({ ...COMMON, groups: [] });
-    expect(html).toContain('<label for="import-yaml">YAML to import</label>');
     expect(html).toContain(
-      '<textarea id="import-yaml" name="yaml" rows="12" aria-describedby="import-yaml-help"',
+      '<label class="kb-label" for="import-yaml">YAML to import</label>',
     );
-    expect(html).toContain('<p class="muted" id="import-yaml-help"');
+    expect(html).toContain(
+      '<textarea class="kb-textarea" id="import-yaml" name="yaml" rows="12" aria-describedby="import-yaml-help"',
+    );
+    expect(html).toContain('<p class="kb-help" id="import-yaml-help"');
   });
 });
 
@@ -6018,7 +6026,7 @@ describe("Permissions page accessibility (#854)", () => {
       perCommand: new Map(),
     });
     expect(html).toContain(
-      '<label class="visually-hidden" for="perm-roles-ping">Allowed roles for /ping</label>',
+      '<label class="kb-visually-hidden" for="perm-roles-ping">Allowed roles for /ping</label>',
     );
     expect(html).toMatch(
       /<span class="kb-picker" data-picker data-picker-meta="[^"]*"><select class="kb-select" id="perm-roles-ping" name="roleIds" multiple size="\d+">/,
