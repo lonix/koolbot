@@ -79,7 +79,9 @@ function setup(channels: ManagedChannelView[] = live) {
 describe("normaliseChannelName", () => {
   it("lowercases and hyphenates a text channel name the way Discord does", () => {
     expect(normaliseChannelName("text", "  Mod  Log ")).toBe("mod-log");
-    expect(normaliseChannelName("text", "a -- b")).toBe("a-b");
+    expect(normaliseChannelName("text", "a -- b")).toBe("a----b");
+    expect(normaliseChannelName("text", "raid--alerts")).toBe("raid--alerts");
+    expect(normaliseChannelName("text", "-raid-")).toBe("-raid-");
     expect(normaliseChannelName("text", "📢 News")).toBe("📢-news");
   });
   it("keeps voice and category names as typed (control characters aside)", () => {
@@ -107,6 +109,39 @@ describe("planChannels", () => {
       action: "existing",
       existingId: "222222222222222222",
     });
+  });
+
+  it.each(["raid--alerts", "-raid-", "Raid--Alerts"])(
+    "selects an existing channel stored as %s, hyphens as typed",
+    (typed) => {
+      const channels = [
+        ...live,
+        view("666666666666666666", typed.toLowerCase(), "text"),
+      ];
+      const plan = planChannels([{ kind: "text", name: typed }], channels);
+      expect(plan.ok && plan.entries[0]).toMatchObject({
+        action: "existing",
+        existingId: "666666666666666666",
+      });
+    },
+  );
+
+  it("never creates a duplicate of a channel whose stored name has upper case or spaces", () => {
+    const channels = [
+      ...live,
+      view("666666666666666666", "Raid Alerts", "text"),
+    ];
+    const plan = planChannels(
+      [{ kind: "text", name: "raid-alerts" }],
+      channels,
+    );
+    expect(plan.ok && plan.entries[0].action).toBe("existing");
+  });
+
+  it("refuses a name that is over 100 characters once lowercased", () => {
+    const plan = planChannels([{ kind: "text", name: "İ".repeat(100) }], live);
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) expect(plan.errors.join(" ")).toMatch(/at most 100/);
   });
 
   it("creates when the same name exists only in another parent or kind", () => {
@@ -272,6 +307,22 @@ describe("applyChannelPlan", () => {
     const result = await applyChannelPlan(deps, entries, reviewed.planId);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/Check Discord/);
+  });
+
+  it("says reading the channels failed and nothing was created when the read fails", async () => {
+    const { deps, post } = setup();
+    const reviewed = planChannels(entries, live);
+    if (!reviewed.ok) throw new Error("plan");
+    deps.listChannels = async () => {
+      throw new Error("Discord API timeout after 30000ms");
+    };
+    const result = await applyChannelPlan(deps, entries, reviewed.planId);
+    expect(result).toMatchObject({ ok: false, removed: [], stuck: [] });
+    if (!result.ok) {
+      expect(result.error).toMatch(/nothing was created/);
+      expect(result.error).not.toMatch(/Check Discord|already/);
+    }
+    expect(post).not.toHaveBeenCalled();
   });
 
   it("passes a rate limit through as its own message and leaves nothing", async () => {

@@ -15,10 +15,15 @@
  *     behind unreported.
  *
  * Rules, each in one place so a change is one edit:
- *  - Names: trimmed, 1 to 100 characters. A text channel name is normalised as
- *    Discord does (`normaliseChannelName`). A name that already exists with the
- *    same kind in the same parent (compared ignoring case) is selected, not
- *    created. Two entries that resolve to the same channel are refused.
+ *  - Names: trimmed, 1 to 100 characters (checked again after normalising). A
+ *    text channel name is lower-cased with spaces turned to hyphens
+ *    (`normaliseChannelName`), the part of Discord's rule that is certain;
+ *    hyphens stay as typed. A name that matches an existing channel of the same
+ *    kind in the same parent, both sides normalised alike and compared ignoring
+ *    case, is selected, not created. Two entries that resolve to the same
+ *    channel are refused.
+ *  - A failed read of the channels before the first write reports that nothing
+ *    was created; only a failed write asks the admin to check Discord.
  *  - Parent: `parentId` must be an existing category and is only for text and
  *    voice. A created category has no parent. Nothing here chooses a parent: the
  *    caller passes what the setting's kind decides (no parent by default).
@@ -78,8 +83,9 @@ const CHANNEL_TYPES = {
 } as const;
 
 /**
- * A text channel name as far as the rule is certain: lower case, spaces to
- * hyphens, repeated hyphens collapsed. Nothing else is removed (emoji stay);
+ * A text channel name as far as the rule is certain: lower case and spaces to
+ * hyphens. Hyphens stay as typed (Discord allows repeated, leading and
+ * trailing ones) and nothing else is removed (emoji stay);
  * Discord applies any further rule itself and the name it returns is used.
  * Voice channels and categories keep what was typed (control characters and
  * extra spaces aside).
@@ -90,15 +96,17 @@ export function normaliseChannelName(
 ): string {
   const clean = cleanName(raw);
   if (kind !== "text") return clean;
-  return clean
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/-{2,}/g, "-")
-    .replace(/^-+|-+$/g, "");
+  return clean.toLowerCase().replace(/\s/g, "-");
 }
 
-const sameName = (a: string, b: string): boolean =>
-  a.toLowerCase() === b.toLowerCase();
+/** Both sides go through the same normalisation, so a name matches a channel as Discord stores it. */
+const sameName = (
+  kind: ManageableKind,
+  typed: string,
+  stored: string,
+): boolean =>
+  normaliseChannelName(kind, typed).toLowerCase() ===
+  normaliseChannelName(kind, stored).toLowerCase();
 
 /** Validate the entries against the live channels. Pure: nothing is written. */
 export function planChannels(
@@ -124,8 +132,12 @@ export function planChannels(
       continue;
     }
     const name = normaliseChannelName(entry.kind, cleaned);
-    if (name.length === 0) {
-      errors.push(`The name for ${label} needs at least one letter or number.`);
+    // Lower-casing can lengthen a Unicode string, so the limit applies to the
+    // normalised name too (a category keeps its case, so it cannot grow).
+    if (name.length > CHANNEL_LIMITS.nameMax) {
+      errors.push(
+        `The name can be at most ${CHANNEL_LIMITS.nameMax} characters.`,
+      );
       continue;
     }
     let parentId: string | null = null;
@@ -152,7 +164,7 @@ export function planChannels(
       (c) =>
         c.kind === entry.kind &&
         c.parentId === (entry.kind === "category" ? null : parentId) &&
-        sameName(c.name, name),
+        sameName(entry.kind, name, c.name),
     );
     if (found) {
       planned.push({
@@ -261,7 +273,10 @@ export async function applyChannelPlan(
   try {
     live = await deps.listChannels();
   } catch (error) {
-    return nothing(describeWriteFailure(error));
+    logger.warn("channel create: could not read the channels", error);
+    return nothing(
+      "KoolBot couldn't read the channels from Discord, so nothing was created. Try again.",
+    );
   }
   const plan = planChannels(entries, live);
   if (!plan.ok) return nothing(plan.errors.join(" "));
