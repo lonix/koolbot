@@ -108,6 +108,7 @@ import {
   renderUserPage,
   renderUserPrivacyBody,
   renderUserRewindBody,
+  renderUserRewindLoadError,
   renderUserTimezoneBody,
   renderUserVoiceBody,
 } from "../../src/web/user-layout.js";
@@ -7476,6 +7477,10 @@ export function userPages(): A11yPage[] {
         "/me/rewind",
         renderUserRewindBody({ ...REWIND, year: 2024, hasData: false }),
       ),
+    },
+    {
+      name: "/me rewind (could not load)",
+      html: shell("Rewind", "/me/rewind", renderUserRewindLoadError(2026)),
     },
     {
       name: "/me rewind (by room kind)",
