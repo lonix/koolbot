@@ -973,4 +973,44 @@ describe("review findings on #1699", () => {
       );
     });
   });
+
+  describe("fourth review: undo in a multi-select follows the chip order", () => {
+    const make = (): JSDOM =>
+      mount(
+        renderRolePicker({
+          id: "f",
+          name: "value_x.y",
+          options: ROLES,
+          selected: [],
+          create: ok("role"),
+        }).replace(' id="f"', ""),
+      );
+    it("a recreated name that is no longer the last chip is not told to use Backspace", () => {
+      const dom = make();
+      const inp = open(dom);
+      for (const n of ["Aa", "Bb"]) {
+        type(dom, n);
+        key(dom, inp, "Enter");
+      }
+      $<HTMLButtonElement>(
+        dom,
+        ".kb-picker__chip-remove[aria-label*='Aa']",
+      ).click();
+      open(dom);
+      type(dom, "Aa");
+      key(dom, inp, "Enter");
+      // Aa keeps its earlier place, so the last chip is Bb.
+      expect(
+        [...dom.window.document.querySelectorAll(".kb-picker__chip")].map(
+          (c) => c.textContent,
+        ),
+      ).toEqual(["@Aa (will be created)", "@Bb (will be created)"]);
+      expect(live(dom)).toBe(
+        "Will be created: role 'Aa'. Use its remove button to undo.",
+      );
+      // What Backspace really does: it removes the last chip.
+      key(dom, inp, "Backspace");
+      expect(posted(dom)).toEqual(["create:Aa"]);
+    });
+  });
 });

@@ -476,7 +476,7 @@ export function channelPickerScript(create: boolean): string {
         "if(!o){o=document.createElement('option');o.value=PFX+nm;o.setAttribute('data-create','');o.setAttribute('data-name',nm);o.textContent=nm+' (will be created)';sel.appendChild(o)}" +
         // A single select drops the pending name it held when this one is selected: say so in the same announcement.
         "var prev=multi?[]:pendNames();o.selected=true;" +
-        "say('Will be created: '+cfg.kind+\" '\"+nm+\"'. \"+(prev.length?'Removed: new '+cfg.kind+names(prev)+'. ':'')+(multi?'Press Backspace in the empty search, or use its remove button, to undo.':'Choose another row to undo.'));fireBoth();" +
+        "say('Will be created: '+cfg.kind+\" '\"+nm+\"'. \"+(prev.length?'Removed: new '+cfg.kind+names(prev)+'. ':'')+(multi?(lastOn()===o.index?'Press Backspace in the empty search, or use its remove button, to undo.':'Use its remove button to undo.'):'Choose another row to undo.'));fireBoth();" +
         "if(multi){inp.value='';filter();paint()}else{paint();close(true)}}" +
         "function choose(k){if(k===CR){createChoose();return}if(k<0||!items[k])return;" +
         "var was=!multi&&sel.selectedIndex>=items.length&&sel.options[sel.selectedIndex]&&sel.options[sel.selectedIndex].hasAttribute('data-create')?sel.options[sel.selectedIndex]:null;" +
