@@ -5383,7 +5383,7 @@ describe("renderCommandAuditPage", () => {
     expect(html).toContain("Alice");
     expect(html).toContain("/quote add");
     expect(html).toContain("general");
-    expect(html).toContain('class="tag tag-on">success');
+    expect(html).toContain('class="kb-badge kb-badge--on">success');
     expect(html).toContain("123ms");
   });
 
@@ -5433,8 +5433,8 @@ describe("renderCommandAuditPage", () => {
     expect(html).toContain('<option value="quote">/quote</option>');
     expect(html).not.toContain("/component:");
     // Table cell: bare label for the component row, slash for the command.
-    expect(html).toContain('<td class="mono">component:vc_control</td>');
-    expect(html).toContain('<td class="mono">/quote add</td>');
+    expect(html).toContain('<td class="kb-mono">component:vc_control</td>');
+    expect(html).toContain('<td class="kb-mono">/quote add</td>');
   });
 
   it("preserves filters in pagination links and form state", () => {
@@ -5739,17 +5739,17 @@ describe("renderAnalyticsPage (#675 Part B)", () => {
         timeZone: "UTC",
       },
     });
-    expect(html).toContain("heatgrid");
+    expect(html).toContain("kb-heatmap");
     expect(html).toContain("Busiest slot");
     expect(html).toContain("Friday");
     expect(html).toContain("10 PM");
-    expect(html).toContain("hg-cell peak");
+    expect(html).toContain("kb-heatmap__cell is-peak");
     // No disabled notice when tracking is on.
     expect(html).not.toContain("voicetracking.enabled");
     // The grid's cells only carry data in hover-only `title`s, so the grid
     // is exposed as one labelled image pointing at the text lists (#855).
     expect(html).toContain(
-      '<div class="heatgrid" role="img" aria-label="Voice activity heatmap by weekday and hour of day. Busiest slot: Friday at 10 PM. Per-weekday and per-hour totals are listed below.">',
+      '<div class="kb-heatmap" role="img" aria-label="Voice activity heatmap by weekday and hour of day. Busiest slot: Friday at 10 PM. Per-weekday and per-hour totals are listed below.">',
     );
   });
 });
