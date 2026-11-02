@@ -214,7 +214,7 @@ interface Lookup<T> {
   values(): Iterable<T | null>;
 }
 
-interface Snapshot {
+export interface Snapshot {
   guild: Guild;
   me: GuildMember | null;
   fresh: boolean;
@@ -390,7 +390,8 @@ async function loadSnapshot(
   };
 }
 
-function getSnapshot(
+/** The shared, short-lived read of one server (also used by the create check, #1660). */
+export function getSnapshot(
   client: Client,
   guildId: string,
   deps: CheckDeps,
