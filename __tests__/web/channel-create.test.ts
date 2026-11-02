@@ -625,6 +625,26 @@ describe("applyChannelPlan serialises per server (#1714)", () => {
     for (let i = 0; i < 10; i += 1) await Promise.resolve();
   };
 
+  /** Hold the lock for a server until `finish()`; resolves once the holder runs. */
+  async function holdLock(guildId: string): Promise<{
+    finish: () => void;
+    done: Promise<unknown>;
+  }> {
+    let finish!: () => void;
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const done = withChannelLock(guildId, async () => {
+      started();
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    });
+    await running;
+    return { finish, done };
+  }
+
   /** One shared server: a create adds to what the next read returns. */
   function sharedServer(guildId = "1") {
     const channels: ManagedChannelView[] = [...live];
@@ -783,12 +803,7 @@ describe("applyChannelPlan serialises per server (#1714)", () => {
     jest.useFakeTimers();
     try {
       const server = sharedServer();
-      let finish!: () => void;
-      const holder = withChannelLock("1", async () => {
-        await new Promise<void>((resolve) => {
-          finish = resolve;
-        });
-      });
+      const { finish, done: holder } = await holdLock("1");
       const waiting = applyChannelPlan(server.deps, [entry], "any");
       await jest.advanceTimersByTimeAsync(CHANNEL_LOCK_WAIT_MS);
       expect(await waiting).toEqual({
@@ -805,17 +820,35 @@ describe("applyChannelPlan serialises per server (#1714)", () => {
     }
   });
 
+  it("an apply cancelled while it waits writes nothing and leaves the lock free", async () => {
+    const server = sharedServer();
+    const reviewed = planChannels([entry], server.channels);
+    if (!reviewed.ok) throw new Error("plan");
+    const { finish, done: holder } = await holdLock("1");
+    const abort = new AbortController();
+    const waiting = applyChannelPlan(
+      { ...server.deps, signal: abort.signal },
+      [entry],
+      reviewed.planId,
+    );
+    abort.abort();
+    expect(await waiting).toMatchObject({ ok: false, removed: [], stuck: [] });
+    finish();
+    await holder;
+    await flush();
+    expect(server.post).not.toHaveBeenCalled();
+    expect(await withChannelLock("1", async () => "free")).toEqual({
+      ok: true,
+      value: "free",
+    });
+  });
+
   it("a different server is not blocked", async () => {
     const busy = sharedServer("1");
     const free = sharedServer("2");
     const reviewed = planChannels([entry], free.channels);
     if (!reviewed.ok) throw new Error("plan");
-    let finish!: () => void;
-    const holder = withChannelLock("1", async () => {
-      await new Promise<void>((resolve) => {
-        finish = resolve;
-      });
-    });
+    const { finish, done: holder } = await holdLock("1");
     const result = await applyChannelPlan(free.deps, [entry], reviewed.planId);
     expect(result.ok).toBe(true);
     expect(busy.post).not.toHaveBeenCalled();

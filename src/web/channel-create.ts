@@ -249,6 +249,11 @@ export interface ChannelCreateDeps {
   listChannels: () => Promise<ManagedChannelView[]>;
   /** The audit-log reason Discord records. */
   reason: string;
+  /**
+   * Abandons the apply while it still waits for the lock (a closed request).
+   * An apply that has started is never cut off by it.
+   */
+  signal?: AbortSignal;
 }
 
 export interface AppliedChannel {
@@ -281,8 +286,10 @@ export async function applyChannelPlan(
   entries: readonly ChannelPlanEntry[],
   reviewedPlanId: string,
 ): Promise<ChannelApplyResult> {
-  const held = await withChannelLock(deps.guildId, () =>
-    applyLocked(deps, entries, reviewedPlanId),
+  const held = await withChannelLock(
+    deps.guildId,
+    () => applyLocked(deps, entries, reviewedPlanId),
+    deps.signal,
   );
   if (held.ok) return held.value;
   return {

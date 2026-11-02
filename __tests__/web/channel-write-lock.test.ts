@@ -85,7 +85,7 @@ describe("withChannelLock", () => {
     const abandoned = jest.fn(async () => "late");
     const waiting = withChannelLock("g1", abandoned);
     await jest.advanceTimersByTimeAsync(CHANNEL_LOCK_WAIT_MS);
-    expect(await waiting).toEqual({ ok: false });
+    expect(await waiting).toEqual({ ok: false, reason: "busy" });
     expect(CHANNEL_LOCK_BUSY_MESSAGE).toMatch(/nothing was changed/);
     held.open();
     expect(await holder).toEqual({ ok: true, value: "held" });
@@ -97,6 +97,53 @@ describe("withChannelLock", () => {
       value: "next",
     });
     expect(channelWriteLock.size).toBe(0);
+  });
+
+  it("a caller cancelled while it waits never runs its work", async () => {
+    const held = gate();
+    const holder = withChannelLock("g1", async () => {
+      await held.wait;
+      return "held";
+    });
+    const abort = new AbortController();
+    const work = jest.fn(async () => "late");
+    const waiting = withChannelLock("g1", work, abort.signal);
+    abort.abort();
+    expect(await waiting).toEqual({ ok: false, reason: "cancelled" });
+    held.open();
+    expect(await holder).toEqual({ ok: true, value: "held" });
+    await flush();
+    expect(work).not.toHaveBeenCalled();
+    expect(channelWriteLock.size).toBe(0);
+  });
+
+  it("an already aborted signal never runs the work, even on a free lock", async () => {
+    const abort = new AbortController();
+    abort.abort();
+    const work = jest.fn(async () => 1);
+    expect(await withChannelLock("g1", work, abort.signal)).toEqual({
+      ok: false,
+      reason: "cancelled",
+    });
+    await flush();
+    expect(work).not.toHaveBeenCalled();
+  });
+
+  it("a signal that aborts once the work has started does not cut it off", async () => {
+    const held = gate();
+    const abort = new AbortController();
+    const running = withChannelLock(
+      "g1",
+      async () => {
+        await held.wait;
+        return "done";
+      },
+      abort.signal,
+    );
+    await flush();
+    abort.abort();
+    held.open();
+    expect(await running).toEqual({ ok: true, value: "done" });
   });
 
   it("does not time a holder out: only the wait is bounded", async () => {

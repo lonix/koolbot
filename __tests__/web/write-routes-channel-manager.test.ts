@@ -23,6 +23,7 @@ import {
   startAdminHarness,
   stubRequireSession,
   createTestSession,
+  TEST_CSRF_TOKEN,
   parseFlashRedirect,
   type AdminHarness,
 } from "./admin-harness.js";
@@ -1833,46 +1834,68 @@ describe("overlapping saves and uncertain outcomes", () => {
 });
 
 describe("the shared per-server channel lock (#1714)", () => {
-  const flush = async (ms = 20): Promise<void> => {
-    await new Promise((resolve) => setTimeout(resolve, ms));
+  /** In-memory work only (no I/O) settles within a few turns of the loop. */
+  const settle = async (): Promise<void> => {
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise<void>((resolve) => globalThis.setImmediate(resolve));
+    }
   };
-  const applyDeps = (guildId: string) => ({
+  const applyDeps = (guildId: string, signal?: AbortSignal) => ({
     guildId,
     rest: mockRest as never,
     call: (fn: (s: AbortSignal) => Promise<unknown>) =>
       fn(new AbortController().signal) as Promise<never>,
     listChannels: async () => [...channels],
     reason: "test",
+    signal,
   });
   const entry = { kind: "text" as const, name: "bot-log" };
 
-  it("an apply for a name waits for a Channel Manager write and then creates nothing", async () => {
-    await mount();
+  /**
+   * The Channel Manager's next create is held at Discord until `open()`.
+   * `reached` settles once that request is inside the lock and has called
+   * Discord, so a competing apply is started only after the manager holds it.
+   */
+  function holdNextManagerCreate(addToServer: boolean): {
+    reached: Promise<void>;
+    open: () => void;
+  } {
     let open!: () => void;
     const gate = new Promise<void>((resolve) => {
       open = resolve;
     });
+    let reachedResolve!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      reachedResolve = resolve;
+    });
     mockCreate.mockImplementationOnce(async (body: any) => {
+      reachedResolve();
       await gate;
       const made = { id: "100000000000000077", name: body.name as string };
-      channels.push(view(made.id, { name: made.name }));
+      if (addToServer) channels.push(view(made.id, { name: made.name }));
       return made;
     });
+    return { reached, open };
+  }
+
+  it("an apply for a name waits for a Channel Manager write and then creates nothing", async () => {
+    await mount();
+    const hold = holdNextManagerCreate(true);
     const reviewed = planChannels([entry], channels);
     if (!reviewed.ok) throw new Error("plan");
     const manager = harness.post("/channels/create", {
       type: "text",
       name: "bot-log",
     });
-    await flush();
+    await hold.reached;
     const apply = applyChannelPlan(
       applyDeps(session.guildId),
       [entry],
       reviewed.planId,
     );
-    await flush();
+    await settle();
     expect(mockCreate).toHaveBeenCalledTimes(1);
-    open();
+    hold.open();
     const res = await manager;
     expect(flashOf(res)).toMatchObject({ type: "ok" });
     expect((await apply).ok).toBe(false);
@@ -1886,12 +1909,18 @@ describe("the shared per-server channel lock (#1714)", () => {
     const gate = new Promise<void>((resolve) => {
       open = resolve;
     });
+    let holding!: () => void;
+    const holdingStarted = new Promise<void>((resolve) => {
+      holding = resolve;
+    });
     const order: string[] = [];
     const held = withChannelLock(session.guildId, async () => {
       order.push("apply holds");
+      holding();
       await gate;
       order.push("apply done");
     });
+    await holdingStarted;
     const readsBefore = channelReads;
     const manager = harness
       .post("/channels/create", { type: "text", name: "other" })
@@ -1899,8 +1928,9 @@ describe("the shared per-server channel lock (#1714)", () => {
         order.push("manager done");
         return res;
       });
-    await flush();
-    expect(order).toEqual(["apply holds"]);
+    // The request goes over HTTP, so give it time to reach the lock; this
+    // only strengthens the negative check, the order below does not depend on it.
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
     expect(channelReads).toBe(readsBefore);
     open();
     await held;
@@ -1924,27 +1954,74 @@ describe("the shared per-server channel lock (#1714)", () => {
 
   it("a different server's apply is not blocked by a Channel Manager write", async () => {
     await mount();
-    let open!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      open = resolve;
-    });
-    mockCreate.mockImplementationOnce(async () => {
-      await gate;
-      return created;
-    });
+    const hold = holdNextManagerCreate(false);
     const manager = harness.post("/channels/create", {
       type: "text",
       name: "x",
     });
-    await flush();
+    await hold.reached;
     const other = await applyChannelPlan(
       applyDeps("another-guild"),
       [entry],
       (planChannels([entry], channels) as { planId: string }).planId,
     );
     expect(other.ok).toBe(true);
-    open();
+    hold.open();
     await manager;
+  });
+
+  it("is released when the channels cannot be read, and nothing is written", async () => {
+    await mount();
+    failChannelReadsFrom = 1;
+    const failed = await harness.post("/channels/create", {
+      type: "text",
+      name: "x",
+    });
+    expect(flashOf(failed).type).toBe("err");
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(await withChannelLock(session.guildId, async () => "free")).toEqual({
+      ok: true,
+      value: "free",
+    });
+  });
+
+  it("a request that closes while it waits never runs its write afterwards", async () => {
+    await mount();
+    let release!: () => void;
+    const holder = withChannelLock(session.guildId, async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    });
+    const abort = new AbortController();
+    const waiting = fetch(`${harness.baseUrl}/admin/channels/create`, {
+      method: "POST",
+      redirect: "manual",
+      signal: abort.signal,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `koolbot_csrf=${encodeURIComponent(TEST_CSRF_TOKEN)}`,
+      },
+      body: new globalThis.URLSearchParams({
+        _csrf: TEST_CSRF_TOKEN,
+        type: "text",
+        name: "late",
+      }).toString(),
+    }).catch(() => null);
+    // Wait until the server has seen the request (its audit entry is written
+    // only when the request has been answered, so poll the lock instead).
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    abort.abort();
+    await waiting;
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    release();
+    await holder;
+    // The queued write has had its turn and did nothing.
+    expect(await withChannelLock(session.guildId, async () => "free")).toEqual({
+      ok: true,
+      value: "free",
+    });
+    expect(mockCreate).not.toHaveBeenCalled();
   });
 
   it("refuses with the busy message when the lock stays held, without writing", async () => {
