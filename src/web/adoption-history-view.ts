@@ -115,7 +115,7 @@ const VERDICT: Record<string, { title: string; next: string }> = {
   },
   rolling_back: {
     title: "The latest apply is being restored",
-    next: "Restore is offered again when that has finished.",
+    next: "Reload this page to see how it ended.",
   },
   rollback_partial: {
     title: "The latest apply was only partly restored",

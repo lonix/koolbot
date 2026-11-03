@@ -276,6 +276,17 @@ describe("adoption history on the kb- components (#1733)", () => {
     expect(html.includes("kb-callout kb-callout--warn")).toBe(tone === "warn");
   });
 
+  it("does not promise Restore after a restore in progress (it ends as rolled back)", () => {
+    const html = mainOf(
+      renderAdoptionHistoryPage({
+        ...base,
+        snapshots: [snap({ status: "rolling_back" })],
+      }),
+    );
+    expect(html).toContain("Reload this page to see how it ended.");
+    expect(html).not.toContain("Restore is offered");
+  });
+
   it("has one footer in the list panel, with the pager and the retention note", () => {
     const html = mainOf(states.list);
     expect(html.match(/kb-panel__foot/g)).toHaveLength(1);
