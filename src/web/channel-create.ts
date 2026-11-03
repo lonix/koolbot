@@ -255,6 +255,14 @@ export interface ChannelCreateDeps {
    * An apply that has started is never cut off by it.
    */
   signal?: AbortSignal;
+  /**
+   * A check the caller makes on the live channels read inside the lock, before
+   * the re-plan. Returning false means what the caller decided its entries
+   * from has changed, and the apply refuses ("changed since Review") with
+   * nothing created. Absent: no check (the Channel Manager and every other
+   * caller are unaffected).
+   */
+  liveUnchanged?: (live: readonly ManagedChannelView[]) => boolean;
 }
 
 export interface AppliedChannel {
@@ -323,13 +331,12 @@ async function applyLocked(
       "KoolBot couldn't read the channels from Discord, so nothing was created. Try again.",
     );
   }
+  const CHANGED =
+    "The channels on the server changed since Review, so nothing was created. Review the changes again.";
+  if (deps.liveUnchanged && !deps.liveUnchanged(live)) return nothing(CHANGED);
   const plan = planChannels(entries, live);
   if (!plan.ok) return nothing(plan.errors.join(" "));
-  if (plan.planId !== reviewedPlanId) {
-    return nothing(
-      "The channels on the server changed since Review, so nothing was created. Review the changes again.",
-    );
-  }
+  if (plan.planId !== reviewedPlanId) return nothing(CHANGED);
 
   const done: AppliedChannel[] = [];
   const createdIds: string[] = [];

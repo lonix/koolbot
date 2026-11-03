@@ -70,6 +70,7 @@ export async function createPendingChannels(
     const resolved = resolveExisting(pending, live);
     if (!resolved.ok) return { ok: false, error: resolved.error };
     const entries = resolved.entries;
+    const before = matchSignature(pending, live);
     const plan = planChannels(entries, live);
     if (!plan.ok) return { ok: false, error: plan.errors.join(" ") };
     const manager = CommandManager.getInstance(client);
@@ -82,6 +83,9 @@ export async function createPendingChannels(
         listChannels: () => fetchChannelViews(guild),
         reason: `KoolBot web UI, by ${actorId}`,
         signal,
+        // The entries were decided from the read above, outside the lock: a
+        // match that appeared (or became ambiguous) since refuses the apply.
+        liveUnchanged: (now) => matchSignature(pending, now) === before,
       },
       entries,
       plan.planId,
@@ -118,18 +122,25 @@ export const AMBIGUOUS_NAME_MESSAGE =
  * the whole server first: one normalised match keeps its own parent, so the
  * helper selects it; two or more are ambiguous and refused.
  */
+function matchesOf(
+  name: string,
+  live: readonly ManagedChannelView[],
+): ManagedChannelView[] {
+  const wanted = normaliseChannelName("text", name).toLowerCase();
+  return live.filter(
+    (c) =>
+      c.kind === "text" &&
+      normaliseChannelName("text", c.name).toLowerCase() === wanted,
+  );
+}
+
 function resolveExisting(
   pending: readonly PendingCreate[],
   live: readonly ManagedChannelView[],
 ): { ok: true; entries: ChannelPlanEntry[] } | { ok: false; error: string } {
   const entries: ChannelPlanEntry[] = [];
   for (const p of pending) {
-    const wanted = normaliseChannelName("text", p.name).toLowerCase();
-    const matches = live.filter(
-      (c) =>
-        c.kind === "text" &&
-        normaliseChannelName("text", c.name).toLowerCase() === wanted,
-    );
+    const matches = matchesOf(p.name, live);
     if (matches.length > 1) return { ok: false, error: AMBIGUOUS_NAME_MESSAGE };
     entries.push({
       kind: "text",
@@ -138,4 +149,18 @@ function resolveExisting(
     });
   }
   return { ok: true, entries };
+}
+
+/** The ids matching each pending name, in order: what the entries were decided from. */
+function matchSignature(
+  pending: readonly PendingCreate[],
+  live: readonly ManagedChannelView[],
+): string {
+  return JSON.stringify(
+    pending.map((p) =>
+      matchesOf(p.name, live)
+        .map((c) => `${c.id}:${c.parentId ?? ""}`)
+        .sort(),
+    ),
+  );
 }

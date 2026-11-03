@@ -937,3 +937,50 @@ describe("applyChannelPlan serialises per server (#1714)", () => {
     await holder;
   });
 });
+
+describe("applyChannelPlan liveUnchanged (#1663)", () => {
+  const entry = { kind: "text" as const, name: "quote-wall" };
+  const planId = (): string => {
+    const plan = planChannels([entry], live);
+    if (!plan.ok) throw new Error("plan");
+    return plan.planId;
+  };
+
+  it("refuses with the changed-since-Review message and creates nothing when the check says so", async () => {
+    const { deps, post } = setup();
+    const seen: number[] = [];
+    const result = await applyChannelPlan(
+      {
+        ...deps,
+        liveUnchanged: (l) => {
+          seen.push(l.length);
+          return false;
+        },
+      },
+      [entry],
+      planId(),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: CHANGED_SINCE_REVIEW,
+      removed: [],
+      stuck: [],
+    });
+    expect(seen).toEqual([live.length]);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("changes nothing when the check passes or is absent", async () => {
+    const a = setup();
+    const withCheck = await applyChannelPlan(
+      { ...a.deps, liveUnchanged: () => true },
+      [entry],
+      planId(),
+    );
+    const b = setup();
+    const without = await applyChannelPlan(b.deps, [entry], planId());
+    expect(withCheck.ok).toBe(true);
+    expect(without).toEqual(withCheck);
+    expect(a.post).toHaveBeenCalledTimes(1);
+  });
+});

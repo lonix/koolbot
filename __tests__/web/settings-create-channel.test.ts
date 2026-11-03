@@ -331,6 +331,64 @@ describe("a name that exists inside a category (#1663)", () => {
     expect(mockConfigSet).not.toHaveBeenCalled();
   });
 
+  it("refuses, creating nothing, when a match appears in a category after the first read", async () => {
+    live = [view(CAT, { name: "Community", kind: "category" })];
+    const later = [
+      ...live,
+      view("100000000000000060", { name: "quote-wall", parentId: CAT }),
+    ];
+    mockFetchViews
+      .mockResolvedValueOnce(live) // the read before the lock
+      .mockResolvedValue(later); // the read inside the lock
+    const res = await save({
+      category: "quotes",
+      keys: [QUOTES],
+      [`value_${QUOTES}`]: "create:Quote Wall",
+    });
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.type).toBe("err");
+    expect(body.invalidReasons[QUOTES]).toContain("changed since Review");
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("refuses when a second match appears in another category after the first read", async () => {
+    const A = view(CAT, { name: "A", kind: "category" });
+    const first = [
+      A,
+      view("100000000000000060", { name: "quote-wall", parentId: CAT }),
+    ];
+    const later = [
+      ...first,
+      view("100000000000000051", { name: "B", kind: "category" }),
+      view("100000000000000061", {
+        name: "Quote Wall",
+        parentId: "100000000000000051",
+      }),
+    ];
+    mockFetchViews.mockResolvedValueOnce(first).mockResolvedValue(later);
+    const res = await save({
+      category: "quotes",
+      keys: [QUOTES],
+      [`value_${QUOTES}`]: "create:Quote Wall",
+    });
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.type).toBe("err");
+    expect(body.invalidReasons[QUOTES]).toContain("changed since Review");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("goes ahead when nothing moved between the two reads", async () => {
+    live = [view(CAT, { name: "Community", kind: "category" })];
+    const res = await save({
+      category: "quotes",
+      keys: [QUOTES],
+      [`value_${QUOTES}`]: "create:Quote Wall",
+    });
+    expect(((await res.json()) as any).type).toBe("ok");
+    expect(mockPost).toHaveBeenCalledTimes(1);
+  });
+
   it("still creates a name that exists only as another kind", async () => {
     live = [view("100000000000000070", { name: "quote-wall", kind: "voice" })];
     await save({
