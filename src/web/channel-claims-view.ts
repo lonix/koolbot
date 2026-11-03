@@ -12,6 +12,7 @@ import {
 } from "./discord-labels.js";
 import { ChannelType } from "discord.js";
 import { renderFlash, type FlashMessage } from "./admin-views.js";
+import { icon, toneIcon, type Tone } from "./icons.js";
 import { renderEmojiField } from "./setting-pickers.js";
 import {
   renderAdoptionDiff,
@@ -87,15 +88,59 @@ export interface ClaimsPageProps {
 
 const checked = (v: boolean | undefined): string => (v ? " checked" : "");
 
+/**
+ * A Callout. `title` and `text` are HTML the caller has already escaped. A
+ * state is a `status`; only the failure of an action is an `alert`.
+ */
+function callout(
+  tone: Tone,
+  role: "status" | "alert",
+  title: string,
+  o: { text?: string; textHtml?: string; titleId?: string } = {},
+): string {
+  const cls = tone ? ` kb-callout--${tone}` : "";
+  const id = o.titleId ? ` id="${o.titleId}"` : "";
+  const body = o.textHtml
+    ? `<div class="kb-callout__text">${o.textHtml}</div>`
+    : o.text
+      ? `<p class="kb-callout__text">${o.text}</p>`
+      : "";
+  return `<div class="kb-callout${cls}" role="${role}">${toneIcon(tone)}<div class="kb-callout__body"><p class="kb-callout__title"${id}>${title}</p>${body}</div></div>`;
+}
+
+/** A labelled control: `kb-field` with a `for`/`id` pair, so the label names the control. */
+function field(id: string, label: string, control: string): string {
+  return `<div class="kb-field"><label class="kb-label" for="${id}">${label}</label>${control}</div>`;
+}
+
+/**
+ * A checkbox with its label, in normal flow so a long text wraps beside the
+ * box (a `kb-row` would put the box alone on a line). No component exists for
+ * a plain checkbox; the label stays a bare element, with no class.
+ */
+function check(input: string, text: string): string {
+  return `<label>${input} <span>${text}</span></label>`;
+}
+
+/** A Panel's head; the title is a plain wrapping flex row, never `kb-row`. */
+function panelHead(id: string, title: string): string {
+  return `<header class="kb-panel__head"><h2 class="kb-panel__title" id="${id}">${title}</h2></header>`;
+}
+
 function featureOptions(channel: ScanChannel, selected: string): string {
   const fits = FEATURE_TARGETS.filter((f) => featureFitsChannel(f, channel));
   if (fits.length === 0) return "";
-  return `<label>Bind to a feature <select name="bind_${escapeHtml(channel.id)}"><option value="">(none)</option>${fits
-    .map(
-      (f) =>
-        `<option value="${escapeHtml(f.key)}"${f.key === selected ? " selected" : ""}>${escapeHtml(f.label)}</option>`,
-    )
-    .join("")}</select></label>`;
+  const name = `bind_${escapeHtml(channel.id)}`;
+  return field(
+    name,
+    "Bind to a feature",
+    `<select class="kb-select" id="${name}" name="${name}"><option value="">(none)</option>${fits
+      .map(
+        (f) =>
+          `<option value="${escapeHtml(f.key)}"${f.key === selected ? " selected" : ""}>${escapeHtml(f.label)}</option>`,
+      )
+      .join("")}</select>`,
+  );
 }
 
 function roleOptions(scan: ServerScan, selected: readonly string[]): string {
@@ -134,7 +179,7 @@ function notes(
     out.push("a Discord community channel");
   if (c.syncedToParent === false) out.push("own permissions");
   return out.length
-    ? `<div class="muted">${escapeHtml(out.join("; "))}</div>`
+    ? `<div class="kb-muted">${escapeHtml(out.join("; "))}</div>`
     : "";
 }
 
@@ -149,7 +194,7 @@ function claimRow(
 ): string {
   const id = escapeHtml(c.id);
   const action = claim?.action ?? "leave";
-  const actionSelect = `<select name="action_${id}" aria-label="Action for ${escapeHtml(c.name)}">${CLAIM_ACTIONS.filter(
+  const actionSelect = `<select class="kb-select" name="action_${id}" aria-label="Action for ${escapeHtml(c.name)}">${CLAIM_ACTIONS.filter(
     (a) => a !== "sync" || c.parentId !== null,
   )
     .map(
@@ -158,49 +203,74 @@ function claimRow(
     )
     .join("")}</select>`;
   const bulkSelect = bulk
-    ? `<label>For every channel here left alone <select name="bulk_${id}"><option value="">(no change)</option>${CLAIM_ACTIONS.filter(
-        (a) => a !== "leave",
-      )
-        .map(
-          (a) =>
-            `<option value="${a}">${escapeHtml(ACTION_LABELS[a])}</option>`,
+    ? field(
+        `bulk_${id}`,
+        "For every channel here left alone",
+        `<select class="kb-select" id="bulk_${id}" name="bulk_${id}"><option value="">(no change)</option>${CLAIM_ACTIONS.filter(
+          (a) => a !== "leave",
         )
-        .join("")}</select></label>`
+          .map(
+            (a) =>
+              `<option value="${a}">${escapeHtml(ACTION_LABELS[a])}</option>`,
+          )
+          .join("")}</select>`,
+      )
     : "";
   const groupSelect = groups.length
-    ? `<label>Group and above <select name="min_${id}"><option value="">(none)</option>${groups
-        .map(
-          (g) =>
-            `<option value="${escapeHtml(g.id)}"${claim?.minGroupId === g.id ? " selected" : ""}>${escapeHtml(g.name)}</option>`,
-        )
-        .join("")}</select></label>`
+    ? field(
+        `min_${id}`,
+        "Group and above",
+        `<select class="kb-select" id="min_${id}" name="min_${id}"><option value="">(none)</option>${groups
+          .map(
+            (g) =>
+              `<option value="${escapeHtml(g.id)}"${claim?.minGroupId === g.id ? " selected" : ""}>${escapeHtml(g.name)}</option>`,
+          )
+          .join("")}</select>`,
+      )
     : "";
   const voiceBind =
     c.kind === "category"
-      ? `<label class="check"><input type="checkbox" name="vmo_${id}" value="1"${checked(claim?.voiceManagedOnly)}> If bound as the voice category: also turn on managed-only cleanup (only channels KoolBot created are ever deleted)</label>
-<label class="check"><input type="checkbox" name="prefix_${id}" value="1"${checked(claim?.usePrefix)}> If bound as the voice category: use this server's naming prefix${scan.naming.suggestedPrefix ? ` (<code>${escapeHtml(scan.naming.suggestedPrefix)}</code>)` : " (none detected)"}</label>`
+      ? `${check(`<input type="checkbox" name="vmo_${id}" value="1"${checked(claim?.voiceManagedOnly)}>`, "If bound as the voice category: also turn on managed-only cleanup (only channels KoolBot created are ever deleted)")}
+${check(`<input type="checkbox" name="prefix_${id}" value="1"${checked(claim?.usePrefix)}>`, `If bound as the voice category: use this server's naming prefix${scan.naming.suggestedPrefix ? ` (<code class="kb-mono">${escapeHtml(scan.naming.suggestedPrefix)}</code>)` : " (none detected)"}`)}`
       : "";
   const forumLock = c.flags.forum
-    ? `<label class="check"><input type="checkbox" name="lock_${id}" value="1"${checked(claim?.lockReplies)}> Forum: also stop replies inside posts</label>`
+    ? check(
+        `<input type="checkbox" name="lock_${id}" value="1"${checked(claim?.lockReplies)}>`,
+        "Forum: also stop replies inside posts",
+      )
     : "";
   const stageSpeakers = c.flags.stage
-    ? `<label>Stage: only these roles may request to speak (gate; they can also join) <select name="speakers_${id}" multiple size="5">${roleOptions(scan, claim?.speakerRoleIds ?? [])}</select></label>`
+    ? field(
+        `speakers_${id}`,
+        "Stage: only these roles may request to speak (gate; they can also join)",
+        `<select class="kb-select" id="speakers_${id}" name="speakers_${id}" multiple size="5">${roleOptions(scan, claim?.speakerRoleIds ?? [])}</select>`,
+      )
     : "";
-  const options = `<details><summary>Options</summary><div class="stack">
-<label>Roles (gate: allowed in; read-only: may still post) <select name="roles_${id}" multiple size="5">${roleOptions(scan, claim?.roleIds ?? [])}</select></label>
+  const options = `<details class="kb-disclosure"><summary>${icon("chevron-right", { className: "kb-chev" })}Options</summary><div class="kb-disclosure__body kb-stack">
+${field(
+  `roles_${id}`,
+  "Roles (gate: allowed in; read-only: may still post)",
+  `<select class="kb-select" id="roles_${id}" name="roles_${id}" multiple size="5">${roleOptions(scan, claim?.roleIds ?? [])}</select>`,
+)}
 ${stageSpeakers}
 ${groupSelect}
-<label class="check"><input type="checkbox" name="react_${id}" value="1"${checked(claim?.allowReactions)}> Read-only: members may still react</label>
+${check(`<input type="checkbox" name="react_${id}" value="1"${checked(claim?.allowReactions)}>`, "Read-only: members may still react")}
 ${forumLock}
-<label class="check"><input type="checkbox" name="replace_${id}" value="1"${checked(claim?.approveReplace)}> Sync: I approve replacing the permission overwrites this channel has of its own. The previous ones are saved in the snapshot.</label>
+${check(`<input type="checkbox" name="replace_${id}" value="1"${checked(claim?.approveReplace)}>`, "Sync: I approve replacing the permission overwrites this channel has of its own. The previous ones are saved in the snapshot.")}
 ${voiceBind}
 </div></details>`;
+  const isCategory = c.kind === "category";
   return `<tr id="claim-${id}">
-<th scope="row">${c.kind === "category" ? `<strong>${namedChannelMention(c.name, c.typeName)}</strong>` : `<span aria-hidden="true">&nbsp;&nbsp;</span>${namedChannelMention(c.name, c.typeName)}`}<div class="muted">${escapeHtml(c.typeName)}</div>${notes(c, feeds, pairing)}</th>
-<td>${actionSelect}${bulkSelect}</td>
+<th scope="row"${isCategory ? "" : ' class="kb-tree__child"'}>${isCategory ? `<strong>${namedChannelMention(c.name, c.typeName)}</strong>` : namedChannelMention(c.name, c.typeName)}<div class="kb-muted">${escapeHtml(c.typeName)}</div>${notes(c, feeds, pairing)}</th>
+<td><div class="kb-stack">${actionSelect}${bulkSelect}</div></td>
 <td>${featureOptions(c, claim?.bindKey ?? "")}</td>
 <td>${options}</td>
 </tr>`;
+}
+
+/** A table inside its Panel: it scrolls there, never the page. */
+function flushTable(caption: string, head: string[], rows: string): string {
+  return `<div class="kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">${caption}</caption><thead><tr>${head.map((h) => `<th scope="col">${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function renderSuggestions(
@@ -217,26 +287,35 @@ function renderSuggestions(
       const claim = claimOf.get(p.categoryId);
       const action =
         p.state === "proposed"
-          ? `<label class="check"><input type="checkbox" name="pair_${cid}" value="1"${checked(claim?.registerPairing)}> Register <span class="visually-hidden">${escapeHtml(p.roleName)} for ${escapeHtml(p.categoryName)}</span></label> <span class="muted">Emoji <span class="visually-hidden">for ${escapeHtml(p.categoryName)}</span></span> ${renderEmojiField(`pairemoji_${p.categoryId}`, claim?.pairEmoji ?? DEFAULT_PAIR_EMOJI, { label: p.categoryName, inputLabel: `Emoji for ${p.categoryName}`, maxLength: 64 })}`
-          : `<span class="tag ${p.state === "refused" ? "tag-off" : "tag-on"}">${p.state === "refused" ? "refused" : "already a reaction role"}</span> ${escapeHtml(p.reason ?? "")}`;
+          ? `<div class="kb-row">${check(`<input type="checkbox" name="pair_${cid}" value="1"${checked(claim?.registerPairing)}>`, `Register <span class="kb-visually-hidden">${escapeHtml(p.roleName)} for ${escapeHtml(p.categoryName)}</span>`)} <span class="kb-muted">Emoji <span class="kb-visually-hidden">for ${escapeHtml(p.categoryName)}</span></span> ${renderEmojiField(`pairemoji_${p.categoryId}`, claim?.pairEmoji ?? DEFAULT_PAIR_EMOJI, { label: p.categoryName, inputLabel: `Emoji for ${p.categoryName}`, maxLength: 64 })}</div>`
+          : `<span class="kb-badge ${p.state === "refused" ? "kb-badge--off" : "kb-badge--on"}">${p.state === "refused" ? "refused" : "already a reaction role"}</span> ${escapeHtml(p.reason ?? "")}`;
       return `<tr><th scope="row">${channelMention({ name: p.categoryName, type: ChannelType.GuildCategory })}</th><td>${roleMention(p.roleName)}</td><td>${action}</td></tr>`;
     })
     .join("");
   const pairing = pairings.length
-    ? `<h3>Game-role categories</h3>
-<p class="muted">These categories are hidden from @everyone and visible to exactly one role. Registering one makes that role pickable through a new KoolBot picker and keeps the category gated: the role and the category are reused as they are and nothing new is created. A role with powerful permissions (Administrator, Manage Roles and similar) is refused.</p>
-<table><caption class="visually-hidden">Detected game-role categories</caption><thead><tr><th scope="col">Category</th><th scope="col">Role</th><th scope="col">Register</th></tr></thead><tbody>${pairRows}</tbody></table>
-${proposed.length ? `<label class="check"><input type="checkbox" name="pairs_all" value="1"> Register all ${proposed.length} detected pair${proposed.length === 1 ? "" : "s"} when previewing</label> <span class="muted">Refused pairs are skipped; each one keeps the emoji shown above.</span>` : ""}`
+    ? `<div class="kb-stack">
+<h3 class="kb-overline">Game-role categories</h3>
+<p class="kb-help">These categories are hidden from @everyone and visible to exactly one role. Registering one makes that role pickable through a new KoolBot picker and keeps the category gated: the role and the category are reused as they are and nothing new is created. A role with powerful permissions (Administrator, Manage Roles and similar) is refused.</p>
+${flushTable("Detected game-role categories", ["Category", "Role", "Register"], pairRows)}
+${proposed.length ? `<div class="kb-row">${check(`<input type="checkbox" name="pairs_all" value="1">`, `Register all ${proposed.length} detected pair${proposed.length === 1 ? "" : "s"} when previewing`)} <span class="kb-muted">Refused pairs are skipped; each one keeps the emoji shown above.</span></div>` : ""}
+</div>`
     : "";
   let feedHtml: string;
   if (!feeds.known) {
-    feedHtml = `<div class="notice warn" role="status">Webhook data is unavailable${feeds.unavailable === "missing-permission" ? " because KoolBot lacks the Manage Webhooks permission" : " because it could not be read"}. No feed suggestions are made: this does not mean no channel is fed by a webhook or a followed channel.</div>`;
+    feedHtml = callout(
+      "warn",
+      "status",
+      `Webhook data is unavailable${feeds.unavailable === "missing-permission" ? " because KoolBot lacks the Manage Webhooks permission" : " because it could not be read"}.`,
+      {
+        text: "No feed suggestions are made: this does not mean no channel is fed by a webhook or a followed channel.",
+      },
+    );
   } else if (feeds.feeds.length === 0) {
-    feedHtml = `<p class="muted">No channel is fed by a webhook or a followed announcement channel.</p>`;
+    feedHtml = `<p class="kb-help">No channel is fed by a webhook or a followed announcement channel.</p>`;
   } else {
     const byId = new Map(scan.channels.map((c) => [c.id, c]));
-    feedHtml = `<p class="muted">These channels are fed by a webhook or a followed announcement channel. Making one a feed makes it read-only for everyone (reactions stay open). Its webhooks and follower integrations are never modified or removed.</p>
-<ul class="stack">${feeds.feeds
+    feedHtml = `<p class="kb-help">These channels are fed by a webhook or a followed announcement channel. Making one a feed makes it read-only for everyone (reactions stay open). Its webhooks and follower integrations are never modified or removed.</p>
+<div class="kb-panel__body--flush"><ul class="kb-list">${feeds.feeds
       .map((f) => {
         const ch = byId.get(f.channelId);
         const fid = escapeHtml(f.channelId);
@@ -246,11 +325,17 @@ ${proposed.length ? `<label class="check"><input type="checkbox" name="pairs_all
             k === "channel-follower" ? "followed channel" : "webhook",
           )
           .join(" + ");
-        return `<li><label class="check"><input type="checkbox" name="feed_${fid}" value="1"${checked(claimOf.get(f.channelId)?.feed)}> Treat <strong>${name}</strong> as a feed</label> <span class="muted">(${escapeHtml(kinds)})</span></li>`;
+        return `<li>${check(`<input type="checkbox" name="feed_${fid}" value="1"${checked(claimOf.get(f.channelId)?.feed)}>`, `Treat <strong>${name}</strong> as a feed`)} <span class="kb-muted">(${escapeHtml(kinds)})</span></li>`;
       })
-      .join("")}</ul>`;
+      .join("")}</ul></div>`;
   }
-  return `<section aria-labelledby="cc-suggestions"><h3 id="cc-suggestions">Suggestions</h3>${pairing}<h3>Feeds</h3>${feedHtml}</section>`;
+  return `<section class="kb-panel" aria-labelledby="cc-suggestions">
+${panelHead("cc-suggestions", "Suggestions")}
+<div class="kb-panel__body kb-stack">
+${pairing}
+<div class="kb-stack"><h3 class="kb-overline">Feeds</h3>${feedHtml}</div>
+</div>
+</section>`;
 }
 
 function renderForm(props: ClaimsPageProps, csrf: string): string {
@@ -322,12 +407,15 @@ function renderForm(props: ClaimsPageProps, csrf: string): string {
       ),
     );
   }
-  return `<form method="POST" action="/admin/adopt/claims/preview" class="stack">
+  return `<form method="POST" action="/admin/adopt/claims/preview" class="kb-stack">
 ${csrf}
 ${renderSuggestions(scan, props, pairings, feeds)}
-<table><caption class="visually-hidden">Categories and channels</caption><thead><tr><th scope="col">Category / channel</th><th scope="col">Action</th><th scope="col">Feature</th><th scope="col">Options</th></tr></thead><tbody>${rows.join("")}</tbody></table>
-<button type="submit" class="${planCanApply(props) ? "btn" : "btn btn-primary"}">Preview changes</button>
-<span class="muted">Nothing is written to Discord yet.</span>
+<section class="kb-panel" aria-labelledby="cc-categories">
+${panelHead("cc-categories", "Categories and channels")}
+<div class="kb-panel__body"><p class="kb-help">Everything is left alone unless you choose an action. Overwrites for other bots, other roles and members are kept, and unrelated settings on a changed overwrite stay as they are. Webhooks, followed-channel feeds, messages and pins are never touched.</p></div>
+${flushTable("Categories and channels", ["Category / channel", "Action", "Feature", "Options"], rows.join(""))}
+<footer class="kb-panel__foot"><button type="submit" class="${planCanApply(props) ? "kb-btn" : "kb-btn kb-btn--primary"}">Preview changes</button><span>Nothing is written to Discord yet.</span></footer>
+</section>
 </form>`;
 }
 
@@ -343,24 +431,31 @@ function planCanApply(props: ClaimsPageProps): boolean {
   );
 }
 
+/** A list of plan problems or advice as a Callout: each code is a Badge. */
+function issueCallout(
+  tone: "warn" | "err",
+  title: string,
+  issues: ClaimsPlan["errors"],
+): string {
+  const badge = tone === "err" ? "kb-badge--off" : "kb-badge--warn";
+  return callout(tone, "status", `${title} (${issues.length})`, {
+    textHtml: `<ul>${issues
+      .map(
+        (i) =>
+          `<li><span class="kb-badge ${badge}">${escapeHtml(i.code)}</span> ${escapeHtml(i.message)}</li>`,
+      )
+      .join("")}</ul>`,
+  });
+}
+
 function renderPlan(props: ClaimsPageProps, csrf: string): string {
   const { plan } = props;
   if (!plan) return "";
   const extra = plan.errors.length
-    ? `<div class="card adoption-issues blockers"><h3>Needs attention (${plan.errors.length})</h3><ul>${plan.errors
-        .map(
-          (i) =>
-            `<li><span class="tag tag-off">${escapeHtml(i.code)}</span> ${escapeHtml(i.message)}</li>`,
-        )
-        .join("")}</ul></div>`
+    ? issueCallout("err", "Needs attention", plan.errors)
     : "";
   const advice = plan.warnings.length
-    ? `<div class="card adoption-issues warnings"><h3>Worth knowing (${plan.warnings.length})</h3><ul>${plan.warnings
-        .map(
-          (i) =>
-            `<li><span class="tag tag-warn">${escapeHtml(i.code)}</span> ${escapeHtml(i.message)}</li>`,
-        )
-        .join("")}</ul></div>`
+    ? issueCallout("warn", "Worth knowing", plan.warnings)
     : "";
   const applicable =
     plan.plan.errors.length === 0 &&
@@ -368,9 +463,15 @@ function renderPlan(props: ClaimsPageProps, csrf: string): string {
     plan.plan.operations.length > 0;
   const form =
     applicable && props.previewToken
-      ? `<form method="POST" action="/admin/adopt/claims/apply" data-confirm="Apply this plan to Discord? A snapshot is saved first so it can be rolled back."${CONFIRM_NEUTRAL_ATTR}>${csrf}<input type="hidden" name="planId" value="${escapeHtml(plan.plan.id)}"><input type="hidden" name="token" value="${escapeHtml(props.previewToken)}">${renderDestructiveConfirm(plan.plan)}<button type="submit" class="btn btn-primary">Apply plan</button> <span class="muted">A snapshot of everything touched is saved first.</span></form>`
+      ? `<div class="kb-panel__body"><form method="POST" action="/admin/adopt/claims/apply" class="kb-stack" data-confirm="Apply this plan to Discord? A snapshot is saved first so it can be rolled back."${CONFIRM_NEUTRAL_ATTR}>${csrf}<input type="hidden" name="planId" value="${escapeHtml(plan.plan.id)}"><input type="hidden" name="token" value="${escapeHtml(props.previewToken)}">${renderDestructiveConfirm(plan.plan)}<div class="kb-row"><button type="submit" class="kb-btn kb-btn--primary">Apply plan</button><span class="kb-muted">A snapshot of everything touched is saved first.</span></div></form></div>`
       : "";
-  return `${extra}${advice}${renderAdoptionDiff(plan.plan)}${form}`;
+  const issues =
+    extra || advice
+      ? `<div class="kb-panel__body kb-stack">${extra}${advice}</div>`
+      : "";
+  // The diff keeps its own markup (#1715); the flush body is its scroll
+  // container, so a wide plan table never scrolls the page.
+  return `${issues}<div class="kb-panel__body--flush">${renderAdoptionDiff(plan.plan)}</div>${form}`;
 }
 
 export const JOB_SCRIPT = (jobId: string): string =>
@@ -382,35 +483,51 @@ export const JOB_SCRIPT = (jobId: string): string =>
 
 export function renderChannelClaimsPage(props: ClaimsPageProps): string {
   const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+  // `JOB_SCRIPT` sets the text of #cc-job, so the id sits on the Callout's title.
   const job = props.jobId
-    ? `<div class="notice" id="cc-job" role="status">Applying…</div>`
+    ? callout("", "status", "Applying…", { titleId: "cc-job" })
     : "";
   const prefill = props.prefill
-    ? `<div class="notice" role="status">Prefilled from the Server scan: <strong>${namedChannelMention(props.prefill.channelName, props.prefill.channelTypeName)}</strong> is set to be bound to <strong>${escapeHtml(props.prefill.featureLabel)}</strong>. Nothing changes until you preview the plan and apply it.</div>`
+    ? callout(
+        "",
+        "status",
+        `Prefilled from the Server scan: <strong>${namedChannelMention(props.prefill.channelName, props.prefill.channelTypeName)}</strong> is set to be bound to <strong>${escapeHtml(props.prefill.featureLabel)}</strong>.`,
+        { text: "Nothing changes until you preview the plan and apply it." },
+      )
     : "";
   const problems = props.problems.length
-    ? `<div class="notice warn" role="status">${props.problems.map((p) => escapeHtml(p)).join(" ")}</div>`
+    ? callout(
+        "warn",
+        "status",
+        props.problems.map((p) => escapeHtml(p)).join(" "),
+      )
     : "";
   const content = props.scan
-    ? `<div class="card">
-  <h2>Categories and channels</h2>
-  <p class="muted">Everything is left alone unless you choose an action. Overwrites for other bots, other roles and members are kept, and unrelated settings on a changed overwrite stay as they are. Webhooks, followed-channel feeds, messages and pins are never touched.</p>
-  ${renderForm(props, csrf)}
-</div>
-<div class="card">
-  <h2>Plan</h2>
-  <p class="muted">What applying would change in Discord and in KoolBot's settings. Steps that replace existing permissions are listed as destructive, run last, and only appear when you approved them.</p>
-  ${props.plan ? renderPlan(props, csrf) : `<p class="muted">Choose actions above and preview them.</p>`}
-</div>`
-    : `<div class="notice err">The scan failed: ${escapeHtml(props.error ?? "unknown error")}. Check that the bot is in the server, then reload.</div>`;
-  const body = `
-<h1>Channel Claims</h1>
-<p class="subtitle">Take over existing categories and channels: make them read-only, gate them to groups, sync them with their category, or bind them to a KoolBot feature. See <a href="/admin/adopt">Server Scan</a> for what is there now.</p>
+    ? `${renderForm(props, csrf)}
+<section class="kb-panel" aria-labelledby="cc-plan">
+  ${panelHead("cc-plan", "Plan")}
+  <div class="kb-panel__body"><p class="kb-help">What applying would change in Discord and in KoolBot's settings. Steps that replace existing permissions are listed as destructive, run last, and only appear when you approved them.</p>${props.plan ? "" : `<p class="kb-help">Choose actions above and preview them.</p>`}</div>
+  ${props.plan ? renderPlan(props, csrf) : ""}
+</section>`
+    : callout(
+        "err",
+        "alert",
+        `The scan failed: ${escapeHtml(props.error ?? "unknown error")}.`,
+        { text: "Check that the bot is in the server, then reload." },
+      );
+  const body = `<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Channel Claims</h1>
+    <p class="kb-pagehead__sub">Take over existing categories and channels: make them read-only, gate them to groups, sync them with their category, or bind them to a KoolBot feature. See <a href="/admin/adopt">Server Scan</a> for what is there now.</p>
+  </div>
+</header>
 ${renderFlash(props.flash)}
 ${job}
 ${prefill}
 ${problems}
 ${content}
+</div>
 ${props.jobId ? `${scriptTag(JOB_SCRIPT(props.jobId))}` : ""}
 `;
   return renderAdminPage({

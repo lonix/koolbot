@@ -406,7 +406,7 @@ describe("Discord labels on the claims page (#1394)", () => {
     const row = (id: string): string =>
       html.slice(html.indexOf(`<tr id="claim-${id}">`)).split("</tr>")[0];
     expect(row("11")).toContain('aria-label="Text channel"');
-    expect(row("11")).toContain('<div class="muted">GuildText</div>');
+    expect(row("11")).toContain('<div class="kb-muted">GuildText</div>');
     expect(row("13")).toContain('aria-label="Voice channel"');
     expect(row("10")).toContain("kb-mention--category");
     expect(row("10")).toContain("Games &lt;script&gt;");
