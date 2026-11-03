@@ -22,7 +22,12 @@ import {
 } from "discord.js";
 import logger from "../../../utils/logger.js";
 import { CommandManager } from "../../../services/command-manager.js";
-import { createKeyedLock } from "../../../utils/keyed-lock.js";
+import {
+  CHANNEL_LOCK_BUSY_MESSAGE,
+  ChannelReadTimeoutError,
+  readWithin,
+  withChannelLock,
+} from "../../channel-write-lock.js";
 import { recordAudit } from "../../audit.js";
 import {
   cancellableCall,
@@ -150,10 +155,16 @@ async function moveRefusal(
   errors: FormErrors,
 ): Promise<boolean> {
   try {
-    const verdict = moveVerdict(target, await loadProtection(guild, channels));
+    const verdict = moveVerdict(
+      target,
+      await readWithin(() => loadProtection(guild, channels)),
+    );
     if (verdict.ok) return false;
     addFieldError(errors, "parent", verdict.message);
   } catch (error) {
+    // A stalled lookup is not about the field: it reaches the write wrapper,
+    // which refuses without drawing the page (and its lookup) again.
+    if (error instanceof ChannelReadTimeoutError) throw error;
     logger.warn("channel manager: protection check failed", error);
     addFieldError(
       errors,
@@ -199,10 +210,10 @@ export function createChannelManagerRouter(
 ): Router {
   const router = Router();
 
-  // Writes to one server run one at a time, each from a fresh read of the
-  // channels: two saves of the same page cannot both pass their checks against
-  // the same snapshot and then silently overwrite each other.
-  const writeLock = createKeyedLock();
+  // Writes to one server run one at a time (the shared lock in
+  // `channel-write-lock.ts`, which `applyChannelPlan` takes too), each from a
+  // fresh read of the channels: two saves of the same page cannot both pass
+  // their checks against the same snapshot and then silently overwrite each other.
 
   // Created on first use: the token exists once the bot has logged in.
   let cachedRest: REST | null = writeRest ?? null;
@@ -239,7 +250,10 @@ export function createChannelManagerRouter(
     guild: Guild,
     id: string,
   ): Promise<GuildChannel | null> {
-    const found = await guild.channels.fetch(id).catch(() => null);
+    // A read inside the lock: bounded, and a timeout refuses before the write.
+    const found = await readWithin(() =>
+      guild.channels.fetch(id).catch(() => null),
+    );
     return found && !found.isThread() ? (found as GuildChannel) : null;
   }
 
@@ -255,40 +269,66 @@ export function createChannelManagerRouter(
       const session = requireSessionContext(req);
       const params = { id: String(req.params.id ?? "") };
       let outcome: Outcome = refuse("");
-      await writeLock.run(session.guildId, async () => {
-        try {
-          const guild = await fetchGuild(session.guildId);
-          if (!guild) {
+      // A request that closes before its turn comes never runs afterwards; one
+      // that is already running keeps the lock until it has finished.
+      const gone = new AbortController();
+      const onClose = (): void => {
+        if (!res.writableEnded) gone.abort();
+      };
+      res.once("close", onClose);
+      // The session checks before this handler are async: the client may have
+      // left already, and its "close" event was then missed.
+      if (res.destroyed) onClose();
+      const held = await withChannelLock(
+        session.guildId,
+        async () => {
+          try {
+            const guild = await readWithin(() => fetchGuild(session.guildId));
+            if (!guild) {
+              outcome = refuse(
+                "Discord couldn't be reached, so nothing changed.",
+              );
+            } else if (!(await readWithin(() => botCanManageChannels(guild)))) {
+              outcome = refuse(
+                "KoolBot doesn't have the Manage Channels permission. Grant it in Discord, then try again.",
+              );
+            } else if (!getWriteRest()) {
+              outcome = refuse(
+                "The bot isn't signed in to Discord yet, so nothing was changed.",
+              );
+            } else {
+              const manager = CommandManager.getInstance(client);
+              outcome = await handler({
+                guild,
+                channels: await readWithin(() => fetchChannelViews(guild)),
+                maxBitrate: maxBitrateOf(guild),
+                body: (req.body as Record<string, unknown> | undefined) ?? {},
+                params,
+                reason: `KoolBot web UI, by ${session.discordUserId}`,
+                rest: getWriteRest() as REST,
+                call: (fn, opName, retryOnTimeout = false) =>
+                  cancellableCall(manager, fn, opName, retryOnTimeout),
+              });
+            }
+          } catch (error) {
+            logger.error(`channel manager: ${name} failed`, error);
             outcome = refuse(
-              "Discord couldn't be reached, so nothing changed.",
+              error instanceof ChannelReadTimeoutError
+                ? error.message
+                : describeWriteFailure(error),
             );
-          } else if (!(await botCanManageChannels(guild))) {
-            outcome = refuse(
-              "KoolBot doesn't have the Manage Channels permission. Grant it in Discord, then try again.",
-            );
-          } else if (!getWriteRest()) {
-            outcome = refuse(
-              "The bot isn't signed in to Discord yet, so nothing was changed.",
-            );
-          } else {
-            const manager = CommandManager.getInstance(client);
-            outcome = await handler({
-              guild,
-              channels: await fetchChannelViews(guild),
-              maxBitrate: maxBitrateOf(guild),
-              body: (req.body as Record<string, unknown> | undefined) ?? {},
-              params,
-              reason: `KoolBot web UI, by ${session.discordUserId}`,
-              rest: getWriteRest() as REST,
-              call: (fn, opName, retryOnTimeout = false) =>
-                cancellableCall(manager, fn, opName, retryOnTimeout),
-            });
           }
-        } catch (error) {
-          logger.error(`channel manager: ${name} failed`, error);
-          outcome = refuse(describeWriteFailure(error));
-        }
-      });
+        },
+        gone.signal,
+      );
+      res.off("close", onClose);
+      if (!held.ok) {
+        outcome = refuse(
+          held.reason === "busy"
+            ? CHANNEL_LOCK_BUSY_MESSAGE
+            : "The request was closed before it started, so nothing was changed.",
+        );
+      }
       await recordAudit(session, {
         action: `channels.${name}`,
         targetId: outcome.targetId ?? (params.id || null),
@@ -815,7 +855,7 @@ export function createChannelManagerRouter(
         verdict = deleteVerdict(
           target,
           ctx.channels,
-          await loadProtection(ctx.guild, ctx.channels),
+          await readWithin(() => loadProtection(ctx.guild, ctx.channels)),
         );
       } catch (error) {
         logger.warn("channel manager: protection check failed", error);

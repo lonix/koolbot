@@ -676,9 +676,20 @@ server {
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
     }
 }
 ```
+
+> [!NOTE]
+> `proxy_read_timeout 300s` matters for the Channel Manager. One write waits up
+> to 25 s for the per-server channel lock, may make up to five reads of at
+> most 20 s each (100 s), and then makes one Discord write. A delete can be
+> retried after a timeout: three attempts of 30 s with 2 s and 4 s of backoff
+> (96 s). That is about 221 s in the worst case, plus the audit write. With
+> nginx's default of 60 s, a slow request can end in a 504 page while the
+> change is still made. Ordinary requests take well under a second. Caddy and
+> Traefik have no such read timeout by default.
 
 Traefik (compose labels):
 

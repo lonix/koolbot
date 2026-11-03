@@ -21,6 +21,12 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
 
 const { applyChannelPlan, normaliseChannelName, planChannels } =
   await import("../../src/web/channel-create.js");
+const {
+  withChannelLock,
+  CHANNEL_LOCK_WAIT_MS,
+  CHANNEL_LOCK_BUSY_MESSAGE,
+  CHANNEL_READ_TIMEOUT_MS,
+} = await import("../../src/web/channel-write-lock.js");
 
 const view = (
   id: string,
@@ -239,6 +245,42 @@ describe("applyChannelPlan", () => {
     const { deps, post } = setup(changed);
     const result = await applyChannelPlan(deps, entries, reviewed.planId);
     expect(result).toMatchObject({ ok: false, removed: [], stuck: [] });
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("still writes nothing when a name that Review showed as existing is gone", async () => {
+    const one = [{ kind: "text" as const, name: "mod-log", parentId: CAT }];
+    const reviewed = planChannels(one, live);
+    if (!reviewed.ok) throw new Error("plan");
+    const gone = live.filter((c) => c.name !== "mod-log");
+    const { deps, post } = setup(gone);
+    const result = await applyChannelPlan(deps, one, reviewed.planId);
+    expect(result).toMatchObject({ ok: false, removed: [], stuck: [] });
+    if (result.ok) throw new Error("expected failure");
+    expect(result.error).toBe(CHANGED_SINCE_REVIEW);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("still writes nothing when a name that Review showed as existing is now a different channel", async () => {
+    const one = [{ kind: "text" as const, name: "mod-log", parentId: CAT }];
+    const reviewed = planChannels(one, live);
+    if (!reviewed.ok) throw new Error("plan");
+    const swapped = live.map((c) =>
+      c.name === "mod-log" ? { ...c, id: "999999999999999999" } : c,
+    );
+    const { deps, post } = setup(swapped);
+    const result = await applyChannelPlan(deps, one, reviewed.planId);
+    expect(result).toMatchObject({ ok: false, removed: [], stuck: [] });
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("still writes nothing when the reviewed entries are not the ones being applied", async () => {
+    const reviewed = planChannels(entries, live);
+    if (!reviewed.ok) throw new Error("plan");
+    const other = [...entries, { kind: "text" as const, name: "extra" }];
+    const { deps, post } = setup(live);
+    const result = await applyChannelPlan(deps, other, reviewed.planId);
+    expect(result.ok).toBe(false);
     expect(post).not.toHaveBeenCalled();
   });
 
@@ -614,5 +656,284 @@ describe("errors wrapped by makeDiscordApiCall (the cause chain)", () => {
     (a as { cause?: unknown }).cause = b;
     const result = await run(a, { afterFirst: false });
     expect(result.ok).toBe(false);
+  });
+});
+
+const CHANGED_SINCE_REVIEW =
+  "The channels on the server changed since Review, so nothing was created. Review the changes again.";
+
+describe("applyChannelPlan serialises per server (#1714)", () => {
+  const entry = { kind: "text" as const, name: "bot-log" };
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  };
+
+  /** Hold the lock for a server until `finish()`; resolves once the holder runs. */
+  async function holdLock(guildId: string): Promise<{
+    finish: () => void;
+    done: Promise<unknown>;
+  }> {
+    let finish!: () => void;
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const done = withChannelLock(guildId, async () => {
+      started();
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    });
+    await running;
+    return { finish, done };
+  }
+
+  /** One shared server: a create adds to what the next read returns. */
+  function sharedServer(guildId = "1") {
+    const channels: ManagedChannelView[] = [...live];
+    let release: (() => void) | null = null;
+    let hold: Promise<void> | null = null;
+    const post = jest.fn(
+      async (_route: string, opts: { body: Record<string, unknown> }) => {
+        if (hold) await hold;
+        const id = String(900 + channels.length).padStart(18, "0");
+        channels.push(view(id, opts.body.name as string, "text", null));
+        return { id, name: opts.body.name as string };
+      },
+    );
+    const del = jest
+      .fn<(route: string, opts: unknown) => Promise<void>>()
+      .mockResolvedValue(undefined);
+    const deps: ChannelCreateDeps = {
+      guildId,
+      rest: { post, delete: del } as unknown as ChannelCreateDeps["rest"],
+      call: (fn) => fn(new AbortController().signal),
+      listChannels: async () => [...channels],
+      reason: "test",
+    };
+    return {
+      deps,
+      post,
+      del,
+      channels,
+      holdCreates: () => {
+        hold = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      },
+      releaseCreates: () => release?.(),
+    };
+  }
+
+  it("two concurrent applies for the same name create one channel", async () => {
+    const server = sharedServer();
+    const reviewed = planChannels([entry], server.channels);
+    if (!reviewed.ok) throw new Error("plan");
+    server.holdCreates();
+    const first = applyChannelPlan(server.deps, [entry], reviewed.planId);
+    const second = applyChannelPlan(server.deps, [entry], reviewed.planId);
+    await flush();
+    expect(server.post).toHaveBeenCalledTimes(1);
+    server.releaseCreates();
+    const results = await Promise.all([first, second]);
+    expect(server.post).toHaveBeenCalledTimes(1);
+    expect(results[0].ok).toBe(true);
+    // The second one re-planned inside the lock, saw the name, and refused.
+    expect(results[1]).toEqual({
+      ok: false,
+      error: CHANGED_SINCE_REVIEW,
+      removed: [],
+      stuck: [],
+    });
+    expect(server.channels.filter((c) => c.name === "bot-log")).toHaveLength(1);
+  });
+
+  it("an apply waits for another writer of the same server and re-reads after it", async () => {
+    const server = sharedServer();
+    const reviewed = planChannels([entry], server.channels);
+    if (!reviewed.ok) throw new Error("plan");
+    let finishOther!: () => void;
+    const other = withChannelLock("1", async () => {
+      await new Promise<void>((resolve) => {
+        finishOther = resolve;
+      });
+      // The other writer (the Channel Manager) creates the same name.
+      server.channels.push(view("777777777777777777", "bot-log", "text"));
+    });
+    const apply = applyChannelPlan(server.deps, [entry], reviewed.planId);
+    await flush();
+    expect(server.post).not.toHaveBeenCalled();
+    finishOther();
+    await other;
+    const result = await apply;
+    expect(server.post).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      ok: false,
+      error: CHANGED_SINCE_REVIEW,
+      removed: [],
+      stuck: [],
+    });
+    expect(server.channels.filter((c) => c.name === "bot-log")).toHaveLength(1);
+  });
+
+  it("releases the lock after a failed apply and after its rollback", async () => {
+    const server = sharedServer();
+    const two = [entry, { kind: "text" as const, name: "second" }];
+    const reviewed = planChannels(two, server.channels);
+    if (!reviewed.ok) throw new Error("plan");
+    server.post
+      .mockImplementationOnce(async (_r, opts) => ({
+        id: "888888888888888881",
+        name: opts.body.name as string,
+      }))
+      .mockRejectedValueOnce(apiError(50013, "Missing Permissions"));
+    const failed = await applyChannelPlan(server.deps, two, reviewed.planId);
+    expect(failed).toMatchObject({
+      ok: false,
+      removed: ["888888888888888881"],
+    });
+    expect(server.del).toHaveBeenCalledTimes(1);
+    expect(await withChannelLock("1", async () => "free")).toEqual({
+      ok: true,
+      value: "free",
+    });
+  });
+
+  it("releases the lock when the rollback itself fails", async () => {
+    const server = sharedServer();
+    const two = [entry, { kind: "text" as const, name: "second" }];
+    const reviewed = planChannels(two, server.channels);
+    if (!reviewed.ok) throw new Error("plan");
+    server.post
+      .mockImplementationOnce(async (_r, opts) => ({
+        id: "888888888888888881",
+        name: opts.body.name as string,
+      }))
+      .mockRejectedValueOnce(apiError(50013, "Missing Permissions"));
+    server.del.mockRejectedValue(apiError(50013, "Missing Permissions"));
+    const failed = await applyChannelPlan(server.deps, two, reviewed.planId);
+    expect(failed).toMatchObject({ ok: false, stuck: ["888888888888888881"] });
+    expect(await withChannelLock("1", async () => "free")).toEqual({
+      ok: true,
+      value: "free",
+    });
+  });
+
+  it("releases the lock when the channels cannot be read", async () => {
+    const server = sharedServer();
+    const deps = {
+      ...server.deps,
+      listChannels: async () => {
+        throw new Error("down");
+      },
+    };
+    const result = await applyChannelPlan(deps, [entry], "whatever");
+    expect(result.ok).toBe(false);
+    expect(await withChannelLock("1", async () => "free")).toEqual({
+      ok: true,
+      value: "free",
+    });
+  });
+
+  it("releases the lock after a create that timed out", async () => {
+    const server = sharedServer();
+    const reviewed = planChannels([entry], server.channels);
+    if (!reviewed.ok) throw new Error("plan");
+    server.post.mockRejectedValueOnce(new Error("Request timeout"));
+    const result = await applyChannelPlan(
+      server.deps,
+      [entry],
+      reviewed.planId,
+    );
+    expect(result.ok).toBe(false);
+    expect(await withChannelLock("1", async () => "free")).toEqual({
+      ok: true,
+      value: "free",
+    });
+  });
+
+  it("a caller that waits too long gets the busy message in the unchanged result shape and writes nothing", async () => {
+    jest.useFakeTimers();
+    try {
+      const server = sharedServer();
+      const { finish, done: holder } = await holdLock("1");
+      const waiting = applyChannelPlan(server.deps, [entry], "any");
+      await jest.advanceTimersByTimeAsync(CHANNEL_LOCK_WAIT_MS);
+      expect(await waiting).toEqual({
+        ok: false,
+        error: CHANNEL_LOCK_BUSY_MESSAGE,
+        removed: [],
+        stuck: [],
+      });
+      finish();
+      await holder;
+      expect(server.post).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("an apply cancelled while it waits writes nothing and leaves the lock free", async () => {
+    const server = sharedServer();
+    const reviewed = planChannels([entry], server.channels);
+    if (!reviewed.ok) throw new Error("plan");
+    const { finish, done: holder } = await holdLock("1");
+    const abort = new AbortController();
+    const waiting = applyChannelPlan(
+      { ...server.deps, signal: abort.signal },
+      [entry],
+      reviewed.planId,
+    );
+    abort.abort();
+    expect(await waiting).toMatchObject({ ok: false, removed: [], stuck: [] });
+    finish();
+    await holder;
+    await flush();
+    expect(server.post).not.toHaveBeenCalled();
+    expect(await withChannelLock("1", async () => "free")).toEqual({
+      ok: true,
+      value: "free",
+    });
+  });
+
+  it("a stalled read of the channels stops the apply before any write and frees the lock", async () => {
+    jest.useFakeTimers();
+    try {
+      const server = sharedServer();
+      const reviewed = planChannels([entry], server.channels);
+      if (!reviewed.ok) throw new Error("plan");
+      const deps = {
+        ...server.deps,
+        listChannels: () => new Promise<ManagedChannelView[]>(() => undefined),
+      };
+      const applying = applyChannelPlan(deps, [entry], reviewed.planId);
+      await jest.advanceTimersByTimeAsync(CHANNEL_READ_TIMEOUT_MS);
+      const result = await applying;
+      expect(result).toMatchObject({ ok: false, removed: [], stuck: [] });
+      if (result.ok) throw new Error("expected failure");
+      expect(result.error).toMatch(
+        /couldn't read the channels.*nothing was created/,
+      );
+      expect(server.post).not.toHaveBeenCalled();
+      expect(await withChannelLock("1", async () => "free")).toEqual({
+        ok: true,
+        value: "free",
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("a different server is not blocked", async () => {
+    const busy = sharedServer("1");
+    const free = sharedServer("2");
+    const reviewed = planChannels([entry], free.channels);
+    if (!reviewed.ok) throw new Error("plan");
+    const { finish, done: holder } = await holdLock("1");
+    const result = await applyChannelPlan(free.deps, [entry], reviewed.planId);
+    expect(result.ok).toBe(true);
+    expect(busy.post).not.toHaveBeenCalled();
+    finish();
+    await holder;
   });
 });
