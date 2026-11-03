@@ -2490,6 +2490,33 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Adoption history (first page, latest apply partly applied)",
+      html: renderAdoptionHistoryPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        snapshots: [
+          { ...ADOPTION_SNAPSHOT, status: "partial", failed: 1 },
+          {
+            ...ADOPTION_SNAPSHOT,
+            id: "b".repeat(24),
+            status: "rolled_back",
+            rolledBackBy: "9",
+            rolledBackAt: new Date("2026-10-02T10:00:00Z"),
+          },
+        ],
+        hasMore: true,
+      }),
+    },
+    {
+      name: "Adoption history (no older snapshots)",
+      html: renderAdoptionHistoryPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        snapshots: [],
+        page: 3,
+      }),
+    },
+    {
       name: "Adoption history (empty)",
       html: renderAdoptionHistoryPage({
         ...COMMON,
@@ -2521,6 +2548,25 @@ export function adminPages(): A11yPage[] {
           revertibleCreatedRoles: 1,
           uncertainCreatedRoles: 1,
           dependentRepairs: 2,
+        },
+      }),
+    },
+    {
+      name: "Restore snapshot (nothing left to revert)",
+      html: renderRestoreConfirmPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        destructiveNote: "n",
+        snapshot: {
+          ...ADOPTION_SNAPSHOT,
+          status: "rollback_partial",
+          destructive: 0,
+          createdRoles: 0,
+          operations: [],
+          interrupted: 0,
+          revertibleCreatedRoles: 0,
+          uncertainCreatedRoles: 0,
+          dependentRepairs: 0,
         },
       }),
     },

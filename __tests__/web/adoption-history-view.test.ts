@@ -184,6 +184,135 @@ describe("restore confirm page", () => {
   });
 });
 
+/** The page's own markup, without the shared layout around it. */
+const mainOf = (html: string): string =>
+  html.slice(html.indexOf("<main"), html.indexOf("</main>"));
+
+/** Every class token in the markup that is not a kb- class, and every bare table. */
+const nonKbClasses = (html: string): string[] => [
+  ...[...html.matchAll(/class="([^"]*)"/g)]
+    .flatMap((m) => m[1].split(/\s+/))
+    .filter((t) => t && !t.startsWith("kb-")),
+  ...[...html.matchAll(/<table(?![^>]*class="kb-table")/g)].map((m) => m[0]),
+];
+
+describe("adoption history on the kb- components (#1733)", () => {
+  const detail = (over: Record<string, unknown> = {}) => ({
+    ...snap(),
+    operations: [
+      { summary: "Delete #old", destructive: true },
+      { summary: "Make #news read-only", destructive: false },
+    ],
+    interrupted: 1,
+    uncertainCreatedRoles: 1,
+    dependentRepairs: 2,
+    revertibleCreatedRoles: 1,
+    ...over,
+  });
+  const states: Record<string, string> = {
+    list: renderAdoptionHistoryPage({
+      ...base,
+      snapshots: [
+        snap(),
+        snap({ id: "d".repeat(24), status: "rolled_back", rolledBackBy: "x" }),
+        snap({ id: "e".repeat(24), status: "applying" }),
+      ],
+      page: 2,
+      hasMore: true,
+      jobId: "11111111-1111-1111-1111-111111111111",
+      flash: { type: "ok", text: "Done." },
+    }),
+    empty: renderAdoptionHistoryPage({ ...base, snapshots: [] }),
+    "no older": renderAdoptionHistoryPage({
+      ...base,
+      snapshots: [],
+      page: 3,
+    }),
+    unreadable: renderAdoptionHistoryPage({ ...base, snapshots: null }),
+    restore: renderRestoreConfirmPage({
+      ...base,
+      snapshot: detail(),
+      destructiveNote: "Messages cannot be restored.",
+    }),
+    "restore, nothing left": renderRestoreConfirmPage({
+      ...base,
+      snapshot: detail({ operations: [], interrupted: 0, dependentRepairs: 0 }),
+      destructiveNote: "n",
+    }),
+    "not restorable": renderRestoreConfirmPage({
+      ...base,
+      snapshot: detail({ status: "rolled_back" }),
+      destructiveNote: "n",
+    }),
+  };
+
+  it.each(Object.keys(states))("%s renders only kb- classes", (name) => {
+    expect(nonKbClasses(mainOf(states[name]))).toEqual([]);
+  });
+
+  it("leads the list with the verdict on the first page only", () => {
+    const first = renderAdoptionHistoryPage({
+      ...base,
+      snapshots: [snap({ status: "partial" })],
+    });
+    expect(first).toContain("The latest apply was only partly applied");
+    expect(first).toContain("kb-callout--warn");
+    expect(states.list).not.toContain("The latest apply");
+    expect(states.empty).not.toContain("The latest apply");
+  });
+
+  it.each([
+    ["applied", "The latest apply is in place", "plain"],
+    ["applying", "The latest apply is still running", "plain"],
+    ["partial", "The latest apply was only partly applied", "warn"],
+    ["rolling_back", "The latest apply is being restored", "plain"],
+    ["rollback_partial", "The latest apply was only partly restored", "warn"],
+    ["rolled_back", "The latest apply has been restored", "plain"],
+  ])("states the verdict for %s", (status, title, tone) => {
+    const html = mainOf(
+      renderAdoptionHistoryPage({ ...base, snapshots: [snap({ status })] }),
+    );
+    expect(html).toContain(`<p class="kb-callout__title">${title}</p>`);
+    expect(html.includes("kb-callout kb-callout--warn")).toBe(tone === "warn");
+  });
+
+  it("has one footer in the list panel, with the pager and the retention note", () => {
+    const html = mainOf(states.list);
+    expect(html.match(/kb-panel__foot/g)).toHaveLength(1);
+    expect(html).toContain("adoption.snapshot.retention_days");
+    expect(html).toContain("?page=3");
+  });
+
+  it("keeps the job line live and the restore link marked for the dialog", () => {
+    expect(states.list).toMatch(/id="ah-job"/);
+    expect(states.list).toContain('data-confirm-link="snapshot-restore"');
+    expect(states.list).toContain("kb-table");
+  });
+
+  it("keeps every marker the dialog upgrade reads and styles the restore as danger", () => {
+    const html = states.restore;
+    expect(html).toContain('data-confirm-link-page="snapshot-restore"');
+    expect(html).toContain("data-confirm-form");
+    expect(html).toContain('data-confirm-title="Restore this snapshot?"');
+    expect(html).toContain('type="hidden" name="_csrf" value="tok"');
+    expect(html).toMatch(
+      /<button type="submit" class="kb-btn kb-btn--danger">Restore this snapshot<\/button>/,
+    );
+    expect(html).toContain("kb-panel--danger");
+    expect(html.match(/data-confirm-item/g)?.length).toBeGreaterThanOrEqual(5);
+    // The option is a checkbox inside ONE label the dialog reads as text.
+    expect(html).toMatch(
+      /<label><input type="checkbox" name="deleteCreatedRoles" value="1">[\s\S]*?<\/label>/,
+    );
+    expect(mainOf(html)).not.toContain("kb-btn--primary");
+  });
+
+  it("has no form on a snapshot that cannot be restored", () => {
+    expect(states["not restorable"]).not.toContain("data-confirm-form");
+    expect(states["not restorable"]).not.toContain("data-confirm-link-page");
+  });
+});
+
 describe("wizard adoption entry", () => {
   it("links the adoption flow and tells a fresh server it can skip it", () => {
     const html = renderWizardPage({
