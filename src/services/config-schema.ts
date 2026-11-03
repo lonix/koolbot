@@ -827,6 +827,19 @@ export interface SettingMetadata {
    */
   channelKind?: "text" | "voice";
   /**
+   * The Settings pages and the wizard's Channels step may offer to create the
+   * text channel this `channel` setting points at (#1663, #1662): the Picker's
+   * "Create new channel" row, shown when the bot can create channels and saved
+   * through the shared helper in `web/channel-create.ts`. Read by every surface
+   * from here, never from a list in a view. Set it only on a text `channel`
+   * setting that gets a feature's posts and is safe in a channel everyone who
+   * can see the server can read: a created channel has no permission overwrites
+   * (`overwritesFor`, #1659). Do NOT set it on a log channel (`core.*.channel_id`
+   * holding errors or moderation, `moderation.raid.alert_channel_id`) until
+   * the helper can create a private one. Ignored for any other type.
+   */
+  createChannel?: boolean;
+  /**
    * Hard dependencies: this key may only be enabled when every listed key
    * is also enabled (truthy). Used by write-time validation and the Settings
    * UI to block/grey a toggle until its requirements are met. Only declare
@@ -1507,6 +1520,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Discord channel ID where the weekly recap is posted.",
     category: "voicetracking",
     type: "channel",
+    createChannel: true,
   },
   "voicetracking.announcements.include_voice_stats": {
     label: "Recap: top voice-time members",
@@ -1654,6 +1668,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Channel ID where quote messages are posted.",
     category: "quotes",
     type: "channel",
+    createChannel: true,
     // The Quotes page's Re-post card renders from this value (#1428).
     reloadOnSave: true,
   },
@@ -1807,6 +1822,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Channel where marquee milestone celebrations are posted. Leave empty to disable the announcement (the underlying accolade is still awarded).",
     category: "celebrations",
     type: "channel",
+    createChannel: true,
   },
 
   // Weekly Personal Voice-Activity Digest (#483)
@@ -1910,6 +1926,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Channel where birthday messages are posted.",
     category: "birthdays",
     type: "channel",
+    createChannel: true,
   },
   "birthdays.message": {
     label: "Birthday message template",
@@ -1964,6 +1981,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Channel where welcome messages are posted.",
     category: "welcome",
     type: "channel",
+    createChannel: true,
   },
   "welcome.message": {
     label: "Welcome message template",
@@ -2007,6 +2025,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Channel where KoolBot posts the rules message with the Accept button. Make it read-only for members.",
     category: "rules",
     type: "channel",
+    createChannel: true,
   },
   "rules.role_id": {
     label: "Acceptance role",
@@ -2056,6 +2075,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Text channel where the event announcement (with the Discord event link) and the pre-start reminder are posted.",
     category: "events",
     type: "channel",
+    createChannel: true,
   },
   "events.timezone": {
     label: "Event timezone (IANA)",
@@ -2197,6 +2217,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Text channel LFG posts are sent to. Leave empty to post in whichever channel /lfg was run in.",
     category: "lfg",
     type: "channel",
+    createChannel: true,
   },
   "lfg.expiry_minutes": {
     label: "Post lifetime (minutes)",
@@ -2352,6 +2373,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Channel ID where NEW reaction-role messages are posted. Each mapping remembers the channel its picker was posted in, so changing this never moves or breaks existing pickers: they keep working in their own channel. Only older mappings, created before pickers remembered their channel, are still looked up here; for those, delete the picker and mapping BEFORE switching channels, or switch back before cleaning up (startup keeps them while none of them is found in this channel, and archives the missing ones once another is).",
     category: "reactionroles",
     type: "channel",
+    createChannel: true,
   },
   "reactionroles.style": {
     label: "Self-assign surface style",
@@ -2407,6 +2429,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Channel ID where notice messages are posted.",
     category: "notices",
     type: "channel",
+    createChannel: true,
     // The Notices page's Re-post card renders from this value (#1428).
     reloadOnSave: true,
   },
@@ -2529,6 +2552,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Optional channel ID where role-change announcements are posted. Leave empty to disable announcements.",
     category: "leaderboard_roles",
     type: "channel",
+    createChannel: true,
   },
 
   // Discord-channel logging categories (#844). Consumed by DiscordLogger,

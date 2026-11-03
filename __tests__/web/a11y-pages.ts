@@ -4376,6 +4376,61 @@ export function adminPages(): A11yPage[] {
         flash: FLASH,
       }),
     })),
+    ...[
+      {
+        name: "Quotes (settings card, channel to be created)",
+        createChannel: {
+          kind: "channel" as const,
+          channelKind: "text" as const,
+          ok: true,
+        },
+        // The posted pending value, drawn again after a refused save (#1663).
+        current: "create:Quote Wall",
+      },
+      {
+        name: "Quotes (settings card, creating a channel is not possible)",
+        createChannel: {
+          kind: "channel" as const,
+          channelKind: "text" as const,
+          ok: false,
+          reason:
+            "The bot needs Manage Channels to create a channel. Give the bot's role Manage Channels in Server Settings, Roles; the Bot permissions page shows what is missing.",
+        },
+        current: "",
+      },
+    ].map((c) => ({
+      name: c.name,
+      html: renderQuotesPage({
+        ...COMMON,
+        enabled: false,
+        channel: null,
+        headerMessageId: null,
+        settingsPickers: {
+          textChannels: [
+            { id: "c1", name: "quotes", type: ChannelType.GuildText },
+          ],
+          createChannel: c.createChannel,
+        },
+        settingRows: [
+          {
+            key: "quotes.channel_id",
+            label: "Quote channel",
+            current: c.current,
+            defaultValue: "",
+            type: "channel",
+            description: "Channel ID where quote messages are posted.",
+            category: "quotes",
+          },
+        ],
+        maxLength: 1000,
+        rows: [],
+        total: 0,
+        page: 1,
+        pageSize: 25,
+        search: "",
+        flash: null,
+      }),
+    })),
     {
       name: "Birthdays (missing bot permission notice)",
       html: renderBirthdaysPage({

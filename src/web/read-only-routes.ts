@@ -230,6 +230,8 @@ import {
   type SettingRow,
   messageJumpUrl,
 } from "./admin-views.js";
+import { pickerCreateFor } from "./setting-create.js";
+import { loadCreateChannelAnswer } from "./setting-create-load.js";
 import { isEventRunning } from "./host-panel-shared.js";
 
 function deriveCategory(key: string): string {
@@ -672,6 +674,13 @@ export async function loadFeatureSettings(
     pickers.voiceChannels = channelData.voiceChannels;
     pickers.categoryChannels = channelData.categoryChannels;
   }
+  // The create row for a flagged channel setting of the card (#1663).
+  const createChannel = await loadCreateChannelAnswer(
+    client,
+    guildId,
+    settingRows.map((r) => r.key),
+  );
+  if (createChannel) pickers.createChannel = createChannel;
   if (roleData) pickers.roles = roleData.roles;
   if (roleData && takesRoleGroups(settingRows)) {
     pickers.groupRoles = await withRoleGroupOptions(guildId, roleData.roles);
@@ -1464,6 +1473,17 @@ export function createReadOnlyRouter(
           roles,
           groupRoles,
           reactionRoleMessages,
+          // The create row for the flagged channel settings (#1663). Not while
+          // the stored config cannot be read: the forms are a notice then.
+          pickerCreate: settingsUnavailable
+            ? undefined
+            : pickerCreateFor(
+                await loadCreateChannelAnswer(
+                  client,
+                  common.guildId,
+                  rows.map((r) => r.key),
+                ),
+              ),
           guildId: common.guildId,
           guildName,
           // The Settings page had no flash wiring at all, so a rejected save
@@ -2085,6 +2105,11 @@ export function createReadOnlyRouter(
       settingRows,
       settingsUnavailable: stored === null,
       textChannels: channelData.textChannels,
+      createChannel: await loadCreateChannelAnswer(
+        client,
+        common.guildId,
+        settingRows.map((r) => r.key),
+      ),
       roles: roleData.roles,
       messages,
       refusedForm,
@@ -2189,6 +2214,11 @@ export function createReadOnlyRouter(
       settingRows,
       settingsUnavailable: stored === null,
       textChannels: channelData.textChannels,
+      createChannel: await loadCreateChannelAnswer(
+        client,
+        common.guildId,
+        settingRows.map((r) => r.key),
+      ),
       groups,
       categoryOptions,
       refusedForm,
