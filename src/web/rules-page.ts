@@ -20,11 +20,15 @@ import {
   type NavFeatureStatus,
 } from "./admin-layout.js";
 import {
+  kbEmptyState,
   renderFlash,
   renderRepostCard,
   type FlashMessage,
 } from "./admin-views.js";
 import { renderAdoptionDiff } from "./adoption-diff.js";
+import { toneIcon, type Tone } from "./icons.js";
+import { renderSettingRow } from "./host-settings-rows.js";
+import { renderSwitch } from "./setting-controls.js";
 import {
   renderPermissionNotice,
   type PermissionNotice,
@@ -147,48 +151,142 @@ export const JOB_SCRIPT = (jobId: string): string =>
   "el.textContent=j.text;if(j.status==='running'){setTimeout(tick,1500)}else{setTimeout(function(){location.href='/admin/rules'},1500)}})" +
   ".catch(function(){el.textContent='Lost contact with the bot; reload to see the result.'})}tick()})();";
 
+/** A Callout. `title` is plain text; `text` and `actions` are HTML the caller has escaped. A failure is an alert, everything else a status. */
+function callout(o: {
+  tone: Tone;
+  title: string;
+  text?: string;
+  id?: string;
+}): string {
+  const role = o.tone === "err" ? "alert" : "status";
+  const cls = o.tone ? `kb-callout kb-callout--${o.tone}` : "kb-callout";
+  const titleId = o.id ? ` id="${escapeHtml(o.id)}"` : "";
+  return `<div class="${cls}" role="${role}">${toneIcon(o.tone)}<div class="kb-callout__body"><p class="kb-callout__title"${titleId}>${escapeHtml(o.title)}</p>${o.text ? `<p class="kb-callout__text">${o.text}</p>` : ""}</div></div>`;
+}
+
+/** A Panel: `body` is HTML the caller has escaped; the body is spaced as a stack. */
+function panel(id: string, title: string, body: string): string {
+  return `<section class="kb-panel" id="${id}" aria-labelledby="${id}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${id}-h">${escapeHtml(title)}</h2></header>
+  <div class="kb-panel__body"><div class="kb-stack">${body}</div></div>
+</section>`;
+}
+
+/** Why the rules message can't be posted yet, or null when it can. */
+function postBlockedReason(p: RulesPageProps): string | null {
+  if (!p.enabled) return "Turn on Rules acceptance in Settings first.";
+  if (!p.channelId) return "Set the rules channel first.";
+  return null;
+}
+
+/** The rollout in one sentence: all the page knows is whether a plan is previewed. */
+function rolloutLine(p: RulesPageProps): string {
+  if (!p.plan) return "No rollout is previewed.";
+  return rulesPlanIsApplicable(p.plan)
+    ? "A rollout is previewed below and can be applied."
+    : "A rollout is previewed below; there is nothing to apply.";
+}
+
+/** The verdict the page opens with: the state of the rules message, then of the rollout. */
+function renderVerdict(p: RulesPageProps): string {
+  const settings = `<a href="/admin/settings">Settings</a>`;
+  const rollout = escapeHtml(rolloutLine(p));
+  if (!p.enabled) {
+    return callout({
+      tone: "",
+      title: "Rules acceptance is off.",
+      text: `Turn it on in ${settings} to post the rules message. ${rollout}`,
+    });
+  }
+  if (!p.channelId) {
+    return callout({
+      tone: "warn",
+      title: "No rules channel is set.",
+      text: `The rules message is posted in the channel you pick in ${settings}. ${rollout}`,
+    });
+  }
+  if (!p.messagePosted) {
+    return callout({
+      tone: "warn",
+      title: "The rules message is not posted yet.",
+      text: `Post it below so members can accept. ${rollout}`,
+    });
+  }
+  return callout({
+    tone: "ok",
+    title: "The rules message is posted.",
+    text: `${p.accepted} ${p.accepted === 1 ? "acceptance" : "acceptances"} recorded. ${rollout}`,
+  });
+}
+
 function renderNotices(p: RulesPageProps): string {
   const out: string[] = [];
   if (p.native.screening) {
     out.push(
-      `<div class="notice warn" role="status"><strong>Discord's Membership Screening is on.</strong> It already asks new members to accept the rules. Using the KoolBot role as well means members accept twice. Prefer the native gate on Community servers; use this role for non-Community servers or when you want a custom message or button.</div>`,
+      callout({
+        tone: "warn",
+        title: "Discord's Membership Screening is on.",
+        text: "It already asks new members to accept the rules. Using the KoolBot role as well means members accept twice. Prefer the native gate on Community servers; use this role for non-Community servers or when you want a custom message or button.",
+      }),
     );
   } else if (p.native.community) {
     out.push(
-      `<div class="notice" role="status">This is a Community server, which has Discord's own rules channel, Membership Screening and Onboarding. If you use those, you don't need the KoolBot role; two gates make new members accept twice.</div>`,
+      callout({
+        tone: "",
+        title:
+          "This is a Community server, which has Discord's own rules channel, Membership Screening and Onboarding.",
+        text: "If you use those, you don't need the KoolBot role; two gates make new members accept twice.",
+      }),
     );
   }
   if (p.intentMissing) {
     out.push(
-      `<div class="notice warn" role="status">The Server Members intent is off, so the member list can't be read. Granting the role to existing members and recording current holders won't work until it is on. ${escapeHtml(GUILD_MEMBERS_INTENT_HOWTO)}</div>`,
+      callout({
+        tone: "warn",
+        title:
+          "The Server Members intent is off, so the member list can't be read.",
+        text: `Granting the role to existing members and recording current holders won't work until it is on. ${escapeHtml(GUILD_MEMBERS_INTENT_HOWTO)}`,
+      }),
     );
   }
   if (p.unavailable) {
-    out.push(
-      `<div class="notice warn" role="status">${escapeHtml(p.unavailable)}</div>`,
-    );
+    out.push(callout({ tone: "warn", title: p.unavailable }));
   }
   return out.join("");
 }
 
 function renderStatus(p: RulesPageProps, csrf: string): string {
-  const row = (k: string, v: string): string =>
-    `<tr><th scope="row">${k}</th><td>${v}</td></tr>`;
-  return `<div class="card">
-  <h2>Status</h2>
-  <table class="kv"><tbody>
-    ${row("Feature", p.enabled ? `<span class="tag tag-on">on</span>` : `<span class="tag tag-off">off</span>`)}
-    ${row("Rules channel", p.channelId ? `<code>${escapeHtml(p.channelId)}</code>` : "not set")}
-    ${row("Acceptance role", p.roleId ? `${escapeHtml(p.roleName ?? "unknown role")} <code>${escapeHtml(p.roleId)}</code>` : "not set")}
+  const row = (k: string, v: string): string => `<dt>${k}</dt><dd>${v}</dd>`;
+  const mono = (v: string): string =>
+    `<code class="kb-mono">${escapeHtml(v)}</code>`;
+  const blocked = postBlockedReason(p);
+  const syncBlocked = p.roleId
+    ? null
+    : "Set the acceptance role in Settings first.";
+  const why = [blocked, syncBlocked]
+    .filter((r): r is string => r !== null)
+    .map((r) => `<p class="kb-help">${escapeHtml(r)}</p>`)
+    .join("");
+  const postClass =
+    p.plan && rulesPlanIsApplicable(p.plan)
+      ? "kb-btn"
+      : "kb-btn kb-btn--primary";
+  return panel(
+    "rules-status",
+    "Status",
+    `<dl class="kb-kv">
+    ${row("Feature", p.enabled ? `<span class="kb-badge kb-badge--on">On</span>` : `<span class="kb-badge kb-badge--off">Off</span>`)}
+    ${row("Rules channel", p.channelId ? mono(p.channelId) : "not set")}
+    ${row("Acceptance role", p.roleId ? `${escapeHtml(p.roleName ?? "unknown role")} ${mono(p.roleId)}` : "not set")}
     ${row("Rules message", p.messagePosted ? "posted" : "not posted yet")}
     ${row("Acceptances recorded", String(p.accepted))}
-  </tbody></table>
-  <p class="muted">Turn the feature on and pick the channel, role and texts on the <a href="/admin/settings">Settings</a> page. Make the rules channel read-only for members in Discord.</p>
-  <div class="row">
-    <form method="POST" action="/admin/rules/post">${csrf}<button type="submit" class="${p.plan && rulesPlanIsApplicable(p.plan) ? "btn" : "btn btn-primary"}"${p.enabled && p.channelId ? "" : " disabled"}>${p.messagePosted ? "Update the rules message" : "Post the rules message"}</button></form>
-    <form method="POST" action="/admin/rules/sync" data-confirm="Record everyone who already holds the acceptance role as accepted (adopted)? Nothing is changed in Discord."${CONFIRM_NEUTRAL_ATTR}>${csrf}<button type="submit" class="btn"${p.roleId ? "" : " disabled"}>Record current role holders as accepted</button></form>
-  </div>
-</div>`;
+  </dl>
+  <p class="kb-help">Turn the feature on and pick the channel, role and texts on the <a href="/admin/settings">Settings</a> page. Make the rules channel read-only for members in Discord.</p>
+  <div class="kb-row">
+    <form method="POST" action="/admin/rules/post">${csrf}<button type="submit" class="${postClass}"${blocked === null ? "" : " disabled"}>${p.messagePosted ? "Update the rules message" : "Post the rules message"}</button></form>
+    <form method="POST" action="/admin/rules/sync" data-confirm="Record everyone who already holds the acceptance role as accepted (adopted)? Nothing is changed in Discord."${CONFIRM_NEUTRAL_ATTR}>${csrf}<button type="submit" class="kb-btn"${syncBlocked === null ? "" : " disabled"}>Record current role holders as accepted</button></form>
+  </div>${why}`,
+  );
 }
 
 function renderRepost(p: RulesPageProps, csrf: string): string {
@@ -207,59 +305,88 @@ function renderRepost(p: RulesPageProps, csrf: string): string {
       "The old message is deleted if KoolBot can find it in this channel. Its Accept button stops working either way.",
       "Members who already accepted keep their acceptance and role.",
     ],
-    blockedReason: !p.enabled
-      ? "Turn on Rules acceptance in Settings first."
-      : !p.channelId
-        ? "Set the rules channel first."
-        : null,
+    blockedReason: postBlockedReason(p),
   });
 }
 
 function renderRollout(p: RulesPageProps, csrf: string): string {
   const gated = new Set(p.options.gateChannelIds);
   const channelBoxes = p.channels
-    .map(
-      (c) =>
-        `<label class="check"><input type="checkbox" name="gate" value="${escapeHtml(c.id)}"${gated.has(c.id) ? " checked" : ""}> ${channelMention({ name: c.name, type: c.type })}</label>`,
-    )
+    .map((c) => {
+      const id = `rules-gate-${c.id}`;
+      return `<li><label for="${escapeHtml(id)}"><input type="checkbox" id="${escapeHtml(id)}" name="gate" value="${escapeHtml(c.id)}"${gated.has(c.id) ? " checked" : ""}> ${channelMention({ name: c.name, type: c.type })}</label></li>`;
+    })
     .join("");
-  const form = `<form method="GET" action="/admin/rules" class="stack">
+  const option = (
+    id: string,
+    name: string,
+    label: string,
+    line: string,
+    on: boolean,
+  ): string =>
+    renderSettingRow({
+      id,
+      name: label,
+      line,
+      control: renderSwitch(name, on, {
+        id: `${id}-input`,
+        labelledBy: `${id}-name`,
+        describedBy: `${id}-desc`,
+        onValue: "1",
+      }),
+    });
+  const options = [
+    p.roleId
+      ? ""
+      : option(
+          "rules-create-role",
+          "createRole",
+          `Create a role named "${DEFAULT_RULES_ROLE_NAME}"`,
+          "To use as the acceptance role.",
+          p.options.createRole,
+        ),
+    option(
+      "rules-grant-existing",
+      "grantExisting",
+      "Grant the role to all current members",
+      "So the existing community isn't locked out.",
+      p.options.grantExisting,
+    ),
+  ].join("");
+  const form = `<form method="GET" action="/admin/rules" class="kb-stack">
     <input type="hidden" name="preview" value="1">
-    ${
-      p.roleId
-        ? ""
-        : `<label class="check"><input type="checkbox" name="createRole" value="1"${p.options.createRole ? " checked" : ""}> Create a role named "${escapeHtml(DEFAULT_RULES_ROLE_NAME)}" to use as the acceptance role</label>`
-    }
-    <label class="check"><input type="checkbox" name="grantExisting" value="1"${p.options.grantExisting ? " checked" : ""}> Grant the role to all current members, so the existing community isn't locked out</label>
-    <fieldset><legend>Hide these channels from everyone except members with the role</legend>
-      <div class="checks">${channelBoxes || `<span class="muted">No channels found.</span>`}</div>
+    <div class="kb-settings">${options}</div>
+    <fieldset class="kb-field"><legend class="kb-label">Hide these channels from everyone except members with the role</legend>
+      ${channelBoxes ? `<ul class="kb-list">${channelBoxes}</ul>` : `<p class="kb-help">No channels found.</p>`}
     </fieldset>
-    <button type="submit" class="btn">Preview changes</button>
+    <div><button type="submit" class="kb-btn">Preview changes</button></div>
   </form>`;
-  return `<div class="card">
-  <h2>Roll out to this server</h2>
-  <p class="muted">Optional and off until you choose it. Nothing is changed in Discord until you apply a previewed plan; every apply saves a snapshot first. Rolling back from the Web UI is not available yet. Members of the server who already hold a picked role count as accepted.</p>
-  ${form}
-  ${p.plan ? renderPlan(p, csrf) : ""}
-</div>`;
+  const rollout = panel(
+    "rules-rollout",
+    "Roll out to this server",
+    `<p class="kb-help">Optional and off until you choose it. Nothing is changed in Discord until you apply a previewed plan; every apply saves a snapshot first. Rolling back from the Web UI is not available yet. Members of the server who already hold a picked role count as accepted.</p>
+  ${form}`,
+  );
+  return `${rollout}${p.plan ? renderPlan(p, csrf) : ""}`;
 }
 
 function renderPlan(p: RulesPageProps, csrf: string): string {
   const plan = p.plan!;
   const pv = plan.preview;
   const n = (v: number | null): string => (v === null ? "unknown" : String(v));
-  const counts = `<ul>
-    <li>Members in the server: <strong>${n(pv.totalMembers)}</strong></li>
-    <li>Already hold the acceptance role: <strong>${n(pv.holders)}</strong></li>
-    <li>Would lose sight of the gated channels: <strong>${n(pv.lockedOut)}</strong> <span class="muted">(owner and administrators always see everything)</span></li>
-  </ul>`;
+  const counts = `<dl class="kb-numbers">
+    <div><dt>Members in the server</dt><dd>${n(pv.totalMembers)}</dd></div>
+    <div><dt>Already hold the acceptance role</dt><dd>${n(pv.holders)}</dd></div>
+    <div><dt>Would lose sight of the gated channels</dt><dd>${n(pv.lockedOut)}</dd></div>
+  </dl>
+  <p class="kb-help">Owner and administrators always see everything.</p>`;
   const extra = plan.extraErrors.length
-    ? `<div class="card adoption-issues blockers"><h3>Needs attention (${plan.extraErrors.length})</h3><ul>${plan.extraErrors
+    ? `<div class="kb-callout kb-callout--err" role="alert">${toneIcon("err")}<div class="kb-callout__body"><p class="kb-callout__title">Needs attention (${plan.extraErrors.length})</p><div class="kb-callout__text"><ul>${plan.extraErrors
         .map(
           (i) =>
-            `<li><span class="tag tag-off">${escapeHtml(i.code)}</span> ${escapeHtml(i.message)}</li>`,
+            `<li><span class="kb-badge kb-badge--off">${escapeHtml(i.code)}</span> ${escapeHtml(i.message)}</li>`,
         )
-        .join("")}</ul></div>`
+        .join("")}</ul></div></div></div>`
     : "";
   const hidden =
     `<input type="hidden" name="planId" value="${escapeHtml(plan.plan.id)}">` +
@@ -275,27 +402,41 @@ function renderPlan(p: RulesPageProps, csrf: string): string {
       )
       .join("");
   const apply = rulesPlanIsApplicable(plan)
-    ? `<form method="POST" action="/admin/rules/apply" data-confirm="Apply this plan to Discord? A snapshot is saved first."${CONFIRM_NEUTRAL_ATTR}>${csrf}${hidden}<button type="submit" class="btn btn-primary">Apply plan</button></form>`
+    ? `<form method="POST" action="/admin/rules/apply" data-confirm="Apply this plan to Discord? A snapshot is saved first."${CONFIRM_NEUTRAL_ATTR}>${csrf}${hidden}<button type="submit" class="kb-btn kb-btn--primary">Apply plan</button></form>`
     : plan.plan.operations.length === 0 && plan.extraErrors.length === 0
-      ? `<p class="muted">Nothing to change: the server already matches.</p>`
+      ? kbEmptyState(
+          "circle-check",
+          "Nothing to change",
+          "The server already matches.",
+        )
       : "";
-  return `<h3>Preview</h3>${counts}${extra}${renderAdoptionDiff(plan.plan)}${apply}`;
+  return panel(
+    "rules-preview",
+    "Preview",
+    `${counts}${extra}${renderAdoptionDiff(plan.plan)}${apply}`,
+  );
 }
 
 export function renderRulesPage(props: RulesPageProps): string {
   const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+  // `JOB_SCRIPT` sets the text of #rules-job, so the id sits on the Callout's title.
   const job = props.jobId
-    ? `<div class="notice" id="rules-job" role="status">Applying…</div>`
+    ? callout({ tone: "", title: "Applying…", id: "rules-job" })
     : "";
-  const body = `
-<h1>Rules Acceptance</h1>
-<p class="subtitle">An optional rules gate: members press Accept in a read-only channel and receive an acceptance role. Off by default.</p>
+  const body = `<div class="kb-stack">
+<header class="kb-pagehead"><div class="kb-pagehead__text">
+  <h1 class="kb-pagehead__title">Rules Acceptance</h1>
+  <p class="kb-pagehead__sub">An optional rules gate: members press Accept in a read-only channel and receive an acceptance role. Off by default.</p>
+</div></header>
 ${renderFlash(props.flash)}
 ${job}
+${renderVerdict(props)}
+${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
 ${renderNotices(props)}
-${renderStatus(props, csrf)}${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
+${renderStatus(props, csrf)}
 ${renderRepost(props, csrf)}
 ${renderRollout(props, csrf)}
+</div>
 ${props.jobId ? `${scriptTag(JOB_SCRIPT(props.jobId))}` : ""}
 `;
   return renderAdminPage({
