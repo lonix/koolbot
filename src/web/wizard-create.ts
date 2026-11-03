@@ -356,7 +356,13 @@ export async function applyWizardCreations(
         const held = await withChannelLock(guildId, async () => {
           let referenced: Set<string>;
           try {
-            const rows = await ConfigService.getInstance().getAll();
+            // Bounded like every read made inside the lock: a stalled
+            // database must not hold the server's channel writes. A timeout
+            // lands in the catch below, which reports the channels as
+            // possibly still there and releases the lock.
+            const rows = await readWithin(() =>
+              ConfigService.getInstance().getAll(),
+            );
             referenced = new Set(rows.flatMap((r) => idsIn(r.value)));
           } catch (error) {
             logger.warn("wizard: cleanup could not read the settings", error);

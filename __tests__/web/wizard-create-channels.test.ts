@@ -121,6 +121,8 @@ jest.unstable_mockModule("../../src/web/channel-write-rest.js", () => ({
 }));
 
 const { withChannelLock } = await import("../../src/web/channel-write-lock.js");
+const { applyWizardCreations, reviewWizardCreations } =
+  await import("../../src/web/wizard-create.js");
 const { createWizardRouter } =
   await import("../../src/web/routes/write/wizard.js");
 const { WizardService } = await import("../../src/services/wizard-service.js");
@@ -845,5 +847,39 @@ describe("applying planned creations (#1662)", () => {
     expect(state().creations).toEqual({
       [QUOTES]: { name: "wall", kind: "text" },
     });
+  });
+
+  it("a settings read that never answers is cut off, the channel is reported as possibly there, and the lock is free", async () => {
+    const creations = { [QUOTES]: { name: "wall", kind: "text" as const } };
+    const review = await reviewWizardCreations(
+      client,
+      session.guildId,
+      creations,
+    );
+    const made = await applyWizardCreations(
+      client,
+      session.guildId,
+      session.discordUserId,
+      creations,
+      review.planId as string,
+    );
+    expect(made.ok).toBe(true);
+    if (!made.ok) return;
+    mockConfigGetAll.mockImplementation(() => new Promise(() => undefined));
+    jest.useFakeTimers();
+    try {
+      const pending = made.cleanup();
+      await jest.advanceTimersByTimeAsync(20_001);
+      const result = await pending;
+      expect(result.stuck).toEqual(["100000000000000100"]);
+      expect(result.removed).toEqual([]);
+      expect(mockDelete).not.toHaveBeenCalled();
+      // Nothing holds the server's lock any more.
+      const next = await withChannelLock(session.guildId, async () => "free");
+      expect(next).toEqual({ ok: true, value: "free" });
+    } finally {
+      jest.useRealTimers();
+      mockConfigGetAll.mockResolvedValue([]);
+    }
   });
 });
