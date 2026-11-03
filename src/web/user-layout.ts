@@ -168,13 +168,8 @@ const STYLE = [
   "#main:focus-visible{outline:none}",
   "h1{margin:0 0 var(--space-1);font-size:var(--type-page-title-size)}",
   "h2{margin:var(--space-6) 0 var(--space-2);font-size:var(--type-section-title-size);color:var(--text-secondary)}",
-  ".card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4) var(--space-5);margin:0 0 var(--space-4);overflow-x:auto}",
-  ".card h2{margin-top:0}",
-  ".empty{padding:var(--space-4);color:var(--muted);font-style:italic}",
-  ".muted{color:var(--muted)}",
-  ".mono{font-family:var(--font-mono);font-size:var(--type-mono-size)}",
+  // Still used by the "over size" tag in the host settings group editor (host-settings-groups.ts).
   ".tag{display:inline-block;padding:0 var(--space-2);line-height:1.4;border-radius:var(--radius-sm);font-size:var(--type-badge-size);font-weight:600;text-transform:uppercase;letter-spacing:.04em}",
-  ".tag-info{background:var(--info-bg);color:var(--info-text)}",
   // Disabled-feature "off" tag on the overview cards, mirroring the admin
   // Settings palette (#709).
   // The flash is a kb-callout and a Callout has no margin. The old .notice kept `space-4` below it, so a
@@ -182,41 +177,10 @@ const STYLE = [
   // gap spaces it, so it adds nothing. The stack rule is more specific, so the order does not matter.
   ".kb-callout[data-flash]{margin:0 0 var(--space-4)}",
   ".kb-stack>.kb-callout[data-flash]{margin:0}",
-  // Still used by the member presets page (me-event-presets-page.ts); goes with that piece (#1708 to #1711).
+  // Still used by the shared group editor on the new-event page (renderGroupsSection in admin-views.ts: the presets notice and the group errors box).
   ".notice{padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);margin:0 0 var(--space-4)}",
-  ".notice.info{background:var(--selected);color:var(--info-text)}",
-  ".notice.ok{background:var(--ok-bg);color:var(--ok-text)}",
   ".notice.warn{background:var(--warn-bg);color:var(--warn-text)}",
   ".notice.err{background:var(--err-bg);color:var(--err-text)}",
-  ".prefs-table{width:100%;border-collapse:collapse}",
-  ".prefs-table th,.prefs-table td{text-align:left;padding:.6rem .5rem;vertical-align:top;border-bottom:1px solid var(--chrome)}",
-  ".prefs-table th{font-weight:600;color:var(--text-secondary);font-size:.85rem;text-transform:uppercase;letter-spacing:.04em}",
-  // A row header (`th scope=row`) reads as a body cell; only assistive tech hears the difference.
-  ".prefs-table tbody th[scope=row]{font-weight:500;color:inherit;font-size:inherit;text-transform:none;letter-spacing:normal}",
-  // The row header rule above sets size and colour, so the cell's own classes are restated after it.
-  ".prefs-table tbody th[scope=row].mono{font-size:var(--type-mono-size)}",
-  ".prefs-table tbody th[scope=row].muted{color:var(--muted)}",
-  ".prefs-table tr:last-child td,.prefs-table tr:last-child th[scope=row]{border-bottom:0}",
-  ".btn,.btn-secondary,.btn-danger{border:0;padding:var(--space-2) var(--space-4);border-radius:var(--radius-md);cursor:pointer;font-weight:600;font-size:var(--type-ui-size)}",
-  // Neutral by default; `.btn-primary` is the one main button of a view (#1512).
-  ".btn{background:var(--fill);color:var(--text)}",
-  ".btn:hover{background:var(--fill-hover)}",
-  ".btn-primary{background:var(--primary);color:var(--on-primary)}",
-  ".btn-primary:hover{background:var(--primary-hover)}",
-  // The Privacy page's download control is a link (a plain GET), not a form
-  // button, so it needs the block/decoration bits a <button> gets for free.
-  "a.btn{display:inline-block;text-decoration:none;color:var(--text)}",
-  "a.btn:hover{text-decoration:none;color:var(--text)}",
-  "a.btn-primary,a.btn-primary:hover{color:var(--on-primary)}",
-  ".btn-secondary{background:var(--fill);color:var(--text)}",
-  ".btn-secondary:hover{background:var(--fill-hover)}",
-  ".btn-danger{background:var(--danger);color:var(--on-primary)}",
-  ".btn-danger:hover{background:var(--danger-hover)}",
-  // The shared preset editor's form (`form.stack`, on the member presets page; the admin layout styles its own).
-  "form.stack label{display:block;margin:0 0 var(--space-3)}",
-  "form.stack input[type=text],form.stack input[type=number],form.stack select{display:block;max-width:100%}",
-  "form.stack fieldset{margin:0 0 var(--space-3)}",
-  "form.inline{display:inline}",
   `.skip-link{position:absolute;left:-999px;top:0;z-index:100;background:var(--primary);color:var(--on-primary);padding:var(--space-2) var(--space-3);border-radius:0 0 var(--radius-sm) 0;font-weight:600}`,
   ".skip-link:focus{left:0;text-decoration:none}",
   // Reflow (WCAG 1.4.10, #855): the column's gutters and the Rewind hero tighten in kb.css.
