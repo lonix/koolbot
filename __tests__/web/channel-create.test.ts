@@ -234,17 +234,65 @@ describe("applyChannelPlan", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it("writes nothing when the live server no longer matches what Review showed", async () => {
+  it("selects a name another writer created since Review instead of creating it again", async () => {
     const reviewed = planChannels(entries, live);
     if (!reviewed.ok) throw new Error("plan");
-    // Someone created "raid-alerts" between Review and Apply.
+    // Someone created "raid-alerts" between Review and Apply: it was a create
+    // at Review and now exists, so it is selected, and only "Logs" is created.
     const changed = [
       ...live,
       view("444444444444444444", "raid-alerts", "text"),
     ];
     const { deps, post } = setup(changed);
     const result = await applyChannelPlan(deps, entries, reviewed.planId);
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) throw new Error("expected success");
+    expect(result.channels).toEqual([
+      expect.objectContaining({ name: "Logs", created: true }),
+      {
+        id: "444444444444444444",
+        name: "raid-alerts",
+        created: false,
+      },
+    ]);
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it("still writes nothing when a name that Review showed as existing is gone", async () => {
+    const one = [{ kind: "text" as const, name: "mod-log", parentId: CAT }];
+    const reviewed = planChannels(one, live);
+    if (!reviewed.ok) throw new Error("plan");
+    const gone = live.filter((c) => c.name !== "mod-log");
+    const { deps, post } = setup(gone);
+    const result = await applyChannelPlan(deps, one, reviewed.planId);
     expect(result).toMatchObject({ ok: false, removed: [], stuck: [] });
+    if (result.ok) throw new Error("expected failure");
+    expect(result.error).toBe(
+      "The channels on the server changed since Review, so nothing was created. Review the changes again.",
+    );
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("still writes nothing when a name that Review showed as existing is now a different channel", async () => {
+    const one = [{ kind: "text" as const, name: "mod-log", parentId: CAT }];
+    const reviewed = planChannels(one, live);
+    if (!reviewed.ok) throw new Error("plan");
+    const swapped = live.map((c) =>
+      c.name === "mod-log" ? { ...c, id: "999999999999999999" } : c,
+    );
+    const { deps, post } = setup(swapped);
+    const result = await applyChannelPlan(deps, one, reviewed.planId);
+    expect(result).toMatchObject({ ok: false, removed: [], stuck: [] });
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("still writes nothing when the reviewed entries are not the ones being applied", async () => {
+    const reviewed = planChannels(entries, live);
+    if (!reviewed.ok) throw new Error("plan");
+    const other = [...entries, { kind: "text" as const, name: "extra" }];
+    const { deps, post } = setup(live);
+    const result = await applyChannelPlan(deps, other, reviewed.planId);
+    expect(result.ok).toBe(false);
     expect(post).not.toHaveBeenCalled();
   });
 
@@ -698,9 +746,13 @@ describe("applyChannelPlan serialises per server (#1714)", () => {
     server.releaseCreates();
     const results = await Promise.all([first, second]);
     expect(server.post).toHaveBeenCalledTimes(1);
-    expect(results[0].ok).toBe(true);
-    // The second one re-planned inside the lock, saw the name, and wrote nothing.
-    expect(results[1]).toMatchObject({ ok: false, removed: [], stuck: [] });
+    // The second one re-planned inside the lock, saw the name, and selected it.
+    expect(results[0].ok && results[1].ok).toBe(true);
+    if (!results[0].ok || !results[1].ok) throw new Error("expected success");
+    expect(results[0].channels[0]).toMatchObject({ created: true });
+    expect(results[1].channels).toEqual([
+      { id: results[0].channels[0].id, name: "bot-log", created: false },
+    ]);
     expect(server.channels.filter((c) => c.name === "bot-log")).toHaveLength(1);
   });
 
@@ -723,7 +775,10 @@ describe("applyChannelPlan serialises per server (#1714)", () => {
     await other;
     const result = await apply;
     expect(server.post).not.toHaveBeenCalled();
-    expect(result.ok).toBe(false);
+    expect(result).toEqual({
+      ok: true,
+      channels: [{ id: "777777777777777777", name: "bot-log", created: false }],
+    });
     expect(server.channels.filter((c) => c.name === "bot-log")).toHaveLength(1);
   });
 

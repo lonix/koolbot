@@ -29,10 +29,16 @@ import { createKeyedLock } from "../utils/keyed-lock.js";
 
 /**
  * How long a caller waits for another write to the same server (owner
- * decision, #1714). Kept under the 60 s default `proxy_read_timeout` of the
- * nginx setup in WEBUI.md: the session checks run before the wait and the
- * audit write after it, so a longer wait could end in a 504 before the busy
- * page arrives.
+ * decision, #1714). Kept short so that a busy server answers quickly.
+ *
+ * Budget of one Channel Manager request, worst case: this wait (25 s) + up to
+ * five reads inside the lock (`CHANNEL_READ_TIMEOUT_MS`, 20 s each: guild,
+ * permission, channels, the target channel and the protection lookup) + one Discord
+ * write (30 s, `WRITE_TIMEOUT_MS`), about 155 s, though a normal request takes
+ * well under a second. A proxy that cuts a request after 60 s (nginx's default
+ * `proxy_read_timeout`) could answer 504 while the write still completes, so
+ * WEBUI.md asks for `proxy_read_timeout 180s` on the nginx setup. If you change
+ * one of these numbers, change that line and this sum too.
  */
 export const CHANNEL_LOCK_WAIT_MS = 25_000;
 
@@ -52,7 +58,7 @@ export const CHANNEL_READ_TIMEOUT_MS = 20_000;
 
 /** What an admin reads when a read inside the lock timed out. */
 export const CHANNEL_READ_TIMEOUT_MESSAGE =
-  "Discord didn't answer in time, so nothing was changed. Try again in a moment.";
+  "A check took too long, so nothing was changed. Try again in a moment.";
 
 export class ChannelReadTimeoutError extends Error {
   constructor() {

@@ -162,6 +162,9 @@ async function moveRefusal(
     if (verdict.ok) return false;
     addFieldError(errors, "parent", verdict.message);
   } catch (error) {
+    // A stalled lookup is not about the field: it reaches the write wrapper,
+    // which refuses without drawing the page (and its lookup) again.
+    if (error instanceof ChannelReadTimeoutError) throw error;
     logger.warn("channel manager: protection check failed", error);
     addFieldError(
       errors,
@@ -247,7 +250,10 @@ export function createChannelManagerRouter(
     guild: Guild,
     id: string,
   ): Promise<GuildChannel | null> {
-    const found = await guild.channels.fetch(id).catch(() => null);
+    // A read inside the lock: bounded, and a timeout refuses before the write.
+    const found = await readWithin(() =>
+      guild.channels.fetch(id).catch(() => null),
+    );
     return found && !found.isThread() ? (found as GuildChannel) : null;
   }
 

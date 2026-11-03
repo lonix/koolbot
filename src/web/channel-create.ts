@@ -220,11 +220,49 @@ export function planChannels(
     }
   }
   if (errors.length > 0) return { ok: false, errors };
-  const planId = createHash("sha256")
+  return { ok: true, entries: planned, planId: planIdOf(planned) };
+}
+
+const planIdOf = (planned: readonly PlannedChannel[]): string =>
+  createHash("sha256")
     .update(JSON.stringify(planned))
     .digest("hex")
     .slice(0, 16);
-  return { ok: true, entries: planned, planId };
+
+/** The most `existing` entries that are tried as "was a create at Review". */
+const MAX_SELECTED_SINCE_REVIEW = 10;
+
+/**
+ * Whether the live plan differs from the reviewed one only by names that were
+ * a create at Review and now exist (another writer made them a moment
+ * earlier): those are selected, not created again. Any other difference (an
+ * entry that was `existing` is gone or changed, a new name, a different
+ * parent) does not match and the apply refuses. Review showed only a hash, so
+ * each subset of the live `existing` entries is tried as "was a create".
+ */
+function selectsSinceReview(
+  plan: readonly PlannedChannel[],
+  entries: readonly ChannelPlanEntry[],
+  reviewedPlanId: string,
+): boolean {
+  const existing = plan.flatMap((p, i) => (p.action === "existing" ? [i] : []));
+  if (existing.length === 0 || existing.length > MAX_SELECTED_SINCE_REVIEW) {
+    return false;
+  }
+  for (let mask = 1; mask < 1 << existing.length; mask += 1) {
+    const reverted = plan.map((p, i): PlannedChannel => {
+      const bit = existing.indexOf(i);
+      if (bit < 0 || !(mask & (1 << bit))) return p;
+      return {
+        kind: p.kind,
+        name: normaliseChannelName(p.kind, entries[i].name),
+        parentId: p.parentId,
+        action: "create",
+      };
+    });
+    if (planIdOf(reverted) === reviewedPlanId) return true;
+  }
+  return false;
 }
 
 /**
@@ -280,7 +318,10 @@ export type ChannelApplyResult =
  * showed. On a failure, what this call created is deleted again. The whole
  * apply, the re-read included, runs inside the shared per-server lock
  * (`channel-write-lock.ts`); a caller that waits too long for it gets
- * `CHANNEL_LOCK_BUSY_MESSAGE` and nothing is written.
+ * `CHANNEL_LOCK_BUSY_MESSAGE` and nothing is written. A name that was a create
+ * at Review and was made by another writer meanwhile is selected (it comes back
+ * with `created: false`), not created again; every other change since Review
+ * still refuses.
  */
 export async function applyChannelPlan(
   deps: ChannelCreateDeps,
@@ -323,7 +364,10 @@ async function applyLocked(
   }
   const plan = planChannels(entries, live);
   if (!plan.ok) return nothing(plan.errors.join(" "));
-  if (plan.planId !== reviewedPlanId) {
+  if (
+    plan.planId !== reviewedPlanId &&
+    !selectsSinceReview(plan.entries, entries, reviewedPlanId)
+  ) {
     return nothing(
       "The channels on the server changed since Review, so nothing was created. Review the changes again.",
     );

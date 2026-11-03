@@ -62,6 +62,9 @@ let canManage = true;
 let protectionFails = false;
 let channelReads = 0;
 let channelReadHangs = false;
+let protectionHangs = false;
+let protectionCalls = 0;
+let liveFetchHangs = false;
 let failChannelReadsFrom: number | null = null;
 let recent: unknown = [];
 jest.unstable_mockModule("../../src/web/channel-manager-data.js", () => ({
@@ -77,6 +80,8 @@ jest.unstable_mockModule("../../src/web/channel-manager-data.js", () => ({
   loadRecentChanges: async () => recent,
   botCanManageChannels: async () => canManage,
   loadProtection: async () => {
+    protectionCalls++;
+    if (protectionHangs) return new Promise<never>(() => undefined);
     if (protectionFails) throw new Error("db down");
     return protection;
   },
@@ -151,13 +156,15 @@ function makeClient(opts: { guildFails?: boolean } = {}): Client {
     id: "guild-1",
     channels: {
       fetch: jest.fn(async (id: string) =>
-        fetchMissing
-          ? null
-          : {
-              id,
-              isThread: () => false,
-              ...liveFlags,
-            },
+        liveFetchHangs
+          ? new Promise<never>(() => undefined)
+          : fetchMissing
+            ? null
+            : {
+                id,
+                isThread: () => false,
+                ...liveFlags,
+              },
       ),
     },
   };
@@ -228,6 +235,9 @@ beforeEach(() => {
   canManage = true;
   protectionFails = false;
   channelReads = 0;
+  protectionHangs = false;
+  protectionCalls = 0;
+  liveFetchHangs = false;
   failChannelReadsFrom = null;
   recent = [];
   liveFlags = {};
@@ -1905,7 +1915,11 @@ describe("the shared per-server channel lock (#1714)", () => {
     hold.open();
     const res = await manager;
     expect(flashOf(res)).toMatchObject({ type: "ok" });
-    expect((await apply).ok).toBe(false);
+    // The apply selects the channel the manager created; nothing is created twice.
+    expect(await apply).toEqual({
+      ok: true,
+      channels: [{ id: "100000000000000077", name: "bot-log", created: false }],
+    });
     expect(mockCreate).toHaveBeenCalledTimes(1);
     expect(channels.filter((c) => c.name === "bot-log")).toHaveLength(1);
   });
@@ -2142,5 +2156,91 @@ describe("the shared per-server channel lock (#1714)", () => {
     await withChannelLock(session.guildId, async () => undefined);
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
     expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  /** Only the lock's read timeout is shortened; the HTTP stack keeps real timers. */
+  function shortReadTimeout(): () => void {
+    const realSetTimeout = globalThis.setTimeout;
+    const spy = jest
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
+        realSetTimeout(
+          fn,
+          ms === CHANNEL_READ_TIMEOUT_MS ? 5 : ms,
+          ...rest,
+        )) as unknown as typeof setTimeout);
+    return () => spy.mockRestore();
+  }
+
+  it("a stalled protection lookup on a move refuses with the timeout text, never draws the page again, and frees the lock", async () => {
+    await mount();
+    protectionHangs = true;
+    const restore = shortReadTimeout();
+    try {
+      const res = await harness.post(`/channels/${TEXT}/edit`, {
+        parent: "",
+        orig_parent: CAT,
+      });
+      // A flash redirect, not the refused form page (422).
+      expect(res.status).toBe(303);
+      expect(flashOf(res)).toMatchObject({ type: "err" });
+      expect(flashOf(res).msg).toBe(CHANNEL_READ_TIMEOUT_MESSAGE);
+      expect(protectionCalls).toBe(1);
+      expect(mockEdit).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+    expect(await withChannelLock(session.guildId, async () => "free")).toEqual({
+      ok: true,
+      value: "free",
+    });
+  });
+
+  it("a stalled fetch of the target channel refuses before any write and frees the lock", async () => {
+    await mount();
+    liveFetchHangs = true;
+    const restore = shortReadTimeout();
+    try {
+      const res = await harness.post(`/channels/${TEXT}/edit`, {
+        name: "renamed",
+        orig_name: "general",
+      });
+      expect(flashOf(res)).toMatchObject({ type: "err" });
+      expect(flashOf(res).msg).toBe(CHANNEL_READ_TIMEOUT_MESSAGE);
+      expect(mockEdit).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+    expect(await withChannelLock(session.guildId, async () => "free")).toEqual({
+      ok: true,
+      value: "free",
+    });
+  });
+
+  it("an apply that created a name first still lets a Channel Manager create of the same name post a second channel", async () => {
+    await mount();
+    const reviewed = planChannels([entry], channels);
+    if (!reviewed.ok) throw new Error("plan");
+    mockCreate.mockImplementation(async (body: any) => {
+      const made = {
+        id: String(100000000000000200 + channels.length),
+        name: body.name as string,
+      };
+      channels.push(view(made.id, { name: made.name }));
+      return made;
+    });
+    const applied = await applyChannelPlan(
+      applyDeps(session.guildId),
+      [entry],
+      reviewed.planId,
+    );
+    expect(applied.ok).toBe(true);
+    const res = await harness.post("/channels/create", {
+      type: "text",
+      name: "bot-log",
+    });
+    expect(flashOf(res)).toMatchObject({ type: "ok" });
+    expect(mockCreate).toHaveBeenCalledTimes(2);
+    expect(channels.filter((c) => c.name === "bot-log")).toHaveLength(2);
   });
 });
