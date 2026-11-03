@@ -713,8 +713,11 @@ function panel(
 }
 
 /** An EmptyState (components.md): what is missing, then how it fills up. */
-function emptyState(title: string, text: string): string {
-  return `<div class="kb-empty"><p class="kb-empty__title">${title}</p><p class="kb-empty__text">${text}</p></div>`;
+function emptyState(title: string, text: string, iconName?: IconName): string {
+  const glyph = iconName
+    ? `<div class="kb-empty__icon">${icon(iconName)}</div>`
+    : "";
+  return `<div class="kb-empty">${glyph}<p class="kb-empty__title">${title}</p><p class="kb-empty__text">${text}</p></div>`;
 }
 
 /** A name and a figure per row, in a `kb-list`. Both are HTML the caller has already escaped. */
@@ -1584,7 +1587,11 @@ export function renderUserVoiceBody(opts: VoicePageBodyOptions): string {
   const npHelp = `${VOICE_NAME_PATTERN_FORM_ID}-help`;
   const presetCards =
     opts.presets.length === 0
-      ? '<div class="kb-empty"><p class="kb-empty__title">No saved presets yet</p><p class="kb-empty__text">Open a voice channel\'s control panel in Discord and choose <strong>Presets → Save current as preset</strong> to create one.</p></div>'
+      ? emptyState(
+          "No saved presets yet",
+          "Open a voice channel's control panel in Discord and choose <strong>Presets → Save current as preset</strong> to create one.",
+          "mic",
+        )
       : opts.presets
           .map((p) => renderPresetRow(p, opts.csrfToken, opts.refusedForm))
           .join("");
