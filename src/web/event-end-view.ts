@@ -31,7 +31,7 @@ export interface EndFormOptions {
 
 export function renderEndEventForm(opts: EndFormOptions): string {
   const id = `end-${escapeHtml(opts.idSuffix)}`;
-  return `<form method="POST" action="${escapeHtml(opts.actionPath)}" class="end-event-form" aria-describedby="${id}-what">
+  return `<form method="POST" action="${escapeHtml(opts.actionPath)}" data-end-event-form aria-describedby="${id}-what">
 <input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">
 <p id="${id}-what">Ending the event now stops its reminders and host actions. ${
     opts.hasGroupChannels
@@ -43,7 +43,7 @@ export function renderEndEventForm(opts: EndFormOptions): string {
       : "the Discord event is closed"
   }. This cannot be undone.</p>
 <p><label><input type="checkbox" name="${END_CONFIRM_FIELD}" value="1" required> I want to end this event now</label></p>
-<button type="submit" class="btn btn-danger">End event now</button>
+<button type="submit" class="kb-btn kb-btn--danger">End event now</button>
 </form>`;
 }
 
@@ -94,7 +94,7 @@ export function renderEndSection(opts: {
   }
   const items = endEventItems(opts.hasGroupChannels, opts.adopted === true);
   return `<p class="kb-muted">Ends the event for everyone and tidies up its channels. You are asked to confirm first.</p>
-<form method="POST" action="${escapeHtml(opts.actionPath)}" class="end-event-form" data-confirm="End this event now?"${confirmListAttr(items)}>
+<form method="POST" action="${escapeHtml(opts.actionPath)}" data-end-event-form data-confirm="End this event now?"${confirmListAttr(items)}>
 <input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">
 <noscript><p>Ending the event does this:</p><ul>${items.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ul><p><label><input type="checkbox" required> I want to end this event now</label></p></noscript>
 <button type="submit" class="kb-btn kb-btn--danger" name="${END_CONFIRM_FIELD}" value="1">End event now</button>
