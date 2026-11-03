@@ -512,6 +512,17 @@ the row's name. Numbers get `td.kb-num` (right-aligned, tabular). Row actions go
 - Status cells use badges; ids and commands use `kb-mono`.
 - Wide tables scroll inside their panel, never the page (#855).
 
+**Width (proposal for the owner, #1629).** As built, every admin table shares the `main` cap of `1100px` (1036px of content), whatever it holds. A table
+whose columns do not fit there scrolls inside its panel, and a wider window does not help. Proposed, rule (c): a page whose main content is a table
+(a row-actions column with inline controls, or about six columns or more) or a board takes the wide column: one class on the page raises the cap
+from `content-max` to `content-max-wide` (proposed 96rem), defined once in `admin-layout.ts` and `kb.css`. Prose and form pages keep `content-max`.
+
+- Scrolling inside the panel stays the fallback for a window narrower than the table. It is not how a table fits at 1600px or wider: if it scrolls
+  there, change the page (fewer columns, controls that stack under the row's name, details in a disclosure).
+- A visually hidden label inside a scrolling panel needs a positioned ancestor within the panel (`position: relative` on the scroll container), or it
+  sits outside the panel's clip and the whole page scrolls sideways.
+- Measure with `scripts/measure-ui-widths.mjs` on the UI preview render at 1280, 1600, 1920 and 2560px. jsdom has no layout, so no unit test can.
+
 ### KeyValue
 
 Facts about one thing: a definition list for labelled facts, a number grid for counts.
