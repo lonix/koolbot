@@ -241,11 +241,12 @@ describe("member mod log pages are built from kb- components (#1710)", () => {
   });
 
   it.each(BODIES)(
-    "$name: a panel title that holds a badge is a kb-row",
+    "$name: a panel title that holds a badge is a plain kb-panel__title (it wraps through the stylesheet, #1698)",
     ({ html }) => {
       for (const el of doc(html).querySelectorAll(".kb-panel__title")) {
         if (el.querySelector(".kb-badge")) {
-          expect(el.classList.contains("kb-row")).toBe(true);
+          expect(el.classList.contains("kb-panel__title")).toBe(true);
+          expect(el.classList.contains("kb-row")).toBe(false);
         }
       }
     },

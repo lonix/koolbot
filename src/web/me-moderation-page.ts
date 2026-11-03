@@ -473,7 +473,7 @@ export function renderModCaseBody(p: ModCaseBodyProps): string {
   return `${head}
 <div class="kb-stack">
 <section class="kb-panel" aria-labelledby="case-h">
-  <header class="kb-panel__head"><h2 class="kb-panel__title kb-row" id="case-h">${actionBadge(c.action)} ${caseStatusBadge(c.status)}</h2></header>
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="case-h">${actionBadge(c.action)} ${caseStatusBadge(c.status)}</h2></header>
   <div class="kb-panel__body">
     <dl class="kb-kv">
       <dt>Member</dt><dd title="${escapeHtml(c.userId)}">${escapeHtml(c.userLabel)}</dd>
