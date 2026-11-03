@@ -84,7 +84,7 @@ describe("Events page header and sections (#1525)", () => {
     const early = Array.from(
       d.querySelectorAll("#upcoming-events tbody tr"),
     ).find((r) => r.textContent?.includes("Event early"));
-    expect(early?.querySelector(".end-now")).not.toBeNull();
+    expect(early?.querySelector("[data-end-now]")).not.toBeNull();
     expect(early?.querySelector(".kb-badge")?.textContent).toBe("Planned");
     expect(d.querySelector("#live-events tbody .kb-badge")?.textContent).toBe(
       "Live",
@@ -103,7 +103,7 @@ describe("Events page header and sections (#1525)", () => {
     expect(soon?.textContent).toContain("Edit");
     expect(soon?.textContent).toContain("Start now");
     expect(soon?.textContent).toContain("Cancel");
-    expect(soon?.querySelector(".end-now")).toBeNull();
+    expect(soon?.querySelector("[data-end-now]")).toBeNull();
   });
 
   it("says how Start now works when nothing is live, and keeps empty states apart", () => {
