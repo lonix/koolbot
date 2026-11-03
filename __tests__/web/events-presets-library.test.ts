@@ -515,8 +515,8 @@ describe("the presets admin page (#1200)", () => {
     // After a refused save the page is the blank editor: no kind select has a
     // leads option. The draft the script restores holds the leads value.
     const html = adminPage().replace(
-      "<h1>Group presets</h1>",
-      '<h1>Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>nope</div>',
+      '<h1 class="kb-pagehead__title">Group presets</h1>',
+      '<h1 class="kb-pagehead__title">Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>nope</div>',
     );
     const dom = new JSDOM(html, {
       url: "http://localhost/admin/events/presets",
@@ -563,8 +563,8 @@ describe("the presets admin page (#1200)", () => {
   it("a draft with a leads row and an explicit unticked box stays unticked on a second restore, and one with an explicit tick stays ticked (#1263)", () => {
     const restore = (draft: Record<string, unknown>): HTMLInputElement => {
       const html = adminPage().replace(
-        "<h1>Group presets</h1>",
-        '<h1>Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>nope</div>',
+        '<h1 class="kb-pagehead__title">Group presets</h1>',
+        '<h1 class="kb-pagehead__title">Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>nope</div>',
       );
       const dom = new JSDOM(html, {
         url: "http://localhost/admin/events/presets",
@@ -615,8 +615,8 @@ describe("the presets admin page (#1200)", () => {
         maxCount: 3,
         editing: { id: LIB_ID, label: "Old" },
       }).replace(
-        "<h1>Group presets</h1>",
-        '<h1>Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>nope</div>',
+        '<h1 class="kb-pagehead__title">Group presets</h1>',
+        '<h1 class="kb-pagehead__title">Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>nope</div>',
       );
       const dom = new JSDOM(html, {
         url: "http://localhost/admin/events/presets",
@@ -649,8 +649,8 @@ describe("the presets admin page (#1200)", () => {
 
   it("a restored older draft counts its leads row once, as the lobby: the free slot stays usable, and changing the row's kind recounts (#1263)", () => {
     const html = adminPage({ maxCount: 4 }).replace(
-      "<h1>Group presets</h1>",
-      '<h1>Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>nope</div>',
+      '<h1 class="kb-pagehead__title">Group presets</h1>',
+      '<h1 class="kb-pagehead__title">Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>nope</div>',
     );
     const dom = new JSDOM(html, {
       url: "http://localhost/admin/events/presets",
@@ -752,8 +752,8 @@ describe("the presets admin page (#1200)", () => {
     // Duplicate or Save-from-event of 4 groups at a cap of 2: the refused
     // create comes back to a page with the default 2 rows and the draft.
     const html = adminPage({ maxCount: 2 }).replace(
-      "<h1>Group presets</h1>",
-      '<h1>Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>Preset not saved.</div>',
+      '<h1 class="kb-pagehead__title">Group presets</h1>',
+      '<h1 class="kb-pagehead__title">Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>Preset not saved.</div>',
     );
     const dom = new JSDOM(html, {
       url: "http://localhost/admin/events/presets",
@@ -892,8 +892,8 @@ describe("a preset's clan tags default (#1194)", () => {
 
   it("after a refused save, the editor draft keeps the ticked box", () => {
     const html = adminPage().replace(
-      "<h1>Group presets</h1>",
-      '<h1>Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>Preset not saved.</div>',
+      '<h1 class="kb-pagehead__title">Group presets</h1>',
+      '<h1 class="kb-pagehead__title">Group presets</h1><div class="kb-callout kb-callout--err" role="alert" data-flash>Preset not saved.</div>',
     );
     const dom = new JSDOM(html, {
       url: "http://localhost/admin/events/presets",
@@ -1079,7 +1079,7 @@ describe("the Captains lobby tick in the preset editor (#1263)", () => {
     const html = adminPage();
     const row = html.slice(html.indexOf("Mine &quot;"));
     expect(row).toContain("captains lobby");
-    expect(row).toContain('<span class="muted">2:</span>');
+    expect(row).toContain('<span class="kb-muted">2:</span>');
     expect(row).not.toContain("Command");
   });
 

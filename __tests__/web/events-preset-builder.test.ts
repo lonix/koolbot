@@ -65,8 +65,8 @@ function html(
   });
   return flash
     ? page.replace(
-        "<h1>Group presets</h1>",
-        "<h1>Group presets</h1>" + flashDiv,
+        '<h1 class="kb-pagehead__title">Group presets</h1>',
+        '<h1 class="kb-pagehead__title">Group presets</h1>' + flashDiv,
       )
     : page;
 }

@@ -1,6 +1,12 @@
 import type { Client } from "discord.js";
 import { scriptTag } from "./html.js";
-import { formView, type RefusedForm } from "./form-errors.js";
+import { toneIcon, type Tone } from "./icons.js";
+import {
+  formView,
+  type FormControlAttrs,
+  type FormView,
+  type RefusedForm,
+} from "./form-errors.js";
 import {
   escapeHtml,
   renderAdminPage,
@@ -8,6 +14,7 @@ import {
 } from "./admin-layout.js";
 import {
   GROUP_ROWS_HEAD,
+  kbEmptyState,
   renderFlash,
   renderGroupRow,
   type FlashMessage,
@@ -221,6 +228,85 @@ async function loadHostPresets(
   }
 }
 
+/** A Panel for one topic of a presets page: the title, an optional note in the foot, and an optional ready-made footer. */
+export function presetPanel(
+  id: string,
+  title: string,
+  body: string,
+  opts: {
+    flush?: boolean;
+    /** Text above a flush table, in a padded body of its own. */
+    lead?: string;
+    note?: string;
+    footer?: string;
+  } = {},
+): string {
+  const foot =
+    opts.footer ??
+    (opts.note ? `<footer class="kb-panel__foot">${opts.note}</footer>` : "");
+  return `<section class="kb-panel" id="${id}" aria-labelledby="${id}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${id}-h">${title}</h2></header>
+  ${
+    opts.lead
+      ? `<div class="kb-panel__body">${opts.lead}</div>
+  `
+      : ""
+  }<div class="kb-panel__body${opts.flush ? " kb-panel__body--flush" : ""}">${body}</div>${foot}
+</section>`;
+}
+
+/** A Callout with a one-sentence title (the same shape as the page flash). `text` is trusted markup built by the caller. */
+export function presetCallout(tone: Tone, text: string): string {
+  const mod = tone === "" ? "" : ` kb-callout--${tone}`;
+  return `<div class="kb-callout${mod}" role="status">${toneIcon(tone)}<div class="kb-callout__body"><p class="kb-callout__title">${text}</p></div></div>`;
+}
+
+/** An On / Off Badge: a word and a colour, never colour alone. */
+function presetBadge(on: boolean, onText: string, offText: string): string {
+  return `<span class="kb-badge ${on ? "kb-badge--on" : "kb-badge--off"}">${on ? onText : offText}</span>`;
+}
+
+/** The first cell of a preset row: its name, and its description under it. */
+export function presetNameCell(entry: PresetEntry): string {
+  return `<th scope="row">${escapeHtml(entry.label)}${entry.description ? `<div class="kb-muted">${escapeHtml(entry.description)}</div>` : ""}</th>`;
+}
+
+/** The id of a Field's control, and its `aria-invalid` and error link when the server refused it. */
+function controlAttrs(c: FormControlAttrs): string {
+  const describedBy = c.describedBy
+    ? ` aria-describedby="${escapeHtml(c.describedBy)}"`
+    : "";
+  return ` id="${escapeHtml(c.id)}"${c.invalid ? ' aria-invalid="true"' : ""}${describedBy}`;
+}
+
+/** A Field: its label tied to the control by id, the control, an optional help line and the refused field's error line. */
+function presetField(
+  f: FormView,
+  name: string,
+  label: string,
+  control: string,
+  help = "",
+): string {
+  return `<div class="kb-field">
+      <label class="kb-label" for="${escapeHtml(f.id(name))}">${label}</label>
+      ${control}${help ? `<p class="kb-help">${help}</p>` : ""}${f.error(name)}
+    </div>`;
+}
+
+/** A Switch that posts `1` when on, with its help line tied to it by `aria-describedby`. */
+function presetSwitch(
+  name: string,
+  checked: boolean,
+  label: string,
+  helpId: string,
+  help: string,
+): string {
+  return `<div class="kb-field">
+      <label class="kb-switch"><input type="checkbox" role="switch" name="${name}" value="1"${checked ? " checked" : ""} aria-describedby="${helpId}"><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span><span>${label}</span></label>
+      <p class="kb-help" id="${helpId}">${help}</p>
+    </div>`;
+}
+
 export function groupSummary(entry: PresetEntry): string {
   // The Captains lobby (a stored `leads` row) is a tag, not a listed group, as on
   // the event form and the host panel (#1263).
@@ -229,36 +315,36 @@ export function groupSummary(entry: PresetEntry): string {
     .map((g) => `${g.marker ? `${g.marker} ` : ""}${g.name}`)
     .join(", ");
   const tags = entry.tagsEnabled
-    ? ' <span class="tag" title="Pre-ticks the clan tags box on the event form">clan tags on</span>'
+    ? ' <span class="kb-badge kb-badge--info" title="Pre-ticks the clan tags box on the event form">clan tags on</span>'
     : "";
   const lobby =
     listed.length < entry.groups.length
-      ? ' <span class="tag" title="Ticks Captains lobby on the event form (used while group leaders is ticked)">captains lobby</span>'
+      ? ' <span class="kb-badge kb-badge--info" title="Ticks Captains lobby on the event form (used while group leaders is ticked)">captains lobby</span>'
       : "";
-  return `<span class="muted">${listed.length}:</span> ${escapeHtml(names)}${tags}${lobby}`;
+  return `<span class="kb-muted">${listed.length}:</span> ${escapeHtml(names)}${tags}${lobby}`;
 }
 
 function entryRow(entry: PresetEntry, csrfInput: string): string {
   const library = entry.source === "library";
-  const toggle = `<form method="POST" action="/admin/events/presets/toggle" class="inline">${csrfInput}
+  const toggle = `<form method="POST" action="/admin/events/presets/toggle">${csrfInput}
     <input type="hidden" name="id" value="${escapeHtml(entry.id)}">
     <input type="hidden" name="enabled" value="${entry.enabled ? "0" : "1"}">
-    <button type="submit" class="btn" aria-label="${entry.enabled ? "Turn off" : "Turn on"} ${escapeHtml(entry.label)}">${entry.enabled ? "Turn off" : "Turn on"}</button>
+    <button type="submit" class="kb-btn kb-btn--sm" aria-label="${entry.enabled ? "Turn off" : "Turn on"} ${escapeHtml(entry.label)}">${entry.enabled ? "Turn off" : "Turn on"}</button>
   </form>`;
-  const duplicate = `<a class="btn" href="/admin/events/presets?from=${encodeURIComponent(entry.id)}#editor" aria-label="Duplicate ${escapeHtml(entry.label)}">Duplicate</a>`;
+  const duplicate = `<a class="kb-btn kb-btn--sm" href="/admin/events/presets?from=${encodeURIComponent(entry.id)}#editor" aria-label="Duplicate ${escapeHtml(entry.label)}">Duplicate</a>`;
   const edit = library
-    ? `<a class="btn" href="/admin/events/presets?edit=${encodeURIComponent(entry.id)}#editor" aria-label="Edit ${escapeHtml(entry.label)}">Edit</a>
-  <form method="POST" action="/admin/events/presets/delete" class="inline" data-confirm="Delete the preset '${escapeHtml(entry.label)}'? Events that already used it keep their groups.">${csrfInput}
+    ? `<a class="kb-btn kb-btn--sm" href="/admin/events/presets?edit=${encodeURIComponent(entry.id)}#editor" aria-label="Edit ${escapeHtml(entry.label)}">Edit</a>
+  <form method="POST" action="/admin/events/presets/delete" data-confirm="Delete the preset '${escapeHtml(entry.label)}'? Events that already used it keep their groups.">${csrfInput}
     <input type="hidden" name="id" value="${escapeHtml(entry.id)}">
-    <button type="submit" class="btn btn-danger" aria-label="Delete ${escapeHtml(entry.label)}">Delete</button>
+    <button type="submit" class="kb-btn kb-btn--sm kb-btn--danger" aria-label="Delete ${escapeHtml(entry.label)}">Delete</button>
   </form>`
     : "";
   return `<tr>
-<th scope="row">${escapeHtml(entry.label)}${entry.description ? `<br><span class="muted">${escapeHtml(entry.description)}</span>` : ""}</th>
+${presetNameCell(entry)}
 <td>${library ? "Your preset" : "Built-in"}</td>
 <td>${groupSummary(entry)}</td>
-<td><span class="tag ${entry.enabled ? "tag-on" : "tag-off"}">${entry.enabled ? "on" : "off"}</span></td>
-<td class="actions">${toggle} ${duplicate} ${edit}</td>
+<td>${presetBadge(entry.enabled, "on", "off")}</td>
+<td class="kb-actions"><div class="kb-row kb-row--nowrap">${toggle} ${duplicate} ${edit}</div></td>
 </tr>`;
 }
 
@@ -436,43 +522,47 @@ export function renderPresetEditorForm(props: PresetEditorFormProps): string {
     .join("");
   const oversize =
     total > props.maxCount
-      ? `<div class="notice warn" role="status">This setup has ${total} groups${lobbyOn ? " (counting the Captains lobby)" : ""} but the limit is ${props.maxCount}${props.audience === "host" ? ". Remove groups before saving, or ask an admin to raise the limit; nothing is dropped for you." : " (<code>events.groups.max_count</code>). Remove groups, or raise the limit, before saving; nothing is dropped for you."}</div>`
+      ? presetCallout(
+          "warn",
+          `This setup has ${total} groups${lobbyOn ? " (counting the Captains lobby)" : ""} but the limit is ${props.maxCount}${props.audience === "host" ? ". Remove groups before saving, or ask an admin to raise the limit; nothing is dropped for you." : ' (<span class="kb-mono">events.groups.max_count</span>). Remove groups, or raise the limit, before saving; nothing is dropped for you.'}`,
+        )
       : "";
+  const text = (
+    name: string,
+    max: number,
+    extra = "",
+    required = false,
+  ): string =>
+    `<input type="text" class="kb-input" name="${name}"${required ? " required" : ""} maxlength="${max}" value="${escapeHtml(v[name] ?? "")}"${extra}${controlAttrs(f.control(name))}>`;
   const editorHtml = props.editUnavailable
-    ? '<div class="notice err" role="status">This preset cannot be loaded right now because the preset library could not be read. Nothing was changed. Reload the page in a moment to edit it.</div>'
+    ? presetCallout(
+        "err",
+        "This preset cannot be loaded right now because the preset library could not be read. Nothing was changed. Reload the page in a moment to edit it.",
+      )
     : `${oversize}
-  <form method="POST" action="${escapeHtml(props.action)}" class="stack" data-preset-form>
+  <form method="POST" action="${escapeHtml(props.action)}" class="kb-stack" data-preset-form>
     ${csrfInput}
     ${props.editing ? `<input type="hidden" name="${PRESET_FORM_FIELDS.id}" value="${escapeHtml(props.editing.id)}">` : ""}
-    <label>Preset name (up to ${GROUP_NAME_MAX} characters, unique ignoring case)
-      <input type="text" name="${PRESET_FORM_FIELDS.name}" required maxlength="${GROUP_NAME_MAX}" value="${escapeHtml(v[PRESET_FORM_FIELDS.name] ?? "")}" placeholder="Clan match"${f.attrs(PRESET_FORM_FIELDS.name)}>
-    </label>${f.error(PRESET_FORM_FIELDS.name)}
-    <label>Description (optional)
-      <input type="text" name="${PRESET_FORM_FIELDS.description}" maxlength="${PRESET_DESCRIPTION_MAX}" value="${escapeHtml(v[PRESET_FORM_FIELDS.description] ?? "")}"${f.attrs(PRESET_FORM_FIELDS.description)}>
-    </label>${f.error(PRESET_FORM_FIELDS.description)}
-    <label>What a group is called (e.g. Team, Squad, Room, Party)
-      <input type="text" name="${GROUP_FORM_FIELDS.label}" maxlength="${GROUP_LABEL_MAX}" value="${escapeHtml(v[GROUP_FORM_FIELDS.label] ?? "")}" placeholder="${DEFAULT_GROUP_LABEL}"${f.attrs(GROUP_FORM_FIELDS.label)}>
-    </label>${f.error(GROUP_FORM_FIELDS.label)}
-    <label>What a leader is called (e.g. Leader, Captain)
-      <input type="text" name="${GROUP_FORM_FIELDS.leaderLabel}" maxlength="${GROUP_LABEL_MAX}" value="${escapeHtml(v[GROUP_FORM_FIELDS.leaderLabel] ?? "")}" placeholder="${DEFAULT_LEADER_LABEL}"${f.attrs(GROUP_FORM_FIELDS.leaderLabel)}>
-    </label>${f.error(GROUP_FORM_FIELDS.leaderLabel)}
-    <label>Create channels this many minutes before the start (empty = server default)
-      <input type="number" name="${GROUP_FORM_FIELDS.leadMinutes}" min="${CHANNEL_LEAD_MIN}" max="${CHANNEL_LEAD_MAX}" value="${escapeHtml(v[GROUP_FORM_FIELDS.leadMinutes] ?? "")}" placeholder="Server default"${f.attrs(GROUP_FORM_FIELDS.leadMinutes)}>
-    </label>${f.error(GROUP_FORM_FIELDS.leadMinutes)}
-    <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.tags}" value="1"${v[GROUP_FORM_FIELDS.tags] ? " checked" : ""}> Clan tags on nicknames: pre-tick this on the event form when the preset is chosen (the host can still change it for each event)</label>
-    <p class="muted">Only teams that have a tag get one on their members' nicknames, while the event runs.</p>
-    <label class="checkbox"><input type="checkbox" name="${GROUP_FORM_FIELDS.captainsLobby}" value="1"${lobbyOn ? " checked" : ""}> Captains lobby: a separate voice channel that only the host and the current leaders can join. Choosing this preset on the event form ticks Captains lobby there. It only takes effect on an event while group leaders is ticked (a preset has no leaders setting of its own); the host can still untick it for each event.</label>
+    ${presetField(f, PRESET_FORM_FIELDS.name, `Preset name (up to ${GROUP_NAME_MAX} characters, unique ignoring case)`, text(PRESET_FORM_FIELDS.name, GROUP_NAME_MAX, ' placeholder="Clan match"', true))}
+    ${presetField(f, PRESET_FORM_FIELDS.description, "Description (optional)", text(PRESET_FORM_FIELDS.description, PRESET_DESCRIPTION_MAX))}
+    ${presetField(f, GROUP_FORM_FIELDS.label, "What a group is called (e.g. Team, Squad, Room, Party)", text(GROUP_FORM_FIELDS.label, GROUP_LABEL_MAX, ` placeholder="${DEFAULT_GROUP_LABEL}"`))}
+    ${presetField(f, GROUP_FORM_FIELDS.leaderLabel, "What a leader is called (e.g. Leader, Captain)", text(GROUP_FORM_FIELDS.leaderLabel, GROUP_LABEL_MAX, ` placeholder="${DEFAULT_LEADER_LABEL}"`))}
+    ${presetField(f, GROUP_FORM_FIELDS.leadMinutes, "Create channels this many minutes before the start (empty = server default)", `<input type="number" class="kb-input" name="${GROUP_FORM_FIELDS.leadMinutes}" min="${CHANNEL_LEAD_MIN}" max="${CHANNEL_LEAD_MAX}" value="${escapeHtml(v[GROUP_FORM_FIELDS.leadMinutes] ?? "")}" placeholder="Server default"${controlAttrs(f.control(GROUP_FORM_FIELDS.leadMinutes))}>`)}
+    ${presetSwitch(GROUP_FORM_FIELDS.tags, Boolean(v[GROUP_FORM_FIELDS.tags]), "Clan tags on nicknames", `${EVENT_PRESET_FORM}-tags-help`, "Pre-ticks this on the event form when the preset is chosen (the host can still change it for each event). Only teams that have a tag get one on their members' nicknames, while the event runs.")}
+    ${presetSwitch(GROUP_FORM_FIELDS.captainsLobby, lobbyOn, "Captains lobby", `${EVENT_PRESET_FORM}-lobby-help`, "A separate voice channel that only the host and the current leaders can join. Choosing this preset on the event form ticks Captains lobby there. It only takes effect on an event while group leaders is ticked (a preset has no leaders setting of its own); the host can still untick it for each event.")}
     ${lobbyFields}
     ${renderGroupBuilder(props.maxCount)}${f.error(PRESET_GROUPS_FIELD)}
     ${GROUP_ROWS_HEAD}
-    <div data-group-rows data-max="${props.maxCount}" class="stack">
+    <div data-group-rows data-max="${props.maxCount}" class="kb-grouprows">
       ${rows}
     </div>
     <template data-group-row-template>${renderGroupRow("__N__", "__P__")}</template>
-    <button type="button" class="btn" data-add-group hidden>Add a group</button>
-    <p class="muted">Up to ${props.maxCount} groups${props.audience === "host" ? " (ask an admin to raise it)" : " (<code>events.groups.max_count</code>)"}. The Captains lobby counts as one of them. Rows left completely empty are ignored.</p>
-    <button type="submit" class="btn btn-primary">${props.editing ? "Save changes" : (props.addLabel ?? "Add preset")}</button>
-    ${props.editing ? `<a class="btn" href="${escapeHtml(props.cancelHref)}">Cancel</a>` : ""}
+    <div class="kb-row"><button type="button" class="kb-btn kb-btn--sm" data-add-group hidden>Add a group</button></div>
+    <p class="kb-help">Up to ${props.maxCount} groups${props.audience === "host" ? " (ask an admin to raise it)" : ' (<span class="kb-mono">events.groups.max_count</span>)'}. The Captains lobby counts as one of them. Rows left completely empty are ignored.</p>
+    <div class="kb-row">
+      <button type="submit" class="kb-btn kb-btn--primary">${props.editing ? "Save changes" : (props.addLabel ?? "Add preset")}</button>
+      ${props.editing ? `<a class="kb-btn" href="${escapeHtml(props.cancelHref)}">Cancel</a>` : ""}
+    </div>
   </form>`;
   return editorHtml;
 }
@@ -484,39 +574,37 @@ function hostPresetRow(
   const id = escapeHtml(row.entry.id);
   const published = row.publishedAs !== null;
   const owner = row.ownerName
-    ? `${escapeHtml(row.ownerName)} <span class="muted">(${escapeHtml(row.ownerId)})</span>`
-    : `<span class="mono">${escapeHtml(row.ownerId)}</span>`;
+    ? `${escapeHtml(row.ownerName)} <span class="kb-muted">(${escapeHtml(row.ownerId)})</span>`
+    : `<span class="kb-mono">${escapeHtml(row.ownerId)}</span>`;
   const action = published
-    ? `<form method="POST" action="/admin/events/presets/unpublish" class="inline" data-confirm="Remove the server copy of '${escapeHtml(row.entry.label)}'? Events that already used it keep their groups, and the host keeps their own preset.">${csrfInput}
+    ? `<form method="POST" action="/admin/events/presets/unpublish" data-confirm="Remove the server copy of '${escapeHtml(row.entry.label)}'? Events that already used it keep their groups, and the host keeps their own preset.">${csrfInput}
     <input type="hidden" name="id" value="${id}">
-    <button type="submit" class="btn btn-danger" aria-label="Unpublish ${escapeHtml(row.entry.label)}">Unpublish</button>
+    <button type="submit" class="kb-btn kb-btn--sm kb-btn--danger" aria-label="Unpublish ${escapeHtml(row.entry.label)}">Unpublish</button>
   </form>`
-    : `<form method="POST" action="/admin/events/presets/publish" class="inline">${csrfInput}
+    : `<form method="POST" action="/admin/events/presets/publish">${csrfInput}
     <input type="hidden" name="id" value="${id}">
-    <button type="submit" class="btn" aria-label="Publish ${escapeHtml(row.entry.label)}">Publish</button>
+    <button type="submit" class="kb-btn kb-btn--sm" aria-label="Publish ${escapeHtml(row.entry.label)}">Publish</button>
   </form>`;
   return `<tr>
-<th scope="row">${escapeHtml(row.entry.label)}${row.entry.description ? `<br><span class="muted">${escapeHtml(row.entry.description)}</span>` : ""}</th>
+${presetNameCell(row.entry)}
 <td>${owner}</td>
 <td>${groupSummary(row.entry)}</td>
-<td>${published ? '<span class="tag tag-on">published</span>' : '<span class="tag tag-off">not published</span>'}</td>
-<td class="actions">${action}</td>
+<td>${presetBadge(published, "published", "not published")}</td>
+<td class="kb-actions"><div class="kb-row kb-row--nowrap">${action}</div></td>
 </tr>`;
 }
 
 const HOST_PRESETS_INTRO =
-  '<p class="muted">Hosts can save their own presets from the host panel. Only admins see them all. Publishing copies one into the server\'s presets above, switched on, so every host can pick it; the host keeps their own preset, and the copy stays if they later delete it or reset their data. Unpublishing deletes the server copy (including any change you made to it).</p>';
+  '<p class="kb-help">Hosts can save their own presets from the host panel. Only admins see them all. Publishing copies one into the server\'s presets above, switched on, so every host can pick it; the host keeps their own preset, and the copy stays if they later delete it or reset their data. Unpublishing deletes the server copy (including any change you made to it).</p>';
 
+/** Previous and Next in the panel foot. `renderListPager` needs a page count, and this list only knows whether a next page exists. */
 function hostPresetsPager(v: HostPresetsView): string {
   const link = (page: number, text: string): string =>
-    `<a class="btn" href="/admin/events/presets?hostPage=${page}#host-presets">${text}</a>`;
-  const parts = [
-    v.page > 0 ? link(v.page - 1, "Previous") : "",
-    v.hasMore ? link(v.page + 1, "Next") : "",
-  ].filter(Boolean);
-  return parts.length > 0
-    ? `<p class="muted">Page ${v.page + 1}. ${parts.join(" ")}</p>`
-    : "";
+    `<a class="kb-btn kb-btn--sm" href="/admin/events/presets?hostPage=${page}#host-presets">${text}</a>`;
+  const off = (text: string): string =>
+    `<button class="kb-btn kb-btn--sm" disabled>${text}</button>`;
+  if (v.page === 0 && !v.hasMore) return "";
+  return `<footer class="kb-panel__foot">${v.page > 0 ? link(v.page - 1, "← Prev") : off("← Prev")}<span>Page ${v.page + 1}</span>${v.hasMore ? link(v.page + 1, "Next →") : off("Next →")}</footer>`;
 }
 
 function renderHostPresetsCard(
@@ -524,17 +612,34 @@ function renderHostPresetsCard(
   csrfInput: string,
 ): string {
   if (hostPresets === undefined) return "";
+  const title = "Hosts' presets";
   if (hostPresets === null) {
-    return `<div class="card" id="host-presets"><h2>Hosts' presets</h2>${HOST_PRESETS_INTRO}<div class="notice warn" role="status">The hosts' presets could not be read right now. Reload the page in a moment.</div></div>`;
+    return presetPanel(
+      "host-presets",
+      title,
+      `<div class="kb-stack">${HOST_PRESETS_INTRO}${presetCallout("warn", "The hosts' presets could not be read right now. Reload the page in a moment.")}</div>`,
+    );
   }
   if (hostPresets.rows.length === 0 && hostPresets.page === 0) {
-    return `<div class="card" id="host-presets"><h2>Hosts' presets</h2>${HOST_PRESETS_INTRO}<p class="muted">No host has saved a preset yet.</p></div>`;
+    return presetPanel(
+      "host-presets",
+      title,
+      `<div class="kb-stack">${HOST_PRESETS_INTRO}${kbEmptyState("users", "No host has saved a preset yet.", "Presets show up here when a host saves one from the host panel.")}</div>`,
+    );
   }
-  return `<div class="card" id="host-presets"><h2>Hosts' presets</h2>${HOST_PRESETS_INTRO}
-<table class="data">
+  return presetPanel(
+    "host-presets",
+    title,
+    `<table class="kb-table">
 <thead><tr><th scope="col">Preset</th><th scope="col">Host</th><th scope="col">Groups</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
 <tbody>${hostPresets.rows.map((r) => hostPresetRow(r, csrfInput)).join("\n")}</tbody>
-</table>${hostPresetsPager(hostPresets)}</div>`;
+</table>`,
+    {
+      flush: true,
+      lead: HOST_PRESETS_INTRO,
+      footer: hostPresetsPager(hostPresets),
+    },
+  );
 }
 
 export function renderEventPresetsPage(props: EventPresetsPageProps): string {
@@ -554,11 +659,11 @@ export function renderEventPresetsPage(props: EventPresetsPageProps): string {
   ).length;
   const table =
     props.entries.length > 0
-      ? `<table class="data">
+      ? `<table class="kb-table">
 <thead><tr><th scope="col">Preset</th><th scope="col">Kind</th><th scope="col">Groups</th><th scope="col">Offered to hosts</th><th scope="col">Actions</th></tr></thead>
 <tbody>${props.entries.map((e) => entryRow(e, csrfInput)).join("\n")}</tbody>
 </table>`
-      : '<p class="muted">The presets could not be listed.</p>';
+      : presetCallout("warn", "The presets could not be listed.");
 
   const editorHtml = renderPresetEditorForm({
     csrfInput,
@@ -575,23 +680,29 @@ export function renderEventPresetsPage(props: EventPresetsPageProps): string {
     ? `Edit "${escapeHtml(props.editing.label)}"`
     : "Add a preset";
   const body = `
-<h1>Group presets</h1>
-<p class="subtitle">Presets fill in the groups of an event in one click. Built-in presets can be switched off but not edited; add your own below. Changing, switching off or deleting a preset never changes events that already used it: each event keeps its own copy of its groups. <a href="/admin/events">Back to Events</a>.</p>
+<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <p class="kb-pagehead__crumbs"><a href="/admin/events">Back to Events</a></p>
+    <h1 class="kb-pagehead__title">Group presets</h1>
+    <p class="kb-pagehead__sub">Presets fill in the groups of an event in one click. Built-in presets can be switched off but not edited; add your own below. Changing, switching off or deleting a preset never changes events that already used it: each event keeps its own copy of its groups.</p>
+  </div>
+</header>
 ${renderFlash(props.flash)}
-${notice ? `<div class="notice warn" role="status">${escapeHtml(notice)}</div>` : ""}
-<div class="card">
-  <h2>Presets</h2>
-  ${table}
-  <p class="muted">Turning a preset off hides it from the event form. The "Custom" choice is always available. Your presets: ${libraryCount} of ${MAX_LIBRARY_PRESETS}.</p>
-</div>
+${notice ? presetCallout("warn", escapeHtml(notice)) : ""}
+${presetPanel("presets", "Presets", table, {
+  flush: props.entries.length > 0,
+  note: `Turning a preset off hides it from the event form. The "Custom" choice is always available. Your presets: ${libraryCount} of ${MAX_LIBRARY_PRESETS}.`,
+})}
 ${renderHostPresetsCard(props.hostPresets, csrfInput)}
-<div class="card" id="editor">
-  <h2>${heading}</h2>
-  ${props.prefillNote && !props.editUnavailable ? `<p class="muted">${escapeHtml(props.prefillNote)}</p>` : ""}
-  ${editorHtml}
-</div>
+${presetPanel(
+  "editor",
+  heading,
+  `<div class="kb-stack">${props.prefillNote && !props.editUnavailable ? `<p class="kb-help">${escapeHtml(props.prefillNote)}</p>` : ""}${editorHtml}</div>`,
+)}
 ${scriptTag(groupRowsScript())}
 ${scriptTag(EVENT_PRESETS_SCRIPT)}
+</div>
 `;
 
   return renderAdminPage({
