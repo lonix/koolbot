@@ -49,6 +49,7 @@ import {
   renderUserPage,
   renderUserPrivacyBody,
   renderUserRewindBody,
+  renderUserRewindLoadError,
   renderUserTimezoneBody,
   renderUserVoiceBody,
   BIRTHDAY_FORM_ID,
@@ -1357,9 +1358,7 @@ export function createUserRouter(
           renderUserPage({
             title: "Rewind",
             active: "/me/rewind",
-            body:
-              `<h1>Rewind ${year}</h1>` +
-              '<div class="notice err">Could not load your year-in-review. Please try again later.</div>',
+            body: renderUserRewindLoadError(year),
             csrfToken: getCsrfToken(req),
             remainingMs: getDisplayedRemainingMs(session),
             isAdmin: session.role === "admin",

@@ -12,6 +12,7 @@ import { JSDOM } from "jsdom";
 import {
   renderUserPage,
   renderUserRewindBody,
+  renderUserRewindLoadError,
   type RewindBodyOptions,
 } from "../../src/web/user-layout.js";
 
@@ -197,14 +198,18 @@ describe("Rewind bar lists and panels (#1524)", () => {
   it("puts every section in a kb-panel and uses no old Rewind class", () => {
     const html = renderUserRewindBody(BASE);
     expect(html).not.toMatch(/rw-|class="card"|class="empty"|class="current"/);
+    expect(html).not.toMatch(/class="(subtitle|notice)|<h2>|<h1>/);
     const titles = [...dom().querySelectorAll(".kb-panel__title")].map((e) =>
       text(e),
     );
     expect(titles).toEqual([
       "Where you spent your voice time",
       "Top voice companions",
+      "Text activity",
       "Top text channels",
+      "Reactions",
       "When you're online",
+      "Polls",
       "Rank journey",
       "Badges earned this year",
     ]);
@@ -296,6 +301,32 @@ describe("Rewind sections are spaced by a kb-stack (#1524)", () => {
   });
 });
 
+describe("Rewind header and load error (#1706)", () => {
+  it("opens with a PageHeader carrying the year and the one-line purpose", () => {
+    for (const d of [dom(), dom({ hasData: false })]) {
+      const head = d.querySelector("header.kb-pagehead");
+      expect(text(head?.querySelector("h1.kb-pagehead__title"))).toMatch(
+        /^Rewind \d{4}$/,
+      );
+      expect(text(head?.querySelector(".kb-pagehead__sub"))).toBe(
+        "Your personal year-in-review.",
+      );
+    }
+  });
+
+  it("shows a load failure as the header and an error Callout with role alert", () => {
+    const html = renderUserRewindLoadError(2026);
+    expect(html).not.toMatch(/class="notice|<h1>/);
+    const d = new JSDOM(`<body>${html}</body>`).window.document;
+    expect(text(d.querySelector("h1"))).toBe("Rewind 2026");
+    const c = d.querySelector(".kb-callout.kb-callout--err");
+    expect(c?.getAttribute("role")).toBe("alert");
+    expect(text(c)).toBe(
+      "Could not load your year-in-review. Please try again later.",
+    );
+  });
+});
+
 describe("Rewind in the member sheet (#1524)", () => {
   it("ships no .rw- rule and no gradient", () => {
     const html = renderUserPage({
@@ -309,5 +340,6 @@ describe("Rewind in the member sheet (#1524)", () => {
     const sheet = /<style>([\s\S]*?)<\/style>/.exec(html)?.[1] ?? "";
     expect(sheet).not.toContain(".rw-");
     expect(sheet).not.toContain("gradient");
+    expect(sheet).not.toContain(".subtitle");
   });
 });
