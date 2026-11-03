@@ -108,6 +108,7 @@ import {
   renderUserPage,
   renderUserPrivacyBody,
   renderUserRewindBody,
+  renderUserRewindLoadError,
   renderUserTimezoneBody,
   renderUserVoiceBody,
 } from "../../src/web/user-layout.js";
@@ -156,6 +157,7 @@ import {
 } from "../../src/web/host-board-view.js";
 import {
   renderConfirmBody,
+  renderResultBody,
   renderEventSettings,
   renderGroupChanges,
   type SettingsViewData,
@@ -6692,6 +6694,19 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      name: "/me host panel settings result, something left to do",
+      html: shell(
+        "Settings saved: Quiz night",
+        "/me/events",
+        renderResultBody({
+          ok: false,
+          message:
+            "Settings saved. Two channels are not finished. Try again in a few minutes.",
+          panelPath: "/me/events/65a000000000000000000001/host",
+        }),
+      ),
+    },
+    {
       // Unlocked, with people: a team with a leader-less member who is not
       // connected, an empty team and a person in no team.
       name: "/me host panel (board, unlocked, with people)",
@@ -7476,6 +7491,10 @@ export function userPages(): A11yPage[] {
         "/me/rewind",
         renderUserRewindBody({ ...REWIND, year: 2024, hasData: false }),
       ),
+    },
+    {
+      name: "/me rewind (could not load)",
+      html: shell("Rewind", "/me/rewind", renderUserRewindLoadError(2026)),
     },
     {
       name: "/me rewind (by room kind)",

@@ -15,6 +15,8 @@ import {
   CASE_OUTCOME_LABELS,
   CASE_STATUS_LABELS,
   MODERATION_ACTION_LABELS,
+  kbEmptyState,
+  renderListPager,
   type CommandAuditRow,
   type ModerationRow,
 } from "./admin-views.js";
@@ -28,6 +30,7 @@ import type { CaseView } from "./moderation-case-groups.js";
 import { channelMention } from "./discord-labels.js";
 import { CASE_DECISIONS } from "./moderation-case-actions.js";
 import type { ModerationAction } from "../models/moderation-log.js";
+import { icon, toneIcon } from "./icons.js";
 
 export const MOD_BASE = "/me/moderation";
 
@@ -74,6 +77,11 @@ function header(title: string, crumbs: string): string {
 }
 
 const crumbsLog = "Moderation";
+
+/** A warning Callout that says what could not be read, and what that is not. */
+function unreadableCallout(title: string, text: string): string {
+  return `<div class="kb-callout kb-callout--warn" role="status">${toneIcon("warn")}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(title)}</p><p class="kb-callout__text">${escapeHtml(text)}</p></div></div>`;
+}
 
 function badgeClass(action: ModerationAction): string {
   // Same reading as the admin log: undo actions positive, removals severe,
@@ -227,10 +235,16 @@ function renderOpenCases(p: ModLogBodyProps): string {
   const items = p.openCases;
   let body: string;
   if (items === null) {
-    body =
-      '<div class="kb-callout kb-callout--warn" role="status"><div class="kb-callout__body"><p class="kb-callout__title">The cases could not be read.</p><p class="kb-callout__text">Reload the page in a moment.</p></div></div>';
+    body = unreadableCallout(
+      "The cases could not be read.",
+      "Reload the page in a moment.",
+    );
   } else if (items.length === 0) {
-    body = `<div class="kb-empty"><p class="kb-empty__title">No open cases.</p><p class="kb-empty__text">A case appears here when a kick or ban gets a review date.</p></div>`;
+    body = kbEmptyState(
+      "gavel",
+      "No open cases.",
+      "A case appears here when a kick or ban gets a review date.",
+    );
   } else {
     body = `<div class="kb-panel__body--flush"><table class="kb-table">
 <thead><tr><th scope="col">Case</th><th scope="col">Member</th><th scope="col">Action</th><th scope="col">Status</th><th scope="col">Review</th><th scope="col"><span class="kb-visually-hidden">Review case</span></th></tr></thead>
@@ -276,13 +290,18 @@ function renderActions(p: ModLogBodyProps): string {
 
   let table: string;
   if (p.rowsUnavailable) {
-    table = `<div class="kb-panel__body"><div class="kb-callout kb-callout--warn" role="status"><div class="kb-callout__body"><p class="kb-callout__title">The log could not be read.</p><p class="kb-callout__text">This is not an empty log. Reload the page in a moment.</p></div></div></div>`;
+    table = `<div class="kb-panel__body">${unreadableCallout(
+      "The log could not be read.",
+      "This is not an empty log. Reload the page in a moment.",
+    )}</div>`;
   } else if (p.rows.length === 0) {
-    table = `<div class="kb-panel__body"><div class="kb-empty"><p class="kb-empty__title">${
+    table = `<div class="kb-panel__body">${kbEmptyState(
+      "gavel",
       p.kind === "all"
         ? "No actions logged yet."
-        : `No ${escapeHtml(MOD_LOG_KIND_LABELS[p.kind].toLowerCase())} logged.`
-    }</p><p class="kb-empty__text">Warnings, timeouts, kicks and bans show up here as they happen.</p></div></div>`;
+        : `No ${MOD_LOG_KIND_LABELS[p.kind].toLowerCase()} logged.`,
+      "Warnings, timeouts, kicks and bans show up here as they happen.",
+    )}</div>`;
   } else {
     table = `<div class="kb-panel__body--flush"><table class="kb-table">
 <thead><tr><th scope="col">When</th><th scope="col">Member</th><th scope="col">Action</th><th scope="col">Moderator</th><th scope="col">Reason</th>${
@@ -312,17 +331,20 @@ function renderActions(p: ModLogBodyProps): string {
       .join("\n")}</tbody></table></div>`;
   }
 
-  const prev =
-    page > 1
-      ? `<a class="kb-btn kb-btn--sm" href="${MOD_BASE}${pageQuery(p.kind, page - 1)}#actions">Previous</a>`
-      : "";
-  const next =
-    page < totalPages
-      ? `<a class="kb-btn kb-btn--sm" href="${MOD_BASE}${pageQuery(p.kind, page + 1)}#actions">Next</a>`
-      : "";
   const foot =
     totalPages > 1
-      ? `<footer class="kb-panel__foot"><span>Page ${page} of ${totalPages}</span>${prev}${next}</footer>`
+      ? renderListPager({
+          prevHref:
+            page > 1
+              ? `${MOD_BASE}${pageQuery(p.kind, page - 1)}#actions`
+              : null,
+          nextHref:
+            page < totalPages
+              ? `${MOD_BASE}${pageQuery(p.kind, page + 1)}#actions`
+              : null,
+          page,
+          totalPages,
+        })
       : "";
   return `<section class="kb-panel" id="actions" aria-labelledby="actions-h">
   <header class="kb-panel__head"><h2 class="kb-panel__title" id="actions-h">Actions</h2><span class="kb-panel__meta">${p.rowsUnavailable ? "unavailable" : `${p.total} ${plural(p.total, "entry", "entries")}`}</span></header>
@@ -338,7 +360,11 @@ export function renderModLogBody(p: ModLogBodyProps): string {
   const head = header("Mod log", crumbsLog);
   if (!p.enabled) {
     return `${head}
-<div class="kb-empty"><p class="kb-empty__title">Moderation is switched off on this server.</p><p class="kb-empty__text">There is nothing to read yet. A server admin can switch it on.</p></div>`;
+${kbEmptyState(
+  "gavel",
+  "Moderation is switched off on this server.",
+  "There is nothing to read yet. A server admin can switch it on.",
+)}`;
   }
   return `${head}
 <div class="kb-stack">
@@ -358,37 +384,37 @@ export interface ModCaseBodyProps {
 
 function caseEvents(c: CaseView): string {
   if (c.events.length === 0) {
-    return '<p class="kb-muted">No decisions yet.</p>';
+    return '<p class="kb-help">No decisions yet.</p>';
   }
-  return `<ul>${c.events
+  return `<ul class="kb-list">${c.events
     .map((e) => {
       const what = e.outcome
         ? escapeHtml(CASE_OUTCOME_LABELS[e.outcome] ?? e.outcome)
         : e.to === "under_review"
           ? "marked as needing a decision"
           : "opened";
-      return `<li><span class="kb-mono">${escapeHtml(stamp(e.at))}</span> ${what} by ${escapeHtml(e.byLabel)}${
+      return `<li><span class="kb-mono">${escapeHtml(stamp(e.at))}</span><span class="kb-list__main">${what} by ${escapeHtml(e.byLabel)}${
         e.note && e.note !== REVIEW_JOB_NOTE ? `: ${escapeHtml(e.note)}` : ""
-      }</li>`;
+      }</span></li>`;
     })
     .join("")}</ul>`;
 }
 
 function caseHistory(c: CaseView): string {
   if (c.historyUnavailable) {
-    return '<p class="kb-muted">The earlier actions could not be read. Reload the page in a moment.</p>';
+    return '<p class="kb-help">The earlier actions could not be read. Reload the page in a moment.</p>';
   }
   if (c.history.length === 0) {
-    return '<p class="kb-muted">No earlier actions on file.</p>';
+    return '<p class="kb-help">No earlier actions on file.</p>';
   }
-  return `<ul>${c.history
+  return `<ul class="kb-list">${c.history
     .map(
       (h) =>
-        `<li><span class="kb-mono">${escapeHtml(stamp(h.createdAt))}</span> ${actionBadge(h.action)} ${
+        `<li><span class="kb-mono">${escapeHtml(stamp(h.createdAt))}</span>${actionBadge(h.action)}<span class="kb-list__main">${
           h.reason
             ? escapeHtml(h.reason.slice(0, 200))
             : '<span class="kb-muted">no reason</span>'
-        }</li>`,
+        }</span></li>`,
     )
     .join("")}</ul>`;
 }
@@ -447,7 +473,7 @@ export function renderModCaseBody(p: ModCaseBodyProps): string {
   return `${head}
 <div class="kb-stack">
 <section class="kb-panel" aria-labelledby="case-h">
-  <header class="kb-panel__head"><h2 class="kb-panel__title" id="case-h">${actionBadge(c.action)} ${caseStatusBadge(c.status)}</h2></header>
+  <header class="kb-panel__head"><h2 class="kb-panel__title kb-row" id="case-h">${actionBadge(c.action)} ${caseStatusBadge(c.status)}</h2></header>
   <div class="kb-panel__body">
     <dl class="kb-kv">
       <dt>Member</dt><dd title="${escapeHtml(c.userId)}">${escapeHtml(c.userLabel)}</dd>
@@ -475,7 +501,7 @@ ${
   <header class="kb-panel__head"><h2 class="kb-panel__title" id="review-h">Review</h2></header>
   <div class="kb-panel__body">${reviewForm(p)}</div>
 </section>`
-    : `<p class="kb-muted">This case is closed, so there is nothing left to review.</p>`
+    : `<p class="kb-help">This case is closed, so there is nothing left to review.</p>`
 }
 </div>`;
 }
@@ -483,7 +509,7 @@ ${
 /** The case id did not match a case on this server, or cases are switched off. */
 export function renderModCaseMissingBody(casesEnabled: boolean): string {
   return `${header("Case not found", `<a href="${MOD_BASE}">Moderation</a> / Mod log`)}
-<div class="kb-empty"><p class="kb-empty__title">${
+<div class="kb-empty"><div class="kb-empty__icon">${icon("gavel")}</div><p class="kb-empty__title">${
     casesEnabled
       ? "There is no such case."
       : "Cases are switched off on this server."
@@ -556,13 +582,18 @@ export function renderModAuditBody(p: ModAuditBodyProps): string {
     .join("");
 
   const table = p.unavailable
-    ? `<div class="kb-panel__body"><div class="kb-callout kb-callout--warn" role="status"><div class="kb-callout__body"><p class="kb-callout__title">The command audit could not be read.</p><p class="kb-callout__text">This is not an empty audit. Reload the page in a moment.</p></div></div></div>`
+    ? `<div class="kb-panel__body">${unreadableCallout(
+        "The command audit could not be read.",
+        "This is not an empty audit. Reload the page in a moment.",
+      )}</div>`
     : p.rows.length === 0
-      ? `<div class="kb-panel__body"><div class="kb-empty"><p class="kb-empty__title">No command invocations match.</p><p class="kb-empty__text">${
+      ? `<div class="kb-panel__body">${kbEmptyState(
+          "scroll-text",
+          "No command invocations match.",
           p.enabled
             ? "Commands show up here as people use them."
-            : "Command auditing is switched off on this server, so nothing is recorded."
-        }</p></div></div>`
+            : "Command auditing is switched off on this server, so nothing is recorded.",
+        )}</div>`
       : `<div class="kb-panel__body--flush"><table class="kb-table">
 <thead><tr><th scope="col">When</th><th scope="col">Member</th><th scope="col">Command</th><th scope="col">Channel</th><th scope="col">Result</th><th scope="col">Error</th></tr></thead>
 <tbody>${p.rows
@@ -582,17 +613,20 @@ export function renderModAuditBody(p: ModAuditBodyProps): string {
           })
           .join("\n")}</tbody></table></div>`;
 
-  const prev =
-    page > 1
-      ? `<a class="kb-btn kb-btn--sm" href="${MOD_BASE}/audit${auditQuery(p.filters, page - 1)}">Previous</a>`
-      : "";
-  const next =
-    page < totalPages
-      ? `<a class="kb-btn kb-btn--sm" href="${MOD_BASE}/audit${auditQuery(p.filters, page + 1)}">Next</a>`
-      : "";
   const foot =
     totalPages > 1
-      ? `<footer class="kb-panel__foot"><span>Page ${page} of ${totalPages}</span>${prev}${next}</footer>`
+      ? renderListPager({
+          prevHref:
+            page > 1
+              ? `${MOD_BASE}/audit${auditQuery(p.filters, page - 1)}`
+              : null,
+          nextHref:
+            page < totalPages
+              ? `${MOD_BASE}/audit${auditQuery(p.filters, page + 1)}`
+              : null,
+          page,
+          totalPages,
+        })
       : "";
   return `${head}
 <div class="kb-stack">

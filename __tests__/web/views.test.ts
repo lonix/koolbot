@@ -2,6 +2,7 @@
  * Unit tests for the pre-auth WebUI scaffold views (`src/web/views.ts`).
  */
 
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "@jest/globals";
 import {
   renderConsent,
@@ -9,11 +10,18 @@ import {
   renderInvalidLink,
 } from "../../src/web/views.js";
 
+const css = readFileSync(
+  new URL("../../docs/design/kb.css", import.meta.url),
+  "utf8",
+);
+
 describe("renderConsent", () => {
   it("posts to the token-bound redemption route with the token URL-encoded", () => {
     const html = renderConsent({ token: "a b/c", csrfToken: "csrf-1" });
     expect(html).toContain('action="/admin/s/a%20b%2Fc"');
-    expect(html).toContain('<button type="submit">Continue</button>');
+    expect(html).toContain(
+      '<button type="submit" class="kb-btn kb-btn--primary">Continue</button>',
+    );
   });
 
   it("embeds the double-submit CSRF token so the redemption POST can pass requireCsrf (#771)", () => {
@@ -46,12 +54,16 @@ describe("renderErrorPage (#855)", () => {
     );
     expect(html).toContain("<title>Sign in required — KoolBot Admin</title>");
     expect(html).toContain(
-      "<main><h1>Sign in required</h1><p>Run <code>/config</code> in Discord.</p></main>",
+      '<main class="kb-member"><header class="kb-pagehead"><div class="kb-pagehead__text"><h1 class="kb-pagehead__title">Sign in required</h1></div></header>' +
+        '<div class="kb-panel"><div class="kb-panel__body"><p>Run <code>/config</code> in Discord.</p></div></div></main>',
     );
-    expect(html).toContain("background:var(--bg);color:var(--text)");
-    // Keyboard focus ring for the links these pages carry.
-    expect(html).toContain(
-      "a:focus-visible,button:focus-visible{outline:2px solid var(--focus)",
+    // The page carries no style sheet of its own: kb.css (linked) supplies the
+    // dark background, the font and the keyboard focus ring (#1710).
+    expect(html).not.toContain("<style");
+    expect(html).toContain('href="/admin/_assets/kb.css');
+    expect(css).toMatch(/body \{[^}]*background: var\(--bg\)/);
+    expect(css).toMatch(
+      /a:focus-visible, button:focus-visible[^{]*\{ outline: 2px solid var\(--focus\)/,
     );
   });
 
@@ -62,13 +74,15 @@ describe("renderErrorPage (#855)", () => {
       bodyHtml: "",
       product: "KoolBot",
     });
-    expect(html).toContain("<h1>&lt;Forbidden&gt;</h1>");
+    expect(html).toContain(
+      '<h1 class="kb-pagehead__title">&lt;Forbidden&gt;</h1>',
+    );
     expect(html).toContain("<title>Forbidden — KoolBot</title>");
   });
 
   it("wraps the existing scaffold pages in the same main landmark", () => {
     expect(renderInvalidLink()).toContain(
-      "<main><h1>Link invalid or expired</h1>",
+      '<main class="kb-member"><header class="kb-pagehead"><div class="kb-pagehead__text"><h1 class="kb-pagehead__title">Link invalid or expired</h1>',
     );
   });
 });

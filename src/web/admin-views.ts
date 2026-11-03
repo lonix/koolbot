@@ -3166,7 +3166,11 @@ const PLACEHOLDER_REFERENCE_HTML = `<details class="kb-disclosure kb-disclosure-
 )}</dl><p class="kb-help">Tick "Process placeholders" on the announcement to expand them at send time.</p></div></details>`;
 
 /** An EmptyState with the icon of the page it sits on: what is missing, and how the area fills up. */
-function kbEmptyState(iconName: IconName, title: string, text: string): string {
+export function kbEmptyState(
+  iconName: IconName,
+  title: string,
+  text: string,
+): string {
   return `<div class="kb-empty"><div class="kb-empty__icon">${icon(iconName)}</div><p class="kb-empty__title">${escapeHtml(title)}</p><p class="kb-empty__text">${escapeHtml(text)}</p></div>`;
 }
 
@@ -5231,7 +5235,7 @@ function quotesQueryString(search: string, page: number): string {
  * (disabled at either end) around "Page n of m". The links are written as
  * their callers build them, so a search term stays in the address.
  */
-function renderListPager(o: {
+export function renderListPager(o: {
   prevHref: string | null;
   nextHref: string | null;
   page: number;

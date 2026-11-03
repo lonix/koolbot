@@ -51,23 +51,21 @@ const pages: Array<[string, () => string]> = [
 ];
 
 describe("layouts keep kb.css's dark colour scheme (#1507)", () => {
-  it.each(pages)(
-    "%s sets color-scheme to nothing but dark",
-    (_name, render) => {
-      const html = render();
-      const styles = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map(
-        (m) => m[1],
-      );
-      expect(styles.length).toBeGreaterThan(0);
-      const values = styles.flatMap((css) =>
-        [...css.matchAll(/color-scheme\s*:\s*([^;}]*)/g)].map((m) =>
-          m[1].trim(),
-        ),
-      );
-      for (const v of values) expect(v).toBe("dark");
-      expect(html).not.toMatch(/color-scheme\s*:\s*(normal|light)/);
-    },
-  );
+  it.each(pages)("%s sets color-scheme to nothing but dark", (name, render) => {
+    const html = render();
+    const styles = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map(
+      (m) => m[1],
+    );
+    // The two layouts carry a style sheet on top of kb.css; the pre-auth pages
+    // carry none (#1710), so they cannot reset it. kb.css is linked on all.
+    if (name.includes("layout")) expect(styles.length).toBeGreaterThan(0);
+    expect(html).toContain("/_assets/kb.css");
+    const values = styles.flatMap((css) =>
+      [...css.matchAll(/color-scheme\s*:\s*([^;}]*)/g)].map((m) => m[1].trim()),
+    );
+    for (const v of values) expect(v).toBe("dark");
+    expect(html).not.toMatch(/color-scheme\s*:\s*(normal|light)/);
+  });
 });
 
 describe("native-control follow-ups (#1507)", () => {

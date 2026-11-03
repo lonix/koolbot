@@ -123,7 +123,7 @@ a.kb-pill:hover { background: var(--fill-hover); color: var(--on-primary); text-
 /* ---------- Panel ---------- */
 .kb-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); min-width: 0; }
 .kb-panel__head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4) var(--space-5); flex-wrap: wrap; }
-.kb-panel__title { margin: 0; font-size: var(--type-panel-title-size); line-height: 1.4; font-weight: 600; display: flex; align-items: center; gap: var(--space-2); }
+.kb-panel__title { margin: 0; font-size: var(--type-panel-title-size); line-height: 1.4; font-weight: 600; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .kb-panel__meta { color: var(--muted); font-size: var(--type-description-size); }
 .kb-panel__actions { margin-left: auto; display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .kb-panel__body { padding: var(--space-4) var(--space-5); }

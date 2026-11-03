@@ -168,7 +168,6 @@ const STYLE = [
   "#main:focus-visible{outline:none}",
   "h1{margin:0 0 var(--space-1);font-size:var(--type-page-title-size)}",
   "h2{margin:var(--space-6) 0 var(--space-2);font-size:var(--type-section-title-size);color:var(--text-secondary)}",
-  ".subtitle{color:var(--muted);margin:0 0 var(--space-4)}",
   ".card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4) var(--space-5);margin:0 0 var(--space-4);overflow-x:auto}",
   ".card h2{margin-top:0}",
   ".empty{padding:var(--space-4);color:var(--muted);font-style:italic}",
@@ -183,7 +182,7 @@ const STYLE = [
   // gap spaces it, so it adds nothing. The stack rule is more specific, so the order does not matter.
   ".kb-callout[data-flash]{margin:0 0 var(--space-4)}",
   ".kb-stack>.kb-callout[data-flash]{margin:0}",
-  // Still used by the Rewind route's load-error line (user-routes.ts); goes with that piece (#1706).
+  // Still used by the member presets page (me-event-presets-page.ts); goes with that piece (#1708 to #1711).
   ".notice{padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);margin:0 0 var(--space-4)}",
   ".notice.info{background:var(--selected);color:var(--info-text)}",
   ".notice.ok{background:var(--ok-bg);color:var(--ok-text)}",
@@ -829,11 +828,13 @@ function renderTextActivity(opts: RewindBodyOptions): string {
         );
 
   return [
-    "<h2>Text activity</h2>",
-    '<div class="kb-tiles">',
-    statTile("Messages sent", String(opts.messagesSent)),
-    peak,
-    "</div>",
+    panel(
+      "Text activity",
+      '<div class="kb-tiles">' +
+        statTile("Messages sent", String(opts.messagesSent)) +
+        peak +
+        "</div>",
+    ),
     panel("Top text channels", channels, {
       flush: opts.topTextChannels.length > 0,
     }),
@@ -850,13 +851,13 @@ function renderReactionActivity(opts: RewindBodyOptions): string {
   const received = opts.reactionsReceived > 0 ? opts.reactionsReceived : 0;
   if (given <= 0 && received <= 0) return "";
 
-  return [
-    "<h2>Reactions</h2>",
-    '<div class="kb-tiles">',
-    statTile("Reactions given", String(given)),
-    statTile("Reactions received", String(received)),
-    "</div>",
-  ].join("");
+  return panel(
+    "Reactions",
+    '<div class="kb-tiles">' +
+      statTile("Reactions given", String(given)) +
+      statTile("Reactions received", String(received)) +
+      "</div>",
+  );
 }
 
 /** Format a whole-minute weight as a compact "X hr Y min" tooltip / value. */
@@ -955,12 +956,12 @@ function renderPollActivity(opts: RewindBodyOptions): string {
   const votes = opts.pollVotesCast > 0 ? opts.pollVotesCast : 0;
   if (votes <= 0) return "";
 
-  return [
-    "<h2>Polls</h2>",
-    '<div class="kb-tiles">',
-    statTile("Poll votes cast", String(votes)),
-    "</div>",
-  ].join("");
+  return panel(
+    "Polls",
+    '<div class="kb-tiles">' +
+      statTile("Poll votes cast", String(votes)) +
+      "</div>",
+  );
 }
 
 /** Room-kind labels for the Rewind page (#1420); `other` is the neutral fallback. */
@@ -979,6 +980,24 @@ const ROOM_KIND_SINGULAR: Record<string, string> = {
   other: "a voice channel",
 };
 
+/** The Rewind PageHeader (components.md): the year in the title and one line of what the page is. */
+function rewindHeader(year: number): string {
+  return pageHeader(`Rewind ${year}`, "Your personal year-in-review.");
+}
+
+/**
+ * The Rewind page when the summary cannot be read (500): the title (as before, no extra line) and
+ * the failure as an error Callout, `role="alert"` as a failure is (components.md).
+ */
+export function renderUserRewindLoadError(year: number): string {
+  return (
+    '<div class="kb-stack">' +
+    pageHeader(`Rewind ${year}`) +
+    `<div class="kb-callout kb-callout--err" role="alert">${toneIcon("err")}<div class="kb-callout__body"><p class="kb-callout__title">Could not load your year-in-review. Please try again later.</p></div></div>` +
+    "</div>"
+  );
+}
+
 export function renderUserRewindBody(opts: RewindBodyOptions): string {
   const years = opts.availableYears.includes(opts.year)
     ? opts.availableYears
@@ -988,8 +1007,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
   if (!opts.hasData) {
     return [
       '<div class="kb-stack">',
-      `<h1>Rewind ${opts.year}</h1>`,
-      '<p class="subtitle">Your personal year-in-review.</p>',
+      rewindHeader(opts.year),
       picker,
       '<div class="kb-panel"><div class="kb-panel__body">',
       emptyState(
@@ -1097,8 +1115,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
 
   return [
     '<div class="kb-stack">',
-    `<h1>Rewind ${opts.year}</h1>`,
-    '<p class="subtitle">Your personal year-in-review.</p>',
+    rewindHeader(opts.year),
     picker,
     hero,
     '<div class="kb-tiles">',

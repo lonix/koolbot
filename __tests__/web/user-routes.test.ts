@@ -901,7 +901,9 @@ describe("userWebErrorHandler", () => {
     // Shared error shell (#855): lang, viewport, landmark, /me title suffix.
     expect(res.body).toContain('<html lang="en">');
     expect(res.body).toContain("<title>Forbidden — KoolBot</title>");
-    expect(res.body).toContain("<main><h1>Forbidden</h1>");
+    expect(res.body).toContain(
+      '<main class="kb-member"><header class="kb-pagehead"><div class="kb-pagehead__text"><h1 class="kb-pagehead__title">Forbidden</h1></div></header>',
+    );
     expect(next).not.toHaveBeenCalled();
   });
 

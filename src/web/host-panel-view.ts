@@ -342,7 +342,7 @@ ${renderGroupsFold(e)}`;
       const html = controls[s.id];
       const inner =
         html ??
-        `<p class="muted">${escapeHtml(s.placeholder)} Not available yet.</p>`;
+        `<p class="kb-muted">${escapeHtml(s.placeholder)} Not available yet.</p>`;
       // The board is the page (#1424): it renders its own section.
       if (s.id === "board") {
         return [html ?? "", renderGroupsFold(e)].filter(Boolean).join("\n");
@@ -375,9 +375,9 @@ ${renderGroupsFold(e)}`;
           inner,
         );
       }
-      return `<section class="card" id="host-${s.id}" aria-labelledby="host-${s.id}-h">
-<h2 id="host-${s.id}-h">${escapeHtml(s.title)}</h2>
-${inner}
+      return `<section class="kb-panel" id="host-${s.id}" aria-labelledby="host-${s.id}-h">
+<header class="kb-panel__head"><h2 class="kb-panel__title" id="host-${s.id}-h">${escapeHtml(s.title)}</h2></header>
+<div class="kb-panel__body">${inner}</div>
 </section>`;
     })
     .filter(Boolean)
