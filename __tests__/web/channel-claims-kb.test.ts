@@ -312,10 +312,25 @@ describe("Channel claims markup (#1730)", () => {
       }
       for (const t of doc.querySelectorAll("table")) {
         expect(t.classList.contains("kb-table")).toBe(true);
-        expect(t.closest(".kb-panel__body--flush")).not.toBeNull();
+        // The pairing table holds the emoji picker, whose popup is absolutely
+        // positioned inside it: a scroll container would clip it.
+        const pairing =
+          t.querySelector("caption")?.textContent ===
+          "Detected game-role categories";
+        expect(t.closest(".kb-panel__body--flush") === null).toBe(pairing);
       }
     },
   );
+
+  it("keeps the emoji picker's popup out of any scroll container", () => {
+    const doc = docOf(STATES[0]);
+    const field = doc.querySelector("[data-emoji-field]") as Element;
+    expect(field).not.toBeNull();
+    // `groupRowsScript` appends the popup to the field's `.kb-emoji-wrap`.
+    expect(field.querySelector(".kb-emoji-wrap")).not.toBeNull();
+    expect(field.closest(".kb-panel__body--flush")).toBeNull();
+    expect(field.closest("table.kb-table")).not.toBeNull();
+  });
 
   it("wraps the held plan diff in a scroll container inside its panel", () => {
     const s = STATES.find((x) => x.name === "applicable plan")!;

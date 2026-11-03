@@ -268,9 +268,20 @@ ${voiceBind}
 </tr>`;
 }
 
-/** A table inside its Panel: it scrolls there, never the page. */
-function flushTable(caption: string, head: string[], rows: string): string {
-  return `<div class="kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">${caption}</caption><thead><tr>${head.map((h) => `<th scope="col">${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>`;
+/**
+ * A table inside its Panel: it scrolls there, never the page. `scroll: false`
+ * leaves the scroll container out: the pairing table holds the emoji picker,
+ * whose popup is absolutely positioned inside the table and would be clipped
+ * (scrolled inside a box the height of the table) by an overflow container.
+ */
+function flushTable(
+  caption: string,
+  head: string[],
+  rows: string,
+  scroll = true,
+): string {
+  const table = `<table class="kb-table"><caption class="kb-visually-hidden">${caption}</caption><thead><tr>${head.map((h) => `<th scope="col">${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>`;
+  return scroll ? `<div class="kb-panel__body--flush">${table}</div>` : table;
 }
 
 function renderSuggestions(
@@ -296,7 +307,7 @@ function renderSuggestions(
     ? `<div class="kb-stack">
 <h3 class="kb-overline">Game-role categories</h3>
 <p class="kb-help">These categories are hidden from @everyone and visible to exactly one role. Registering one makes that role pickable through a new KoolBot picker and keeps the category gated: the role and the category are reused as they are and nothing new is created. A role with powerful permissions (Administrator, Manage Roles and similar) is refused.</p>
-${flushTable("Detected game-role categories", ["Category", "Role", "Register"], pairRows)}
+${flushTable("Detected game-role categories", ["Category", "Role", "Register"], pairRows, false)}
 ${proposed.length ? `<div class="kb-row">${check(`<input type="checkbox" name="pairs_all" value="1">`, `Register all ${proposed.length} detected pair${proposed.length === 1 ? "" : "s"} when previewing`)} <span class="kb-muted">Refused pairs are skipped; each one keeps the emoji shown above.</span></div>` : ""}
 </div>`
     : "";
