@@ -123,7 +123,7 @@ jest.unstable_mockModule("../../src/web/channel-write-rest.js", () => ({
 const { withChannelLock } = await import("../../src/web/channel-write-lock.js");
 const { applyWizardCreations, reviewWizardCreations } =
   await import("../../src/web/wizard-create.js");
-const { createWizardRouter } =
+const { createWizardRouter, flashKeepingTail, idList } =
   await import("../../src/web/routes/write/wizard.js");
 const { WizardService } = await import("../../src/services/wizard-service.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
@@ -781,7 +781,7 @@ describe("applying planned creations (#1662)", () => {
     const flash = parseFlashRedirect(res.headers.get("location") ?? "");
     expect(mockDelete).not.toHaveBeenCalled();
     expect(flash.msg).toContain("100000000000000100");
-    expect(flash.msg).toContain("may still exist");
+    expect(flash.msg).toContain("May still exist");
   });
 
   it("says the settings were not applied, and keeps the helper's account of the channels, when a create fails and one cannot be removed", async () => {
@@ -881,5 +881,66 @@ describe("applying planned creations (#1662)", () => {
       jest.useRealTimers();
       mockConfigGetAll.mockResolvedValue([]);
     }
+  });
+
+  it("keeps the cleanup outcome and every shown id whole when the settings error is longer than the flash allows", async () => {
+    start(["quotes", "notices"]);
+    const planId = planIdOf(
+      await stageAndReview([
+        [0, quotesStep("create:first")],
+        [1, noticesStep("create:second")],
+      ]),
+    );
+    mockConfigSet.mockRejectedValue(new Error("db ".repeat(400)));
+    // The first channel was adopted by another save (kept); the second cannot be removed (stuck).
+    mockConfigGetAll.mockResolvedValue([
+      { key: "welcome.channel_id", value: "100000000000000100" },
+    ]);
+    mockDelete.mockRejectedValue(new Error("Discord is down"));
+    const res = await apply(planId);
+    const flash = parseFlashRedirect(res.headers.get("location") ?? "");
+    const msg = String(flash.msg);
+    expect(msg.length).toBeLessThanOrEqual(500);
+    expect(msg).toContain("…");
+    expect(msg).toContain(
+      "Kept, because a saved setting points at it: 100000000000000100.",
+    );
+    expect(msg).toContain(
+      "May still exist (not removed or checked): 100000000000000101.",
+    );
+    expect(msg).toContain("Check them in Discord before applying again.");
+  });
+
+  it("keeps the cleanup outcome when the engine throws with a long error", async () => {
+    start(["quotes"]);
+    const planId = planIdOf(
+      await stageAndReview([[0, quotesStep("create:wall")]]),
+    );
+    mockConfigGetAll
+      .mockRejectedValueOnce(new Error("snapshot ".repeat(200)))
+      .mockResolvedValue([]);
+    const res = await apply(planId);
+    const msg = String(
+      parseFlashRedirect(res.headers.get("location") ?? "").msg,
+    );
+    expect(msg.length).toBeLessThanOrEqual(500);
+    expect(msg).toMatch(/was removed again\./);
+  });
+});
+
+describe("the flash keeps its tail (#1662)", () => {
+  it("shortens only the head, never the tail, and stays within the flash limit", () => {
+    const out = flashKeepingTail(
+      "e".repeat(900),
+      " tail with 100000000000000101.",
+    );
+    expect(out.length).toBeLessThanOrEqual(500);
+    expect(out.endsWith(" tail with 100000000000000101.")).toBe(true);
+    expect(flashKeepingTail("short", " tail")).toBe("short tail");
+  });
+
+  it("shows at most two ids and says how many more", () => {
+    expect(idList(["1", "2"])).toBe("1, 2");
+    expect(idList(["1", "2", "3", "4", "5"])).toBe("1, 2 and 3 more");
   });
 });

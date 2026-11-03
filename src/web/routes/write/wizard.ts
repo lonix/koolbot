@@ -151,6 +151,27 @@ function tickedFeatures(raw: unknown): string[] {
 /** Features whose scope the Access step can leave without anybody to run it. */
 const GAP_FEATURES = ["events", "moderation"] as const;
 
+/**
+ * A flash that is cut to the mechanism's length (the text travels in the
+ * redirect's query string, hence `FLASH_MAX`) without ever cutting `tail`.
+ * Only `head` (the underlying error) is shortened, with an ellipsis, so what
+ * became of the created channels, and their ids, always reaches the admin.
+ */
+export function flashKeepingTail(head: string, tail: string): string {
+  if (head.length + tail.length <= FLASH_MAX) return head + tail;
+  const room = FLASH_MAX - tail.length - 1;
+  if (room <= 0) return truncateFlash(tail.trimStart());
+  return `${head.slice(0, room).trimEnd()}…${tail}`;
+}
+
+/** At most `MAX_IDS_SHOWN` ids, then "and N more", so the cleanup text stays short enough to protect. */
+const MAX_IDS_SHOWN = 2;
+export function idList(ids: readonly string[]): string {
+  const shown = ids.slice(0, MAX_IDS_SHOWN).join(", ");
+  const more = ids.length - MAX_IDS_SHOWN;
+  return more > 0 ? `${shown} and ${more} more` : shown;
+}
+
 export function createWizardRouter(client: Client): Router {
   const router = Router();
 
@@ -1051,8 +1072,8 @@ export function createWizardRouter(client: Client): Router {
         derived[gate] = false;
       }
 
-      const confirmFailure = (text: string): void => {
-        const msg = truncateFlash(text);
+      const confirmFailure = (text: string, keep = ""): void => {
+        const msg = flashKeepingTail(text, keep);
         const qs = new globalThis.URLSearchParams({
           step: "confirm",
           flash: "err",
@@ -1381,8 +1402,10 @@ export function createWizardRouter(client: Client): Router {
           });
           // The helper says what happened to the channels; "nothing was
           // applied" would not be true when one could not be removed again.
+          // The helper's account of the channels (with any ids) is kept whole.
           confirmFailure(
-            `The settings were not applied. ${made.error}${await undoAccess()}`,
+            "The settings were not applied.",
+            ` ${made.error}${await undoAccess()}`,
           );
           return;
         }
@@ -1393,7 +1416,13 @@ export function createWizardRouter(client: Client): Router {
           leftover: boolean;
         }> => {
           const back = await made.cleanup();
-          const list = (ids: string[]): string => ids.join(", ");
+          if (back.kept.length > 0 || back.stuck.length > 0) {
+            logger.warn("wizard: channels left after a failed apply", {
+              kept: back.kept,
+              stuck: back.stuck,
+            });
+          }
+          const list = idList;
           const note = [
             back.removed.length > 0
               ? ` The ${back.removed.length === 1 ? "channel" : "channels"} created for this apply ${back.removed.length === 1 ? "was" : "were"} removed again.`
@@ -1402,7 +1431,7 @@ export function createWizardRouter(client: Client): Router {
               ? ` Kept, because a saved setting points at ${back.kept.length === 1 ? "it" : "them"}: ${list(back.kept)}.`
               : "",
             back.stuck.length > 0
-              ? ` These channels were created for this apply and may still exist (they could not be removed or checked): ${list(back.stuck)}. Check them in Discord before applying again.`
+              ? ` May still exist (not removed or checked): ${list(back.stuck)}. Check them in Discord before applying again.`
               : "",
           ].join("");
           return {
@@ -1534,8 +1563,11 @@ export function createWizardRouter(client: Client): Router {
           !result.reloadFailed
             ? `Wizard apply failed: ${wizardApplyFailureReason(result)}. The settings were not saved.`
             : wizardApplyFailureMessage(result);
-        const failureMsg = truncateFlash(
-          base + channelBack.note + (await undoAccess()),
+        // The underlying error is the part that may be shortened; the
+        // channels' outcome and the role mapping's are kept whole.
+        const failureMsg = flashKeepingTail(
+          base,
+          channelBack.note + (await undoAccess()),
         );
         const qs = new globalThis.URLSearchParams({
           step: "confirm",
@@ -1561,7 +1593,8 @@ export function createWizardRouter(client: Client): Router {
         // The session and the admin's choices stay, like every other refused
         // apply: they go back to Review with the reason and can retry.
         confirmFailure(
-          `The settings could not be applied. ${text}${channelNote}${accessNote}`,
+          `The settings could not be applied. ${text}`,
+          `${channelNote}${accessNote}`,
         );
       }
     }),
