@@ -30,18 +30,22 @@ function declarationsOf(css: string, selector: string): string | undefined {
   return undefined;
 }
 
-describe("member table row headers keep the cell's own classes (#1515)", () => {
+describe("member table row headers: the .prefs-table rules are gone (#1515, #1711)", () => {
   const css = memberCss();
 
-  it("a mono row header keeps the mono size token, not the inherited size", () => {
-    const rule = declarationsOf(css, ".prefs-table tbody th[scope=row].mono");
-    expect(rule).toBeDefined();
-    expect(rule).toContain("font-size:var(--type-mono-size)");
+  it("no mono row-header rule is left in the member sheet", () => {
+    expect(
+      declarationsOf(css, ".prefs-table tbody th[scope=row].mono"),
+    ).toBeUndefined();
   });
 
-  it("a muted row header keeps the muted colour", () => {
-    const rule = declarationsOf(css, ".prefs-table tbody th[scope=row].muted");
-    expect(rule).toBeDefined();
-    expect(rule).toContain("color:var(--muted)");
+  it("no muted row-header rule is left in the member sheet", () => {
+    expect(
+      declarationsOf(css, ".prefs-table tbody th[scope=row].muted"),
+    ).toBeUndefined();
+  });
+
+  it("no .prefs-table rule is left at all", () => {
+    expect(css).not.toContain(".prefs-table");
   });
 });
