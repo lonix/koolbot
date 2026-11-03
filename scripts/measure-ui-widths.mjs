@@ -31,9 +31,14 @@ const openDetails = process.argv.includes("--open-details");
 const strict = process.argv.includes("--strict");
 const extraCss = arg("--css", "");
 
-/* global document, getComputedStyle */
+/* global document, getComputedStyle, window */
 /** Runs in the page: one record per overflowing element. */
 function measure() {
+  // A refused form focuses its invalid control, which can leave a panel scrolled sideways; measure from the left edge.
+  for (const el of document.querySelectorAll("*")) {
+    if (el.scrollLeft) el.scrollLeft = 0;
+  }
+  window.scrollTo(0, 0);
   const text = (el) => (el.textContent || "").replace(/\s+/g, " ").trim();
   const label = (el) => {
     if (el.caption) return `table "${text(el.caption).slice(0, 28)}"`;
