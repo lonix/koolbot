@@ -144,8 +144,8 @@ should not send its admins' browsers to a font CDN, and the native face is the f
     from the same two tokens, so the caps cannot disagree; a page never sets a width of its own.
   - **Text keeps its line length on a wide page:** descriptions, help text and callouts stay at `content-max` through their own `max-width`.
   - **Scrolling stays the fallback** (#855), but only a fallback: a table that scrolls inside its panel at 1920px is a bug in the page, to be fixed
-    with fewer columns, controls that stack under their row's name or row details in a disclosure. The wide column does not help below about
-    1840px, so a window of 1280px needs those fixes either way.
+    with fewer columns, controls that stack under their row's name or row details in a disclosure. The wide column starts to give room above about
+    1340px and reaches its full width at about 1840px; at 1280px the room is the same under either cap (976px), so those fixes are needed either way.
   - **When to opt in:** because of what the page's main content is, never because a form is long. A page that has both puts the table first and keeps
     its forms in panels of their own.
 - **Scopes:** four, each granted by a role group capability and shown as a ScopeBadge next to the person's name in the TopBar.
