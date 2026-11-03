@@ -170,6 +170,22 @@ proposal until the owner settles it.
   Bot permissions does not check, never called unneeded), a folded *Not needed* list of what only switched-off features use, a Panel of four numbered steps to swap
   Administrator in Discord, and one primary button, *Open Bot permissions*, next to *Skip for now*.
 
+### WizardFeatureStep, creating a channel (#1662)
+
+**Proposal for the owner, not final manual text.** Each Features page of the Setup wizard (one per chosen feature; the wizard has no step of its own for
+channels) is drawn from the same controls as All settings. A flagged post channel setting (the schema's `createChannel`, the same ten keys the
+audit of issue 1619 names: weekly recap, quotes, birthdays, welcome, rules, event announcements, looking for group, the reaction-role message channel,
+notices and the leaderboard role announcements) offers the Picker's create row, as on the Settings pages.
+
+- Choosing the row only marks the name on the page ("Quote Wall (will be created)") and the step saves it with the other answers. Nothing is created on
+  the step. Opening the step again draws the pending name again.
+- **Review** lists each channel in the Panel *Channels and categories to create* (`renderCreateReview`) and shows the setting in the table with
+  *# name (will be created)* or *# name (existing channel)*. A hidden `channelPlanId` carries the plan Apply must reproduce. When creating cannot work, an
+  error Callout *The channels can't be created* names why and Apply is disabled.
+- Two settings that type the same new name share one channel (a decision for the owner); one Panel row names both settings.
+- **Apply** creates the channels in one go, stores their ids, and removes them again if anything after it fails.
+- Components: Picker (create row and help line), Panel, List, Callout `--err`, Mention. No new component.
+
 ## Event host
 
 ### HostEventsPage

@@ -433,9 +433,23 @@ function failureMessage(
   return `${cause} The ${removed.length === 1 ? "channel" : "channels"} created earlier in this request ${removed.length === 1 ? "was" : "were"} removed again.`;
 }
 
+/**
+ * Delete channels one apply created, newest first. A channel already gone
+ * counts as removed. For a caller whose own later work failed after
+ * `applyChannelPlan` had succeeded (the wizard's apply, #1662); the helper
+ * uses it for its own failures. It takes no lock: it deletes only the ids it is
+ * given, which this caller created a moment ago.
+ */
+export async function removeCreatedChannels(
+  deps: Pick<ChannelCreateDeps, "rest" | "call" | "reason">,
+  ids: readonly string[],
+): Promise<{ removed: string[]; stuck: string[] }> {
+  return removeAgain(deps, ids);
+}
+
 /** Delete what one apply created, newest first. A channel already gone counts as removed. */
 async function removeAgain(
-  deps: ChannelCreateDeps,
+  deps: Pick<ChannelCreateDeps, "rest" | "call" | "reason">,
   ids: readonly string[],
 ): Promise<{ removed: string[]; stuck: string[] }> {
   const removed: string[] = [];

@@ -168,6 +168,7 @@ import {
   renderWizardSubSteps,
 } from "./wizard-access-view.js";
 import {
+  renderCreateProblems,
   renderCreateReview,
   type PlannedCreation,
 } from "./wizard-create-review.js";
@@ -2624,6 +2625,13 @@ export interface WizardStepPageProps extends CommonProps {
   /** The bot's reaction-role messages, for a key that picks one (#1433). */
   reactionRoleMessages?: ReactionRoleMessageOptions | null;
   /**
+   * The answer for the Picker's create row on this step (#1662): `ok` shows the
+   * row on every flagged channel setting, a refusal shows its help line, absent
+   * (permissions unreadable, or nothing flagged on this step) leaves the
+   * Pickers as they were. The server reads a posted `create:` value itself.
+   */
+  pickerCreate?: PickerCreate;
+  /**
    * Enabled-state of every key on this step *plus* the cross-feature
    * dependency targets those keys reference (e.g. `achievements.enabled`
    * depends on `voicetracking.enabled`, which lives on another step). The
@@ -2654,6 +2662,7 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
     roles: props.roles,
     groupRoles: props.groupRoles,
     reactionRoleMessages: props.reactionRoleMessages,
+    create: pickerCreateFor(props.pickerCreate),
   };
 
   // Build the same `SettingRow` shape the Settings page feeds to
@@ -2831,8 +2840,12 @@ export interface WizardConfirmPageProps extends CommonProps {
   accessFingerprint?: string;
   /** The plan for creating the Event host role (#1365), when it was chosen. */
   hostRole?: HostReview | null;
-  /** Channels and categories Apply would create (#1661); rendering only until the wizard wires it in. */
+  /** Channels Apply would create (#1661, #1662): one panel row each, listed before the settings table. */
   creations?: PlannedCreation[];
+  /** The plan Review showed, posted back as `channelPlanId` so Apply can tell it went stale (#1662). */
+  createPlanId?: string | null;
+  /** Why the planned channels can't be created; Apply is blocked while any is set (#1662). */
+  createProblems?: readonly string[];
   /** What turning features off needs or refuses (#1622); null when it could not be checked. */
   dependencies?: WizardDependencyReview | null;
   /** Whether the bot has Administrator (#1617); absent when the page is drawn without a check. */
@@ -2868,7 +2881,9 @@ export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
   // without dependency conflicts renders exactly as before (#1622).
   const dependencyReview = renderDependencyReview(props.dependencies);
   const dependencyHtml = dependencyReview ? `${dependencyReview}\n` : "";
-  const createReview = renderCreateReview(creations);
+  const createProblems = props.createProblems ?? [];
+  const createReview =
+    renderCreateProblems(createProblems) + renderCreateReview(creations);
   const createHtml = createReview ? `${createReview}\n` : "";
   // The Administrator check (#1617). The continue switch sits outside the Apply
   // form and joins it by id, like the dependency review's confirm switch.
@@ -2903,8 +2918,8 @@ ${createHtml}${dependencyHtml}<div class="card">
   <form method="POST" action="/admin/wizard/apply"${dependencyHtml || adminContinue ? ` id="${WIZARD_APPLY_FORM_ID}"` : ""}>
     <input type="hidden" name="_csrf" value="${csrf}">
     ${props.accessFingerprint ? `<input type="hidden" name="accessFingerprint" value="${escapeHtml(props.accessFingerprint)}">` : ""}
-    ${hostRole?.planId ? `<input type="hidden" name="hostPlanId" value="${escapeHtml(hostRole.planId)}">` : ""}
-    <button type="submit" class="btn btn-primary"${nothingToApply || props.accessProblem || (hostRole && hostRole.problems.length > 0) || dependencyReviewBlocksApply(props.dependencies) ? " disabled" : ""}>Apply</button>
+    ${hostRole?.planId ? `<input type="hidden" name="hostPlanId" value="${escapeHtml(hostRole.planId)}">` : ""}${props.createPlanId ? `<input type="hidden" name="channelPlanId" value="${escapeHtml(props.createPlanId)}">` : ""}
+    <button type="submit" class="btn btn-primary"${nothingToApply || props.accessProblem || createProblems.length > 0 || (hostRole && hostRole.problems.length > 0) || dependencyReviewBlocksApply(props.dependencies) ? " disabled" : ""}>Apply</button>
   </form>
   <form method="POST" action="/admin/wizard/cancel">
     <input type="hidden" name="_csrf" value="${csrf}">

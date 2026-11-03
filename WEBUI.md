@@ -1557,8 +1557,26 @@ When a feature's channel or category will be created rather than picked (#1658 t
 create** panel, one row per entry: "Create the text channel quotes for Quotes channel", the voice and category equivalents, then where it goes and who can
 see it ("In COMMUNITY. Inherits access from COMMUNITY.", or "Not in a category. Visible to everyone who can see the server."). A category is shown in
 capitals and never with a `#`. The panel says "Nothing is created until you apply. If applying fails, nothing it created is left behind." The renderer
-(`renderCreateReview`, `src/web/wizard-create-review.ts`) and the optional `creations` prop of the Review page exist; the wizard does not pass a plan yet,
-so nothing is shown until it is wired in. The wording is a proposal and is not in the design manual.
+(`renderCreateReview`, `src/web/wizard-create-review.ts`) is fed by the wizard from the channels the steps plan
+(below). The wording is a proposal and is not in the design manual.
+
+**Creating the channel a feature step points at (#1662, a proposal for the owner).** A Features page offers the Picker's create row for the same
+flagged post channel settings as the Settings pages (`createChannel` in `config-schema.ts`, read here and not listed again) that are on a wizard step:
+the weekly recap, quotes, birthdays, welcome, rules, event announcements, looking for group, the reaction-role message channel, notices and the
+leaderboard role announcements. The log channels are not in the wizard and are not flagged. The page asks `canBotCreate` once per step, and only when a
+flagged setting is on it; without Manage Channels the Picker shows the help line, and when the permissions cannot be read it shows nothing. Choosing the
+row only marks the name; the step reads a posted `create:` value with `parsePickerCreateValue` before anything else, checks the permission again, and
+keeps the name in the wizard session (`WizardState.creations`, beside the configuration, never in it) with the step's other answers. Nothing is created
+until Apply. Choosing a real channel, the none row, or switching the feature off drops the planned name. **Review** plans from a fresh read of the
+server (`planChannels`, with the server-wide name match of the Settings save) and lists each channel to be created in the _Channels and categories to
+create_ panel; the settings table shows each setting with what it will point at, and a hidden `channelPlanId` carries the plan id. Two settings that
+type the same new name (any case, spaces as hyphens) share ONE channel and both point at it. A name that matches one existing text channel, in any
+category, selects it (shown as _existing channel_); two or more are refused and Apply is disabled with the reason, as it is when the bot cannot
+create. **Apply** refuses unless the plan id still matches (a name created in the meantime gives "changed since Review" and nothing is created), then
+creates every channel in one go through the shared helper (`applyChannelPlan`, inside the per-server lock), after the role access and before the
+settings, and stores the new ids with the rest. If a later part fails (a setting write, the settings engine), the channels it created are removed again
+and the message says so, or names any that could not be removed; the planned names stay for a retry. The audit entry lists the channels under
+`channels`. Steps without a planned channel apply exactly as before, with no Discord read or write.
 
 The wizard runs **Choose features, Access, Features, Review** (#1321, renamed in #1620), with a step indicator on every page. **Features** is one
 page per feature you chose, with its settings (channel settings are ordinary settings on the page of the feature that owns them; the wizard has no step of its

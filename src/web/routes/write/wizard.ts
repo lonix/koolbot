@@ -89,6 +89,7 @@ import {
   WIZARD_FEATURE_ORDER,
   wizardOffGates,
   wizardApplyFailureMessage,
+  wizardApplyFailureReason,
   coerceConfigValueForGuild,
   isReactionRoleMessageKey,
   readReactionRoleMessageBaseline,
@@ -101,6 +102,20 @@ import {
   planWizardDependencies,
   type WizardDependencyPlan,
 } from "./wizard-dependencies.js";
+import { canBotCreate } from "../../../services/bot-create-check.js";
+import { offersCreateChannel } from "../../setting-create.js";
+import { loadCreateChannelAnswer } from "../../setting-create-load.js";
+import {
+  parsePickerCreateValue,
+  pickerCreateValue,
+} from "../../setting-pickers.js";
+import {
+  activeWizardCreations,
+  applyWizardCreations,
+  reviewWizardCreations,
+  type CreatedForSetting,
+  type WizardCreateReview,
+} from "../../wizard-create.js";
 
 /** A role id as Discord sends it: digits only. Anything else is ignored. */
 const SNOWFLAKE = /^\d{1,25}$/;
@@ -312,6 +327,24 @@ export function createWizardRouter(client: Client): Router {
           } catch (err) {
             logger.warn("wizard: review could not check dependencies", err);
           }
+          // The channels the steps plan to create (#1662), planned from the
+          // live server with nothing written. Each setting that gets one is a
+          // row of the table, with what it will point at.
+          const createReview = await reviewWizardCreations(
+            client,
+            session.guildId,
+            activeWizardCreations(existing, WIZARD_FEATURE_SETTINGS),
+          ).catch((err: unknown): WizardCreateReview => {
+            logger.warn("wizard: review could not plan the channels", err);
+            return {
+              creations: [],
+              rows: [],
+              planId: null,
+              problems: [
+                "The channels could not be planned, so Apply is blocked. Try again in a moment.",
+              ],
+            };
+          });
           const admin = await readAdmin(session, req.query.recheck === "1");
           res.type("text/html").send(
             renderWizardConfirmPage({
@@ -319,7 +352,10 @@ export function createWizardRouter(client: Client): Router {
               remainingMs,
               navFeatureStatus,
               admin,
-              pending,
+              pending: [...pending, ...createReview.rows],
+              creations: createReview.creations,
+              createPlanId: createReview.planId,
+              createProblems: createReview.problems,
               metadata: settingsMetadata,
               accessChanges,
               accessProblem,
@@ -398,9 +434,24 @@ export function createWizardRouter(client: Client): Router {
             );
           };
 
+          // The Picker's create row (#1662): one permission answer for the
+          // step, asked only when a flagged channel setting is on it.
+          const pickerCreate = await loadCreateChannelAnswer(
+            client,
+            session.guildId,
+            settingKeys,
+          );
+
           const currentValues: Record<string, unknown> = {};
           for (const k of settingKeys) {
             currentValues[k] = resolveCurrent(k);
+            // A channel planned on an earlier visit is drawn again as the
+            // pending option; without the row (permissions unreadable) the
+            // step shows the stored value and the admin chooses again.
+            const planned = existing.creations?.[k];
+            if (planned && pickerCreate && offersCreateChannel(k)) {
+              currentValues[k] = pickerCreateValue(planned.name);
+            }
           }
 
           // Enabled-state of this step's keys plus any dependency targets they
@@ -463,6 +514,7 @@ export function createWizardRouter(client: Client): Router {
               roles: roleData.roles,
               groupRoles,
               reactionRoleMessages,
+              pickerCreate,
               enabledByKey,
               flash,
             }),
@@ -718,8 +770,17 @@ export function createWizardRouter(client: Client): Router {
 
       const saved: Record<string, unknown> = {};
       const dropped: Array<{ key: string; reason: string }> = [];
+      // The permission to create, asked once and only if a create value is
+      // posted for a flagged setting (#1662).
+      let createAnswer: Awaited<ReturnType<typeof canBotCreate>> | null = null;
+      const dropCreation = (k: string): void => {
+        if (state.creations?.[k]) {
+          wizard.removeCreation(session.discordUserId, session.guildId, k);
+        }
+      };
       for (const k of settingKeys) {
         if (masterOff && k !== masterKey) {
+          dropCreation(k);
           // The control was greyed out and not submitted, but an earlier visit
           // to this step may have staged a value for it. A staged `true` (or
           // any value other than `false`) is dropped, so Review's dependency
@@ -730,6 +791,40 @@ export function createWizardRouter(client: Client): Router {
           if (state.configuration[k] === false) continue;
           wizard.removeConfiguration(session.discordUserId, session.guildId, k);
           continue;
+        }
+        // A channel to be created (#1662) is read before anything else touches
+        // the posted value: only a flagged channel setting takes one, and it is
+        // taken out here, so a `create:` value never reaches the CSV join or
+        // the coercion (which refuses it for every other key). The channel is
+        // created by Apply, from Review.
+        const posted = body?.[settingValueFieldName(k)];
+        if (offersCreateChannel(k) && typeof posted === "string") {
+          const named = parsePickerCreateValue(posted);
+          if (named) {
+            if (!named.ok) {
+              dropped.push({ key: k, reason: named.error });
+              continue;
+            }
+            createAnswer ??= await canBotCreate(client, session.guildId, {
+              kind: "channel",
+            });
+            if (createAnswer.ok !== true) {
+              dropped.push({
+                key: k,
+                reason:
+                  createAnswer.ok === false
+                    ? createAnswer.reason
+                    : "KoolBot could not check whether it may create channels. Try again.",
+              });
+              continue;
+            }
+            wizard.setCreation(session.discordUserId, session.guildId, k, {
+              name: named.name,
+              kind: "text",
+            });
+            saved[k] = pickerCreateValue(named.name);
+            continue;
+          }
         }
         const current = await ConfigService.getInstance()
           .get(k)
@@ -793,6 +888,7 @@ export function createWizardRouter(client: Client): Router {
         if (reuse) {
           dropped.push({ key: k, reason: reuse });
         } else if (coerced.ok) {
+          dropCreation(k);
           wizard.addConfiguration(
             session.discordUserId,
             session.guildId,
@@ -1058,6 +1154,55 @@ export function createWizardRouter(client: Client): Router {
       }
       for (const key of cascadeOff) derived[key] = false;
 
+      // The channels the steps plan to create (#1662): the plan Review showed
+      // must still be the plan, checked before anything is written, so a
+      // refusal leaves the server and the settings as they were. Apply
+      // creates them later, inside the shared lock, which checks the same plan
+      // id again against the server as it is then.
+      const plannedChannels = activeWizardCreations(
+        state,
+        WIZARD_FEATURE_SETTINGS,
+      );
+      const channelPlanId = String(
+        (req.body as Record<string, unknown> | undefined)?.channelPlanId ?? "",
+      );
+      if (Object.keys(plannedChannels).length > 0) {
+        const review = await reviewWizardCreations(
+          client,
+          session.guildId,
+          plannedChannels,
+        ).catch((err: unknown): WizardCreateReview => {
+          logger.warn("wizard: apply could not plan the channels", err);
+          return {
+            creations: [],
+            rows: [],
+            planId: null,
+            problems: [
+              "Discord could not be read, so the channels can't be checked.",
+            ],
+          };
+        });
+        const refusal =
+          review.problems.length > 0
+            ? review.problems.join(" ")
+            : review.planId !== channelPlanId
+              ? "The channels on the server changed since you opened Review. Look at the updated list and apply again."
+              : null;
+        if (refusal) {
+          await recordAudit(session, {
+            action: "wizard.apply",
+            details: {
+              stage: "channels",
+              keys: Object.keys(plannedChannels),
+            },
+            result: "failure",
+            errorMessage: refusal,
+          });
+          confirmFailure(`Nothing was applied. ${refusal}`);
+          return;
+        }
+      }
+
       // Role access (#1321) goes first: it is the part that can be undone, so
       // a failure further on can put it back. It is checked against the live
       // server again, and nothing is written if any check fails.
@@ -1194,18 +1339,75 @@ export function createWizardRouter(client: Client): Router {
           : " The role mapping was undone too.";
       };
 
+      // The channels are created after the role access (which can be undone)
+      // and before the settings that point at them. One call makes them all and
+      // removes what it made if one fails. When anything after it fails, they
+      // are removed here, so a failed apply leaves nothing behind.
+      let createdChannels: CreatedForSetting[] = [];
+      let undoChannels = async (): Promise<{
+        note: string;
+        stuck: boolean;
+      }> => ({
+        note: "",
+        stuck: false,
+      });
+      if (Object.keys(plannedChannels).length > 0) {
+        const made = await applyWizardCreations(
+          client,
+          session.guildId,
+          session.discordUserId,
+          plannedChannels,
+          channelPlanId,
+        );
+        if (!made.ok) {
+          await recordAudit(session, {
+            action: "wizard.apply",
+            details: {
+              stage: "channels",
+              keys: Object.keys(plannedChannels),
+            },
+            result: "failure",
+            errorMessage: made.error,
+          });
+          confirmFailure(
+            `Nothing was applied. ${made.error}${await undoAccess()}`,
+          );
+          return;
+        }
+        createdChannels = made.channels;
+        for (const c of made.channels) derived[c.key] = c.id;
+        undoChannels = async (): Promise<{ note: string; stuck: boolean }> => {
+          const back = await made.undo();
+          if (back.stuck.length > 0) {
+            return {
+              note: ` These channels were created for this apply and could not be removed again, so they still exist: ${back.stuck.join(", ")}. Check them in Discord before applying again.`,
+              stuck: true,
+            };
+          }
+          return {
+            note:
+              back.removed.length > 0
+                ? ` The ${back.removed.length === 1 ? "channel" : "channels"} created for this apply ${back.removed.length === 1 ? "was" : "were"} removed again.`
+                : "",
+            stuck: false,
+          };
+        };
+      }
+
       const pendingKeys = [
         ...new Set([
           ...Object.keys(state.configuration),
           ...Object.keys(derived),
         ]),
       ];
+      let engineReturned = false;
       try {
         const result = await wizard.applyConfiguration(
           session.discordUserId,
           session.guildId,
           derived,
         );
+        engineReturned = true;
         await recordAudit(session, {
           action: "wizard.apply",
           details: {
@@ -1218,6 +1420,9 @@ export function createWizardRouter(client: Client): Router {
             reloadFailed: result.reloadFailed ?? false,
             cascadeOff,
             accessGroups: accessApplied.map((c) => c.groupId ?? c.groupName),
+            ...(createdChannels.length > 0
+              ? { channels: createdChannels }
+              : {}),
           },
           result: result.success ? "success" : "failure",
           errorMessage: result.success
@@ -1226,9 +1431,16 @@ export function createWizardRouter(client: Client): Router {
         });
         if (result.success) {
           wizard.endSession(session.discordUserId, session.guildId);
+          const madeCount = new Set(
+            createdChannels.filter((c) => c.created).map((c) => c.id),
+          ).size;
           const summary = `Wizard applied ${pendingKeys.length} setting${pendingKeys.length === 1 ? "" : "s"}${
             accessApplied.length > 0
               ? ` and ${accessApplied.length} role group change${accessApplied.length === 1 ? "" : "s"}`
+              : ""
+          }${
+            madeCount > 0
+              ? ` and created ${madeCount} channel${madeCount === 1 ? "" : "s"}`
               : ""
           }`;
           if (state.createHost) {
@@ -1295,8 +1507,26 @@ export function createWizardRouter(client: Client): Router {
         // keys (if any) could not be reverted and are therefore live — and
         // keep the session so they can retry from the confirm step instead
         // of losing their input.
+        // The channels go back too, unless a setting that points at one is
+        // still stored (a rollback or a reload that did not finish): then they
+        // stay, and the message above says which keys are live.
+        const channelKeys = createdChannels.map((c) => c.key);
+        const keepChannels =
+          result.reloadFailed === true ||
+          channelKeys.some((k) => result.revertFailedKeys.includes(k));
+        const channelBack = keepChannels
+          ? { note: "", stuck: false }
+          : await undoChannels();
+        // The usual message ends "No changes were applied. You can retry.",
+        // which is not true while a created channel still exists.
+        const base =
+          channelBack.stuck &&
+          result.revertFailedKeys.length === 0 &&
+          !result.reloadFailed
+            ? `Wizard apply failed: ${wizardApplyFailureReason(result)}. The settings were not saved.`
+            : wizardApplyFailureMessage(result);
         const failureMsg = truncateFlash(
-          wizardApplyFailureMessage(result) + (await undoAccess()),
+          base + channelBack.note + (await undoAccess()),
         );
         const qs = new globalThis.URLSearchParams({
           step: "confirm",
@@ -1309,6 +1539,10 @@ export function createWizardRouter(client: Client): Router {
         const text = err instanceof Error ? err.message : "Unknown error";
         logger.error("Wizard apply failed", err);
         const accessNote = await undoAccess();
+        // Nothing is written when the engine itself throws (the dependency
+        // check and the snapshot read come before the first write), so the
+        // channels go. After it returned, settings may point at them: they stay.
+        const channelNote = engineReturned ? "" : (await undoChannels()).note;
         await recordAudit(session, {
           action: "wizard.apply",
           details: { keys: pendingKeys },
@@ -1318,7 +1552,7 @@ export function createWizardRouter(client: Client): Router {
         // The session and the admin's choices stay, like every other refused
         // apply: they go back to Review with the reason and can retry.
         confirmFailure(
-          `The settings could not be applied. ${text}${accessNote}`,
+          `The settings could not be applied. ${text}${channelNote}${accessNote}`,
         );
       }
     }),

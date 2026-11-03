@@ -2286,6 +2286,47 @@ export function adminPages(): A11yPage[] {
         enabledByKey: { "welcome.enabled": true },
       }),
     },
+    ...[
+      {
+        name: "Setup wizard step (channel to be created)",
+        // The pending name, drawn again when the step is opened again (#1662).
+        current: "create:Quote Wall",
+        pickerCreate: {
+          kind: "channel" as const,
+          channelKind: "text" as const,
+          ok: true,
+        },
+      },
+      {
+        name: "Setup wizard step (creating a channel is not possible)",
+        current: "",
+        pickerCreate: {
+          kind: "channel" as const,
+          channelKind: "text" as const,
+          ok: false,
+          reason:
+            "The bot needs Manage Channels to create a channel. Give the bot's role Manage Channels in Server Settings, Roles; the Bot permissions page shows what is missing.",
+        },
+      },
+    ].map((c) => ({
+      name: c.name,
+      html: renderWizardStepPage({
+        ...COMMON,
+        ...PICKERS,
+        stepIndex: 0,
+        featureKeys: ["quotes"],
+        featureKey: "quotes",
+        settingKeys: ["quotes.enabled", "quotes.channel_id"],
+        currentValues: {
+          "quotes.enabled": true,
+          "quotes.channel_id": c.current,
+        },
+        metadata: settingsMetadata,
+        defaultValues: { "quotes.enabled": false, "quotes.channel_id": "" },
+        pickerCreate: c.pickerCreate,
+        enabledByKey: { "quotes.enabled": true },
+      }),
+    })),
     {
       // Values a picker cannot produce keep showing and saving as they are:
       // an old custom zone, a colour that is not #RRGGBB, a prefix that is not
@@ -2906,6 +2947,41 @@ export function adminPages(): A11yPage[] {
             settingLabel: "Lobby channel",
             parent: null,
           },
+        ],
+      }),
+    },
+    {
+      name: "Setup wizard confirm, a channel to create and one to select",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [
+          ["quotes.enabled", true],
+          ["quotes.channel_id", "# quote-wall (will be created)"],
+          ["notices.channel_id", "# quote-wall (will be created)"],
+          ["welcome.channel_id", "# hello (existing channel)"],
+        ],
+        metadata: settingsMetadata,
+        accessChanges: [],
+        creations: [
+          {
+            kind: "text",
+            name: "quote-wall",
+            settingLabel: "Notices channel and Quote channel",
+            parent: null,
+          },
+        ],
+        createPlanId: "0123456789abcdef",
+      }),
+    },
+    {
+      name: "Setup wizard confirm, the channels can't be created",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [["quotes.enabled", true]],
+        metadata: settingsMetadata,
+        accessChanges: [],
+        createProblems: [
+          "The bot needs Manage Channels to create a channel. Give the bot's role Manage Channels in Server Settings, Roles; the Bot permissions page shows what is missing.",
         ],
       }),
     },

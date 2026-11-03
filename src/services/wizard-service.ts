@@ -37,6 +37,17 @@ export interface WizardApplyResult {
   reloadFailed?: boolean;
 }
 
+/**
+ * A channel the admin chose to create from a feature step's Picker (#1662).
+ * Held beside the configuration, never in it: nothing is created or stored
+ * until Apply, and the setting gets the new channel's id then.
+ */
+export interface WizardCreation {
+  /** The name as typed, already checked by `parsePickerCreateValue`. */
+  name: string;
+  kind: "text";
+}
+
 export interface DetectedResources {
   categories?: CategoryChannel[];
   voiceChannels?: VoiceChannel[];
@@ -66,6 +77,11 @@ export interface WizardState {
    * picks: the role is created by Apply, through the adoption engine.
    */
   createHost?: boolean;
+  /**
+   * The channels the feature steps plan to create (#1662), by the setting key
+   * that will point at each. A key is here or in `configuration`, never both.
+   */
+  creations?: Record<string, WizardCreation>;
 }
 
 /**
@@ -237,6 +253,31 @@ export class WizardService {
       return true;
     }
     delete state.configuration[key];
+    return this.updateSession(userId, guildId, state);
+  }
+
+  /** Plan a channel for a setting (#1662); a staged value for that key is dropped. */
+  setCreation(
+    userId: string,
+    guildId: string,
+    key: string,
+    creation: WizardCreation,
+  ): boolean {
+    const state = this.getSession(userId, guildId);
+    if (!state) return false;
+    if (hasOwn(state.configuration, key)) delete state.configuration[key];
+    state.creations = { ...(state.creations ?? {}), [key]: creation };
+    return this.updateSession(userId, guildId, state);
+  }
+
+  /** Drop a planned channel (#1662). A key that had none is a no-op. */
+  removeCreation(userId: string, guildId: string, key: string): boolean {
+    const state = this.getSession(userId, guildId);
+    if (!state) return false;
+    if (!state.creations || !hasOwn(state.creations, key)) return true;
+    const rest = { ...state.creations };
+    delete rest[key];
+    state.creations = rest;
     return this.updateSession(userId, guildId, state);
   }
 
