@@ -1115,7 +1115,8 @@ and no permission overwrites). The announcement, the one-off post or the poll sc
 stores and posts nothing, and the form comes back with what was typed, the name still pending and the error under the Channel field. The flash
 names what was created ("Created announcement 5. Created # daily-news for Channel.") and the audit entry lists it under `channel`. Names are
 de-duplicated before planning (`createFormChannels`), so one submit never creates the same name twice. A save that fails after the channel was
-created leaves the channel in place and the flash says so. A `create:` value posted for the ping role is refused instead of stored.
+created leaves the channel in place and the flash says so; a refused create is audited as a failure with the
+typed name. A `create:` value posted for the ping role is refused instead of stored.
 
 **Feature forms use the setting controls (#1533).** A schedule on the **Announcements** and **Polls** forms is the
 same picker as in Settings (Daily, Weekly, Monthly or Custom for a cron expression), with one help line under it

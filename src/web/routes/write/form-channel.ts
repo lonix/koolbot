@@ -10,6 +10,7 @@ import {
   type FormChannel,
 } from "../../form-channel-create.js";
 import type { FormValues } from "../../form-errors.js";
+import { recordAudit } from "../../audit.js";
 import { refuseForm, type requireSessionContext } from "./helpers.js";
 
 /**
@@ -26,6 +27,7 @@ export async function createPendingChannel(
   res: Parameters<typeof refuseForm>[1],
   page: string,
   formId: string,
+  action: string,
   session: ReturnType<typeof requireSessionContext>,
   form: {
     pendingChannel: string | null;
@@ -44,6 +46,12 @@ export async function createPendingChannel(
     form.pendingChannel,
   );
   if (made.ok) return { channelId: made.channel.id, channel: made.channel };
+  await recordAudit(session, {
+    action,
+    details: { channelName: form.pendingChannel },
+    result: "failure",
+    errorMessage: made.error,
+  });
   await refuseForm(req, res, {
     page,
     formId,

@@ -243,6 +243,7 @@ export function createPollsRouter(client: Client): Router {
         res,
         PAGE,
         POLL_SCHEDULE_CREATE_FORM,
+        "poll-schedule.create",
         session,
         form,
       );
@@ -347,6 +348,7 @@ export function createPollsRouter(client: Client): Router {
         res,
         PAGE,
         pollScheduleEditForm(id),
+        "poll-schedule.edit",
         session,
         form,
       );

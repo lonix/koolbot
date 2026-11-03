@@ -302,6 +302,11 @@ describe("Announcements: a pending creation is created, then stored (#1665)", ()
     });
     const html = await refused(res, "announcement-create");
     expect(html).toContain("Discord refused: Missing Permissions");
+    expect(lastAudit()).toMatchObject({
+      action: "announcement.create",
+      result: "failure",
+      details: { channelName: "Daily News" },
+    });
     // The typed name comes back as the pending option.
     expect(html).toContain('value="create:Daily News" data-create');
     expect(html).toContain('value="0 9 * * 1"');

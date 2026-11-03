@@ -190,6 +190,7 @@ export function createAnnouncementsRouter(client: Client): Router {
         res,
         PAGE,
         ANNOUNCEMENT_CREATE_FORM,
+        "announcement.create",
         session,
         form,
       );
@@ -379,6 +380,7 @@ export function createAnnouncementsRouter(client: Client): Router {
         res,
         PAGE,
         ANNOUNCEMENT_ONCE_FORM,
+        "announcement.post-once",
         session,
         form,
       );
