@@ -88,7 +88,10 @@ import {
   renderRoleDeletePage,
   renderRoleGroupsPage,
 } from "../../src/web/role-groups-views.js";
-import { planned as plannedEventAdoption } from "./event-adoption-fixtures.js";
+import {
+  blockedPlanned as blockedEventPlan,
+  planned as plannedEventAdoption,
+} from "./event-adoption-fixtures.js";
 import {
   renderChannelDeleteConfirmPage,
   renderChannelManagerPage,
@@ -1735,6 +1738,78 @@ export function adminPages(): A11yPage[] {
         planned: null,
         error: "Discord couldn't be reached.",
         previewing: false,
+      }),
+    },
+    {
+      name: "Adopt Discord events (list)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption(),
+        previewing: false,
+      }),
+    },
+    {
+      name: "Adopt Discord events (events off, nothing to announce with)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption({
+          eventsEnabled: false,
+          announcementConfigured: false,
+          canManageEvents: false,
+        }),
+        previewing: false,
+      }),
+    },
+    {
+      name: "Adopt Discord events (blocked plan)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: blockedEventPlan(),
+        previewing: true,
+      }),
+    },
+    {
+      name: "Adopt Discord events (nothing chosen)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption({}, undefined, []),
+        previewing: true,
+      }),
+    },
+    {
+      name: "Adopt Discord events (no events)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption({}, [], []),
+        previewing: false,
+      }),
+    },
+    {
+      name: "Adopt Discord events (none can be adopted)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption(
+          {},
+          [plannedEventAdoption().candidates[1].info],
+          [],
+        ),
+        previewing: false,
+      }),
+    },
+    {
+      name: "Adopt Discord events (applying)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption(),
+        previewing: false,
+        jobId: "123e4567-e89b-12d3-a456-426614174000",
       }),
     },
     {
