@@ -19,7 +19,13 @@ import { canBotCreate } from "../services/bot-create-check.js";
 import { CommandManager } from "../services/command-manager.js";
 import logger from "../utils/logger.js";
 import type { CreatePendingResult, PendingCreate } from "./setting-create.js";
-import { applyChannelPlan, planChannels } from "./channel-create.js";
+import {
+  applyChannelPlan,
+  normaliseChannelName,
+  planChannels,
+  type ChannelPlanEntry,
+} from "./channel-create.js";
+import type { ManagedChannelView } from "./channel-manager.js";
 import { fetchChannelViews } from "./channel-manager-data.js";
 import { ChannelReadTimeoutError, readWithin } from "./channel-write-lock.js";
 import { cancellableCall, createWriteRest } from "./channel-write-rest.js";
@@ -58,13 +64,12 @@ export async function createPendingChannels(
       error: "The bot isn't signed in to Discord yet, so nothing was created.",
     };
   }
-  const entries = pending.map((p) => ({
-    kind: "text" as const,
-    name: p.name,
-  }));
   try {
     const guild = await readWithin(() => client.guilds.fetch(guildId));
     const live = await readWithin(() => fetchChannelViews(guild));
+    const resolved = resolveExisting(pending, live);
+    if (!resolved.ok) return { ok: false, error: resolved.error };
+    const entries = resolved.entries;
     const plan = planChannels(entries, live);
     if (!plan.ok) return { ok: false, error: plan.errors.join(" ") };
     const manager = CommandManager.getInstance(client);
@@ -101,4 +106,36 @@ export async function createPendingChannels(
           : "KoolBot couldn't read the channels from Discord, so nothing was created. Try again.",
     };
   }
+}
+
+export const AMBIGUOUS_NAME_MESSAGE =
+  "More than one text channel on this server has that name. Pick the one you want from the list.";
+
+/**
+ * One entry per pending name. The helper only looks for an existing channel in
+ * the entry's own parent (none, top level), so a name that already exists
+ * inside a category would be created again at the top. The caller looks across
+ * the whole server first: one normalised match keeps its own parent, so the
+ * helper selects it; two or more are ambiguous and refused.
+ */
+function resolveExisting(
+  pending: readonly PendingCreate[],
+  live: readonly ManagedChannelView[],
+): { ok: true; entries: ChannelPlanEntry[] } | { ok: false; error: string } {
+  const entries: ChannelPlanEntry[] = [];
+  for (const p of pending) {
+    const wanted = normaliseChannelName("text", p.name).toLowerCase();
+    const matches = live.filter(
+      (c) =>
+        c.kind === "text" &&
+        normaliseChannelName("text", c.name).toLowerCase() === wanted,
+    );
+    if (matches.length > 1) return { ok: false, error: AMBIGUOUS_NAME_MESSAGE };
+    entries.push({
+      kind: "text",
+      name: p.name,
+      ...(matches.length === 1 ? { parentId: matches[0].parentId } : {}),
+    });
+  }
+  return { ok: true, entries };
 }

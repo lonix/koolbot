@@ -2105,6 +2105,11 @@ export function createReadOnlyRouter(
       settingRows,
       settingsUnavailable: stored === null,
       textChannels: channelData.textChannels,
+      createChannel: await loadCreateChannelAnswer(
+        client,
+        common.guildId,
+        settingRows.map((r) => r.key),
+      ),
       roles: roleData.roles,
       messages,
       refusedForm,
@@ -2209,6 +2214,11 @@ export function createReadOnlyRouter(
       settingRows,
       settingsUnavailable: stored === null,
       textChannels: channelData.textChannels,
+      createChannel: await loadCreateChannelAnswer(
+        client,
+        common.guildId,
+        settingRows.map((r) => r.key),
+      ),
       groups,
       categoryOptions,
       refusedForm,

@@ -1518,8 +1518,9 @@ Choosing the row only marks the name in the Picker ("Name (will be created)"); n
 flagged setting's value with `parsePickerCreateValue` before anything else, checks the permission again, and when nothing else in the section was
 refused creates every pending channel in one go through the shared helper (`channel-create.ts`: a plan from a fresh read, then an apply inside the
 per-server lock). The new ids are stored with the rest of the section, the page reloads so the Picker lists the channel as an existing one, and one
-flash says what happened, for example "Saved 2 settings in quotes. Created #quote-wall for Quote channel." A name that already exists as a text
-channel (any case) is selected instead: the flash says "Used the existing #name for ...". If the name appears on the server between the plan and the
+flash says what happened, for example "Saved 2 settings in quotes. Created # quote-wall for Quote channel." A name that already exists as a text
+channel anywhere on the server (any case, spaces as hyphens) is selected instead, with its own category, and two such channels refuse the
+save: the flash says "Used the existing # name for ...". If the name appears on the server between the plan and the
 apply, the apply refuses with "changed since Review" and nothing is stored. A failed create stores nothing in the section and creates nothing (a
 channel created earlier in the same save is removed again); the section stays as typed, with the error under each setting that asked for a
 channel. Two settings that type the same new name are refused. The audit entry of the save lists the created channels under `channels`. A

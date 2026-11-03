@@ -4586,6 +4586,8 @@ export interface ReactionRolesProps extends CommonProps {
   settingsUnavailable?: boolean;
   /** Text-channel options backing the `reactionroles.message_channel_id` picker. */
   textChannels?: ChannelOption[];
+  /** The create-row answer for the flagged message channel setting (#1663, `loadCreateChannelAnswer`). */
+  createChannel?: PickerCreate;
   /** The guild's roles for the *Bind an existing role* picker (#1530). */
   roles?: RoleOption[];
   /** The bot's reaction-role messages for the *Message* select; `null` when the list could not be read (#1530). */
@@ -4939,7 +4941,10 @@ ${renderFeatureSettingsCard({
     "Turn reaction roles on or off, pick the message channel and the surface style for new role messages. Turning the feature off keeps the other settings as they are.",
   category: "reactionroles",
   settingRows: props.settingRows ?? [],
-  pickers: { textChannels: props.textChannels },
+  pickers: {
+    textChannels: props.textChannels,
+    createChannel: props.createChannel,
+  },
   returnTo: "/admin/reaction-roles",
   csrfToken: props.csrfToken,
   unavailable: props.settingsUnavailable,
@@ -4994,6 +4999,8 @@ export interface NoticesProps extends CommonProps {
   settingRows: SettingRow[];
   /** Text-channel options backing the `notices.channel_id` picker. */
   textChannels: ChannelOption[];
+  /** The create-row answer for the flagged channel setting of the card (#1663, `loadCreateChannelAnswer`). */
+  createChannel?: PickerCreate;
   /**
    * True when the stored config could not be read. The settings card is then
    * withheld rather than rendered with schema defaults a save would persist.
@@ -5154,7 +5161,10 @@ ${renderFeatureSettingsCard({
     "Change notices settings here without leaving the page. Changing the channel does not move notices already posted: after saving, use Resync notices to channel above to repost them in the new channel.",
   category: "notices",
   settingRows: props.settingRows,
-  pickers: { textChannels: props.textChannels },
+  pickers: {
+    textChannels: props.textChannels,
+    createChannel: props.createChannel,
+  },
   returnTo: "/admin/notices",
   csrfToken: props.csrfToken,
   unavailable: props.settingsUnavailable,

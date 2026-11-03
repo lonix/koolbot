@@ -847,9 +847,15 @@ export function coerceConfigValue(
     pickerType === "role_list"
   ) {
     const items = Array.isArray(raw) ? raw : [raw];
+    // A list setting is stored as comma-separated text, so a posted string is
+    // checked entry by entry (an array item may itself be a joined string).
     if (
       items.some(
-        (v) => typeof v === "string" && v.startsWith(PICKER_CREATE_PREFIX),
+        (v) =>
+          typeof v === "string" &&
+          v
+            .split(",")
+            .some((entry) => entry.trim().startsWith(PICKER_CREATE_PREFIX)),
       )
     ) {
       return {

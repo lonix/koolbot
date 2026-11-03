@@ -25,8 +25,12 @@ jest.unstable_mockModule("../../src/services/bot-create-check.js", () => ({
         },
 }));
 
-const { renderSettingsPage, renderFeatureSettingsCard } =
-  await import("../../src/web/admin-views.js");
+const {
+  renderSettingsPage,
+  renderFeatureSettingsCard,
+  renderReactionRolesPage,
+  renderNoticesPage,
+} = await import("../../src/web/admin-views.js");
 type SettingRow = import("../../src/web/admin-views.js").SettingRow;
 const { loadCreateChannelAnswer } =
   await import("../../src/web/setting-create-load.js");
@@ -197,4 +201,52 @@ describe("the page-wide answer", () => {
     ).toBeUndefined();
     expect(mockCanBotCreate).not.toHaveBeenCalled();
   });
+});
+
+describe("the Reaction roles and Notices pages forward the answer to their card", () => {
+  const COMMON = { csrfToken: "t", remainingMs: 900_000 };
+  const channel = { name: "c", id: "1", type: ChannelType.GuildText };
+  const reactionRoles = (key: string, answer?: typeof OK | typeof NO): string =>
+    renderReactionRolesPage({
+      ...COMMON,
+      enabled: true,
+      configChannel: channel,
+      active: [],
+      archived: [],
+      settingRows: [row(key)],
+      textChannels: TEXT,
+      roles: [],
+      messages: null,
+      ...(answer ? { createChannel: answer } : {}),
+    } as unknown as Parameters<typeof renderReactionRolesPage>[0]);
+  const notices = (key: string, answer?: typeof OK | typeof NO): string =>
+    renderNoticesPage({
+      ...COMMON,
+      enabled: true,
+      channel,
+      total: 0,
+      textChannels: TEXT,
+      settingRows: [row(key)],
+      groups: [],
+      categoryOptions: [],
+      ...(answer ? { createChannel: answer } : {}),
+    } as unknown as Parameters<typeof renderNoticesPage>[0]);
+
+  for (const [name, render, key] of [
+    ["Reaction roles", reactionRoles, "reactionroles.message_channel_id"],
+    ["Notices", notices, "notices.channel_id"],
+  ] as const) {
+    it(`${name}: the row is offered when the bot can create`, () => {
+      expect(createOf(render(key, OK), key)).toEqual(OK);
+    });
+    it(`${name}: the help line shows when the bot cannot create`, () => {
+      expect(createOf(render(key, NO), key)).toEqual(NO);
+    });
+    it(`${name}: no row when the flag is missing or the answer is unknown`, () => {
+      expect(render(key)).not.toContain("&quot;create&quot;");
+      expect(render("welcome.rules_channel_id", OK)).not.toContain(
+        "&quot;create&quot;",
+      );
+    });
+  }
 });

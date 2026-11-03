@@ -147,6 +147,8 @@ let nextId = 100000000000000100n;
 beforeEach(async () => {
   jest.clearAllMocks();
   can = { ok: true };
+  mockFetchViews.mockReset();
+  mockFetchViews.mockImplementation(async () => live);
   live = [view("100000000000000001", { name: "general" })];
   nextId = 100000000000000100n;
   mockConfigGet.mockResolvedValue(null);
@@ -284,6 +286,59 @@ describe("a pending creation saved from a section (#1663)", () => {
     expect(mockPost).not.toHaveBeenCalled();
     expect(mockConfigSet).not.toHaveBeenCalled();
     expect(body.reload).toBeUndefined();
+  });
+});
+
+describe("a name that exists inside a category (#1663)", () => {
+  const CAT = "100000000000000050";
+  it("selects it with its own parent instead of creating a duplicate at the top", async () => {
+    live = [
+      view(CAT, { name: "Community", kind: "category" }),
+      view("100000000000000060", { name: "quote-wall", parentId: CAT }),
+    ];
+    const res = await save({
+      category: "quotes",
+      keys: [QUOTES],
+      [`value_${QUOTES}`]: "create:Quote Wall",
+    });
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.text).toContain(
+      "Used the existing # quote-wall for Quote channel.",
+    );
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(setWrites()).toEqual([[QUOTES, "100000000000000060"]]);
+  });
+
+  it("refuses when two channels in different categories match", async () => {
+    live = [
+      view(CAT, { name: "A", kind: "category" }),
+      view("100000000000000051", { name: "B", kind: "category" }),
+      view("100000000000000060", { name: "quote-wall", parentId: CAT }),
+      view("100000000000000061", {
+        name: "quote-wall",
+        parentId: "100000000000000051",
+      }),
+    ];
+    const res = await save({
+      category: "quotes",
+      keys: [QUOTES],
+      [`value_${QUOTES}`]: "create:Quote Wall",
+    });
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.type).toBe("err");
+    expect(body.invalidReasons[QUOTES]).toContain("Pick the one you want");
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("still creates a name that exists only as another kind", async () => {
+    live = [view("100000000000000070", { name: "quote-wall", kind: "voice" })];
+    await save({
+      category: "quotes",
+      keys: [QUOTES],
+      [`value_${QUOTES}`]: "create:quote-wall",
+    });
+    expect(mockPost).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -508,6 +563,13 @@ describe("a create value is never stored as a setting value (defect on main)", (
       ["voicetracking.excluded_channels", "create:x"],
       ["voicetracking.excluded_channels", ["123456789012345678", "create:x"]],
       ["quotes.delete_roles", ["create:x"]],
+      // list settings are comma-separated text: every entry is checked
+      ["voicetracking.excluded_channels", "123456789012345678,create:wall"],
+      ["voicetracking.excluded_channels", "123456789012345678 , create:wall"],
+      ["voicetracking.excluded_channels", "create:wall,123456789012345678"],
+      ["voicetracking.excluded_channels", ["123456789012345678,create:wall"]],
+      ["quotes.delete_roles", ["1", " create:x,2"]],
+      ["quotes.channel_id", "123456789012345678,create:wall"],
     ] as const) {
       expect(coerceConfigValue(key, raw)).toEqual(refused);
       // The wizard's apply path calls the guild-aware wrapper.
