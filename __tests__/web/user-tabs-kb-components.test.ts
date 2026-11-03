@@ -129,6 +129,18 @@ const BODIES: Array<{ name: string; html: string }> = [
       },
     }),
   },
+  {
+    name: "privacy (export switched off)",
+    html: renderUserPrivacyBody({ ...privacy, featureEnabled: false }),
+  },
+  {
+    name: "privacy (Rewind off, no reset)",
+    html: renderUserPrivacyBody({
+      ...privacy,
+      rewindEnabled: false,
+      reset: undefined,
+    }),
+  },
 ];
 
 const notifRows = [
@@ -147,6 +159,16 @@ const dom = (html: string) => new JSDOM(`<body>${html}</body>`).window.document;
 
 describe.each(BODIES)("the $name body (#1543)", ({ html }) => {
   const doc = dom(html);
+
+  it("carries only kb- classes, and every table is a kb-table (#1707)", () => {
+    const stray = [...doc.querySelectorAll("[class]")].flatMap((e) =>
+      [...e.classList].filter((c) => !c.startsWith("kb-")),
+    );
+    expect(stray).toEqual([]);
+    doc.querySelectorAll("table").forEach((t) => {
+      expect(t.classList.contains("kb-table")).toBe(true);
+    });
+  });
 
   it("has no style attribute", () => {
     expect(doc.querySelectorAll("[style]")).toHaveLength(0);
@@ -254,6 +276,8 @@ describe("Voice (#1543)", () => {
     expect(empty.querySelector(".kb-empty .kb-empty__title")!.textContent).toBe(
       "No saved presets yet",
     );
+    // An EmptyState names its page with an icon (#1707).
+    expect(empty.querySelector(".kb-empty .kb-empty__icon svg")).not.toBeNull();
   });
 });
 

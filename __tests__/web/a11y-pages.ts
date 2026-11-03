@@ -7445,6 +7445,20 @@ export function userPages(): A11yPage[] {
       ),
     },
     {
+      name: "/me voice (no presets)",
+      html: shell(
+        "Voice",
+        "/me/voice",
+        renderUserVoiceBody({
+          csrfToken: COMMON.csrfToken,
+          namePattern: null,
+          displayName: "Alice",
+          presets: [],
+          maxPerUser: 5,
+        }),
+      ),
+    },
+    {
       name: "/me voice (rejected user limit)",
       html: shell(
         "Voice",
@@ -7556,6 +7570,53 @@ export function userPages(): A11yPage[] {
           excluded: [],
           maxItems: 5000,
           reset: { enabled: true, cooldownHours: 24, csrfToken: "tok" },
+        }),
+      ),
+    },
+    {
+      name: "/me privacy (tracking opt-out offered)",
+      html: shell(
+        "Privacy",
+        "/me/privacy",
+        renderUserPrivacyBody({
+          featureEnabled: true,
+          included: [],
+          excluded: [],
+          maxItems: 5000,
+          reset: { enabled: true, cooldownHours: 0, csrfToken: "tok" },
+          trackingOptOut: { offered: true, optedOutAt: null, csrfToken: "tok" },
+        }),
+      ),
+    },
+    {
+      name: "/me privacy (opted out)",
+      html: shell(
+        "Privacy",
+        "/me/privacy",
+        renderUserPrivacyBody({
+          featureEnabled: true,
+          rewindEnabled: false,
+          included: [],
+          excluded: [],
+          maxItems: 5000,
+          trackingOptOut: {
+            offered: false,
+            optedOutAt: new Date("2026-01-02T00:00:00Z"),
+            csrfToken: "tok",
+          },
+        }),
+      ),
+    },
+    {
+      name: "/me privacy (export switched off)",
+      html: shell(
+        "Privacy",
+        "/me/privacy",
+        renderUserPrivacyBody({
+          featureEnabled: false,
+          included: [],
+          excluded: [],
+          maxItems: 5000,
         }),
       ),
     },
