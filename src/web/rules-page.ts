@@ -179,12 +179,21 @@ function postBlockedReason(p: RulesPageProps): string | null {
   return null;
 }
 
-/** The rollout in one sentence: all the page knows is whether a plan is previewed. */
+/**
+ * The rollout in one sentence: all the page knows is whether a plan is
+ * previewed, and whether it can be applied. A plan that is blocked is not the
+ * same as one with nothing to change (`rulesPlanIsApplicable` is false for both).
+ */
 function rolloutLine(p: RulesPageProps): string {
-  if (!p.plan) return "No rollout is previewed.";
-  return rulesPlanIsApplicable(p.plan)
-    ? "A rollout is previewed below and can be applied."
-    : "A rollout is previewed below; there is nothing to apply.";
+  const plan = p.plan;
+  if (!plan) return "No rollout is previewed.";
+  if (rulesPlanIsApplicable(plan)) {
+    return "A rollout is previewed below and can be applied.";
+  }
+  if (plan.plan.errors.length > 0 || plan.extraErrors.length > 0) {
+    return "A rollout is previewed below, but it can't be applied until the listed problems are fixed.";
+  }
+  return "A rollout is previewed below; there is nothing to apply.";
 }
 
 /** The verdict the page opens with: the state of the rules message, then of the rollout. */
@@ -284,8 +293,8 @@ function renderStatus(p: RulesPageProps, csrf: string): string {
   <p class="kb-help">Turn the feature on and pick the channel, role and texts on the <a href="/admin/settings">Settings</a> page. Make the rules channel read-only for members in Discord.</p>
   <div class="kb-row">
     <form method="POST" action="/admin/rules/post">${csrf}<button type="submit" class="${postClass}"${blocked === null ? "" : " disabled"}>${p.messagePosted ? "Update the rules message" : "Post the rules message"}</button></form>
-    <form method="POST" action="/admin/rules/sync" data-confirm="Record everyone who already holds the acceptance role as accepted (adopted)? Nothing is changed in Discord."${CONFIRM_NEUTRAL_ATTR}>${csrf}<button type="submit" class="kb-btn"${syncBlocked === null ? "" : " disabled"}>Record current role holders as accepted</button></form>
-  </div>${why}`,
+    <form method="POST" action="/admin/rules/sync" data-confirm="Record everyone who already holds the acceptance role as accepted (adopted)? Nothing is changed in Discord."${CONFIRM_NEUTRAL_ATTR}>${csrf}<button type="submit" class="kb-btn" aria-describedby="rules-sync-help"${syncBlocked === null ? "" : " disabled"}>Record current role holders</button></form>
+  </div><p class="kb-help" id="rules-sync-help">Record current role holders marks everyone who already holds the acceptance role as accepted. Nothing is changed in Discord.</p>${why}`,
   );
 }
 
@@ -413,7 +422,7 @@ function renderPlan(p: RulesPageProps, csrf: string): string {
   return panel(
     "rules-preview",
     "Preview",
-    `${counts}${extra}${renderAdoptionDiff(plan.plan)}${apply}`,
+    `${counts}${extra}<div class="kb-panel__body--flush">${renderAdoptionDiff(plan.plan)}</div>${apply}`,
   );
 }
 

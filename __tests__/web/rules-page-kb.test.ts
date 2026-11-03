@@ -343,4 +343,56 @@ describe("Rules page behaviour kept through the migration", () => {
     expect(html).not.toContain('action="/admin/rules/apply"');
     expect(html).toContain("Needs attention (1)");
   });
+
+  it("says a blocked rollout with pending operations can't be applied, not that there is nothing to apply", () => {
+    for (const blocked of [
+      plan({ extraErrors: [{ code: "admin-lockout", message: "Own access" }] }),
+      plan({
+        plan: {
+          ...plan().plan,
+          errors: [{ code: "x", message: "Blocked" }],
+        },
+      }),
+    ]) {
+      const html = renderRulesPage(props({ plan: blocked }));
+      const text = doc(html).querySelector(".kb-callout")?.textContent ?? "";
+      expect(text).toContain("can't be applied until the listed problems");
+      expect(text).not.toContain("nothing to apply");
+      expect(html).not.toContain('action="/admin/rules/apply"');
+    }
+  });
+
+  it("says there is nothing to apply only for an empty plan", () => {
+    const empty = plan({
+      plan: { ...plan().plan, operations: [] },
+      preview: { totalMembers: null, holders: null, lockedOut: null },
+    });
+    const text = doc(renderRulesPage(props({ plan: empty }))).querySelector(
+      ".kb-callout",
+    )?.textContent;
+    expect(text).toContain("there is nothing to apply");
+  });
+
+  it("keeps the record-holders button label short and explains it in a help line", () => {
+    const d = doc(renderRulesPage(props()));
+    const btn = d.querySelector('form[action="/admin/rules/sync"] button')!;
+    expect(btn.textContent).toBe("Record current role holders");
+    expect(btn.getAttribute("aria-describedby")).toBe("rules-sync-help");
+    expect(d.getElementById("rules-sync-help")?.textContent).toContain(
+      "as accepted",
+    );
+    expect(
+      d
+        .querySelector('form[action="/admin/rules/sync"]')
+        ?.getAttribute("data-confirm"),
+    ).toMatch(/^Record everyone who already holds the acceptance role/);
+  });
+
+  it("puts the plan diff in a scrolling flush body so a wide table does not widen the page", () => {
+    const d = doc(renderRulesPage(props({ plan: plan() })));
+    const diff = d.querySelector("section.adoption-plan")!;
+    expect(
+      diff.closest("#rules-preview .kb-panel__body--flush"),
+    ).not.toBeNull();
+  });
 });
