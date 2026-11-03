@@ -57,6 +57,7 @@ import {
   parsePickerCreateValue,
   type PickerCreate,
 } from "./setting-pickers.js";
+import { pickerCreateFor } from "./setting-create.js";
 import type { ReactionRoleMessageOptions } from "./reaction-role-messages.js";
 import { getServerTimezone } from "../utils/timezone.js";
 import {
@@ -6230,6 +6231,12 @@ export interface FeatureSettingsPickers {
   groupRoles?: RoleOption[];
   /** The bot's reaction-role messages, for a key that picks one (#1433). */
   reactionRoleMessages?: ReactionRoleMessageOptions | null;
+  /**
+   * The bot-permission answer for a flagged text channel setting (#1663,
+   * `loadCreateChannelAnswer`): the Picker's create row, or the help line
+   * saying why there is none. Absent: no row.
+   */
+  createChannel?: PickerCreate;
 }
 
 export interface FeatureSettingsCardProps {
@@ -6343,6 +6350,7 @@ export function renderFeatureSettingsCard(
     roles: props.pickers?.roles ?? [],
     groupRoles: props.pickers?.groupRoles,
     reactionRoleMessages: props.pickers?.reactionRoleMessages,
+    create: pickerCreateFor(props.pickers?.createChannel),
   };
   const masterKey = findFeatureMasterKey(props.settingRows);
   const enabledByKey = new Map<string, boolean>(props.dependencyState ?? []);

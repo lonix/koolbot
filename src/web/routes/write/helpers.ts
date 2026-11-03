@@ -8,6 +8,7 @@
  * routers behind `requireSession`, the admin-role check and `requireCsrf`.
  */
 
+import { PICKER_CREATE_PREFIX } from "../../setting-pickers.js";
 import { RAID_CONFIG_KEYS } from "../../../services/raid-protection-service.js";
 import type { Client } from "discord.js";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
@@ -832,6 +833,31 @@ export function coerceConfigValue(
     return { ok: false, reason: "managed by KoolBot and cannot be set here" };
   }
 
+  // A pending creation (`create:<name>`, #1658) is the Picker's, never a value:
+  // the save that supports it (#1663) takes it out before coercion, so one that
+  // arrives here (a key without the flag, a crafted post, the single-key route)
+  // would only be stored as text that is not an id.
+  const pickerType =
+    settingsMetadata[key as keyof typeof settingsMetadata]?.type;
+  if (
+    pickerType === "channel" ||
+    pickerType === "category" ||
+    pickerType === "role" ||
+    pickerType === "channel_list" ||
+    pickerType === "role_list"
+  ) {
+    const items = Array.isArray(raw) ? raw : [raw];
+    if (
+      items.some(
+        (v) => typeof v === "string" && v.startsWith(PICKER_CREATE_PREFIX),
+      )
+    ) {
+      return {
+        ok: false,
+        reason: "this setting cannot create a new one from here",
+      };
+    }
+  }
   // Array payloads only make sense for the multi-select Discord-entity
   // types (channel_list / role_list). For every other key shape, an
   // array means something is wrong upstream — a misconfigured YAML

@@ -1505,7 +1505,25 @@ same snapshot of the server as **Bot permissions** and never guesses. The bot ca
 answers. Yes: the create row shows. No: no row, and the Picker's help line names the permission, where to fix it and the **Bot permissions** page
 (`CREATE_REASON`); the line shows only where a create row would otherwise be offered. Unknown, when the server, the bot's own membership or the
 category could not be read: no row and no line, because the page cannot say which is true. `toPickerCreate` turns an answer into the Picker's
-flag. No page uses it yet; the pages that offer creation wire it in.
+flag.
+
+**Creating the channel a setting points at, on the Settings pages (#1663, a proposal for the owner).** The Settings page and every feature page's
+Settings card offer the create row for a text `channel` setting whose schema entry has `createChannel: true` (next to `channelKind`, in
+`config-schema.ts`; the wizard's Channels step reads the same flag). The flagged settings are the posts channels: the weekly recap, quotes,
+celebrations, birthdays, welcome, rules, event announcements, looking for group, the reaction-role message channel, notices and the leaderboard role
+announcements. The log channels (`core.*.channel_id`, the raid alert channel) are not flagged: a created channel has no permission overwrites, so
+it would be readable by everyone who can see the server, and the log channels carry errors and moderation. The page asks `canBotCreate` once
+(`loadCreateChannelAnswer`); without Manage Channels the Picker shows the help line, and when the permissions cannot be read it shows nothing.
+Choosing the row only marks the name in the Picker ("Name (will be created)"); nothing is created until you save the section. Saving reads each
+flagged setting's value with `parsePickerCreateValue` before anything else, checks the permission again, and when nothing else in the section was
+refused creates every pending channel in one go through the shared helper (`channel-create.ts`: a plan from a fresh read, then an apply inside the
+per-server lock). The new ids are stored with the rest of the section, the page reloads so the Picker lists the channel as an existing one, and one
+flash says what happened, for example "Saved 2 settings in quotes. Created #quote-wall for Quote channel." A name that already exists as a text
+channel (any case) is selected instead: the flash says "Used the existing #name for ...". If the name appears on the server between the plan and the
+apply, the apply refuses with "changed since Review" and nothing is stored. A failed create stores nothing in the section and creates nothing (a
+channel created earlier in the same save is removed again); the section stays as typed, with the error under each setting that asked for a
+channel. Two settings that type the same new name are refused. The audit entry of the save lists the created channels under `channels`. A
+`create:` value posted for any other channel, category or role setting is refused instead of stored.
 
 The **Setup Wizard** (`/admin/wizard`) walks through the features you pick,
 one step each: voice channels, voice tracking, quotes, achievements, reaction

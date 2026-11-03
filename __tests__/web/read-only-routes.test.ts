@@ -850,7 +850,11 @@ describe("EVENTS_SETTING_KEYS (#975)", () => {
       EVENTS_SETTING_KEYS,
       [{ key: "events.reminder_minutes", value: 45 }],
     );
-    expect(calls).toEqual({ channels: 1, roles: 0 });
+    // The page's own picker fetch is one channel read and no role read. The
+    // Events card holds flagged channel settings (#1663), so the permission
+    // check for the create row (a snapshot cached for a few minutes and shared
+    // with Bot permissions) adds one channel and one role read.
+    expect(calls).toEqual({ channels: 2, roles: 1 });
     expect(data.pickers.textChannels?.map((c) => c.id)).toEqual(["t1"]);
     expect(data.pickers.categoryChannels?.map((c) => c.id)).toEqual(["c1"]);
     expect(data.pickers.roles).toBeUndefined();

@@ -55,6 +55,13 @@ import {
   findGroupRoleReuseForSetting,
   findPowerfulRoleForSetting,
 } from "./helpers.js";
+import { parsePickerCreateValue } from "../../setting-pickers.js";
+import {
+  offersCreateChannel,
+  createdNote,
+  type CreatedForKey,
+  type PendingCreate,
+} from "../../setting-create.js";
 import { isRoleGrantingSetting } from "../../../services/role-grants.js";
 import {
   rearmScheduledServices,
@@ -539,10 +546,24 @@ export function createSettingsRouter(client: Client): Router {
         value: string | number | boolean;
       }> = [];
       const rejected: Array<{ key: string; reason: string }> = [];
+      const pendingCreates: PendingCreate[] = [];
       for (const key of keys) {
         if (seen.has(key)) continue;
         seen.add(key);
         if (masterOff && key !== masterKey) continue;
+        // A pending creation (#1663) is read before anything else touches the
+        // posted value: only a flagged channel setting takes one, and it is
+        // created after every other check has passed. Any other key posting
+        // `create:` falls through and is refused as the invalid id it is.
+        const posted = body[settingValueFieldName(key)];
+        if (offersCreateChannel(key) && typeof posted === "string") {
+          const named = parsePickerCreateValue(posted);
+          if (named) {
+            if (named.ok) pendingCreates.push({ key, name: named.name });
+            else rejected.push({ key, reason: named.error });
+            continue;
+          }
+        }
         const stored = await ConfigService.getInstance()
           .get(key)
           .catch(() => undefined);
@@ -629,6 +650,41 @@ export function createSettingsRouter(client: Client): Router {
           before,
         );
         if (powerful) rejected.push({ key: c.key, reason: powerful });
+      }
+
+      // Create the pending channels (#1663) only when nothing else in the
+      // section was refused. One apply for all of them: a failure creates and
+      // stores nothing, and the error stands under every setting that asked.
+      let createdChannels: CreatedForKey[] = [];
+      if (rejected.length === 0 && pendingCreates.length > 0) {
+        const gone = new AbortController();
+        const onClose = (): void => {
+          if (!res.writableEnded) gone.abort();
+        };
+        res.once("close", onClose);
+        if (res.destroyed) onClose();
+        // Loaded when a save holds a creation: it pulls in the permission
+        // check and the Discord write client, which no other save needs.
+        const { createPendingChannels } =
+          await import("../../setting-create-save.js");
+        const made = await createPendingChannels(
+          client,
+          session.guildId,
+          session.discordUserId,
+          pendingCreates,
+          gone.signal,
+        );
+        res.off("close", onClose);
+        if (made.ok) {
+          createdChannels = made.channels;
+          for (const c of made.channels) {
+            coerced.push({ key: c.key, value: c.id });
+          }
+        } else {
+          for (const p of pendingCreates) {
+            rejected.push({ key: p.key, reason: made.error });
+          }
+        }
       }
 
       if (rejected.length > 0) {
@@ -725,6 +781,7 @@ export function createSettingsRouter(client: Client): Router {
         details: {
           applied,
           failed,
+          ...(createdChannels.length > 0 ? { channels: createdChannels } : {}),
           appliedCount: applied.length,
           failedCount: failed.length,
           outcome,
@@ -750,8 +807,11 @@ export function createSettingsRouter(client: Client): Router {
       // page itself renders nothing else from these values and keeps the
       // in-place flash, apart from the command-gating keys below. A key whose metadata sets `reloadOnSave` also
       // reloads: the rest of the page renders from its value (#1090).
+      // A created channel needs the page again: its Picker must list the new
+      // channel as an existing one, not the pending name (#1663).
       const reload =
-        redirectTo === "/admin/settings"
+        createdChannels.length > 0 ||
+        (redirectTo === "/admin/settings"
           ? // All settings keeps its in-place flash, except after a key that
             // gates a slash command: the status line beside Reload commands
             // (#1638) would still describe the old state, so the page reloads
@@ -769,8 +829,13 @@ export function createSettingsRouter(client: Client): Router {
                 unknownBefore.has(a.key) ||
                 settingsMetadata[a.key as keyof typeof settingsMetadata]
                   ?.reloadOnSave === true,
-            );
-      const rearmNote = rearmFailureNote(rearmFailed);
+            ));
+      const rearmNote =
+        createdNote(
+          createdChannels,
+          (k) =>
+            settingsMetadata[k as keyof typeof settingsMetadata]?.label ?? k,
+        ) + rearmFailureNote(rearmFailed);
       const label = category || "section";
       if (failed.length === 0) {
         respondSectionFlash(
