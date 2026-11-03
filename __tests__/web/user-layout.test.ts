@@ -491,7 +491,7 @@ describe("renderUserPage layout and shared rules on the design tokens (#1541)", 
   const sheet = (html: string): string =>
     /<style>([\s\S]*?)<\/style>/.exec(html)?.[1] ?? "";
   // Tab-only rules go with the tab that moves to the kb- components (#1508, #1543).
-  const TAB_ONLY = /\.page-nav|\.feature-list|\.prefs-table|\.form-actions/;
+  const TAB_ONLY = /\.page-nav|\.feature-list|\.form-actions/;
   const sharedRules = (css: string): string[] =>
     css
       .split("}")
@@ -534,11 +534,35 @@ describe("renderUserPage layout and shared rules on the design tokens (#1541)", 
     }
   });
 
-  it("takes the body font and the mono face from the tokens", () => {
+  it("carries no rule for the old classes no /me page emits any more (#1711)", () => {
     const css = sheet(render());
-    expect(css).toContain(
-      ".mono{font-family:var(--font-mono);font-size:var(--type-mono-size)}",
-    );
+    for (const old of [
+      ".card",
+      ".empty",
+      ".muted",
+      ".tag-info",
+      ".notice.info",
+      ".notice.ok",
+      ".prefs-table",
+      "form.stack",
+      "form.inline",
+    ]) {
+      expect(css).not.toContain(old);
+    }
+  });
+
+  it("keeps the rules a member page still emits: .notice warn and err, .tag, and the bare h2 (#1711)", () => {
+    const css = sheet(render());
+    expect(css).toContain(".notice{");
+    expect(css).toContain(".notice.warn{");
+    expect(css).toContain(".notice.err{");
+    expect(css).toContain(".tag{");
+    expect(css).toMatch(/(^|\})h2\{/);
+  });
+
+  it("takes the body font from the tokens and carries no old .mono rule (#1711)", () => {
+    const css = sheet(render());
+    expect(css).not.toMatch(/(^|[},])\.mono\b/);
     expect(css).not.toMatch(/body\{[^}]*font-family/);
   });
 });
@@ -547,15 +571,11 @@ describe("one primary button on the member pages (#1512)", () => {
   const sheet = (html: string): string =>
     /<style>([\s\S]*?)<\/style>/.exec(html)?.[1] ?? "";
 
-  it("makes .btn neutral and keeps the primary fill for .btn-primary", () => {
+  it("carries no old button rules; kb-btn comes from kb.css (#1711)", () => {
     const css = sheet(render());
-    expect(css).toContain(".btn{background:var(--fill);color:var(--text)}");
-    expect(css).toContain(
-      ".btn-primary{background:var(--primary);color:var(--on-primary)}",
-    );
-    expect(css).toContain(
-      "a.btn-primary,a.btn-primary:hover{color:var(--on-primary)}",
-    );
-    expect(css).not.toMatch(/(^|\})\.btn\{background:var\(--primary\)/);
+    expect(css).not.toMatch(/(^|[},])(a)?\.btn\b/);
+    expect(css).not.toContain(".btn-primary");
+    expect(css).not.toContain(".btn-danger");
+    expect(css).not.toContain(".btn-secondary");
   });
 });
