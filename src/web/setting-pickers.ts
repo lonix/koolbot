@@ -339,7 +339,7 @@ export function channelPickerScript(create: boolean): string {
         "function say(t){if(live){live.textContent='';live.textContent=t}}" +
         "function rowAt(k){return k===CR?crow:rows[k]}" +
         "function itm(k){if(items[k])return items[k];var o=sel.options[k];if(!o||!cfg)return null;" +
-        "return{value:o.value,kind:cfg.kind==='channel'?cfg.sub:cfg.kind,name:o.getAttribute('data-name')||o.textContent,cat:'',pending:true,text:o.textContent}}" +
+        "return{value:o.value,kind:cfg.kind==='channel'?cfg.sub:cfg.kind,name:o.getAttribute('data-name')||o.textContent,cat:'',pending:o.hasAttribute('data-create'),text:o.textContent}}" +
         "function pendOpts(){var o=[],k;for(k=items.length;k<sel.options.length;k++)if(sel.options[k].hasAttribute('data-create'))o.push(sel.options[k]);return o}" +
         "function pendName(o){return o.getAttribute('data-name')||''}" +
         "function undo(o){return'Removed: new '+cfg.kind+\" '\"+pendName(o)+\"'\"}" +

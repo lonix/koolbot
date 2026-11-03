@@ -192,7 +192,12 @@ describe("a pending creation saved from a section (#1663)", () => {
     expect(body.text).toBe(
       "Saved 1 setting in quotes. Created # quote-wall for Quote channel.",
     );
-    expect(body.reload).toContain("flash=ok");
+    // No reload: the page turns the pending option into the channel in place,
+    // so unsaved edits in other sections survive.
+    expect(body.reload).toBeUndefined();
+    expect(body.created).toEqual([
+      { key: QUOTES, id: "100000000000000100", name: "quote-wall" },
+    ]);
     expect(mockPost).toHaveBeenCalledTimes(1);
     const sent = mockPost.mock.calls[0][1].body;
     expect(sent).toEqual({ name: "quote-wall", type: 0 });

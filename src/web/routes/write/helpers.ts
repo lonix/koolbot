@@ -285,6 +285,10 @@ export function respondSectionFlash(
   // them, so the page can print each reason under its own row. The no-JS
   // redirect cannot: a query string is not signed, and only the flash text is.
   invalidReasons: Readonly<Record<string, string>> = {},
+  // Channels this save created for a setting (#1663): the page turns each
+  // setting's pending option into the new channel in place, so unsaved edits in
+  // the page's other sections are not thrown away by a reload.
+  created: ReadonlyArray<{ key: string; id: string; name: string }> = [],
 ): void {
   if (wantsJson(req)) {
     const shownKeys = invalidKeys.slice(0, INVALID_KEYS_MAX);
@@ -297,6 +301,7 @@ export function respondSectionFlash(
           .filter((k) => typeof invalidReasons[k] === "string")
           .map((k) => [k, invalidReasons[k].slice(0, INVALID_REASON_MAX)]),
       ),
+      ...(created.length > 0 ? { created } : {}),
       ...(reload
         ? {
             reload: `${redirectTo}?${flashRedirectQuery(flash, invalidKeys, openSettings)}`,

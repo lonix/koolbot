@@ -760,7 +760,7 @@ const FLASH_ICONS_JSON = JSON.stringify({
   err: toneIcon("err"),
 }).replace(/</g, "\\u003c");
 
-const SETTINGS_SAVE_SCRIPT =
+export const SETTINGS_SAVE_SCRIPT =
   "(function(){" +
   FOCUS_INVALID_FN +
   "var forms=document.querySelectorAll('form[action=\"/admin/settings/save-section\"]');" +
@@ -836,6 +836,21 @@ const SETTINGS_SAVE_SCRIPT =
   "el.setAttribute('aria-invalid','true');" +
   "if(!first)first=el}" +
   "focusInvalid(first)}" +
+  // A channel this save created for a setting (#1663): the setting's pending
+  // option (`create:<name>`) becomes that channel in place, at the same index,
+  // so the save bar's per-option state still lines up and nothing else on the
+  // page (other sections' unsaved edits) is touched. `change` repaints the
+  // picker; the caller then commits the saved values.
+  "function applyCreated(form,list){" +
+  "if(Object.prototype.toString.call(list)!=='[object Array]')return;" +
+  "for(var i=0;i<list.length;i++){var c=list[i];" +
+  "if(!c||typeof c.key!=='string'||typeof c.id!=='string'||typeof c.name!=='string')continue;" +
+  "var sel=form.elements.namedItem('value_'+c.key);" +
+  "if(!sel||sel.tagName!=='SELECT'||sel.multiple)continue;" +
+  "var o=sel.options[sel.selectedIndex];" +
+  "if(!o||!o.hasAttribute('data-create'))continue;" +
+  "o.value=c.id;o.removeAttribute('data-create');o.removeAttribute('data-name');o.textContent=c.name;" +
+  "try{sel.dispatchEvent(new Event('input',{bubbles:true}));sel.dispatchEvent(new Event('change',{bubbles:true}))}catch(e){}}}" +
   "function applyResult(form,data,msgId){clearInvalid(form);" +
   "var keys=data&&Object.prototype.toString.call(data.invalidKeys)==='[object Array]'" +
   "?data.invalidKeys:null;" +
@@ -891,7 +906,7 @@ const SETTINGS_SAVE_SCRIPT =
   "function done(){if(saved){try{form.dispatchEvent(new Event('kb-saved'))}catch(e){}}}" +
   "if(typeof jt==='string'&&jt){" +
   "var n=show(form,(r.json.type)||(okStatus?'ok':'err'),jt);" +
-  "applyResult(form,r.json,n?n.id:'');done();return}" +
+  "applyResult(form,r.json,n?n.id:'');applyCreated(form,r.json.created);done();return}" +
   "if(okStatus){show(form,'ok','Saved.');clearInvalid(form);done();return}" +
   // Non-2xx with no usable JSON: surface the status plus any readable text.
   "var detail=(r.text||'').replace(/<[^>]*>/g,' ').replace(/\\s+/g,' ').trim();" +

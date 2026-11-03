@@ -807,11 +807,11 @@ export function createSettingsRouter(client: Client): Router {
       // page itself renders nothing else from these values and keeps the
       // in-place flash, apart from the command-gating keys below. A key whose metadata sets `reloadOnSave` also
       // reloads: the rest of the page renders from its value (#1090).
-      // A created channel needs the page again: its Picker must list the new
-      // channel as an existing one, not the pending name (#1663).
+      // A created channel is not a reason to reload: the response carries it
+      // and the page updates that Picker in place (#1663), so unsaved edits in
+      // the page's other sections survive.
       const reload =
-        createdChannels.length > 0 ||
-        (redirectTo === "/admin/settings"
+        redirectTo === "/admin/settings"
           ? // All settings keeps its in-place flash, except after a key that
             // gates a slash command: the status line beside Reload commands
             // (#1638) would still describe the old state, so the page reloads
@@ -829,7 +829,12 @@ export function createSettingsRouter(client: Client): Router {
                 unknownBefore.has(a.key) ||
                 settingsMetadata[a.key as keyof typeof settingsMetadata]
                   ?.reloadOnSave === true,
-            ));
+            );
+      const createdForPage = createdChannels.map((c) => ({
+        key: c.key,
+        id: c.id,
+        name: c.name,
+      }));
       const rearmNote =
         createdNote(
           createdChannels,
@@ -849,6 +854,8 @@ export function createSettingsRouter(client: Client): Router {
           [],
           reload,
           reopen,
+          {},
+          createdForPage,
         );
         return;
       }
@@ -865,6 +872,7 @@ export function createSettingsRouter(client: Client): Router {
         reload,
         reopen,
         Object.fromEntries(failed.map((f) => [f.key, f.reason])),
+        createdForPage,
       );
     }),
   );

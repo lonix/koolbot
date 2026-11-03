@@ -1517,7 +1517,9 @@ it would be readable by everyone who can see the server, and the log channels ca
 Choosing the row only marks the name in the Picker ("Name (will be created)"); nothing is created until you save the section. Saving reads each
 flagged setting's value with `parsePickerCreateValue` before anything else, checks the permission again, and when nothing else in the section was
 refused creates every pending channel in one go through the shared helper (`channel-create.ts`: a plan from a fresh read, then an apply inside the
-per-server lock). The new ids are stored with the rest of the section, the page reloads so the Picker lists the channel as an existing one, and one
+per-server lock). The new ids are stored with the rest of the section, and the response names each created channel. The page turns that setting's
+pending option into the channel in place, with no reload, so unsaved edits in the page's other sections stay (the new channel is listed in the Picker after
+the next page load; a page that reloads after saving that setting anyway, such as the Quotes page, still does). One
 flash says what happened, for example "Saved 2 settings in quotes. Created # quote-wall for Quote channel." A name that already exists as a text
 channel anywhere on the server (any case, spaces as hyphens) is selected instead, with its own category, and two such channels refuse the
 save: the flash says "Used the existing # name for ...". If the name appears on the server between the plan and the
