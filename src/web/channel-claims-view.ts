@@ -269,19 +269,12 @@ ${voiceBind}
 }
 
 /**
- * A table inside its Panel: it scrolls there, never the page. `scroll: false`
- * leaves the scroll container out: the pairing table holds the emoji picker,
- * whose popup is absolutely positioned inside the table and would be clipped
- * (scrolled inside a box the height of the table) by an overflow container.
+ * A table inside its Panel: it scrolls there, never the page. Nothing inside
+ * may be absolutely positioned and escape the box: a `kb-visually-hidden` span
+ * would sit outside it and widen the page, so hidden text goes in `aria-label`.
  */
-function flushTable(
-  caption: string,
-  head: string[],
-  rows: string,
-  scroll = true,
-): string {
-  const table = `<table class="kb-table"><caption class="kb-visually-hidden">${caption}</caption><thead><tr>${head.map((h) => `<th scope="col">${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>`;
-  return scroll ? `<div class="kb-panel__body--flush">${table}</div>` : table;
+function flushTable(caption: string, head: string[], rows: string): string {
+  return `<div class="kb-panel__body--flush"><table class="kb-table"><caption class="kb-visually-hidden">${caption}</caption><thead><tr>${head.map((h) => `<th scope="col">${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function renderSuggestions(
@@ -298,7 +291,7 @@ function renderSuggestions(
       const claim = claimOf.get(p.categoryId);
       const action =
         p.state === "proposed"
-          ? `<div class="kb-row">${check(`<input type="checkbox" name="pair_${cid}" value="1"${checked(claim?.registerPairing)}>`, `Register <span class="kb-visually-hidden">${escapeHtml(p.roleName)} for ${escapeHtml(p.categoryName)}</span>`)} <span class="kb-muted">Emoji <span class="kb-visually-hidden">for ${escapeHtml(p.categoryName)}</span></span> ${renderEmojiField(`pairemoji_${p.categoryId}`, claim?.pairEmoji ?? DEFAULT_PAIR_EMOJI, { label: p.categoryName, inputLabel: `Emoji for ${p.categoryName}`, maxLength: 64 })}</div>`
+          ? `<div class="kb-row">${check(`<input type="checkbox" name="pair_${cid}" value="1"${checked(claim?.registerPairing)} aria-label="Register ${escapeHtml(p.roleName)} for ${escapeHtml(p.categoryName)}">`, "Register")} <span class="kb-muted" aria-hidden="true">Emoji</span> ${renderEmojiField(`pairemoji_${p.categoryId}`, claim?.pairEmoji ?? DEFAULT_PAIR_EMOJI, { label: p.categoryName, inputLabel: `Emoji for ${p.categoryName}`, maxLength: 64 })}</div>`
           : `<span class="kb-badge ${p.state === "refused" ? "kb-badge--off" : "kb-badge--on"}">${p.state === "refused" ? "refused" : "already a reaction role"}</span> ${escapeHtml(p.reason ?? "")}`;
       return `<tr><th scope="row">${channelMention({ name: p.categoryName, type: ChannelType.GuildCategory })}</th><td>${roleMention(p.roleName)}</td><td>${action}</td></tr>`;
     })
@@ -307,7 +300,7 @@ function renderSuggestions(
     ? `<div class="kb-stack">
 <h3 class="kb-overline">Game-role categories</h3>
 <p class="kb-help">These categories are hidden from @everyone and visible to exactly one role. Registering one makes that role pickable through a new KoolBot picker and keeps the category gated: the role and the category are reused as they are and nothing new is created. A role with powerful permissions (Administrator, Manage Roles and similar) is refused.</p>
-${flushTable("Detected game-role categories", ["Category", "Role", "Register"], pairRows, false)}
+${flushTable("Detected game-role categories", ["Category", "Role", "Register"], pairRows)}
 ${proposed.length ? `<div class="kb-row">${check(`<input type="checkbox" name="pairs_all" value="1">`, `Register all ${proposed.length} detected pair${proposed.length === 1 ? "" : "s"} when previewing`)} <span class="kb-muted">Refused pairs are skipped; each one keeps the emoji shown above.</span></div>` : ""}
 </div>`
     : "";

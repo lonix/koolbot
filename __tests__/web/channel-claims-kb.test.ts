@@ -312,24 +312,36 @@ describe("Channel claims markup (#1730)", () => {
       }
       for (const t of doc.querySelectorAll("table")) {
         expect(t.classList.contains("kb-table")).toBe(true);
-        // The pairing table holds the emoji picker, whose popup is absolutely
-        // positioned inside it: a scroll container would clip it.
-        const pairing =
-          t.querySelector("caption")?.textContent ===
-          "Detected game-role categories";
-        expect(t.closest(".kb-panel__body--flush") === null).toBe(pairing);
+        expect(t.closest(".kb-panel__body--flush")).not.toBeNull();
       }
     },
   );
 
-  it("keeps the emoji picker's popup out of any scroll container", () => {
+  it("puts no visually hidden element inside the pairing table's scroll container", () => {
+    // An absolutely positioned hidden span escapes a scroll box that is not
+    // positioned and widens the page (long category and role names), so the
+    // text lives in aria-label.
     const doc = docOf(STATES[0]);
-    const field = doc.querySelector("[data-emoji-field]") as Element;
-    expect(field).not.toBeNull();
-    // `groupRowsScript` appends the popup to the field's `.kb-emoji-wrap`.
-    expect(field.querySelector(".kb-emoji-wrap")).not.toBeNull();
-    expect(field.closest(".kb-panel__body--flush")).toBeNull();
-    expect(field.closest("table.kb-table")).not.toBeNull();
+    const box = doc
+      .querySelector('table [name="pair_10"]')
+      ?.closest(".kb-panel__body--flush") as Element;
+    expect(box).not.toBeNull();
+    const hidden = [...box.querySelectorAll(".kb-visually-hidden")].filter(
+      (e) => e.tagName !== "CAPTION",
+    );
+    expect(hidden).toEqual([]);
+  });
+
+  it("names the pairing checkbox by its visible word first (label in name)", () => {
+    const doc = docOf(STATES[0]);
+    const box = doc.querySelector('[name="pair_10"]') as Element;
+    expect(box.getAttribute("aria-label")).toBe("Register Mod for Games");
+    expect(box.closest("label")?.textContent?.trim()).toBe("Register");
+    expect(
+      (box.getAttribute("aria-label") as string).startsWith("Register"),
+    ).toBe(true);
+    const emoji = doc.querySelector('[name="pairemoji_10"]') as Element;
+    expect(emoji.getAttribute("aria-label")).toBe("Emoji for Games");
   });
 
   it("wraps the held plan diff in a scroll container inside its panel", () => {
