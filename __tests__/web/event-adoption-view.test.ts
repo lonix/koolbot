@@ -1,6 +1,6 @@
 import { describe, it, expect } from "@jest/globals";
 import { renderEventAdoptionPage } from "../../src/web/event-adoption-view.js";
-import { planned } from "./event-adoption-fixtures.js";
+import { info, planned } from "./event-adoption-fixtures.js";
 
 const common = { csrfToken: "tok", remainingMs: 1000, navFeatureStatus: {} };
 
@@ -300,5 +300,26 @@ describe("event adoption on the kb- components (#1732)", () => {
   it("escapes names and the failure message", () => {
     expect(states.list).toContain("Made by &lt;b&gt;KoolBot&lt;/b&gt;");
     expect(states.unreadable).toContain("boom &lt;x&gt;");
+  });
+
+  it("announces each event's own start time, even when name and notes match", () => {
+    const a = info({ id: "100", startsAt: "2026-10-20T19:00:00.000Z" });
+    const b = info({ id: "101", startsAt: "2026-10-27T19:00:00.000Z" });
+    const html = mainOf(render(planned({}, [a, b], [])));
+    const ids = [...html.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+    expect(new Set(ids).size).toBe(ids.length);
+    const text = (id: string): string =>
+      html.match(new RegExp(`id="${id}"[^>]*>([^<]*)<`))?.[1] ?? "";
+    for (const [value, date] of [
+      ["100", a.startsAt],
+      ["101", b.startsAt],
+    ]) {
+      const described = html.match(
+        new RegExp(`aria-describedby="([^"]+)" name="ev" value="${value}"`),
+      )?.[1];
+      expect(described).toBeDefined();
+      const spoken = (described as string).split(" ").map(text).join(" ");
+      expect(spoken).toContain(date as string);
+    }
   });
 });

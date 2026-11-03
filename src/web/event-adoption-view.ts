@@ -138,12 +138,15 @@ function renderRow(
     ? c.notes
     : [`Can't be adopted: ${c.reason ?? ""}`];
   const descId = `${id}-detail`;
-  const described = detail.length > 0 ? ` aria-describedby="${descId}"` : "";
+  const startId = `${id}-start`;
+  // The date is part of what a screen reader announces: two events can share a
+  // name and notes. It was inside the label before the migration.
+  const described = ` aria-describedby="${startId}${detail.length > 0 ? ` ${descId}` : ""}"`;
   const detailHtml =
     detail.length > 0
       ? `<span class="kb-list__desc" id="${descId}">${detail.map(escapeHtml).join(" ")}</span>`
       : "";
-  return `<li><input type="checkbox" id="${id}"${described} name="ev" value="${escapeHtml(c.info.id)}"${chosen.has(c.info.id) ? " checked" : ""}${c.adoptable ? "" : " disabled"}><span class="kb-list__main"><label for="${id}"><strong>${escapeHtml(c.info.name)}</strong></label><span class="kb-list__desc">${escapeHtml(c.info.startsAt ?? "no start time")}</span>${detailHtml}</span></li>`;
+  return `<li><input type="checkbox" id="${id}"${described} name="ev" value="${escapeHtml(c.info.id)}"${chosen.has(c.info.id) ? " checked" : ""}${c.adoptable ? "" : " disabled"}><span class="kb-list__main"><label for="${id}"><strong>${escapeHtml(c.info.name)}</strong></label><span class="kb-list__desc" id="${startId}">${escapeHtml(c.info.startsAt ?? "no start time")}</span>${detailHtml}</span></li>`;
 }
 
 function renderList(p: EventAdoptionPlan, applicable: boolean): string {
