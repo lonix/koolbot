@@ -196,6 +196,32 @@ describe("the create row is offered only when creation can work (#1665)", () => 
     }
   });
 
+  it("a refused form with a pending name and an unreadable permission still shows it as pending, with no row or help line", () => {
+    const html = announcements({
+      refusedForm: {
+        formId: "announcement-create",
+        errors: { channelId: "Try again." },
+        values: {
+          channelId: "create:Daily News",
+          cron: "0 9 * * *",
+          message: "Hi",
+        },
+      },
+    });
+    const create = channelPickers(html)[0];
+    const pending = Array.from(create.select.options).filter((o) => o.selected);
+    expect(pending.map((o) => o.value)).toEqual(["create:Daily News"]);
+    expect(pending[0].textContent).toBe("Daily News (will be created)");
+    expect(create.meta.create).toEqual({
+      kind: "channel",
+      channelKind: "text",
+      ok: false,
+    });
+    expect(create.meta.create.reason).toBeUndefined();
+    // The other form, with no pending name, stays the plain array.
+    expect(Array.isArray(channelPickers(html)[1].meta)).toBe(true);
+  });
+
   it("the page sends the picker script that knows the create row only when a row asks for it", () => {
     expect(announcements({ createChannel: OK })).toContain("CR=1e6");
     expect(announcements()).not.toContain("CR=1e6");

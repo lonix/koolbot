@@ -513,6 +513,32 @@ describe("Polls: a pending creation is created, then the schedule is stored (#16
     expect(mockUpdateSchedule).not.toHaveBeenCalled();
   });
 
+  it("a failed schedule lookup creates no channel and asks to try again, keeping the form", async () => {
+    mockGetSchedule.mockRejectedValue(new Error("db down"));
+    const res = await harness.post("/polls/schedules/s1/edit", {
+      ...SCHEDULE,
+      channelId: "create:Weekly Poll",
+    });
+    const html = await refused(res, "poll-schedule-edit-s1");
+    expect(html).toContain("Try again.");
+    expect(html).toContain('value="create:Weekly Poll" data-create');
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockUpdateSchedule).not.toHaveBeenCalled();
+  });
+
+  it("a schedule deleted while the channel is created: the flash and audit still name the channel", async () => {
+    mockUpdateSchedule.mockResolvedValue(null);
+    const res = await harness.post("/polls/schedules/s1/edit", {
+      ...SCHEDULE,
+      channelId: "create:Weekly Poll",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.msg).toBe(
+      "Schedule s1 not found. Created # weekly-poll for Channel.",
+    );
+    expect(lastAudit().details.channel.name).toBe("weekly-poll");
+  });
+
   it("an existing name is refused when a writer created it after the first read", async () => {
     let reads = 0;
     mockFetchViews.mockImplementation(async () => {

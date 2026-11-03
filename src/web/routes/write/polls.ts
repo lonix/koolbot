@@ -327,20 +327,37 @@ export function createPollsRouter(client: Client): Router {
         return;
       }
       const { cron, duration, pingRoleId } = form;
-      // A channel is created only for a schedule that exists, so a row deleted
-      // in another tab leaves no channel behind (#1665).
-      if (
-        form.pendingChannel !== null &&
-        (await isGone(async () => {
+      // A channel is created only for a schedule that is confirmed to exist in
+      // this guild: a row deleted in another tab leaves no channel behind, and
+      // a failed lookup is a retryable refusal, not a reason to create (#1665).
+      if (form.pendingChannel !== null) {
+        let exists: boolean;
+        try {
           const current = await PollService.getInstance(client).getSchedule(id);
-          return !!current && current.guildId === session.guildId;
-        }))
-      ) {
-        flashRedirect(res, PAGE, {
-          type: "err",
-          text: `Schedule ${id} not found.`,
-        });
-        return;
+          exists = !!current && current.guildId === session.guildId;
+        } catch (err) {
+          logger.warn(
+            "Poll schedule lookup before a channel create failed",
+            err,
+          );
+          await refuseForm(req, res, {
+            page: PAGE,
+            formId: pollScheduleEditForm(id),
+            errors: {
+              channelId:
+                "KoolBot couldn't check the schedule, so no channel was created. Try again.",
+            },
+            values: form.values,
+          });
+          return;
+        }
+        if (!exists) {
+          flashRedirect(res, PAGE, {
+            type: "err",
+            text: `Schedule ${id} not found.`,
+          });
+          return;
+        }
       }
       const made = await createPendingChannel(
         client,
@@ -373,12 +390,13 @@ export function createPollsRouter(client: Client): Router {
           await recordAudit(session, {
             action: "poll-schedule.edit",
             targetId: id,
+            details: { channelId, ...channelAudit },
             result: "failure",
             errorMessage: "not found or wrong guild",
           });
           flashRedirect(res, "/admin/polls", {
             type: "err",
-            text: `Schedule ${id} not found.`,
+            text: `Schedule ${id} not found.${note}`,
           });
           return;
         }

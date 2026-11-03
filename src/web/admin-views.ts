@@ -4328,6 +4328,12 @@ function pollChannelPicker(
   create?: PickerCreate,
 ): string {
   const meta: PickerMeta[] = [];
+  // A refused form with a pending name, drawn when the permission could not be
+  // read: keep it a pending creation ("will be created"), with neither a create
+  // row nor a help line (ok false and no reason).
+  if (!create && selectedId && parsePickerCreateValue(selectedId)) {
+    create = { kind: "channel", channelKind: "text", ok: false };
+  }
   // With no text channel and nothing stored, the empty row says so and keeps
   // `meta` in step with the options.
   const empty = options.length === 0 && !selectedId;
