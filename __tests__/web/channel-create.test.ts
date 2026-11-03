@@ -234,28 +234,18 @@ describe("applyChannelPlan", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it("selects a name another writer created since Review instead of creating it again", async () => {
+  it("writes nothing when the live server no longer matches what Review showed", async () => {
     const reviewed = planChannels(entries, live);
     if (!reviewed.ok) throw new Error("plan");
-    // Someone created "raid-alerts" between Review and Apply: it was a create
-    // at Review and now exists, so it is selected, and only "Logs" is created.
+    // Someone created "raid-alerts" between Review and Apply.
     const changed = [
       ...live,
       view("444444444444444444", "raid-alerts", "text"),
     ];
     const { deps, post } = setup(changed);
     const result = await applyChannelPlan(deps, entries, reviewed.planId);
-    expect(result).toMatchObject({ ok: true });
-    if (!result.ok) throw new Error("expected success");
-    expect(result.channels).toEqual([
-      expect.objectContaining({ name: "Logs", created: true }),
-      {
-        id: "444444444444444444",
-        name: "raid-alerts",
-        created: false,
-      },
-    ]);
-    expect(post).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: false, removed: [], stuck: [] });
+    expect(post).not.toHaveBeenCalled();
   });
 
   it("still writes nothing when a name that Review showed as existing is gone", async () => {
@@ -267,9 +257,7 @@ describe("applyChannelPlan", () => {
     const result = await applyChannelPlan(deps, one, reviewed.planId);
     expect(result).toMatchObject({ ok: false, removed: [], stuck: [] });
     if (result.ok) throw new Error("expected failure");
-    expect(result.error).toBe(
-      "The channels on the server changed since Review, so nothing was created. Review the changes again.",
-    );
+    expect(result.error).toBe(CHANGED_SINCE_REVIEW);
     expect(post).not.toHaveBeenCalled();
   });
 
@@ -671,6 +659,9 @@ describe("errors wrapped by makeDiscordApiCall (the cause chain)", () => {
   });
 });
 
+const CHANGED_SINCE_REVIEW =
+  "The channels on the server changed since Review, so nothing was created. Review the changes again.";
+
 describe("applyChannelPlan serialises per server (#1714)", () => {
   const entry = { kind: "text" as const, name: "bot-log" };
   const flush = async (): Promise<void> => {
@@ -746,13 +737,14 @@ describe("applyChannelPlan serialises per server (#1714)", () => {
     server.releaseCreates();
     const results = await Promise.all([first, second]);
     expect(server.post).toHaveBeenCalledTimes(1);
-    // The second one re-planned inside the lock, saw the name, and selected it.
-    expect(results[0].ok && results[1].ok).toBe(true);
-    if (!results[0].ok || !results[1].ok) throw new Error("expected success");
-    expect(results[0].channels[0]).toMatchObject({ created: true });
-    expect(results[1].channels).toEqual([
-      { id: results[0].channels[0].id, name: "bot-log", created: false },
-    ]);
+    expect(results[0].ok).toBe(true);
+    // The second one re-planned inside the lock, saw the name, and refused.
+    expect(results[1]).toEqual({
+      ok: false,
+      error: CHANGED_SINCE_REVIEW,
+      removed: [],
+      stuck: [],
+    });
     expect(server.channels.filter((c) => c.name === "bot-log")).toHaveLength(1);
   });
 
@@ -776,8 +768,10 @@ describe("applyChannelPlan serialises per server (#1714)", () => {
     const result = await apply;
     expect(server.post).not.toHaveBeenCalled();
     expect(result).toEqual({
-      ok: true,
-      channels: [{ id: "777777777777777777", name: "bot-log", created: false }],
+      ok: false,
+      error: CHANGED_SINCE_REVIEW,
+      removed: [],
+      stuck: [],
     });
     expect(server.channels.filter((c) => c.name === "bot-log")).toHaveLength(1);
   });

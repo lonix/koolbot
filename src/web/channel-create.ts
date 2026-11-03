@@ -34,8 +34,8 @@
  * An apply runs inside the shared per-server lock (`channel-write-lock.ts`, #1714),
  * which the Channel Manager's writes take too, so two applies, or an apply and a
  * Channel Manager write, cannot both pass the re-check and both create the same
- * name. Do not call it from inside work that holds that lock. The bot-permission check is the caller's;
- * a refusal from Discord (missing permission, rate limit) is reported here.
+ * name. Do not call it from inside work that holds that lock.
+ * The bot-permission check is the caller's; a refusal from Discord (missing permission, rate limit) is reported here.
  * A create that timed out is in neither `removed` nor `stuck`: whether it exists
  * is unknown, and the error tells the admin to check Discord.
  * A failure `makeDiscordApiCall` wrapped (`Error(..., { cause })`) is classified by
@@ -220,49 +220,11 @@ export function planChannels(
     }
   }
   if (errors.length > 0) return { ok: false, errors };
-  return { ok: true, entries: planned, planId: planIdOf(planned) };
-}
-
-const planIdOf = (planned: readonly PlannedChannel[]): string =>
-  createHash("sha256")
+  const planId = createHash("sha256")
     .update(JSON.stringify(planned))
     .digest("hex")
     .slice(0, 16);
-
-/** The most `existing` entries that are tried as "was a create at Review". */
-const MAX_SELECTED_SINCE_REVIEW = 10;
-
-/**
- * Whether the live plan differs from the reviewed one only by names that were
- * a create at Review and now exist (another writer made them a moment
- * earlier): those are selected, not created again. Any other difference (an
- * entry that was `existing` is gone or changed, a new name, a different
- * parent) does not match and the apply refuses. Review showed only a hash, so
- * each subset of the live `existing` entries is tried as "was a create".
- */
-function selectsSinceReview(
-  plan: readonly PlannedChannel[],
-  entries: readonly ChannelPlanEntry[],
-  reviewedPlanId: string,
-): boolean {
-  const existing = plan.flatMap((p, i) => (p.action === "existing" ? [i] : []));
-  if (existing.length === 0 || existing.length > MAX_SELECTED_SINCE_REVIEW) {
-    return false;
-  }
-  for (let mask = 1; mask < 1 << existing.length; mask += 1) {
-    const reverted = plan.map((p, i): PlannedChannel => {
-      const bit = existing.indexOf(i);
-      if (bit < 0 || !(mask & (1 << bit))) return p;
-      return {
-        kind: p.kind,
-        name: normaliseChannelName(p.kind, entries[i].name),
-        parentId: p.parentId,
-        action: "create",
-      };
-    });
-    if (planIdOf(reverted) === reviewedPlanId) return true;
-  }
-  return false;
+  return { ok: true, entries: planned, planId };
 }
 
 /**
@@ -318,10 +280,9 @@ export type ChannelApplyResult =
  * showed. On a failure, what this call created is deleted again. The whole
  * apply, the re-read included, runs inside the shared per-server lock
  * (`channel-write-lock.ts`); a caller that waits too long for it gets
- * `CHANNEL_LOCK_BUSY_MESSAGE` and nothing is written. A name that was a create
- * at Review and was made by another writer meanwhile is selected (it comes back
- * with `created: false`), not created again; every other change since Review
- * still refuses.
+ * `CHANNEL_LOCK_BUSY_MESSAGE` and nothing is written. A name another
+ * writer created since Review changes the re-plan, so the apply refuses
+ * ("changed since Review") and creates nothing.
  */
 export async function applyChannelPlan(
   deps: ChannelCreateDeps,
@@ -364,10 +325,7 @@ async function applyLocked(
   }
   const plan = planChannels(entries, live);
   if (!plan.ok) return nothing(plan.errors.join(" "));
-  if (
-    plan.planId !== reviewedPlanId &&
-    !selectsSinceReview(plan.entries, entries, reviewedPlanId)
-  ) {
+  if (plan.planId !== reviewedPlanId) {
     return nothing(
       "The channels on the server changed since Review, so nothing was created. Review the changes again.",
     );

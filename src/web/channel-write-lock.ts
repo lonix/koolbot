@@ -15,7 +15,11 @@
  *    `applyChannelPlan`) from inside work that already holds it for the same
  *    server: it would wait for itself until the bounded wait ran out.
  *  - Only the wait is bounded (`CHANNEL_LOCK_WAIT_MS`). A holder is bounded by
- *    its own Discord calls, which have a timeout (`WRITE_TIMEOUT_MS`).
+ *    its own Discord calls, which have a timeout (`WRITE_TIMEOUT_MS`), and every
+ *    read it makes before its first write goes through `readWithin`
+ *    (`CHANNEL_READ_TIMEOUT_MS`): the guild fetch, the Manage Channels check, the
+ *    channel list, the target channel fetch and the protection lookup. A
+ *    stalled read refuses before anything is changed.
  *  - A caller that gives up waiting, or is cancelled while waiting (`signal`,
  *    for example a closed request), never runs its work afterwards: when its
  *    turn comes the slot is passed on at once. Work that has started is never
@@ -23,6 +27,12 @@
  *    does, has finished.
  *  - It is released when the work returns or throws, and the keyed lock drops
  *    an idle key, so nothing is left behind after a failure.
+ *
+ * Known limit (owner decision, #1714): a create that times out, or whose
+ * connection is lost, after Discord accepted it can still complete after the
+ * lock is released. Its caller is told the outcome is unknown and to check
+ * Discord (`describeWriteFailure`); a writer queued behind it reads fresh, but
+ * the channel may not be visible yet.
  */
 
 import { createKeyedLock } from "../utils/keyed-lock.js";
@@ -33,12 +43,16 @@ import { createKeyedLock } from "../utils/keyed-lock.js";
  *
  * Budget of one Channel Manager request, worst case: this wait (25 s) + up to
  * five reads inside the lock (`CHANNEL_READ_TIMEOUT_MS`, 20 s each: guild,
- * permission, channels, the target channel and the protection lookup) + one Discord
- * write (30 s, `WRITE_TIMEOUT_MS`), about 155 s, though a normal request takes
- * well under a second. A proxy that cuts a request after 60 s (nginx's default
- * `proxy_read_timeout`) could answer 504 while the write still completes, so
- * WEBUI.md asks for `proxy_read_timeout 180s` on the nginx setup. If you change
- * one of these numbers, change that line and this sum too.
+ * permission, channels, the target channel and the protection lookup: 100 s)
+ * + the Discord write. A delete is retried after a timeout
+ * (`makeDiscordApiCall`: three attempts of `WRITE_TIMEOUT_MS` = 30 s, with 2 s
+ * and 4 s of backoff: 96 s); a create is not retried (30 s). That is about
+ * 221 s for a delete, before the audit write, which is a database write
+ * with no timeout of its own. A normal request takes well under a second. A
+ * proxy that cuts a request after 60 s (nginx's default `proxy_read_timeout`)
+ * could answer 504 while the write still completes, so WEBUI.md asks for
+ * `proxy_read_timeout 300s` on the nginx setup. If you change one of these
+ * numbers, change that line and this sum too.
  */
 export const CHANNEL_LOCK_WAIT_MS = 25_000;
 

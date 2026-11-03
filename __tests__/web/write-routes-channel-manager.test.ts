@@ -1915,11 +1915,13 @@ describe("the shared per-server channel lock (#1714)", () => {
     hold.open();
     const res = await manager;
     expect(flashOf(res)).toMatchObject({ type: "ok" });
-    // The apply selects the channel the manager created; nothing is created twice.
-    expect(await apply).toEqual({
-      ok: true,
-      channels: [{ id: "100000000000000077", name: "bot-log", created: false }],
-    });
+    // The apply re-planned after the manager's create and refuses.
+    const refused = await apply;
+    expect(refused).toMatchObject({ ok: false, removed: [], stuck: [] });
+    if (refused.ok) throw new Error("expected refusal");
+    expect(refused.error).toMatch(
+      /changed since Review, so nothing was created/,
+    );
     expect(mockCreate).toHaveBeenCalledTimes(1);
     expect(channels.filter((c) => c.name === "bot-log")).toHaveLength(1);
   });
