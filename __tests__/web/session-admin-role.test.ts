@@ -80,7 +80,9 @@ describe("requireAdminRoleMiddleware", () => {
     // light-on-white body.
     expect(res.body).toContain('<html lang="en">');
     expect(res.body).toContain('<meta name="viewport"');
-    expect(res.body).toContain("<main><h1>Forbidden</h1>");
+    expect(res.body).toContain(
+      '<main class="kb-member"><header class="kb-pagehead"><div class="kb-pagehead__text"><h1 class="kb-pagehead__title">Forbidden</h1></div></header>',
+    );
   });
 
   it("returns 401 (not 403) when no webSession is attached", () => {
