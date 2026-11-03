@@ -171,4 +171,73 @@ describe("a saved creation, in place", () => {
     expect(select.value).toBe("create:Quote Wall");
     expect(select.querySelectorAll("[data-create]")).toHaveLength(1);
   });
+
+  it("resolves the submitted option, not the one chosen while the request was in flight", async () => {
+    const { dom, fetchMock } = build();
+    const doc = dom.window.document;
+    const select = doc.querySelector(
+      'select[name="value_quotes.channel_id"]',
+    ) as HTMLSelectElement;
+    const first = select.options[select.selectedIndex];
+    expect(first.value).toBe("create:Quote Wall");
+    let deliver: (v: unknown) => void = () => undefined;
+    fetchMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          deliver = resolve;
+        }),
+    );
+    const form = doc.querySelector(
+      'form[action="/admin/settings/save-section"]',
+    ) as HTMLFormElement;
+    form.dispatchEvent(
+      new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+    );
+    // While the request is in flight the admin chooses another pending name,
+    // as the create row does: a new pending option, selected.
+    const second = doc.createElement("option");
+    second.value = "create:Second";
+    second.setAttribute("data-create", "");
+    second.setAttribute("data-name", "Second");
+    second.textContent = "Second (will be created)";
+    select.appendChild(second);
+    second.selected = true;
+    select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    expect(select.value).toBe("create:Second");
+
+    deliver({
+      status: 200,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            type: "ok",
+            text: "Saved 1 setting in quotes.",
+            invalidKeys: [],
+            created: [
+              {
+                key: "quotes.channel_id",
+                id: "100000000000000100",
+                name: "quote-wall",
+              },
+            ],
+          }),
+        ),
+    });
+    await flush();
+
+    // The submitted option is now the channel...
+    expect(first.value).toBe("100000000000000100");
+    expect(first.hasAttribute("data-create")).toBe(false);
+    expect(first.textContent).toBe("quote-wall");
+    // ...and the newer choice is untouched: still selected, still pending.
+    expect(select.value).toBe("create:Second");
+    expect(second.hasAttribute("data-create")).toBe(true);
+    // The form is dirty (Second is an unsaved edit) and Discard returns to the
+    // saved channel, never to an unresolved creation.
+    const text = form.querySelector("[data-savebar-text]") as HTMLElement;
+    const bar = text.closest("[data-savebar]") as HTMLElement;
+    expect(bar.hidden).toBe(false);
+    (form.querySelector("[data-savebar-discard]") as HTMLElement).click();
+    expect(select.value).toBe("100000000000000100");
+  });
 });

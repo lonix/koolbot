@@ -836,21 +836,28 @@ export const SETTINGS_SAVE_SCRIPT =
   "el.setAttribute('aria-invalid','true');" +
   "if(!first)first=el}" +
   "focusInvalid(first)}" +
-  // A channel this save created for a setting (#1663): the setting's pending
-  // option (`create:<name>`) becomes that channel in place, at the same index,
-  // so the save bar's per-option state still lines up and nothing else on the
-  // page (other sections' unsaved edits) is touched. `change` repaints the
-  // picker; the caller then commits the saved values.
-  "function applyCreated(form,list){" +
+  // A channel this save created for a setting (#1663). `held(form)` records, at
+  // submit time, each single select whose chosen option is a pending one
+  // (`create:<name>`); the response resolves THAT option (not whatever is
+  // chosen when it arrives), in place and at the same index so the save bar's
+  // per-option state lines up. What the admin chose meanwhile is left alone:
+  // a newer pending choice stays pending and the form stays dirty. `change`
+  // repaints the picker; the caller then commits the values as submitted.
+  "function held(form){var out=[];" +
+  "for(var i=0;i<form.elements.length;i++){var s=form.elements[i];" +
+  "if(!s||s.tagName!=='SELECT'||s.multiple||!s.name||s.name.indexOf('value_')!==0)continue;" +
+  "var o=s.options[s.selectedIndex];" +
+  "if(o&&o.hasAttribute('data-create'))out.push({name:s.name,sel:s,opt:o})}" +
+  "return out}" +
+  "function applyCreated(list,sent){" +
   "if(Object.prototype.toString.call(list)!=='[object Array]')return;" +
   "for(var i=0;i<list.length;i++){var c=list[i];" +
   "if(!c||typeof c.key!=='string'||typeof c.id!=='string'||typeof c.name!=='string')continue;" +
-  "var sel=form.elements.namedItem('value_'+c.key);" +
-  "if(!sel||sel.tagName!=='SELECT'||sel.multiple)continue;" +
-  "var o=sel.options[sel.selectedIndex];" +
-  "if(!o||!o.hasAttribute('data-create'))continue;" +
-  "o.value=c.id;o.removeAttribute('data-create');o.removeAttribute('data-name');o.textContent=c.name;" +
-  "try{sel.dispatchEvent(new Event('input',{bubbles:true}));sel.dispatchEvent(new Event('change',{bubbles:true}))}catch(e){}}}" +
+  "for(var k=0;k<sent.length;k++){var h=sent[k];" +
+  "if(h.name!=='value_'+c.key||h.opt.parentNode!==h.sel||!h.opt.hasAttribute('data-create'))continue;" +
+  "h.opt.value=c.id;h.opt.removeAttribute('data-create');h.opt.removeAttribute('data-name');h.opt.textContent=c.name;" +
+  "try{h.sel.dispatchEvent(new Event('input',{bubbles:true}));h.sel.dispatchEvent(new Event('change',{bubbles:true}))}catch(e){}" +
+  "break}}}" +
   "function applyResult(form,data,msgId){clearInvalid(form);" +
   "var keys=data&&Object.prototype.toString.call(data.invalidKeys)==='[object Array]'" +
   "?data.invalidKeys:null;" +
@@ -870,7 +877,7 @@ export const SETTINGS_SAVE_SCRIPT =
   // the FormData in URLSearchParams makes fetch send urlencoded, so the
   // CSRF token and every value_*/keys field round-trip through the parser.
   "var body;try{body=new URLSearchParams(new FormData(form))}catch(err){return}" +
-  "e.preventDefault();" +
+  "e.preventDefault();var sent=held(form);" +
   "var save=form.querySelector('button[type=submit]:not([formaction]):not([form])');" +
   "if(save)save.disabled=true;" +
   "fetch(form.action,{method:'POST',credentials:'same-origin',cache:'no-store'," +
@@ -906,7 +913,7 @@ export const SETTINGS_SAVE_SCRIPT =
   "function done(){if(saved){try{form.dispatchEvent(new Event('kb-saved'))}catch(e){}}}" +
   "if(typeof jt==='string'&&jt){" +
   "var n=show(form,(r.json.type)||(okStatus?'ok':'err'),jt);" +
-  "applyResult(form,r.json,n?n.id:'');applyCreated(form,r.json.created);done();return}" +
+  "applyResult(form,r.json,n?n.id:'');applyCreated(r.json.created,sent);done();return}" +
   "if(okStatus){show(form,'ok','Saved.');clearInvalid(form);done();return}" +
   // Non-2xx with no usable JSON: surface the status plus any readable text.
   "var detail=(r.text||'').replace(/<[^>]*>/g,' ').replace(/\\s+/g,' ').trim();" +

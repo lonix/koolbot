@@ -294,6 +294,36 @@ describe("a pending creation saved from a section (#1663)", () => {
   });
 });
 
+describe("typing a name again after it was created (#1663)", () => {
+  it("selects the channel just created: one channel in total, and the flash says so", async () => {
+    const first = await save({
+      category: "quotes",
+      keys: [QUOTES],
+      [`value_${QUOTES}`]: "create:quote-wall",
+    });
+    expect(((await first.json()) as any).created).toHaveLength(1);
+    // The channel now exists on the server; the page still offers the create
+    // row for that name (the picker lists only what it had at load).
+    live = [...live, view("100000000000000100", { name: "quote-wall" })];
+    mockConfigSet.mockClear();
+    const again = await save({
+      category: "quotes",
+      keys: [QUOTES],
+      [`value_${QUOTES}`]: "create:quote-wall",
+    });
+    const body = (await again.json()) as Record<string, any>;
+    expect(body.type).toBe("ok");
+    expect(body.text).toContain(
+      "Used the existing # quote-wall for Quote channel.",
+    );
+    expect(body.created).toEqual([
+      { key: QUOTES, id: "100000000000000100", name: "quote-wall" },
+    ]);
+    expect(mockPost).toHaveBeenCalledTimes(1);
+    expect(setWrites()).toEqual([[QUOTES, "100000000000000100"]]);
+  });
+});
+
 describe("a name that exists inside a category (#1663)", () => {
   const CAT = "100000000000000050";
   it("selects it with its own parent instead of creating a duplicate at the top", async () => {
