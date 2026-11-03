@@ -231,7 +231,10 @@ import {
   messageJumpUrl,
 } from "./admin-views.js";
 import { pickerCreateFor } from "./setting-create.js";
-import { loadCreateChannelAnswer } from "./setting-create-load.js";
+import {
+  loadCreateChannelAnswer,
+  loadTextChannelCreateAnswer,
+} from "./setting-create-load.js";
 import { isEventRunning } from "./host-panel-shared.js";
 
 function deriveCategory(key: string): string {
@@ -1566,14 +1569,21 @@ export function createReadOnlyRouter(
     const common = await commonFromReq(req);
     const service = ScheduledAnnouncementService.getInstance(client);
     const config = ConfigService.getInstance();
-    const [enabled, announcements, channelData, announcementSettings] =
-      await Promise.all([
-        config.getBoolean("announcements.enabled", false),
-        service.listAnnouncements(common.guildId),
-        fetchChannelData(client, common.guildId),
-        // Editable `announcements.*` settings card (#977).
-        loadFeatureSettings(client, common.guildId, ANNOUNCEMENTS_SETTING_KEYS),
-      ]);
+    const [
+      enabled,
+      announcements,
+      channelData,
+      announcementSettings,
+      createChannel,
+    ] = await Promise.all([
+      config.getBoolean("announcements.enabled", false),
+      service.listAnnouncements(common.guildId),
+      fetchChannelData(client, common.guildId),
+      // Editable `announcements.*` settings card (#977).
+      loadFeatureSettings(client, common.guildId, ANNOUNCEMENTS_SETTING_KEYS),
+      // The Channel Picker's create row (#1665): one permission check per page.
+      loadTextChannelCreateAnswer(client, common.guildId),
+    ]);
 
     const rows = announcements.map((a) => ({
       id: String(a._id),
@@ -1593,6 +1603,7 @@ export function createReadOnlyRouter(
       enabled,
       rows,
       textChannels: channelData.textChannels,
+      createChannel,
       settingRows: announcementSettings.settingRows,
       dependencyState: announcementSettings.dependencyState,
       settingsUnavailable: announcementSettings.unavailable,
@@ -1927,6 +1938,7 @@ export function createReadOnlyRouter(
       channelData,
       roleData,
       pollSettings,
+      createChannel,
     ] = await Promise.all([
       config.getBoolean("polls.enabled", false),
       service.listSchedules(common.guildId),
@@ -1937,6 +1949,8 @@ export function createReadOnlyRouter(
       fetchRoleData(client, common.guildId),
       // Editable `polls.*` settings card (#973).
       loadFeatureSettings(client, common.guildId, POLLS_SETTING_KEYS),
+      // The Channel Picker's create row (#1665): one permission check per page.
+      loadTextChannelCreateAnswer(client, common.guildId),
     ]);
 
     return renderPollsPage({
@@ -1948,6 +1962,7 @@ export function createReadOnlyRouter(
       dependencyState: pollSettings.dependencyState,
       settingsUnavailable: pollSettings.unavailable,
       textChannels: channelData.textChannels,
+      createChannel,
       roles: roleData.roles,
       refusedForm,
       flash: readFlash(req),

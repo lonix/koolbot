@@ -34,6 +34,11 @@ import {
   type FormValues,
 } from "../../form-errors.js";
 import {
+  formChannelNote,
+  readPostedChannel,
+} from "../../form-channel-create.js";
+import { createPendingChannel } from "./form-channel.js";
+import {
   ANNOUNCEMENT_CREATE_FORM,
   ANNOUNCEMENT_ONCE_FORM,
 } from "../../admin-views.js";
@@ -47,13 +52,19 @@ export function checkAnnouncementForm(
 ): {
   errors: FormErrors;
   values: FormValues;
+  /** The posted channel id; empty while the form asks for a new channel. */
   channelId: string;
+  /** The name typed in the Picker's create row, to be created once the rest passed (#1665). */
+  pendingChannel: string | null;
   cron: string;
   message: string;
   placeholders: boolean;
   embedData: IScheduledAnnouncement["embedData"] | undefined;
 } {
-  const channelId = getString(req, "channelId");
+  // The create value is read before the channel is used as an id (#1665).
+  const postedChannel = getString(req, "channelId");
+  const channelRead = readPostedChannel(postedChannel);
+  const channelId = channelRead.kind === "id" ? channelRead.id : "";
   const cronField = readCronField(req, "cron");
   const cron = normalizeCron(cronField.raw);
   const message = getString(req, "message");
@@ -64,7 +75,11 @@ export function checkAnnouncementForm(
   const embedColorHex = readColourField(req, "embedColor");
 
   const errors: FormErrors = {};
-  if (!channelId) addFieldError(errors, "channelId", "Pick a channel.");
+  if (channelRead.kind === "refused") {
+    addFieldError(errors, "channelId", channelRead.error);
+  } else if (!channelId && channelRead.kind === "id") {
+    addFieldError(errors, "channelId", "Pick a channel.");
+  }
   if (withCron) {
     if (cronField.problem) {
       addFieldError(errors, "cron", cronField.problem);
@@ -122,7 +137,8 @@ export function checkAnnouncementForm(
   // lines comes back unchanged; the trimmed variables above are what is
   // validated and saved.
   const values: FormValues = {
-    channelId,
+    // As posted, so a refused form draws a pending creation again.
+    channelId: postedChannel,
     message: getRawString(req, "message"),
     placeholders: placeholders ? "1" : "",
     embedTitle: getRawString(req, "embedTitle"),
@@ -135,6 +151,7 @@ export function checkAnnouncementForm(
     errors,
     values,
     channelId,
+    pendingChannel: channelRead.kind === "create" ? channelRead.name : null,
     cron,
     message,
     placeholders,
@@ -164,7 +181,22 @@ export function createAnnouncementsRouter(client: Client): Router {
       ) {
         return;
       }
-      const { channelId, cron, message, placeholders, embedData } = form;
+      const { cron, message, placeholders, embedData } = form;
+      // A pending channel is created last, after every other field passed, and
+      // the announcement is stored only once the channel exists (#1665).
+      const made = await createPendingChannel(
+        client,
+        req,
+        res,
+        PAGE,
+        ANNOUNCEMENT_CREATE_FORM,
+        session,
+        form,
+      );
+      if (made === null) return;
+      const { channelId, channel } = made;
+      const note = formChannelNote(channel);
+      const channelAudit = channel ? { channel } : {};
 
       const service = ScheduledAnnouncementService.getInstance(client);
       try {
@@ -181,24 +213,30 @@ export function createAnnouncementsRouter(client: Client): Router {
         await recordAudit(session, {
           action: "announcement.create",
           targetId: String(announcement._id),
-          details: { channelId, cron, placeholders, hasEmbed: !!embedData },
+          details: {
+            channelId,
+            cron,
+            placeholders,
+            hasEmbed: !!embedData,
+            ...channelAudit,
+          },
           result: "success",
         });
         flashRedirect(res, "/admin/announcements", {
           type: "ok",
-          text: `Created announcement ${announcement._id}.`,
+          text: `Created announcement ${announcement._id}.${note}`,
         });
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
         await recordAudit(session, {
           action: "announcement.create",
-          details: { channelId, cron, placeholders },
+          details: { channelId, cron, placeholders, ...channelAudit },
           result: "failure",
           errorMessage: text,
         });
         flashRedirect(res, "/admin/announcements", {
           type: "err",
-          text: `Failed to create announcement: ${text}`,
+          text: `Failed to create announcement: ${text}${note}`,
         });
       }
     }),
@@ -334,7 +372,20 @@ export function createAnnouncementsRouter(client: Client): Router {
       ) {
         return;
       }
-      const { channelId, message, placeholders, embedData } = form;
+      const { message, placeholders, embedData } = form;
+      const made = await createPendingChannel(
+        client,
+        req,
+        res,
+        PAGE,
+        ANNOUNCEMENT_ONCE_FORM,
+        session,
+        form,
+      );
+      if (made === null) return;
+      const { channelId, channel } = made;
+      const note = formChannelNote(channel);
+      const channelAudit = channel ? { channel } : {};
 
       const service = ScheduledAnnouncementService.getInstance(client);
       try {
@@ -347,25 +398,30 @@ export function createAnnouncementsRouter(client: Client): Router {
         });
         await recordAudit(session, {
           action: "announcement.post-once",
-          details: { channelId, placeholders, hasEmbed: !!embedData },
+          details: {
+            channelId,
+            placeholders,
+            hasEmbed: !!embedData,
+            ...channelAudit,
+          },
           result: "success",
         });
         flashRedirect(res, "/admin/announcements", {
           type: "ok",
-          text: "One-off announcement posted. Check the configured channel.",
+          text: `One-off announcement posted. Check the configured channel.${note}`,
         });
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
         logger.error("One-off announcement post failed", err);
         await recordAudit(session, {
           action: "announcement.post-once",
-          details: { channelId, placeholders },
+          details: { channelId, placeholders, ...channelAudit },
           result: "failure",
           errorMessage: text,
         });
         flashRedirect(res, "/admin/announcements", {
           type: "err",
-          text: `Failed to post announcement: ${text}`,
+          text: `Failed to post announcement: ${text}${note}`,
         });
       }
     }),

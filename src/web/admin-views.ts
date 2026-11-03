@@ -2966,6 +2966,8 @@ export interface AnnouncementsProps extends CommonProps {
   enabled: boolean;
   rows: AnnouncementRow[];
   textChannels: ChannelOption[];
+  /** The channel Picker's create row (#1665): the bot-permission answer, or nothing when unreadable. */
+  createChannel?: PickerCreate;
   /** The create or one-off form the server just refused, to draw again with its values and messages (#1517). */
   refusedForm?: RefusedForm | null;
   /**
@@ -3094,25 +3096,6 @@ export function renderPageFlash(flash?: FlashMessage | null): string {
   return flash?.openSettings ? "" : renderFlash(flash);
 }
 
-function channelOptionsHtml(
-  options: ChannelOption[],
-  selectedId?: string,
-): string {
-  if (options.length === 0 && !selectedId) {
-    return `<option value="">(no text channels available)</option>`;
-  }
-  // buildOptionsHtml keeps a selected channel that's no longer in the list
-  // (deleted, or the bot lost access) as a selected "unavailable" option.
-  // Without a matching <option> the browser would default to the first
-  // channel, so editing only the cron/duration would silently reassign the
-  // schedule's channel on submit.
-  return buildOptionsHtml(
-    options,
-    new Set(selectedId ? [selectedId] : []),
-    false,
-  );
-}
-
 function roleOptionsHtml(options: RoleOption[], selectedId?: string): string {
   const out = [
     `<option value=""${!selectedId ? " selected" : ""}>(none)</option>`,
@@ -3187,8 +3170,9 @@ function renderAnnouncementFields(
   f: FormView,
   textChannels: ChannelOption[],
   withSchedule: boolean,
+  create?: PickerCreate,
 ): string {
-  return `${pollSelect(f, "channelId", "Channel", channelOptionsHtml(textChannels, f.selected("channelId") || undefined), true)}
+  return `${pollChannelPicker(f, textChannels, f.selected("channelId") || undefined, create)}
     ${withSchedule ? renderCronField(f, "cron", "Schedule", "0 9 * * *") : ""}
     ${pollField(f, "message", "Message", `<textarea class="kb-textarea" name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"${fieldControlAttrs(f.control("message"))}>${f.textareaContent("message")}</textarea>`)}
     <label class="kb-switch"><input type="checkbox" role="switch" name="placeholders" value="1"${f.checked("placeholders") ? " checked" : ""}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span><span>Process placeholders (replace <code>{server_name}</code>, <code>{date}</code>, etc.)</span></label>
@@ -3205,7 +3189,7 @@ function renderAnnouncementFields(
 
 export function renderAnnouncementsPage(props: AnnouncementsProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
-  const create = formView(props.refusedForm, ANNOUNCEMENT_CREATE_FORM);
+  const createForm = formView(props.refusedForm, ANNOUNCEMENT_CREATE_FORM);
   const once = formView(props.refusedForm, ANNOUNCEMENT_ONCE_FORM);
 
   const tableRows = props.rows
@@ -3250,7 +3234,7 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
     "Create a new announcement",
     `<form method="POST" action="/admin/announcements/create" class="kb-stack">
     ${csrfInput}
-    ${renderAnnouncementFields(create, props.textChannels, true)}
+    ${renderAnnouncementFields(createForm, props.textChannels, true, props.createChannel)}
     <div class="kb-row"><button type="submit" class="${mainKbButtonClass(props.enabled)}">Create announcement</button></div>
   </form>`,
   );
@@ -3260,7 +3244,7 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
     `<form method="POST" action="/admin/announcements/post-once" class="kb-stack">
     ${csrfInput}
     <p class="kb-help">Post a one-off announcement immediately — no cron schedule is stored.</p>
-    ${renderAnnouncementFields(once, props.textChannels, false)}
+    ${renderAnnouncementFields(once, props.textChannels, false, props.createChannel)}
     <div class="kb-row"><button type="submit" class="kb-btn">Post now</button></div>
   </form>`,
   );
@@ -4226,6 +4210,8 @@ export interface PollsProps extends CommonProps {
   schedules: PollScheduleRow[];
   items: PollItemRow[];
   textChannels: ChannelOption[];
+  /** The channel Picker's create row (#1665): the bot-permission answer, or nothing when unreadable. */
+  createChannel?: PickerCreate;
   roles: RoleOption[];
   /** The schedule or question form the server just refused, to draw again with its values and messages (#1517). */
   refusedForm?: RefusedForm | null;
@@ -4326,6 +4312,41 @@ function pollSelect(
   );
 }
 
+/**
+ * The Channel field of a schedule form as the Picker (#1665): `span.kb-picker[data-picker]`
+ * around the native select, with the options and the stored-but-unavailable
+ * handling of {@link buildOptionsHtml} (a saved channel that is gone stays selected
+ * and is listed as unavailable, so a cron-only edit never reassigns it). `create`
+ * offers "Create new channel: '...'" (or its help line when the bot cannot); a
+ * refused form draws the typed name again as a pending option. Without JavaScript
+ * it is the select, posting the channel id as before.
+ */
+function pollChannelPicker(
+  f: FormView,
+  options: ChannelOption[],
+  selectedId: string | undefined,
+  create?: PickerCreate,
+): string {
+  const meta: PickerMeta[] = [];
+  // With no text channel and nothing stored, the empty row says so and keeps
+  // `meta` in step with the options.
+  const empty = options.length === 0 && !selectedId;
+  const optionsHtml = buildOptionsHtml(
+    options,
+    new Set(selectedId ? [selectedId] : []),
+    empty,
+    meta,
+    "(no text channels available)",
+    create,
+  );
+  return pollField(
+    f,
+    "channelId",
+    "Channel",
+    `<span class="kb-picker" data-picker data-picker-meta="${pickerMetaAttr(meta, create)}"><select class="kb-select" name="channelId" required${fieldControlAttrs(f.control("channelId"))}>${optionsHtml}</select></span>`,
+  );
+}
+
 /** The multiple-answers choice of a question form: a Switch that posts `multiSelect=1` when on. */
 function pollMultiSelectSwitch(checked: boolean): string {
   return `<label class="kb-switch"><input type="checkbox" role="switch" name="multiSelect" value="1"${checked ? " checked" : ""}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Allow multiple answer selections</label>`;
@@ -4376,7 +4397,7 @@ export function renderPollsPage(props: PollsProps): string {
 <td class="kb-actions"><div class="kb-row kb-row--nowrap">
   <details class="kb-disclosure"${f.open()}><summary>${CHEVRON_ICON}Edit</summary>
     <div class="kb-disclosure__body"><form method="POST" action="${base}/edit" class="kb-stack">${csrfInput}
-      ${pollSelect(f, "channelId", "Channel", channelOptionsHtml(props.textChannels, f.selected("channelId", s.channelId)), true)}
+      ${pollChannelPicker(f, props.textChannels, f.selected("channelId", s.channelId), props.createChannel)}
       ${renderCronField(f, "cron", "Schedule", s.cron)}
       ${renderPollDurationField(f, String(s.durationHours))}
       ${pollSelect(f, "pingRoleId", "Ping role", roleOptionsHtml(props.roles, f.selected("pingRoleId", s.pingRoleId ?? "") || undefined))}
@@ -4435,7 +4456,7 @@ export function renderPollsPage(props: PollsProps): string {
     "Create a new schedule",
     `<form method="POST" action="/admin/polls/schedules/create" class="kb-stack">
     ${csrfInput}
-    ${pollSelect(newSchedule, "channelId", "Channel", channelOptionsHtml(props.textChannels, newSchedule.selected("channelId") || undefined), true)}
+    ${pollChannelPicker(newSchedule, props.textChannels, newSchedule.selected("channelId") || undefined, props.createChannel)}
     ${renderCronField(newSchedule, "cron", "Schedule", "0 12 * * *")}
     ${renderPollDurationField(newSchedule, String(props.defaultDurationHours))}
     ${pollSelect(newSchedule, "pingRoleId", "Ping role", roleOptionsHtml(props.roles, newSchedule.selected("pingRoleId") || undefined))}
