@@ -1341,24 +1341,34 @@ export function createWizardRouter(client: Client): Router {
 
       // The channels are created after the role access (which can be undone)
       // and before the settings that point at them. One call makes them all and
-      // removes what it made if one fails. When anything after it fails, they
-      // are removed here, so a failed apply leaves nothing behind.
+      // removes what it made if one of them fails. When anything after it
+      // fails, `undoChannels` decides per channel from a fresh read of the
+      // stored settings: one that a saved setting points at is kept and
+      // reported, the rest are removed (and any left over are named).
       let createdChannels: CreatedForSetting[] = [];
-      let undoChannels = async (): Promise<{
+      let channelCleanup = async (): Promise<{
         note: string;
-        stuck: boolean;
-      }> => ({
-        note: "",
-        stuck: false,
-      });
+        leftover: boolean;
+      }> => ({ note: "", leftover: false });
       if (Object.keys(plannedChannels).length > 0) {
+        // A closed request abandons the apply while it still waits for the
+        // lock (another channel write is running), as the Settings save does:
+        // queued work never runs after the browser left.
+        const gone = new AbortController();
+        const onClose = (): void => {
+          if (!res.writableEnded) gone.abort();
+        };
+        res.once("close", onClose);
+        if (res.destroyed) onClose();
         const made = await applyWizardCreations(
           client,
           session.guildId,
           session.discordUserId,
           plannedChannels,
           channelPlanId,
+          gone.signal,
         );
+        res.off("close", onClose);
         if (!made.ok) {
           await recordAudit(session, {
             action: "wizard.apply",
@@ -1369,27 +1379,35 @@ export function createWizardRouter(client: Client): Router {
             result: "failure",
             errorMessage: made.error,
           });
+          // The helper says what happened to the channels; "nothing was
+          // applied" would not be true when one could not be removed again.
           confirmFailure(
-            `Nothing was applied. ${made.error}${await undoAccess()}`,
+            `The settings were not applied. ${made.error}${await undoAccess()}`,
           );
           return;
         }
         createdChannels = made.channels;
         for (const c of made.channels) derived[c.key] = c.id;
-        undoChannels = async (): Promise<{ note: string; stuck: boolean }> => {
-          const back = await made.undo();
-          if (back.stuck.length > 0) {
-            return {
-              note: ` These channels were created for this apply and could not be removed again, so they still exist: ${back.stuck.join(", ")}. Check them in Discord before applying again.`,
-              stuck: true,
-            };
-          }
+        channelCleanup = async (): Promise<{
+          note: string;
+          leftover: boolean;
+        }> => {
+          const back = await made.cleanup();
+          const list = (ids: string[]): string => ids.join(", ");
+          const note = [
+            back.removed.length > 0
+              ? ` The ${back.removed.length === 1 ? "channel" : "channels"} created for this apply ${back.removed.length === 1 ? "was" : "were"} removed again.`
+              : "",
+            back.kept.length > 0
+              ? ` Kept, because a saved setting points at ${back.kept.length === 1 ? "it" : "them"}: ${list(back.kept)}.`
+              : "",
+            back.stuck.length > 0
+              ? ` These channels were created for this apply and may still exist (they could not be removed or checked): ${list(back.stuck)}. Check them in Discord before applying again.`
+              : "",
+          ].join("");
           return {
-            note:
-              back.removed.length > 0
-                ? ` The ${back.removed.length === 1 ? "channel" : "channels"} created for this apply ${back.removed.length === 1 ? "was" : "were"} removed again.`
-                : "",
-            stuck: false,
+            note,
+            leftover: back.kept.length > 0 || back.stuck.length > 0,
           };
         };
       }
@@ -1400,14 +1418,12 @@ export function createWizardRouter(client: Client): Router {
           ...Object.keys(derived),
         ]),
       ];
-      let engineReturned = false;
       try {
         const result = await wizard.applyConfiguration(
           session.discordUserId,
           session.guildId,
           derived,
         );
-        engineReturned = true;
         await recordAudit(session, {
           action: "wizard.apply",
           details: {
@@ -1507,20 +1523,13 @@ export function createWizardRouter(client: Client): Router {
         // keys (if any) could not be reverted and are therefore live — and
         // keep the session so they can retry from the confirm step instead
         // of losing their input.
-        // The channels go back too, unless a setting that points at one is
-        // still stored (a rollback or a reload that did not finish): then they
-        // stay, and the message above says which keys are live.
-        const channelKeys = createdChannels.map((c) => c.key);
-        const keepChannels =
-          result.reloadFailed === true ||
-          channelKeys.some((k) => result.revertFailedKeys.includes(k));
-        const channelBack = keepChannels
-          ? { note: "", stuck: false }
-          : await undoChannels();
+        // The channels go back unless a saved setting points at them (a
+        // rollback or a reload that did not finish): decided per channel.
+        const channelBack = await channelCleanup();
         // The usual message ends "No changes were applied. You can retry.",
         // which is not true while a created channel still exists.
         const base =
-          channelBack.stuck &&
+          channelBack.leftover &&
           result.revertFailedKeys.length === 0 &&
           !result.reloadFailed
             ? `Wizard apply failed: ${wizardApplyFailureReason(result)}. The settings were not saved.`
@@ -1539,10 +1548,10 @@ export function createWizardRouter(client: Client): Router {
         const text = err instanceof Error ? err.message : "Unknown error";
         logger.error("Wizard apply failed", err);
         const accessNote = await undoAccess();
-        // Nothing is written when the engine itself throws (the dependency
-        // check and the snapshot read come before the first write), so the
-        // channels go. After it returned, settings may point at them: they stay.
-        const channelNote = engineReturned ? "" : (await undoChannels()).note;
+        // A throw after the engine returned (the audit write) leaves the
+        // settings stored: the cleanup keeps every channel a stored setting
+        // points at, so only a throw before the first write removes them.
+        const channelNote = (await channelCleanup()).note;
         await recordAudit(session, {
           action: "wizard.apply",
           details: { keys: pendingKeys },

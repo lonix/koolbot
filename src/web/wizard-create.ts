@@ -28,6 +28,7 @@ import { ChannelType, type Client } from "discord.js";
 import { canBotCreate } from "../services/bot-create-check.js";
 import { CommandManager } from "../services/command-manager.js";
 import { settingsMetadata } from "../services/config-schema.js";
+import { ConfigService } from "../services/config-service.js";
 import type { WizardCreation } from "../services/wizard-service.js";
 import logger from "../utils/logger.js";
 import {
@@ -39,7 +40,11 @@ import {
 } from "./channel-create.js";
 import type { ManagedChannelView } from "./channel-manager.js";
 import { fetchChannelViews } from "./channel-manager-data.js";
-import { ChannelReadTimeoutError, readWithin } from "./channel-write-lock.js";
+import {
+  ChannelReadTimeoutError,
+  readWithin,
+  withChannelLock,
+} from "./channel-write-lock.js";
 import { cancellableCall } from "./channel-write-rest.js";
 import { channelText } from "./discord-labels.js";
 import type { PlannedCreation } from "./wizard-create-review.js";
@@ -240,15 +245,40 @@ export interface CreatedForSetting {
   created: boolean;
 }
 
+/** What became of the channels one apply created, once something after the creation failed. */
+export interface ChannelCleanup {
+  /** Deleted again. */
+  removed: string[];
+  /** Left in place because a saved setting points at them. */
+  kept: string[];
+  /** Could not be deleted, or could not be decided: they may still exist. */
+  stuck: string[];
+}
+
 export type WizardCreateApply =
   | {
       ok: true;
       /** One per setting key, to store. */
       channels: CreatedForSetting[];
-      /** Remove what this apply created, when something after it failed. */
-      undo: () => Promise<{ removed: string[]; stuck: string[] }>;
+      /**
+       * After a failure that came later: decide per created channel, inside the
+       * shared lock and from a fresh read of the stored settings. A channel
+       * that any stored setting still (or now) points at is kept and reported;
+       * the rest are deleted. A read that fails keeps every channel and says so.
+       */
+      cleanup: () => Promise<ChannelCleanup>;
     }
   | { ok: false; error: string };
+
+/** The ids a stored setting value names: the value itself, or the entries of a comma list or array. */
+function idsIn(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(idsIn);
+  if (typeof value === "string") {
+    return value.split(",").map((v) => v.trim());
+  }
+  if (typeof value === "number") return [String(value)];
+  return [];
+}
 
 /**
  * Creates the planned channels in one go, for the plan Review showed. The
@@ -317,7 +347,33 @@ export async function applyWizardCreations(
     return {
       ok: true,
       channels,
-      undo: () => removeCreatedChannels(deps, createdIds),
+      cleanup: async (): Promise<ChannelCleanup> => {
+        if (createdIds.length === 0)
+          return { removed: [], kept: [], stuck: [] };
+        // No signal: a cleanup that has started is never cut short by the
+        // closed request. Both the read and the deletes sit inside the lock,
+        // so no other writer of this server's channels runs between them.
+        const held = await withChannelLock(guildId, async () => {
+          let referenced: Set<string>;
+          try {
+            const rows = await ConfigService.getInstance().getAll();
+            referenced = new Set(rows.flatMap((r) => idsIn(r.value)));
+          } catch (error) {
+            logger.warn("wizard: cleanup could not read the settings", error);
+            return { removed: [], kept: [], stuck: [...createdIds] };
+          }
+          const kept = createdIds.filter((id) => referenced.has(id));
+          const gone = await removeCreatedChannels(
+            deps,
+            createdIds.filter((id) => !referenced.has(id)),
+          );
+          return { removed: gone.removed, kept, stuck: gone.stuck };
+        });
+        // Busy for the whole wait: nothing was decided, nothing was deleted.
+        return held.ok
+          ? held.value
+          : { removed: [], kept: [], stuck: [...createdIds] };
+      },
     };
   } catch (error) {
     logger.warn("wizard: creating channels failed", error);

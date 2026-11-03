@@ -15,6 +15,7 @@ import {
 } from "@jest/globals";
 import type { Client } from "discord.js";
 import {
+  TEST_CSRF_TOKEN,
   startAdminHarness,
   stubRequireSession,
   createTestSession,
@@ -119,6 +120,7 @@ jest.unstable_mockModule("../../src/web/channel-write-rest.js", () => ({
     e instanceof Error ? `Discord refused: ${e.message}` : "Discord refused.",
 }));
 
+const { withChannelLock } = await import("../../src/web/channel-write-lock.js");
 const { createWizardRouter } =
   await import("../../src/web/routes/write/wizard.js");
 const { WizardService } = await import("../../src/services/wizard-service.js");
@@ -632,7 +634,8 @@ describe("applying planned creations (#1662)", () => {
     const res = await apply(planId);
     const flash = parseFlashRedirect(res.headers.get("location") ?? "");
     expect(flash.type).toBe("err");
-    expect(flash.msg).toContain("Nothing was applied");
+    expect(flash.msg).toContain("The settings were not applied");
+    expect(flash.msg).not.toContain("Nothing was applied");
     expect(flash.msg).toContain("Missing Permissions");
     expect(mockDelete).toHaveBeenCalledTimes(1);
     expect(mockConfigSet).not.toHaveBeenCalled();
@@ -667,7 +670,7 @@ describe("applying planned creations (#1662)", () => {
     const planId = planIdOf(
       await stageAndReview([[0, quotesStep("create:wall")]]),
     );
-    mockConfigGetAll.mockRejectedValue(new Error("snapshot failed"));
+    mockConfigGetAll.mockRejectedValueOnce(new Error("snapshot failed"));
     const res = await apply(planId);
     const flash = parseFlashRedirect(res.headers.get("location") ?? "");
     expect(flash.type).toBe("err");
@@ -703,5 +706,144 @@ describe("applying planned creations (#1662)", () => {
     expect(setWrites()).toEqual(
       expect.arrayContaining([[QUOTES, "123456789012345678"]]),
     );
+  });
+
+  it("keeps, and reports, a created channel that a saved setting now points at, and removes the rest (per channel)", async () => {
+    start(["quotes", "notices"]);
+    const planId = planIdOf(
+      await stageAndReview([
+        [0, quotesStep("create:first")],
+        [1, noticesStep("create:second")],
+      ]),
+    );
+    mockConfigSet.mockRejectedValue(new Error("mongo down"));
+    // Another save adopted the first channel (id ...100) while this apply waited.
+    mockConfigGetAll.mockResolvedValue([
+      { key: "welcome.channel_id", value: "100000000000000100" },
+    ]);
+    const res = await apply(planId);
+    const flash = parseFlashRedirect(res.headers.get("location") ?? "");
+    expect(mockPost).toHaveBeenCalledTimes(2);
+    expect(mockDelete).toHaveBeenCalledTimes(1);
+    expect(String(mockDelete.mock.calls[0][0])).toContain("100000000000000101");
+    expect(flash.msg).toContain(
+      "Kept, because a saved setting points at it: 100000000000000100",
+    );
+    expect(flash.msg).toMatch(/was removed again/);
+    // Not "no changes", not "you can retry", while a created channel stays.
+    expect(flash.msg).not.toContain("You can retry");
+  });
+
+  it("removes a channel whose setting was never saved even when another setting could not be rolled back", async () => {
+    start(["quotes", "notices"]);
+    const planId = planIdOf(
+      await stageAndReview([
+        [0, quotesStep("create:first")],
+        [1, noticesStep("create:second")],
+      ]),
+    );
+    mockConfigSet.mockRejectedValue(new Error("mongo down"));
+    // Only the second channel is still stored; the first was reverted.
+    mockConfigGetAll.mockResolvedValue([
+      { key: NOTICES, value: "100000000000000101" },
+    ]);
+    await apply(planId);
+    expect(mockDelete).toHaveBeenCalledTimes(1);
+    expect(String(mockDelete.mock.calls[0][0])).toContain("100000000000000100");
+  });
+
+  it("also finds a channel inside a comma list of a stored setting", async () => {
+    start(["quotes"]);
+    const planId = planIdOf(
+      await stageAndReview([[0, quotesStep("create:wall")]]),
+    );
+    mockConfigSet.mockRejectedValue(new Error("mongo down"));
+    mockConfigGetAll.mockResolvedValue([
+      { key: "voicetracking.excluded_channels", value: "1,100000000000000100" },
+    ]);
+    await apply(planId);
+    expect(mockDelete).not.toHaveBeenCalled();
+  });
+
+  it("deletes nothing and says so when the stored settings cannot be read for the cleanup", async () => {
+    start(["quotes"]);
+    const planId = planIdOf(
+      await stageAndReview([[0, quotesStep("create:wall")]]),
+    );
+    mockConfigSet.mockRejectedValue(new Error("mongo down"));
+    // The engine's own snapshot read (first call) works; the cleanup's fails.
+    mockConfigGetAll
+      .mockResolvedValueOnce([])
+      .mockRejectedValue(new Error("mongo down"));
+    const res = await apply(planId);
+    const flash = parseFlashRedirect(res.headers.get("location") ?? "");
+    expect(mockDelete).not.toHaveBeenCalled();
+    expect(flash.msg).toContain("100000000000000100");
+    expect(flash.msg).toContain("may still exist");
+  });
+
+  it("says the settings were not applied, and keeps the helper's account of the channels, when a create fails and one cannot be removed", async () => {
+    start(["quotes", "notices"]);
+    const planId = planIdOf(
+      await stageAndReview([
+        [0, quotesStep("create:first")],
+        [1, noticesStep("create:second")],
+      ]),
+    );
+    let calls = 0;
+    mockPost.mockImplementation(async (_r: string, o: any) => {
+      calls += 1;
+      if (calls === 2) throw new Error("Missing Permissions");
+      return { id: "100000000000000200", name: o.body.name };
+    });
+    mockDelete.mockRejectedValue(new Error("Discord is down"));
+    const res = await apply(planId);
+    const flash = parseFlashRedirect(res.headers.get("location") ?? "");
+    expect(flash.msg).toContain("The settings were not applied");
+    expect(flash.msg).toContain("100000000000000200");
+    expect(flash.msg).toContain("still exist");
+    expect(flash.msg).not.toContain("Nothing was applied");
+    expect(flash.msg).not.toContain("nothing was changed");
+  });
+
+  it("does nothing when the browser leaves while the apply waits for the channel lock", async () => {
+    start(["quotes"]);
+    const planId = planIdOf(
+      await stageAndReview([[0, quotesStep("create:wall")]]),
+    );
+    // Another channel write holds the server's lock.
+    let release: () => void = () => undefined;
+    const holding = withChannelLock(
+      session.guildId,
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    const gone = new AbortController();
+    const params = new globalThis.URLSearchParams({
+      _csrf: TEST_CSRF_TOKEN,
+      channelPlanId: planId,
+    });
+    const sent = fetch(`${harness.baseUrl}/admin/wizard/apply`, {
+      method: "POST",
+      redirect: "manual",
+      signal: gone.signal,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `koolbot_csrf=${encodeURIComponent(TEST_CSRF_TOKEN)}`,
+      },
+      body: params.toString(),
+    }).catch(() => null);
+    // Let the request reach the lock wait, then close it.
+    await new Promise((r) => setTimeout(r, 400));
+    gone.abort();
+    await sent;
+    await new Promise((r) => setTimeout(r, 100));
+    release();
+    await holding;
+    await new Promise((r) => setTimeout(r, 200));
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockConfigSet).not.toHaveBeenCalled();
+    expect(state().creations).toEqual({
+      [QUOTES]: { name: "wall", kind: "text" },
+    });
   });
 });

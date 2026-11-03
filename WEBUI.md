@@ -1574,8 +1574,10 @@ type the same new name (any case, spaces as hyphens) share ONE channel and both 
 category, selects it (shown as _existing channel_); two or more are refused and Apply is disabled with the reason, as it is when the bot cannot
 create. **Apply** refuses unless the plan id still matches (a name created in the meantime gives "changed since Review" and nothing is created), then
 creates every channel in one go through the shared helper (`applyChannelPlan`, inside the per-server lock), after the role access and before the
-settings, and stores the new ids with the rest. If a later part fails (a setting write, the settings engine), the channels it created are removed again
-and the message says so, or names any that could not be removed; the planned names stay for a retry. The audit entry lists the channels under
+settings, and stores the new ids with the rest. A closed request abandons the apply while it waits for the per-server lock. If a later part fails (a
+setting write, the settings engine), each channel it created is decided on its own, inside the lock and from a fresh read of the stored settings: one that a
+saved setting points at is kept and named, the rest are removed again, and any that could not be removed or checked are named as possibly still there. The
+message then says the settings were not applied, never that nothing was changed; the planned names stay for a retry. The audit entry lists the channels under
 `channels`. Steps without a planned channel apply exactly as before, with no Discord read or write.
 
 The wizard runs **Choose features, Access, Features, Review** (#1321, renamed in #1620), with a step indicator on every page. **Features** is one
