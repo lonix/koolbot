@@ -151,7 +151,7 @@ export const JOB_SCRIPT = (jobId: string): string =>
   "el.textContent=j.text;if(j.status==='running'){setTimeout(tick,1500)}else{setTimeout(function(){location.href='/admin/rules'},1500)}})" +
   ".catch(function(){el.textContent='Lost contact with the bot; reload to see the result.'})}tick()})();";
 
-/** A Callout. `title` is plain text; `text` and `actions` are HTML the caller has escaped. A failure is an alert, everything else a status. */
+/** A Callout. `title` is plain text; `text` is HTML the caller has escaped. A failure is an alert, everything else a status. */
 function callout(o: {
   tone: Tone;
   title: string;
