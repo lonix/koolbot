@@ -138,7 +138,7 @@ should not send its admins' browsers to a font CDN, and the native face is the f
   1920px and 2560px an admin page has the same 1036px of content, with the empty area to the right.
 - **Admin width, proposal for the owner (#1629, recommended rule (c)).** The cap is for reading: prose, forms and settings read best in a column of
   about `content-max`. A table or a board is read across and needs more room, not less. So the width follows what the page is mainly made of:
-  - **Prose and form pages** (overviews, feature pages, settings, wizard steps, plan and review pages, member pages) keep the column at `content-max`.
+  - **Prose and form pages** (overviews, feature pages, settings, wizard steps, plan and review pages) keep the admin column at `content-max`.
   - **Table and board pages** (a DataTable with a row-actions column or about six columns, the team board, a heatmap) set one class on the page,
     which raises the column to a second token, `content-max-wide` (proposed 96rem). The class is defined once in `admin-layout.ts` and `kb.css`
     from the same two tokens, so the caps cannot disagree; a page never sets a width of its own.
@@ -148,6 +148,7 @@ should not send its admins' browsers to a font CDN, and the native face is the f
     1340px and reaches its full width at about 1840px; at 1280px the room is the same under either cap (976px), so those fixes are needed either way.
   - **When to opt in:** because of what the page's main content is, never because a form is long. A page that has both puts the table first and keeps
     its forms in panels of their own.
+  - **Admin pages only.** Member pages are not part of this proposal and keep `member-content-max` (see *Member pages* below).
 - **Scopes:** four, each granted by a role group capability and shown as a ScopeBadge next to the person's name in the TopBar.
 
   | Scope | Granted by | Signs in with | Sees |
