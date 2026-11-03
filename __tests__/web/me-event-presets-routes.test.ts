@@ -294,7 +294,7 @@ describe("the page", () => {
     const id = presetIdOf(A, "Clan match");
     const html = await page(`edit=${encodeURIComponent(id)}`);
     expect(html).toContain(
-      '<a class="btn" href="/me/events/presets">Cancel</a>',
+      '<a class="kb-btn" href="/me/events/presets">Cancel</a>',
     );
     expect(html).not.toContain("${");
   });
@@ -457,7 +457,7 @@ describe("the Captains lobby tick on the hosts' page (#1263)", () => {
       `edit=${encodeURIComponent(presetIdOf(A, "Clan match"))}`,
     );
     expect(html).toMatch(
-      /<input type="checkbox" name="groups_captains_lobby" value="1" checked>/,
+      /<input type="checkbox" role="switch" name="groups_captains_lobby" value="1" checked /,
     );
     // Two group rows and the template the script clones; the lobby has no row.
     expect(html.split("<div data-group-row ").length - 1).toBe(3);
@@ -503,7 +503,7 @@ describe("the Captains lobby tick on the hosts' page (#1263)", () => {
     });
     const html = await page("fromEvent=65a000000000000000000001");
     expect(html).toMatch(
-      /<input type="checkbox" name="groups_captains_lobby" value="1" checked>/,
+      /<input type="checkbox" role="switch" name="groups_captains_lobby" value="1" checked /,
     );
     expect(html).not.toContain('value="leads"');
   });

@@ -3,8 +3,12 @@ import { groupRowsScript } from "./event-group-form.js";
 import {
   EVENT_PRESETS_SCRIPT,
   groupSummary,
+  presetCallout,
+  presetNameCell,
+  presetPanel,
   renderPresetEditorForm,
 } from "./event-presets-page.js";
+import { kbEmptyState } from "./admin-views.js";
 import {
   MAX_PERSONAL_PRESETS,
   type PresetEntry,
@@ -34,13 +38,13 @@ export interface MyEventPresetsPageProps {
 function presetRow(entry: PresetEntry, csrfInput: string): string {
   const id = encodeURIComponent(entry.id);
   return `<tr>
-<th scope="row">${escapeHtml(entry.label)}${entry.description ? `<br><span class="muted">${escapeHtml(entry.description)}</span>` : ""}</th>
+${presetNameCell(entry)}
 <td>${groupSummary(entry)}</td>
-<td class="actions"><a class="btn" href="/me/events/presets?edit=${id}#editor" aria-label="Edit ${escapeHtml(entry.label)}">Edit</a>
-<form method="POST" action="/me/events/presets/delete" class="inline" data-confirm="Delete your preset '${escapeHtml(entry.label)}'? Events that already used it keep their groups. A copy an admin published to the server library stays.">${csrfInput}
+<td class="kb-actions"><div class="kb-row kb-row--nowrap"><a class="kb-btn kb-btn--sm" href="/me/events/presets?edit=${id}#editor" aria-label="Edit ${escapeHtml(entry.label)}">Edit</a>
+<form method="POST" action="/me/events/presets/delete" data-confirm="Delete your preset '${escapeHtml(entry.label)}'? Events that already used it keep their groups. A copy an admin published to the server library stays.">${csrfInput}
 <input type="hidden" name="id" value="${escapeHtml(entry.id)}">
-<button type="submit" class="btn btn-danger" aria-label="Delete ${escapeHtml(entry.label)}">Delete</button>
-</form></td>
+<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger" aria-label="Delete ${escapeHtml(entry.label)}">Delete</button>
+</form></div></td>
 </tr>`;
 }
 
@@ -50,17 +54,24 @@ export function renderMyEventPresetsBody(
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const list =
     props.presets === null
-      ? '<div class="notice warn" role="status">Your presets could not be read right now. Reload the page in a moment.</div>'
+      ? presetCallout(
+          "warn",
+          "Your presets could not be read right now. Reload the page in a moment.",
+        )
       : props.presets.length === 0
-        ? '<p class="muted">You have no presets yet. Save the groups of an event from its host panel, or add one below.</p>'
-        : `<table class="prefs-table">
+        ? kbEmptyState(
+            "users",
+            "You have no presets yet.",
+            "Save the groups of an event from its host panel, or add one below.",
+          )
+        : `<table class="kb-table">
 <thead><tr><th scope="col">Preset</th><th scope="col">Groups</th><th scope="col">Actions</th></tr></thead>
 <tbody>${props.presets.map((p) => presetRow(p, csrfInput)).join("\n")}</tbody>
 </table>`;
   const count =
     props.presets === null
-      ? ""
-      : `<p class="muted">Your presets: ${props.presets.length} of ${MAX_PERSONAL_PRESETS}.</p>`;
+      ? undefined
+      : `Your presets: ${props.presets.length} of ${MAX_PERSONAL_PRESETS}.`;
   const editor = renderPresetEditorForm({
     csrfInput,
     action: "/me/events/presets/save",
@@ -76,23 +87,24 @@ export function renderMyEventPresetsBody(
   const heading = props.editing
     ? `Edit "${escapeHtml(props.editing.label)}"`
     : "Add a preset";
-  return `<header class="kb-pagehead">
+  return `<div class="kb-stack">
+<header class="kb-pagehead">
   <div class="kb-pagehead__text">
     <p class="kb-pagehead__crumbs"><a href="/me/events">Your events</a></p>
     <h1 class="kb-pagehead__title">Event presets</h1>
     <p class="kb-pagehead__sub">Presets fill in the groups of an event in one click. These are yours: other hosts cannot see or use them. Server admins can see them (the admin needs that to publish one) and may publish one to the server's presets, which makes a copy for everyone while your own preset stays. Changing or deleting a preset never changes events that already used it.</p>
   </div>
 </header>
-<div class="card">
-  <h2>Your presets</h2>
-  ${list}
-  ${count}
-</div>
-<div class="card" id="editor">
-  <h2>${heading}</h2>
-  ${props.prefillNote && !props.editUnavailable ? `<p class="muted">${escapeHtml(props.prefillNote)}</p>` : ""}
-  ${editor}
-</div>
+${presetPanel("your-presets", "Your presets", list, {
+  flush: props.presets !== null && props.presets.length > 0,
+  note: count,
+})}
+${presetPanel(
+  "editor",
+  heading,
+  `<div class="kb-stack">${props.prefillNote && !props.editUnavailable ? `<p class="kb-help">${escapeHtml(props.prefillNote)}</p>` : ""}${editor}</div>`,
+)}
 ${scriptTag(groupRowsScript())}
-${scriptTag(EVENT_PRESETS_SCRIPT)}`;
+${scriptTag(EVENT_PRESETS_SCRIPT)}
+</div>`;
 }
