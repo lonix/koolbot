@@ -512,10 +512,10 @@ the row's name. Numbers get `td.kb-num` (right-aligned, tabular). Row actions go
 - Status cells use badges; ids and commands use `kb-mono`.
 - Wide tables scroll inside their panel, never the page (#855).
 
-**Width (proposal for the owner, #1629).** As built, every admin table shares the `main` cap of `1100px` (1036px of content), whatever it holds. A table
-whose columns do not fit there scrolls inside its panel, and a wider window does not help. Proposed, rule (c): a page whose main content is a table
-(a row-actions column with inline controls, or about six columns or more) or a board takes the wide column: one class on the page raises the cap
-from `content-max` to `content-max-wide` (proposed 96rem), defined once in `admin-layout.ts` and `kb.css`. Prose and form pages keep `content-max`.
+**Width (#1734).** A page whose main content is a table (a row-actions column with inline controls, or about six columns or more) or a board takes
+the wide column: `renderAdminPage({ wide: true })` adds one class, `kb-main--wide`, which raises the cap from `content-max` (72rem) to
+`content-max-wide` (96rem). It is defined once from those two tokens in `admin-layout.ts` and `kb.css`; a page never sets a width of its own.
+Prose and form pages keep `content-max`, and on a wide page subtitles, help text and callouts stay at `content-max`.
 
 - Scrolling inside the panel stays the fallback for a window narrower than the table. It is not how a table fits at 1600px or wider: if it scrolls
   there, change the page (fewer columns, controls that stack under the row's name, details in a disclosure).

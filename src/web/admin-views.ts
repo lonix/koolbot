@@ -3389,6 +3389,7 @@ ${renderFeatureSettingsCard({
 `;
   return renderAdminPage({
     title: "Announcements",
+    wide: true,
     active: "/admin/announcements",
     body,
     csrfToken: props.csrfToken,
@@ -4269,6 +4270,7 @@ ${scriptTag(EVENT_COVER_UPLOAD_SCRIPT)}
 
   return renderAdminPage({
     title: "Events",
+    wide: true,
     active: "/admin/events",
     body,
     csrfToken: props.csrfToken,
@@ -4674,6 +4676,7 @@ ${scriptTag(POLL_IMPORT_UPLOAD_SCRIPT)}
 `;
   return renderAdminPage({
     title: "Polls",
+    wide: true,
     active: "/admin/polls",
     body,
     csrfToken: props.csrfToken,
@@ -5104,6 +5107,7 @@ ${renderFeatureSettingsCard({
 `;
   return renderAdminPage({
     title: "Reaction Roles",
+    wide: true,
     active: "/admin/reaction-roles",
     body,
     csrfToken: props.csrfToken,
@@ -5325,6 +5329,7 @@ ${renderFeatureSettingsCard({
 `;
   return renderAdminPage({
     title: "Notices",
+    wide: true,
     active: "/admin/notices",
     body,
     csrfToken: props.csrfToken,
@@ -5571,6 +5576,7 @@ ${renderFeatureSettingsCard({
 `;
   return renderAdminPage({
     title: "Quotes",
+    wide: true,
     active: "/admin/quotes",
     body,
     csrfToken: props.csrfToken,
@@ -5837,6 +5843,7 @@ ${renderFeatureSettingsCard({
 `;
   return renderAdminPage({
     title: "Birthdays",
+    wide: true,
     active: "/admin/birthdays",
     body,
     csrfToken: props.csrfToken,
@@ -6112,6 +6119,7 @@ ${collectionsPanel}
 `;
   return renderAdminPage({
     title: "Database",
+    wide: true,
     active: "/admin/database",
     body,
     csrfToken: props.csrfToken,
@@ -7405,6 +7413,7 @@ ${renderFeatureSettingsCard({
 `;
   return renderAdminPage({
     title: "Command audit",
+    wide: true,
     active: "/admin/audit/commands",
     body,
     csrfToken: props.csrfToken,
@@ -7852,6 +7861,7 @@ ${renderFeatureSettingsCard({
 `;
   return renderAdminPage({
     title: "Moderation log",
+    wide: true,
     active: "/admin/moderation",
     body,
     csrfToken: props.csrfToken,
@@ -8046,6 +8056,7 @@ ${renderFeatureSettingsCard({
 `;
   return renderAdminPage({
     title: "Support tickets",
+    wide: true,
     active: "/admin/tickets",
     body,
     csrfToken: props.csrfToken,
@@ -8494,6 +8505,7 @@ ${monitorPanel({ id: "voice-hour", title: "By hour of day", body: hourBars })}
 `;
   return renderAdminPage({
     title: "Voice analytics",
+    wide: true,
     active: "/admin/analytics",
     body,
     csrfToken: props.csrfToken,
