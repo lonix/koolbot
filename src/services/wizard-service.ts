@@ -45,7 +45,8 @@ export interface WizardApplyResult {
 export interface WizardCreation {
   /** The name as typed, already checked by `parsePickerCreateValue`. */
   name: string;
-  kind: "text";
+  /** A text channel, or a category (#1664). */
+  kind: "text" | "category";
 }
 
 export interface DetectedResources {

@@ -54,9 +54,7 @@ describe("renderCreateReview (#1661)", () => {
       "Create the voice channel Lobby for Lobby channel",
     );
     expect(plain(html)).toContain("Not in a category");
-    expect(plain(html)).toContain(
-      "Visible to everyone who can see the server",
-    );
+    expect(plain(html)).toContain("Visible to everyone who can see the server");
     expect(html).toContain('aria-label="Voice channel"');
     expect(html).not.toContain("Inherits access");
   });
@@ -67,9 +65,7 @@ describe("renderCreateReview (#1661)", () => {
       "Create the category Hangout for Voice category",
     );
     expect(html).toContain("kb-mention kb-mention--category");
-    expect(plain(html)).toContain(
-      "Visible to everyone who can see the server",
-    );
+    expect(plain(html)).toContain("Visible to everyone who can see the server");
     expect(plain(html)).not.toContain("#");
   });
 
@@ -127,5 +123,35 @@ describe("renderWizardConfirmPage, planned creations (#1661)", () => {
   it("changes nothing when there are none", () => {
     const html = renderWizardConfirmPage({ ...props, creations: [] });
     expect(html).not.toContain("Nothing is created until you apply.");
+  });
+});
+
+describe("the voice category's Review line (#1664)", () => {
+  it("adds the note under a category, and only when given", () => {
+    const withNote = renderCreateReview([
+      {
+        kind: "category",
+        name: "Gaming",
+        settingLabel: "Managed category",
+        note: "The lobby is created in it by the voice feature, not by this step.",
+      },
+    ]);
+    expect(plain(withNote)).toContain(
+      "Visible to everyone who can see the server. The lobby is created in it by the voice feature, not by this step.",
+    );
+    expect(plain(renderCreateReview([category]))).not.toContain("lobby");
+  });
+
+  it("escapes the note", () => {
+    const html = renderCreateReview([
+      {
+        kind: "category",
+        name: "x",
+        settingLabel: "y",
+        note: "<b>hi</b>",
+      },
+    ]);
+    expect(html).not.toContain("<b>hi</b>");
+    expect(html).toContain("&lt;b&gt;hi&lt;/b&gt;");
   });
 });

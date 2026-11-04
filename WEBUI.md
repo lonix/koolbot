@@ -1598,6 +1598,35 @@ saved setting points at is kept and named, the rest are removed again, and any t
 message then says the settings were not applied, never that nothing was changed; the planned names stay for a retry. The audit entry lists the channels under
 `channels`. Steps without a planned channel apply exactly as before, with no Discord read or write.
 
+**Creating the category a setting points at (#1664, a proposal for the owner).** The three category settings, the voice channels' managed category
+(`voicechannels.category_id`), the event channel category (`events.category_id`) and the ticket channel category (`tickets.category_id`), offer
+**Create new category: 'typed text'** on the Settings pages, on every feature page's Settings card and on the wizard's Features pages. It is the same
+mechanism as for a channel, with the category kind of the same helper (`channel-create.ts`) and the same permission check (`canBotCreate` for a
+category, `loadCreateCategoryAnswer`, once per page and only when a flagged category setting is on it). The schema flag is `createCategory: true`, next to
+`createChannel` (a separate flag, so no text channel setting can take a category and the other way round). A category setting takes only an existing
+category, so the flag is on all three and nothing else. A created category has no parent and no permission overwrites, so it is visible to everyone who can
+see the server and inherits nothing; the stored name is exactly what you typed, and the Mention shows it in capitals. Without Manage Channels the Picker shows
+the help line ("The bot needs Manage Channels to create a category ..."), and when the permissions cannot be read it shows nothing.
+
+- **Settings save.** A `create:` value is read before anything is coerced and only for a setting that is flagged for its kind; any other key refuses it, a
+  comma-joined list included. A save can hold both kinds (the events section has a channel and a category): the permission is checked for each kind
+  and every name goes into ONE apply, so one failure removes what was created earlier in the same save and stores nothing. Two settings that type the same
+  new category (any case) create ONE category and both point at it. A name that matches exactly one existing category (any case) selects it ("Used the
+  existing category ..."); two or more categories with the name refuse the save; a name that appears on the server between the plan and the apply refuses it
+  with "changed since Review" and nothing is selected.
+- **Wizard.** The step records the name and the kind in `WizardState.creations`; Review plans from a fresh read and lists the category in _Channels and
+  categories to create_ ("Create the category Support for Ticket channel category"); the settings table shows _📁 Name (will be created)_ or _(existing
+  category)_. A text channel and a category with the same name are two entries. Apply keeps the order (role access, then channels and categories, then
+  settings), with the per-id cleanup and the closed-request handling of the channel kind.
+- **The managed voice category.** `voicechannels.category_id` takes a created category (a decision for the owner, recommended). This step only creates
+  the empty category. The lobby and the rooms are made in it by the voice feature, not by this step, and the Review line says so: "The lobby is created in it
+  by the voice feature, not by this step." The voice feature reads the setting by id only (`resolveManagedCategory`), so the old name key
+  `voicechannels.category.name` plays no part here: the name-to-id migration skips a key whose id is already set and removes the stale name row.
+- **Known limits.** If the reply of a create is lost, whether the category exists is unknown and the error says to check Discord (#1714). A category the wizard
+  created can be deleted by its cleanup after another save adopted it in the meantime; the cleanup reads the stored settings inside the lock, but it cannot
+  see a save that arrives after that read (#1748, the reservation design is planned for a later release). Creating a category shares both limits with
+  creating a channel.
+
 The wizard runs **Choose features, Access, Features, Review** (#1321, renamed in #1620), with a step indicator on every page. **Features** is one
 page per feature you chose, with its settings (channel settings are ordinary settings on the page of the feature that owns them; the wizard has no step of its
 own for channels). When you chose more than one feature, a row of markers under the step indicator shows which feature page you are on, and reads

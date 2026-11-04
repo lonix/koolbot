@@ -2631,6 +2631,8 @@ export interface WizardStepPageProps extends CommonProps {
    * Pickers as they were. The server reads a posted `create:` value itself.
    */
   pickerCreate?: PickerCreate;
+  /** The same for a flagged category setting (#1664): the row, the help line, or nothing. */
+  pickerCreateCategory?: PickerCreate;
   /**
    * Enabled-state of every key on this step *plus* the cross-feature
    * dependency targets those keys reference (e.g. `achievements.enabled`
@@ -2662,7 +2664,7 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
     roles: props.roles,
     groupRoles: props.groupRoles,
     reactionRoleMessages: props.reactionRoleMessages,
-    create: pickerCreateFor(props.pickerCreate),
+    create: pickerCreateFor(props.pickerCreate, props.pickerCreateCategory),
   };
 
   // Build the same `SettingRow` shape the Settings page feeds to
@@ -6294,6 +6296,8 @@ export interface FeatureSettingsPickers {
    * saying why there is none. Absent: no row.
    */
   createChannel?: PickerCreate;
+  /** The same for a flagged category setting (#1664, `loadCreateCategoryAnswer`). */
+  createCategory?: PickerCreate;
 }
 
 export interface FeatureSettingsCardProps {
@@ -6407,7 +6411,10 @@ export function renderFeatureSettingsCard(
     roles: props.pickers?.roles ?? [],
     groupRoles: props.pickers?.groupRoles,
     reactionRoleMessages: props.pickers?.reactionRoleMessages,
-    create: pickerCreateFor(props.pickers?.createChannel),
+    create: pickerCreateFor(
+      props.pickers?.createChannel,
+      props.pickers?.createCategory,
+    ),
   };
   const masterKey = findFeatureMasterKey(props.settingRows);
   const enabledByKey = new Map<string, boolean>(props.dependencyState ?? []);

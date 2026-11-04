@@ -232,6 +232,7 @@ import {
 } from "./admin-views.js";
 import { pickerCreateFor } from "./setting-create.js";
 import {
+  loadCreateCategoryAnswer,
   loadCreateChannelAnswer,
   loadTextChannelCreateAnswer,
 } from "./setting-create-load.js";
@@ -684,6 +685,13 @@ export async function loadFeatureSettings(
     settingRows.map((r) => r.key),
   );
   if (createChannel) pickers.createChannel = createChannel;
+  // The same for a flagged category setting of the card (#1664).
+  const createCategory = await loadCreateCategoryAnswer(
+    client,
+    guildId,
+    settingRows.map((r) => r.key),
+  );
+  if (createCategory) pickers.createCategory = createCategory;
   if (roleData) pickers.roles = roleData.roles;
   if (roleData && takesRoleGroups(settingRows)) {
     pickers.groupRoles = await withRoleGroupOptions(guildId, roleData.roles);
@@ -1482,6 +1490,11 @@ export function createReadOnlyRouter(
             ? undefined
             : pickerCreateFor(
                 await loadCreateChannelAnswer(
+                  client,
+                  common.guildId,
+                  rows.map((r) => r.key),
+                ),
+                await loadCreateCategoryAnswer(
                   client,
                   common.guildId,
                   rows.map((r) => r.key),

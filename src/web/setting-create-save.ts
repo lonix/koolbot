@@ -9,6 +9,13 @@
  * and refuses ("changed since Review") if the answer differs, for example when
  * the name was created in between. Nothing is selected silently then.
  *
+ * A save may hold text channels and categories (#1664: the events section has
+ * both `events.announcement_channel_id` and `events.category_id`); the
+ * permission is checked for each kind present and every name goes into the same
+ * apply. Two settings that type the same new CATEGORY share one (the list is
+ * de-duplicated before planning); a repeated text channel name is still
+ * refused by the helper, as before.
+ *
  * All names of one save go into ONE apply, so the helper's rollback covers them
  * together: either every channel exists and every id is stored, or none is
  * created and none is stored. The caller does the writes of the settings.
@@ -18,7 +25,11 @@ import { REST, type Client } from "discord.js";
 import { canBotCreate } from "../services/bot-create-check.js";
 import { CommandManager } from "../services/command-manager.js";
 import logger from "../utils/logger.js";
-import type { CreatePendingResult, PendingCreate } from "./setting-create.js";
+import type {
+  CreatedForKey,
+  CreatePendingResult,
+  PendingCreate,
+} from "./setting-create.js";
 import {
   applyChannelPlan,
   normaliseChannelName,
@@ -41,6 +52,67 @@ export function writeRestFor(token: string): REST {
   return rest;
 }
 
+/** The pending names of one save, one group per channel or category to plan. */
+interface PendingGroup {
+  /** The first entry of the group: what is planned. */
+  rep: PendingCreate;
+  /** Every setting that points at it, in order. */
+  keys: string[];
+}
+
+/**
+ * Two settings that type the same new category name (compared as the helper
+ * does, ignoring case) are one group, so ONE category is created and both get
+ * its id. Text channels are never merged here: a repeated name stays two
+ * entries and the helper refuses it, as it always has.
+ */
+function groupPending(pending: readonly PendingCreate[]): PendingGroup[] {
+  const groups: PendingGroup[] = [];
+  const byName = new Map<string, PendingGroup>();
+  for (const p of pending) {
+    if (p.kind === "category") {
+      const id = normaliseChannelName("category", p.name).toLowerCase();
+      const group = byName.get(id);
+      if (group) {
+        group.keys.push(p.key);
+        continue;
+      }
+      const made = { rep: p, keys: [p.key] };
+      byName.set(id, made);
+      groups.push(made);
+      continue;
+    }
+    groups.push({ rep: p, keys: [p.key] });
+  }
+  return groups;
+}
+
+/** The permission, asked for each kind the save holds; the refusal to give, or null. */
+async function createRefusal(
+  client: Client,
+  guildId: string,
+  pending: readonly PendingCreate[],
+): Promise<string | null> {
+  const targets: Array<{
+    kind: "text" | "category";
+    target: Parameters<typeof canBotCreate>[2];
+  }> = [];
+  if (pending.some((p) => p.kind !== "category")) {
+    targets.push({ kind: "text", target: { kind: "channel" } });
+  }
+  if (pending.some((p) => p.kind === "category")) {
+    targets.push({ kind: "category", target: { kind: "category" } });
+  }
+  for (const { kind, target } of targets) {
+    const can = await canBotCreate(client, guildId, target);
+    if (can.ok === false) return can.reason;
+    if (can.ok !== true) {
+      return `KoolBot could not check whether it may create ${kind === "category" ? "categories" : "channels"}, so nothing was created. Try again.`;
+    }
+  }
+  return null;
+}
+
 export async function createPendingChannels(
   client: Client,
   guildId: string,
@@ -49,15 +121,8 @@ export async function createPendingChannels(
   signal?: AbortSignal,
 ): Promise<CreatePendingResult> {
   // The server checks again: the Picker's row is only a convenience.
-  const can = await canBotCreate(client, guildId, { kind: "channel" });
-  if (can.ok === false) return { ok: false, error: can.reason };
-  if (can.ok !== true) {
-    return {
-      ok: false,
-      error:
-        "KoolBot could not check whether it may create channels, so nothing was created. Try again.",
-    };
-  }
+  const refusal = await createRefusal(client, guildId, pending);
+  if (refusal) return { ok: false, error: refusal };
   if (!client.token) {
     return {
       ok: false,
@@ -67,10 +132,12 @@ export async function createPendingChannels(
   try {
     const guild = await readWithin(() => client.guilds.fetch(guildId));
     const live = await readWithin(() => fetchChannelViews(guild));
-    const resolved = resolveExisting(pending, live);
+    const groups = groupPending(pending);
+    const reps = groups.map((g) => g.rep);
+    const resolved = resolveExisting(reps, live);
     if (!resolved.ok) return { ok: false, error: resolved.error };
     const entries = resolved.entries;
-    const before = matchSignature(pending, live);
+    const before = matchSignature(reps, live);
     const plan = planChannels(entries, live);
     if (!plan.ok) return { ok: false, error: plan.errors.join(" ") };
     const manager = CommandManager.getInstance(client);
@@ -85,21 +152,27 @@ export async function createPendingChannels(
         signal,
         // The entries were decided from the read above, outside the lock: a
         // match that appeared (or became ambiguous) since refuses the apply.
-        liveUnchanged: (now) => matchSignature(pending, now) === before,
+        liveUnchanged: (now) => matchSignature(reps, now) === before,
       },
       entries,
       plan.planId,
     );
     if (!applied.ok) return { ok: false, error: applied.error };
-    return {
-      ok: true,
-      channels: applied.channels.map((c, i) => ({
-        key: pending[i].key,
-        id: c.id,
-        name: c.name,
-        created: c.created,
-      })),
-    };
+    const channels: CreatedForKey[] = [];
+    groups.forEach((group, i) => {
+      const made = applied.channels[i];
+      group.keys.forEach((key, n) => {
+        channels.push({
+          key,
+          id: made.id,
+          name: made.name,
+          // The settings after the first use what the first one created.
+          created: made.created && n === 0,
+          kind: group.rep.kind ?? "text",
+        });
+      });
+    });
+    return { ok: true, channels };
   } catch (error) {
     logger.warn("settings: creating channels failed", error);
     return {
@@ -114,6 +187,8 @@ export async function createPendingChannels(
 
 export const AMBIGUOUS_NAME_MESSAGE =
   "More than one text channel on this server has that name. Pick the one you want from the list.";
+export const AMBIGUOUS_CATEGORY_MESSAGE =
+  "More than one category on this server has that name. Pick the one you want from the list.";
 
 /**
  * One entry per pending name. The helper only looks for an existing channel in
@@ -123,14 +198,15 @@ export const AMBIGUOUS_NAME_MESSAGE =
  * helper selects it; two or more are ambiguous and refused.
  */
 function matchesOf(
+  kind: "text" | "category",
   name: string,
   live: readonly ManagedChannelView[],
 ): ManagedChannelView[] {
-  const wanted = normaliseChannelName("text", name).toLowerCase();
+  const wanted = normaliseChannelName(kind, name).toLowerCase();
   return live.filter(
     (c) =>
-      c.kind === "text" &&
-      normaliseChannelName("text", c.name).toLowerCase() === wanted,
+      c.kind === kind &&
+      normaliseChannelName(kind, c.name).toLowerCase() === wanted,
   );
 }
 
@@ -140,12 +216,24 @@ export function resolveExisting(
 ): { ok: true; entries: ChannelPlanEntry[] } | { ok: false; error: string } {
   const entries: ChannelPlanEntry[] = [];
   for (const p of pending) {
-    const matches = matchesOf(p.name, live);
-    if (matches.length > 1) return { ok: false, error: AMBIGUOUS_NAME_MESSAGE };
+    const kind = p.kind ?? "text";
+    const matches = matchesOf(kind, p.name, live);
+    if (matches.length > 1) {
+      return {
+        ok: false,
+        error:
+          kind === "category"
+            ? AMBIGUOUS_CATEGORY_MESSAGE
+            : AMBIGUOUS_NAME_MESSAGE,
+      };
+    }
+    // A category has no parent, so only a text channel keeps the one it has.
     entries.push({
-      kind: "text",
+      kind,
       name: p.name,
-      ...(matches.length === 1 ? { parentId: matches[0].parentId } : {}),
+      ...(kind === "text" && matches.length === 1
+        ? { parentId: matches[0].parentId }
+        : {}),
     });
   }
   return { ok: true, entries };
@@ -158,7 +246,7 @@ export function matchSignature(
 ): string {
   return JSON.stringify(
     pending.map((p) =>
-      matchesOf(p.name, live)
+      matchesOf(p.kind ?? "text", p.name, live)
         .map((c) => `${c.id}:${c.parentId ?? ""}`)
         .sort(),
     ),

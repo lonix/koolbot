@@ -103,8 +103,11 @@ import {
   type WizardDependencyPlan,
 } from "./wizard-dependencies.js";
 import { canBotCreate } from "../../../services/bot-create-check.js";
-import { offersCreateChannel } from "../../setting-create.js";
-import { loadCreateChannelAnswer } from "../../setting-create-load.js";
+import { createKindOf } from "../../setting-create.js";
+import {
+  loadCreateCategoryAnswer,
+  loadCreateChannelAnswer,
+} from "../../setting-create-load.js";
 import {
   parsePickerCreateValue,
   pickerCreateValue,
@@ -462,6 +465,12 @@ export function createWizardRouter(client: Client): Router {
             session.guildId,
             settingKeys,
           );
+          // The same for a category setting of the step (#1664).
+          const pickerCreateCategory = await loadCreateCategoryAnswer(
+            client,
+            session.guildId,
+            settingKeys,
+          );
 
           const currentValues: Record<string, unknown> = {};
           for (const k of settingKeys) {
@@ -470,7 +479,12 @@ export function createWizardRouter(client: Client): Router {
             // pending option; without the row (permissions unreadable) the
             // step shows the stored value and the admin chooses again.
             const planned = existing.creations?.[k];
-            if (planned && pickerCreate && offersCreateChannel(k)) {
+            const kind = createKindOf(k);
+            if (
+              planned &&
+              planned.kind === kind &&
+              (kind === "category" ? pickerCreateCategory : pickerCreate)
+            ) {
               currentValues[k] = pickerCreateValue(planned.name);
             }
           }
@@ -536,6 +550,7 @@ export function createWizardRouter(client: Client): Router {
               groupRoles,
               reactionRoleMessages,
               pickerCreate,
+              pickerCreateCategory,
               enabledByKey,
               flash,
             }),
@@ -793,7 +808,10 @@ export function createWizardRouter(client: Client): Router {
       const dropped: Array<{ key: string; reason: string }> = [];
       // The permission to create, asked once and only if a create value is
       // posted for a flagged setting (#1662).
-      let createAnswer: Awaited<ReturnType<typeof canBotCreate>> | null = null;
+      const createAnswers = new Map<
+        "text" | "category",
+        Awaited<ReturnType<typeof canBotCreate>>
+      >();
       const dropCreation = (k: string): void => {
         if (state.creations?.[k]) {
           wizard.removeCreation(session.discordUserId, session.guildId, k);
@@ -819,29 +837,38 @@ export function createWizardRouter(client: Client): Router {
         // the coercion (which refuses it for every other key). The channel is
         // created by Apply, from Review.
         const posted = body?.[settingValueFieldName(k)];
-        if (offersCreateChannel(k) && typeof posted === "string") {
+        const createKind = createKindOf(k);
+        if (createKind && typeof posted === "string") {
           const named = parsePickerCreateValue(posted);
           if (named) {
             if (!named.ok) {
               dropped.push({ key: k, reason: named.error });
               continue;
             }
-            createAnswer ??= await canBotCreate(client, session.guildId, {
-              kind: "channel",
-            });
+            let createAnswer = createAnswers.get(createKind);
+            if (!createAnswer) {
+              createAnswer = await canBotCreate(
+                client,
+                session.guildId,
+                createKind === "category"
+                  ? { kind: "category" }
+                  : { kind: "channel" },
+              );
+              createAnswers.set(createKind, createAnswer);
+            }
             if (createAnswer.ok !== true) {
               dropped.push({
                 key: k,
                 reason:
                   createAnswer.ok === false
                     ? createAnswer.reason
-                    : "KoolBot could not check whether it may create channels. Try again.",
+                    : `KoolBot could not check whether it may create ${createKind === "category" ? "categories" : "channels"}. Try again.`,
               });
               continue;
             }
             wizard.setCreation(session.discordUserId, session.guildId, k, {
               name: named.name,
-              kind: "text",
+              kind: createKind,
             });
             saved[k] = pickerCreateValue(named.name);
             continue;
@@ -1492,16 +1519,30 @@ export function createWizardRouter(client: Client): Router {
         });
         if (result.success) {
           wizard.endSession(session.discordUserId, session.guildId);
-          const madeCount = new Set(
-            createdChannels.filter((c) => c.created).map((c) => c.id),
-          ).size;
+          const madeIds = (kind: "text" | "category"): number =>
+            new Set(
+              createdChannels
+                .filter((c) => c.created && c.kind === kind)
+                .map((c) => c.id),
+            ).size;
+          const madeCount = madeIds("text");
+          const madeCategories = madeIds("category");
           const summary = `Wizard applied ${pendingKeys.length} setting${pendingKeys.length === 1 ? "" : "s"}${
             accessApplied.length > 0
               ? ` and ${accessApplied.length} role group change${accessApplied.length === 1 ? "" : "s"}`
               : ""
           }${
-            madeCount > 0
-              ? ` and created ${madeCount} channel${madeCount === 1 ? "" : "s"}`
+            madeCount + madeCategories > 0
+              ? ` and created ${[
+                  madeCount > 0
+                    ? `${madeCount} channel${madeCount === 1 ? "" : "s"}`
+                    : "",
+                  madeCategories > 0
+                    ? `${madeCategories} ${madeCategories === 1 ? "category" : "categories"}`
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" and ")}`
               : ""
           }`;
           if (state.createHost) {
