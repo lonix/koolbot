@@ -303,7 +303,10 @@ describe("the schedules table", () => {
       "table.kb-table",
     ) as Element;
   const rowsOf = (): Element[] =>
-    Array.from(tableOf().querySelectorAll("tbody tr"));
+    // One record per row: the Edit disclosure is its own full-width row under it (#1738).
+    Array.from(tableOf().querySelectorAll("tbody tr")).filter((r) =>
+      r.querySelector('th[scope="row"]'),
+    );
 
   it("is a DataTable run edge to edge in its panel", () => {
     const table = tableOf();
@@ -357,7 +360,6 @@ describe("the schedules table", () => {
       f.querySelector("button")?.className,
     ]);
     expect(posts).toEqual([
-      ["/admin/polls/schedules/s1/edit", "Save changes", "kb-btn"],
       ["/admin/polls/schedules/s1/toggle", "Disable", "kb-btn kb-btn--sm"],
       ["/admin/polls/schedules/s1/test", "Test", "kb-btn kb-btn--sm"],
       [
@@ -379,10 +381,12 @@ describe("the schedules table", () => {
 
   it("opens Edit as a Disclosure holding the edit form, folded until refused", () => {
     const rows = rowsOf();
-    const edit = rows[0].querySelector("details") as Element;
+    const edit = (rows[0].nextElementSibling as Element).querySelector(
+      "details",
+    ) as Element;
     expect(edit.className).toBe("kb-disclosure");
     expect(edit.hasAttribute("open")).toBe(false);
-    expect(edit.querySelector("summary")?.textContent).toBe("Edit");
+    expect(edit.querySelector("summary")?.textContent).toBe("Edit schedule s1");
     expect(edit.querySelector("summary svg.kb-chev")).not.toBeNull();
     const form = edit.querySelector(".kb-disclosure__body > form");
     expect(form?.getAttribute("action")).toBe("/admin/polls/schedules/s1/edit");
@@ -391,7 +395,9 @@ describe("the schedules table", () => {
 
   it("builds the edit fields as Fields: label, control, kb- classes", () => {
     const rows = rowsOf();
-    const form = rows[0].querySelector("details form") as Element;
+    const form = (rows[0].nextElementSibling as Element).querySelector(
+      "details form",
+    ) as Element;
     const channel = form.querySelector('select[name="channelId"]');
     expect(channel?.className).toBe("kb-select");
     expect(
@@ -426,7 +432,10 @@ describe("the question library table", () => {
   const tableOf = (): Element =>
     main(render({ items: ITEMS })).querySelector("table.kb-table") as Element;
   const rowsOf = (): Element[] =>
-    Array.from(tableOf().querySelectorAll("tbody tr"));
+    // One record per row: the Edit disclosure is its own full-width row under it (#1738).
+    Array.from(tableOf().querySelectorAll("tbody tr")).filter((r) =>
+      r.querySelector('th[scope="row"]'),
+    );
 
   it("is a DataTable with the used count as a number column", () => {
     const table = tableOf();
@@ -471,7 +480,6 @@ describe("the question library table", () => {
       f.querySelector("button")?.className,
     ]);
     expect(posts).toEqual([
-      ["/admin/polls/items/i1/edit", "Save changes", "kb-btn"],
       ["/admin/polls/items/i1/toggle", "Disable", "kb-btn kb-btn--sm"],
       [
         "/admin/polls/items/i1/delete",
@@ -488,8 +496,11 @@ describe("the question library table", () => {
 
   it("shows multiple answers as a Switch that posts multiSelect=1 when ticked", () => {
     const rows = rowsOf();
+    // The switch is in the Edit row under each record (#1738).
     const box = (row: Element): HTMLInputElement =>
-      row.querySelector('input[name="multiSelect"]') as HTMLInputElement;
+      (row.nextElementSibling as Element).querySelector(
+        'input[name="multiSelect"]',
+      ) as HTMLInputElement;
     expect(box(rows[0]).getAttribute("role")).toBe("switch");
     expect(box(rows[0]).value).toBe("1");
     expect(box(rows[0]).checked).toBe(true);
@@ -611,5 +622,23 @@ describe("a refused form on the kb- page", () => {
     );
     const err = body.querySelector("#poll-item-edit-i1-answers-error");
     expect(err?.className).toBe("kb-field__error");
+  });
+});
+
+describe("the row Edit disclosure sits under its record, not in the Actions cell (#1738)", () => {
+  it("puts each Edit disclosure in a full-width row of its own table", () => {
+    const body = main(render({ schedules: SCHEDULES, items: ITEMS }));
+    const tables = Array.from(body.querySelectorAll("table.kb-table"));
+    expect(tables).toHaveLength(2);
+    for (const table of tables) {
+      const cols = table.querySelectorAll("thead th").length;
+      const edits = table.querySelectorAll("tbody td[colspan]");
+      expect(edits).toHaveLength(2);
+      edits.forEach((td) => {
+        expect(td.getAttribute("colspan")).toBe(String(cols));
+        expect(td.querySelector("details.kb-disclosure")).not.toBeNull();
+      });
+      expect(table.querySelectorAll("td.kb-actions details")).toHaveLength(0);
+    }
   });
 });

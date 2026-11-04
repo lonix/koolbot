@@ -268,7 +268,7 @@ describe("Quotes and Birthdays pages on the kb- components (#1641)", () => {
       "Stay hydrated.",
     );
     expect(
-      panel?.querySelector("td.kb-actions details.kb-disclosure"),
+      panel?.querySelector("tbody td[colspan] details.kb-disclosure"),
     ).not.toBeNull();
     const del = panel?.querySelector(
       `form[action="/admin/quotes/${QUOTE.id}/delete"] button.kb-btn--danger`,
@@ -420,4 +420,23 @@ describe("Quotes and Birthdays pages on the kb- components (#1641)", () => {
         ?.hasAttribute("disabled"),
     ).toBe(true);
   });
+});
+
+describe("the row Edit disclosure sits under its record, not in the Actions cell (#1738)", () => {
+  it.each(PAGES.filter((p) => p.name.includes("edit")))(
+    "$name opens it in a full-width row spanning every column",
+    ({ html }) => {
+      const main = mainOf(html);
+      const cols = main.querySelectorAll("thead th").length;
+      const open = main.querySelectorAll(
+        "tbody td[colspan] details.kb-disclosure[open]",
+      );
+      expect(open).toHaveLength(1);
+      expect(open[0].closest("td")?.getAttribute("colspan")).toBe(String(cols));
+      expect(main.querySelectorAll("td.kb-actions details")).toHaveLength(0);
+      expect(
+        main.querySelectorAll("td.kb-actions form").length,
+      ).toBeGreaterThan(0);
+    },
+  );
 });
