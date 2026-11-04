@@ -32,6 +32,7 @@ const mockRecordAudit = jest.fn<(s: unknown, e: unknown) => Promise<void>>(
 );
 const mockGetSession = jest.fn<() => unknown>();
 const mockSetAccess = jest.fn();
+const mockUpdateSession = jest.fn<(...a: unknown[]) => boolean>();
 const mockAddConfiguration = jest.fn();
 const mockApplyConfiguration = jest.fn<() => Promise<unknown>>();
 const mockEndSession = jest.fn();
@@ -115,6 +116,7 @@ jest.unstable_mockModule("../../src/services/wizard-service.js", () => ({
       applyConfiguration: mockApplyConfiguration,
       endSession: mockEndSession,
       setAccess: mockSetAccess,
+      updateSession: mockUpdateSession,
       getConfiguration: (): undefined => undefined,
     }),
   },
@@ -296,6 +298,11 @@ beforeEach(async () => {
   ]);
   botCanManageRoles = true;
   adoptionActive = false;
+  // The session object the route reads is the live one, as in the service.
+  mockUpdateSession.mockImplementation((_u, _g, updates) => {
+    Object.assign(mockGetSession() as object, updates as object);
+    return true;
+  });
   createAnswer = { ok: true };
   mockCanBotCreate.mockImplementation(async () => createAnswer);
   stored = [];
@@ -1191,6 +1198,16 @@ describe("roles created from the Access step's Picker (#1618)", () => {
       expect(html).not.toContain('data-picker-meta="{');
     });
 
+    it("counts a role chosen to be created at Admins as someone who can host, as a picked admin role does", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(none, ["events"], {}, [
+          { name: "Wardens", scopes: ["admin"] },
+        ]),
+      );
+      const html = await (await harness.get("/wizard?step=access")).text();
+      expect(html).not.toContain("nobody can host yet");
+    });
+
     it("counts a role chosen to be created as someone who can host", async () => {
       mockGetSession.mockReturnValue(
         wizardState(none, ["events"], {}, [
@@ -1310,6 +1327,54 @@ describe("roles created from the Access step's Picker (#1618)", () => {
         "could not check",
       );
       expect(mockSetAccess).not.toHaveBeenCalled();
+    });
+
+    describe("a refused save", () => {
+      const getAccess = async (): Promise<string> =>
+        (await harness.get("/wizard?step=access")).text();
+
+      it("keeps the typed name drawn as pending, with no row and no line, when the permission could not be read", async () => {
+        createAnswer = { ok: "unknown" };
+        const res = await save({ roles_staff: ["create:Crew", MOD] });
+        expect(mockSetAccess).not.toHaveBeenCalled();
+        expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+          "could not check",
+        );
+        const html = await getAccess();
+        expect(html).toContain("Crew (will be created)");
+        expect(html).not.toContain("To create a role");
+        expect(html).toMatch(
+          new RegExp(`name="roles_staff"[^>]*>[^]*?value="${MOD}" selected`),
+        );
+        // Shown once: it was never saved.
+        expect(await getAccess()).not.toContain("Crew (will be created)");
+        expect(mockSetAccess).not.toHaveBeenCalled();
+      });
+
+      it("keeps the typed name and gives the reason when the bot lacks Manage Roles", async () => {
+        createAnswer = { ok: false, reason: "The bot needs Manage Roles." };
+        await save({ roles_host: ["create:Crew"] });
+        const html = await getAccess();
+        expect(html).toContain("Crew (will be created)");
+        expect(html).toContain("The bot needs Manage Roles.");
+        expect(html).not.toContain("To create a role");
+      });
+
+      it("keeps the other picks when a name is refused by the mapping's rules", async () => {
+        const res = await save({
+          roles_staff: [MOD, "create:booster"],
+          roles_host: ["create:Crew"],
+        });
+        expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+          "managed by an integration",
+        );
+        const html = await getAccess();
+        expect(html).toMatch(
+          new RegExp(`name="roles_staff"[^>]*>[^]*?value="${MOD}" selected`),
+        );
+        expect(html).toContain("Crew (will be created)");
+        expect(mockSetAccess).not.toHaveBeenCalled();
+      });
     });
 
     it("does not ask for the permission when nothing is typed", async () => {
@@ -1474,7 +1539,9 @@ describe("roles created from the Access step's Picker (#1618)", () => {
       mockPost.mockRejectedValue(new Error("Missing Permissions"));
       const res = await harness.post("/wizard/apply", shown);
       const flash = parseFlashRedirect(res.headers.get("location"));
-      expect(flash.msg).toContain("Nothing was applied.");
+      // A create was tried, so it does not say nothing changed.
+      expect(flash.msg).toContain("The settings were not applied.");
+      expect(flash.msg).not.toContain("Nothing was applied");
       expect(flash.msg).toContain("Missing Permissions");
       expect(createSpy).not.toHaveBeenCalled();
       expect(mockApplyConfiguration).not.toHaveBeenCalled();
@@ -1497,6 +1564,7 @@ describe("roles created from the Access step's Picker (#1618)", () => {
       const flash = parseFlashRedirect(res.headers.get("location"));
       expect(flash.msg).toContain("disk full");
       expect(flash.msg).toContain("created for this apply was removed again");
+      expect(flash.msg).not.toContain("Nothing was applied");
       expect(mockDelete).toHaveBeenCalledTimes(1);
       expect(String(mockDelete.mock.calls[0][0])).toContain(
         `/guilds/${GUILD}/roles/40000000000000001`,
@@ -1565,6 +1633,8 @@ describe("roles created from the Access step's Picker (#1618)", () => {
       expect(flash.msg).toContain(
         "Kept, because a role group or a saved setting points at it: 40000000000000001",
       );
+      expect(flash.msg).not.toContain("No changes were applied");
+      expect(flash.msg).not.toContain("Nothing was applied");
       expect(mockDelete).not.toHaveBeenCalled();
       expect(roles.has("40000000000000001")).toBe(true);
     });
@@ -1586,7 +1656,7 @@ describe("roles created from the Access step's Picker (#1618)", () => {
       });
       const res = await harness.post("/wizard/apply", shown);
       const flash = parseFlashRedirect(res.headers.get("location"));
-      expect(flash.msg).toContain("Nothing was applied.");
+      expect(flash.msg).toContain("The settings were not applied.");
       expect(flash.msg).toContain("…");
       expect(flash.msg).toContain("created for this apply was removed again");
       expect(flash.msg.length).toBeLessThanOrEqual(500);
@@ -1608,6 +1678,31 @@ describe("roles created from the Access step's Picker (#1618)", () => {
       expect(flash.msg).toContain(
         "May still exist (not removed or checked): 40000000000000001",
       );
+      expect(flash.msg).not.toContain("removed again");
+      expect(flash.msg).not.toContain("Nothing was applied");
+    });
+
+    it("does not say no changes were applied when the settings fail and a role could not be removed", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [CREW]),
+      );
+      const shown = review(access, [CREW]);
+      mockApplyConfiguration.mockResolvedValue({
+        success: false,
+        appliedKeys: [],
+        failedKey: "quotes.enabled",
+        errorMessage: "write failed",
+        rolledBackKeys: [],
+        revertFailedKeys: [],
+      });
+      mockDelete.mockRejectedValue(new Error("Discord down"));
+      const res = await harness.post("/wizard/apply", shown);
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.msg).toContain(
+        "May still exist (not removed or checked): 40000000000000001",
+      );
+      expect(flash.msg).toContain("The settings were not saved.");
+      expect(flash.msg).not.toContain("No changes were applied");
       expect(flash.msg).not.toContain("removed again");
     });
 

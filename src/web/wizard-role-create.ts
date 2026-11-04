@@ -228,6 +228,21 @@ export function swapPlaceholders(
   });
 }
 
+/** The typed names of a refused save, as creations to draw (one per name, scopes joined). Not validated: they were not saved. */
+export function draftCreations(
+  named: ReadonlyArray<{ scope: AccessScope; name: string }>,
+): WizardRoleCreation[] {
+  const byName = new Map<string, WizardRoleCreation>();
+  for (const { scope, name } of named) {
+    const k = nameKey(name);
+    const got = byName.get(k);
+    if (got) {
+      if (!got.scopes.includes(scope)) got.scopes.push(scope);
+    } else byName.set(k, { name: cleanRoleName(name), scopes: [scope] });
+  }
+  return [...byName.values()];
+}
+
 /** The names to draw as pending in each scope's Picker. */
 export function pendingNames(
   creations: readonly WizardRoleCreation[],
@@ -237,13 +252,6 @@ export function pendingNames(
     for (const scope of c.scopes) out[scope].push(c.name);
   }
   return out;
-}
-
-/** The scopes a set of creations covers, for the "nobody can host yet" warning. */
-export function scopesBeingCreated(
-  creations: readonly WizardRoleCreation[],
-): Set<AccessScope> {
-  return new Set(creations.flatMap((c) => c.scopes));
 }
 
 // ---- Review ------------------------------------------------------------------

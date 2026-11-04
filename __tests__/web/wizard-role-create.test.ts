@@ -155,16 +155,11 @@ describe("placeholders", () => {
     expect(sel.staff).toEqual(["2", "900"]);
   });
 
-  it("names the scopes being created and the names to draw per scope", () => {
+  it("names the names to draw per scope", () => {
     const two = [
       { name: "A", scopes: ["admin" as const] },
       { name: "B", scopes: ["staff" as const, "host" as const] },
     ];
-    expect([...m.scopesBeingCreated(two)].sort()).toEqual([
-      "admin",
-      "host",
-      "staff",
-    ]);
     expect(m.pendingNames(two)).toEqual({
       admin: ["A"],
       staff: ["B"],

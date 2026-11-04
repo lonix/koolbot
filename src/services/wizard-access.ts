@@ -382,12 +382,10 @@ export interface AccessGap {
 export function accessGaps(
   enabled: ReadonlySet<string>,
   selection: AccessSelection,
-  /** Scopes a role is about to be created for (the Event host create). */
-  creating: ReadonlySet<AccessScope> = new Set(),
 ): AccessGap[] {
   const sel = normaliseSelection(selection);
   const covered = (scope: AccessScope): boolean =>
-    sel[scope].length > 0 || sel.admin.length > 0 || creating.has(scope);
+    sel[scope].length > 0 || sel.admin.length > 0;
   const gaps: AccessGap[] = [];
   if (enabled.has("events") && !covered("host")) {
     gaps.push({

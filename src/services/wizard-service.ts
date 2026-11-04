@@ -91,6 +91,16 @@ export interface WizardState {
    */
   roleCreations?: WizardRoleCreation[];
   /**
+   * What a REFUSED Access save posted (#1618): the ids and the names typed to be
+   * created. Read once by the next Access page, which draws them again (the
+   * names as "(will be created)") and clears it. It is never `access` or
+   * `roleCreations`: nothing in it counts as saved.
+   */
+  accessDraft?: {
+    ids: AccessSelection;
+    named: Array<{ scope: AccessScope; name: string }>;
+  };
+  /**
    * The channels the feature steps plan to create (#1662), by the setting key
    * that will point at each. A key is here or in `configuration`, never both.
    */

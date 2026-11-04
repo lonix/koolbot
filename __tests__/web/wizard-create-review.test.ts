@@ -54,9 +54,7 @@ describe("renderCreateReview (#1661)", () => {
       "Create the voice channel Lobby for Lobby channel",
     );
     expect(plain(html)).toContain("Not in a category");
-    expect(plain(html)).toContain(
-      "Visible to everyone who can see the server",
-    );
+    expect(plain(html)).toContain("Visible to everyone who can see the server");
     expect(html).toContain('aria-label="Voice channel"');
     expect(html).not.toContain("Inherits access");
   });
@@ -67,9 +65,7 @@ describe("renderCreateReview (#1661)", () => {
       "Create the category Hangout for Voice category",
     );
     expect(html).toContain("kb-mention kb-mention--category");
-    expect(plain(html)).toContain(
-      "Visible to everyone who can see the server",
-    );
+    expect(plain(html)).toContain("Visible to everyone who can see the server");
     expect(plain(html)).not.toContain("#");
   });
 

@@ -1626,7 +1626,8 @@ and the Picker's line names the permission and the **Bot permissions** page; whe
 role already chosen stays drawn as pending. Choosing the row only marks the name ("Quartermaster (will be created)"). Saving the step reads the posted
 `create:` values first, before the role ids are read, checks the permission again and keeps each name in the wizard session
 (`WizardState.roleCreations`, beside the picks, never in them). A name typed under several cards is one role, mapped at the highest of them (Admins
-implies the rest). Nothing is created on the step.
+implies the rest). Nothing is created on the step. A save that is refused (a reason is shown) saves nothing, but keeps what was posted, the ids and the typed
+names, for the next load of the step only: they are drawn again (the names as "(will be created)") and then forgotten; they are never the saved picks.
 
 **Review** lists each role in the _Roles to create_ panel as "Create the role @Name (no Discord permissions, nobody added)" with the scopes it is
 mapped to, and the role group that maps it shows in the _Role access_ table. A hidden `rolePlanId` carries the plan Apply must reproduce; when the bot
@@ -1634,9 +1635,10 @@ cannot create, or a role of that name has appeared, an error callout names the r
 (Administrator, dependencies, the channel plan, the role mapping, and the role plan id), then creates the roles in the per-server **role lock**
 (`role-write-lock.ts`), then writes the role groups, then creates the channels, then applies the settings. A closed request abandons the apply while it
 waits for the role lock or the channel lock. The role lock is separate from the channel lock: roles and channels are different things, so neither waits
-for the other, but it has the same bounded wait and the same rules (`withKeyedLock`). It is taken only by this apply; the server scan (Role groups) creates
-roles too, under its own database lock, so Apply refuses while a scan apply is running and tells the admin to try later (an apply that starts a moment
-after that check is not serialised with it).
+for the other, but it has the same bounded wait and the same rules (`withKeyedLock`). It is taken only by this apply. Other code creates roles outside
+it: the server scan (Role groups) under its own database lock, so Apply refuses while a scan apply is running and tells the admin to try later (an
+apply that starts a moment after that check is not serialised with it), and the reaction-role services under their own lock, which are not serialised
+with it at all; the plan's fresh read inside the lock still sees a role they had finished creating.
 
 A created role carries **no Discord permissions** (`permissions: "0"` is sent explicitly, because a role created without the field gets @everyone's),
 is not hoisted or mentionable, and nobody is added to it; the role group that maps it has no permissions of its own either, so no later sync gives it any.

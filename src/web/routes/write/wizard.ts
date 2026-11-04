@@ -109,10 +109,10 @@ import {
 import {
   applyWizardRoles,
   contextWithNew,
+  draftCreations,
   pendingNames,
   resolvePicks,
   reviewWizardRoles,
-  scopesBeingCreated,
   selectionWithNew,
   splitPicks,
   swapPlaceholders,
@@ -265,10 +265,21 @@ export function createWizardRouter(client: Client): Router {
           } catch (err) {
             logger.warn("wizard: access step could not read the server", err);
           }
+          // A refused save's picks and typed names, drawn once more and then
+          // forgotten: they were never saved.
+          const draft = existing.accessDraft;
+          if (draft) {
+            wizard.updateSession(session.discordUserId, session.guildId, {
+              accessDraft: undefined,
+            });
+          }
           const selection =
+            draft?.ids ??
             existing.access ??
             (ctx ? currentMapping(ctx.groups) : emptySelection());
-          const planned = existing.roleCreations ?? [];
+          const planned = draft
+            ? draftCreations(draft.named)
+            : (existing.roleCreations ?? []);
           // The role Picker's create row (#1618): one permission answer for the
           // page. A role already chosen to be created stays drawn as pending
           // even when the answer is unreadable (no row, no line then).
@@ -294,8 +305,7 @@ export function createWizardRouter(client: Client): Router {
               gaps: ctx
                 ? accessGaps(
                     await enabledGapFeatures(existing),
-                    selection,
-                    scopesBeingCreated(planned),
+                    selectionWithNew(selection, planned),
                   )
                 : [],
               create,
@@ -329,8 +339,7 @@ export function createWizardRouter(client: Client): Router {
               fingerprint = accessFingerprint(accessChanges);
               gaps = accessGaps(
                 await enabledGapFeatures(existing),
-                existing.access,
-                scopesBeingCreated(planned),
+                selectionWithNew(existing.access, planned),
               );
               if (planned.length > 0) {
                 roleReview = await reviewWizardRoles(
@@ -692,6 +701,11 @@ export function createWizardRouter(client: Client): Router {
       let selection: AccessSelection = normaliseSelection(picks.ids);
       let creations: WizardRoleCreation[] = [];
       const stay = (text: string): void => {
+        // Nothing is saved, but what was posted is kept for the next page
+        // load (once), so the admin does not retype it.
+        wizard.updateSession(session.discordUserId, session.guildId, {
+          accessDraft: { ids: picks.ids, named: picks.named },
+        });
         res.redirect(
           303,
           `/admin/wizard?step=access&${flashRedirectQuery({ type: "warn", text })}`,
@@ -1273,13 +1287,16 @@ export function createWizardRouter(client: Client): Router {
       // role groups map their ids; `undoRoles` removes them again.
       const plannedRoles = state.access ? (state.roleCreations ?? []) : [];
       let rolesMade: Extract<WizardRoleApply, { ok: true }> | null = null;
-      // What became of the roles this apply created, said once however many
+      // What became of the roles this apply created, decided once however many
       // failure paths ask. Decided from a fresh read inside the role lock.
-      let roleNote: Promise<string> | null = null;
-      async function undoRoles(): Promise<string> {
+      let roleBack: Promise<{ note: string; leftover: boolean }> | null = null;
+      function roleCleanup(): Promise<{ note: string; leftover: boolean }> {
         const made = rolesMade;
-        if (!made) return "";
-        roleNote ??= (async (): Promise<string> => {
+        if (!made) return Promise.resolve({ note: "", leftover: false });
+        roleBack ??= (async (): Promise<{
+          note: string;
+          leftover: boolean;
+        }> => {
           const back = await made.cleanup();
           if (back.kept.length > 0 || back.stuck.length > 0) {
             logger.warn("wizard: roles left after a failed apply", {
@@ -1288,7 +1305,7 @@ export function createWizardRouter(client: Client): Router {
             });
           }
           const many = (n: number): boolean => n !== 1;
-          return [
+          const note = [
             back.removed.length > 0
               ? ` The ${many(back.removed.length) ? "roles" : "role"} created for this apply ${many(back.removed.length) ? "were" : "was"} removed again.`
               : "",
@@ -1299,9 +1316,14 @@ export function createWizardRouter(client: Client): Router {
               ? ` May still exist (not removed or checked): ${idList(back.stuck)}. Check them in Discord before applying again.`
               : "",
           ].join("");
+          return {
+            note,
+            leftover: back.kept.length > 0 || back.stuck.length > 0,
+          };
         })();
-        return roleNote;
+        return roleBack;
       }
+      const undoRoles = async (): Promise<string> => (await roleCleanup()).note;
       if (state.access) {
         let ctx: AccessContext;
         try {
@@ -1437,8 +1459,10 @@ export function createWizardRouter(client: Client): Router {
                 : removed.length > 0
                   ? ` The ${removed.length === 1 ? "role" : "roles"} created for this apply ${removed.length === 1 ? "was" : "were"} removed again.`
                   : "";
+            // A refusal (no create was tried) changed nothing; a failed create
+            // may have left a role, so it does not say that.
             confirmFailure(
-              `Nothing was applied. ${made.cause ?? made.error}`,
+              `${made.cause ? "The settings were not applied." : "Nothing was applied."} ${made.cause ?? made.error}`,
               outcome,
             );
             return;
@@ -1488,10 +1512,14 @@ export function createWizardRouter(client: Client): Router {
             // The roles this apply created go too (a role a stuck group still
             // points at is kept and reported). Only the cause is shortened.
             const roleNote = await undoRoles();
+            // With roles made, "nothing was applied" may not be true (a role
+            // can be kept or stuck), so that head is only for no roles.
             confirmFailure(
-              written.stuck.length > 0
-                ? `Nothing else was applied. ${written.error}`
-                : `Nothing was applied. ${written.error}`,
+              rolesMade
+                ? `The settings were not applied. ${written.error}`
+                : written.stuck.length > 0
+                  ? `Nothing else was applied. ${written.error}`
+                  : `Nothing was applied. ${written.error}`,
               `${
                 written.stuck.length > 0
                   ? ` These could not be undone and are live: ${written.stuck.join(", ")}. Check Role groups.`
@@ -1684,10 +1712,13 @@ export function createWizardRouter(client: Client): Router {
         // The channels go back unless a saved setting points at them (a
         // rollback or a reload that did not finish): decided per channel.
         const channelBack = await channelCleanup();
+        // The mapping goes back first, then the roles it pointed at.
+        const accessNote = await undoAccess();
+        const rolesBack = await roleCleanup();
         // The usual message ends "No changes were applied. You can retry.",
-        // which is not true while a created channel still exists.
+        // which is not true while a created channel or role still exists.
         const base =
-          channelBack.leftover &&
+          (channelBack.leftover || rolesBack.leftover) &&
           result.revertFailedKeys.length === 0 &&
           !result.reloadFailed
             ? `Wizard apply failed: ${wizardApplyFailureReason(result)}. The settings were not saved.`
@@ -1696,7 +1727,7 @@ export function createWizardRouter(client: Client): Router {
         // channels' outcome and the role mapping's are kept whole.
         const failureMsg = flashKeepingTail(
           base,
-          channelBack.note + (await undoAll()),
+          channelBack.note + accessNote + rolesBack.note,
         );
         const qs = new globalThis.URLSearchParams({
           step: "confirm",

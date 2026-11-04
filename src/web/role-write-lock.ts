@@ -14,12 +14,15 @@
  * applies here: it is not re-entrant, and every read made inside it goes
  * through `readWithin`.
  *
- * Known limit: the server adoption engine also creates roles (Role groups,
- * `DiscordAdoptionGateway.createRole`) and is guarded by its own database
- * lock, not by this one. `applyRolePlan` refuses while an adoption apply is
+ * Known limit: other code creates roles outside this lock. The server adoption
+ * engine (Role groups, `DiscordAdoptionGateway.createRole`) is guarded by its
+ * own database lock, and `applyRolePlan` refuses while an adoption apply is
  * active (a bounded read inside this lock), but an apply that starts after that
- * check is not serialised with it; the role plan's re-read still sees a role it
- * has already created.
+ * check is not serialised with it. The reaction-role services
+ * (`reaction-role-service.ts`, `reaction-role-group-service.ts`) create roles
+ * under `reactionRoleGuildLock` and are not serialised with this lock either;
+ * they are not wired in. In both cases the plan's re-read inside this lock
+ * still sees a role they had already finished creating.
  */
 
 import { createKeyedLock } from "../utils/keyed-lock.js";
