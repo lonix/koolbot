@@ -11,7 +11,11 @@
  */
 
 import { ChannelType, PermissionFlagsBits } from "discord.js";
-import { settingsMetadata } from "../../src/services/config-schema.js";
+import {
+  defaultConfig,
+  settingsMetadata,
+} from "../../src/services/config-schema.js";
+import { WIZARD_FEATURE_SETTINGS } from "../../src/web/routes/write/helpers.js";
 import type { PickerCreate } from "../../src/web/setting-pickers.js";
 import {
   renderAnalyticsPage,
@@ -1341,9 +1345,196 @@ const CLAIMS_DESTRUCTIVE_PLAN = {
   },
 } as never;
 
+/**
+ * The Setup wizard's overview and step pages (#1751), every state each has,
+ * so the gate sees the markup of each: the Administrator check in its three
+ * states with and without a ticked feature (a hidden default Next), every
+ * feature listed, and a step that is first, in the middle, last, the only one,
+ * with a flash, switched off, locked by a dependency, below a warning
+ * threshold, with the Picker create rows, with the cron picker, and with its
+ * settings unavailable. The older fixtures of both pages stay with the wizard
+ * ones in `adminPages`.
+ */
+function wizardOverviewAndStepPages(): A11yPage[] {
+  const cfg = defaultConfig as unknown as Record<string, unknown>;
+  const step = (
+    over: Partial<Parameters<typeof renderWizardStepPage>[0]>,
+  ): string =>
+    renderWizardStepPage({
+      ...COMMON,
+      ...PICKERS,
+      stepIndex: 0,
+      featureKeys: ["voicechannels", "quotes", "polls"],
+      featureKey: "voicechannels",
+      settingKeys: ["voicechannels.enabled", "voicechannels.category_id"],
+      currentValues: {
+        "voicechannels.enabled": true,
+        "voicechannels.category_id": "cat1",
+      },
+      metadata: settingsMetadata,
+      defaultValues: {
+        "voicechannels.enabled": false,
+        "voicechannels.category_id": "",
+      },
+      enabledByKey: { "voicechannels.enabled": true },
+      ...over,
+    });
+  const allKeys = (feature: string): string[] =>
+    WIZARD_FEATURE_SETTINGS[feature] ?? [];
+  const allOf = (feature: string): string =>
+    step({
+      featureKeys: [feature],
+      featureKey: feature,
+      settingKeys: allKeys(feature),
+      currentValues: Object.fromEntries(
+        allKeys(feature).map((k) => [k, cfg[k]]),
+      ),
+      defaultValues: Object.fromEntries(
+        allKeys(feature).map((k) => [k, cfg[k]]),
+      ),
+      enabledByKey: Object.fromEntries(
+        allKeys(feature).map((k) => [k, k.endsWith(".enabled")]),
+      ),
+    });
+  return [
+    {
+      name: "Setup wizard overview, every feature, none on",
+      html: renderWizardPage({
+        ...COMMON,
+        featureOrder: Object.keys(WIZARD_FEATURE_SETTINGS),
+        featureStatus: {},
+      }),
+    },
+    {
+      name: "Setup wizard overview, every feature, some on, one ticked, bot lacks Administrator",
+      html: renderWizardPage({
+        ...COMMON,
+        featureOrder: Object.keys(WIZARD_FEATURE_SETTINGS),
+        featureStatus: { voicechannels: true, quotes: true, polls: true },
+        admin: WIZARD_ADMIN.missing,
+        ticked: ["quotes"],
+      }),
+    },
+    {
+      name: "Setup wizard overview, bot lacks Administrator, no invite link",
+      html: renderWizardPage({
+        ...COMMON,
+        featureOrder: ["voicechannels", "polls"],
+        featureStatus: { voicechannels: true, polls: false },
+        admin: { ...WIZARD_ADMIN.missing, inviteUrl: null },
+      }),
+    },
+    {
+      name: "Setup wizard step, flash (failure)",
+      html: step({ flash: { type: "err", text: "One value was rejected." } }),
+    },
+    {
+      name: "Setup wizard step, the only feature",
+      html: step({ featureKeys: ["voicechannels"] }),
+    },
+    {
+      name: "Setup wizard step, feature switched off (rows dimmed)",
+      html: step({ currentValues: { "voicechannels.enabled": false } }),
+    },
+    {
+      name: "Setup wizard step, a setting locked by a dependency",
+      html: step({
+        featureKeys: ["achievements"],
+        featureKey: "achievements",
+        settingKeys: ["achievements.enabled"],
+        currentValues: { "achievements.enabled": true },
+        defaultValues: { "achievements.enabled": false },
+        enabledByKey: {
+          "achievements.enabled": true,
+          "voicetracking.enabled": false,
+        },
+      }),
+    },
+    {
+      name: "Setup wizard step, a value below its warning threshold",
+      html: step({
+        featureKeys: ["voicetracking"],
+        featureKey: "voicetracking",
+        settingKeys: ["voicetracking.seen_retention_days"],
+        currentValues: { "voicetracking.seen_retention_days": 2 },
+        defaultValues: { "voicetracking.seen_retention_days": 30 },
+        metadata: {
+          "voicetracking.seen_retention_days": {
+            label: "Retention days",
+            description: "How long to keep sessions.",
+            category: "voicetracking",
+            type: "number",
+            warnBelow: { value: 7, message: "Below 7 days loses history." },
+          },
+        } as never,
+        enabledByKey: {},
+      }),
+    },
+    {
+      name: "Setup wizard step, a key the schema does not describe",
+      html: step({
+        settingKeys: ["voicechannels.unknown_key"],
+        currentValues: {},
+        metadata: {},
+        defaultValues: { "voicechannels.unknown_key": 3 },
+        enabledByKey: {},
+      }),
+    },
+    {
+      name: "Setup wizard step, leaderboard roles (tier editor note)",
+      html: step({
+        featureKeys: ["leaderboard_roles"],
+        featureKey: "leaderboard_roles",
+        settingKeys: ["leaderboard_roles.enabled"],
+        currentValues: { "leaderboard_roles.enabled": true },
+        defaultValues: { "leaderboard_roles.enabled": false },
+        enabledByKey: { "leaderboard_roles.enabled": true },
+      }),
+    },
+    {
+      name: "Setup wizard step, cron picker and durations (moderation)",
+      html: allOf("moderation"),
+    },
+    {
+      name: "Setup wizard step, every Picker with its create row (tickets)",
+      html: step({
+        ...(() => {
+          const keys = allKeys("tickets");
+          return {
+            featureKeys: ["tickets"],
+            featureKey: "tickets",
+            settingKeys: keys,
+            currentValues: Object.fromEntries(keys.map((k) => [k, cfg[k]])),
+            defaultValues: Object.fromEntries(keys.map((k) => [k, cfg[k]])),
+            enabledByKey: Object.fromEntries(
+              keys.map((k) => [k, k.endsWith(".enabled")]),
+            ),
+          };
+        })(),
+        pickerCreate: { kind: "channel", channelKind: "text", ok: true },
+        pickerCreateCategory: { kind: "category", ok: true },
+      }),
+    },
+    {
+      name: "Setup wizard step, settings unavailable, first",
+      html: step({ settingsUnavailable: true }),
+    },
+    {
+      name: "Setup wizard step, settings unavailable, last, with a flash",
+      html: step({
+        settingsUnavailable: true,
+        stepIndex: 2,
+        featureKey: "polls",
+        flash: { type: "warn", text: "Reload the page." },
+      }),
+    },
+  ];
+}
+
 /** Every authenticated admin page, rendered as a full document. */
 export function adminPages(): A11yPage[] {
   return [
+    ...wizardOverviewAndStepPages(),
     {
       // Everything read, nothing to fix, and the update-available Version panel (#1029).
       name: "Dashboard",

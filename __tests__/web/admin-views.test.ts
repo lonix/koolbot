@@ -4373,10 +4373,12 @@ describe("renderWizardPage", () => {
     expect(html).toContain("Polls");
     // Neither checkbox should be pre-ticked, even though voicechannels is
     // currently enabled. The wizard treats each run as a fresh declaration.
-    expect(html).not.toMatch(
-      /value="voicechannels" id="feat-voicechannels" checked/,
+    expect(html).toMatch(
+      /<input type="checkbox" role="switch" id="feat-voicechannels" name="features" value="voicechannels"(?![^>]*checked)[^>]*>/,
     );
-    expect(html).not.toMatch(/value="polls" id="feat-polls" checked/);
+    expect(html).toMatch(
+      /<input type="checkbox" role="switch" id="feat-polls" name="features" value="polls"(?![^>]*checked)[^>]*>/,
+    );
     expect(html).toContain('action="/admin/wizard/start"');
   });
 
@@ -4386,13 +4388,13 @@ describe("renderWizardPage", () => {
       featureOrder: ["voicechannels", "polls"],
       featureStatus: { voicechannels: true, polls: false },
     });
-    // voicechannels is currently enabled → tag-on.
+    // voicechannels is currently enabled → a "Currently on" Badge.
     expect(html).toMatch(
-      /Voice Channels\s*<span class="fc-current"><span class="tag tag-on">ON<\/span><\/span>/,
+      /Voice Channels<\/label> <span class="kb-badge kb-badge--on">Currently on<\/span>/,
     );
-    // polls is currently disabled → tag-off.
+    // polls is currently disabled → a "Currently off" Badge.
     expect(html).toMatch(
-      /Polls\s*<span class="fc-current"><span class="tag tag-off">OFF<\/span><\/span>/,
+      /Polls<\/label> <span class="kb-badge kb-badge--off">Currently off<\/span>/,
     );
   });
 
@@ -4482,7 +4484,9 @@ describe("renderWizardStepPage", () => {
     // Human-readable label shown; the raw dotted key is demoted to monospace
     // helper text rather than used as the field label (#702).
     expect(html).toContain("Voice Channel Management enabled");
-    expect(html).toContain('<code class="mono muted"');
+    expect(html).toContain(
+      '<span class="kb-mono" id="wiz-voicechannels.enabled-key">voicechannels.enabled</span>',
+    );
     // Every field posts the value_-prefixed name shared with the Settings page.
     expect(html).toContain(
       'name="value_voicechannels.enabled" value="true" checked',
@@ -4805,7 +4809,7 @@ describe("renderWizardStepPage", () => {
 
     it("keeps the heading to the feature's name", () => {
       const html = page(1, ["voicechannels", "quotes", "polls"]);
-      expect(html).toMatch(/<h1>Quote System<\/h1>/);
+      expect(html).toMatch(/<h1 class="kb-pagehead__title">Quote System<\/h1>/);
     });
 
     it("draws no sub-bar for a single feature", () => {
@@ -4827,7 +4831,7 @@ describe("renderWizardStepPage", () => {
     it("falls back to the key for a feature without a label, as the heading does", () => {
       const html = page(1, ["voicechannels", "namehistory", "polls"]);
       expect(html).toContain("Feature 2 of 3: namehistory");
-      expect(html).toMatch(/<h1>namehistory<\/h1>/);
+      expect(html).toMatch(/<h1 class="kb-pagehead__title">namehistory<\/h1>/);
     });
 
     it("keeps the tier editor note, the sub-bar and the right button for leaderboard roles", () => {
@@ -4875,7 +4879,7 @@ describe("renderWizardStepPage", () => {
       metadata: {},
     });
     expect(html).toContain(
-      'href="/admin/wizard?step=access" class="btn">← Previous',
+      'href="/admin/wizard?step=access" class="kb-btn">← Previous',
     );
   });
 
@@ -6091,13 +6095,13 @@ describe("Wizard step accessibility (#854)", () => {
       },
     });
     expect(html).toContain(
-      '<div class="help" id="wiz-voicetracking.seen_retention_days-help">',
+      '<p class="kb-setting__desc" id="wiz-voicetracking.seen_retention_days-help">',
     );
     expect(html).toContain(
-      '<div class="settings-warn" id="wiz-voicetracking.seen_retention_days-warn"',
+      '<div class="kb-callout kb-callout--warn" id="wiz-voicetracking.seen_retention_days-warn"',
     );
     expect(html).toMatch(
-      /id="wiz-voicetracking\.seen_retention_days" aria-describedby="wiz-voicetracking\.seen_retention_days-warn wiz-voicetracking\.seen_retention_days-help"/,
+      /id="wiz-voicetracking\.seen_retention_days" aria-describedby="wiz-voicetracking\.seen_retention_days-warn wiz-voicetracking\.seen_retention_days-help wiz-voicetracking\.seen_retention_days-key"/,
     );
   });
 });

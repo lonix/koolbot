@@ -1348,9 +1348,15 @@ describe("POST /wizard/check keeps the ticked features (#1617)", () => {
     const html = await (
       await harness.get("/wizard?recheck=1&ticked=quotes,polls,<b>x</b>")
     ).text();
-    expect(html).toMatch(/value="quotes" id="feat-quotes" checked/);
-    expect(html).toMatch(/value="polls" id="feat-polls" checked/);
-    expect(html).not.toMatch(/value="lfg" id="feat-lfg" checked/);
+    expect(html).toMatch(
+      /id="feat-quotes" name="features" value="quotes" checked/,
+    );
+    expect(html).toMatch(
+      /id="feat-polls" name="features" value="polls" checked/,
+    );
+    expect(html).not.toMatch(
+      /id="feat-lfg" name="features" value="lfg" checked/,
+    );
     expect(html).not.toContain("<b>x</b>");
   });
 });
