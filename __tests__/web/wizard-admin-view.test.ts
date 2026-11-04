@@ -203,16 +203,6 @@ describe("renderWizardDonePage", () => {
     expect(html).toContain("Blind.");
     expect(html).not.toContain("What your features need");
   });
-
-  it("links the Event host job, escaped", () => {
-    const html = renderWizardDonePage({
-      ...base,
-      report,
-      admin: { state: "has" },
-      hostJobId: "a&b",
-    });
-    expect(html).toContain("/admin/role-groups?job=a%26b");
-  });
 });
 
 type PermissionTargetLike = { kind: "channel"; id: string; name: string };

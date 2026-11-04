@@ -3,7 +3,7 @@ import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
 import { DependencyError, hasOwn, settingsMetadata } from "./config-schema.js";
 import type { IConfig } from "../models/config.js";
-import type { AccessSelection } from "./wizard-access.js";
+import type { AccessScope, AccessSelection } from "./wizard-access.js";
 
 export interface WizardConfiguration {
   [key: string]: string | number | boolean;
@@ -49,6 +49,30 @@ export interface WizardCreation {
   kind: "text" | "category";
 }
 
+/**
+ * A role the admin chose to create from the Access step's Picker (#1618). Held
+ * beside the picks, never in them: nothing is created until Apply. A name typed
+ * under two scopes is one role with both scopes (`scopes` is the highest only:
+ * Admins already implies the rest).
+ */
+export interface WizardRoleCreation {
+  /** The name as typed, cleaned and already checked against the live roles. */
+  name: string;
+  scopes: AccessScope[];
+}
+
+/**
+ * A typed name on the Access step that matched an EXISTING role (#1618): that
+ * role, with everyone who already holds it, is what gets mapped. Kept so Review
+ * can say so; the id is also in the picks.
+ */
+export interface WizardRoleMatch {
+  id: string;
+  /** The role's own name. */
+  name: string;
+  scopes: AccessScope[];
+}
+
 export interface DetectedResources {
   categories?: CategoryChannel[];
   voiceChannels?: VoiceChannel[];
@@ -74,10 +98,23 @@ export interface WizardState {
    */
   access?: AccessSelection;
   /**
-   * *Create @Event host* was chosen on the Access step (#1365). Held like the
-   * picks: the role is created by Apply, through the adoption engine.
+   * The roles the Access step plans to create (#1618), one per distinct name.
+   * Held like the picks: Apply creates them (no Discord permissions, nobody
+   * added) before the role groups that map them are written.
    */
-  createHost?: boolean;
+  roleCreations?: WizardRoleCreation[];
+  /** Typed names that selected an existing role, for Review's warning. */
+  roleMatches?: WizardRoleMatch[];
+  /**
+   * What a REFUSED Access save posted (#1618): the ids and the names typed to be
+   * created. Read once by the next Access page, which draws them again (the
+   * names as "(will be created)") and clears it. It is never `access` or
+   * `roleCreations`: nothing in it counts as saved.
+   */
+  accessDraft?: {
+    ids: AccessSelection;
+    named: Array<{ scope: AccessScope; name: string }>;
+  };
   /**
    * The channels the feature steps plan to create (#1662), by the setting key
    * that will point at each. A key is here or in `configuration`, never both.
@@ -287,12 +324,14 @@ export class WizardService {
     userId: string,
     guildId: string,
     access: AccessSelection | undefined,
-    createHost = false,
+    roleCreations: readonly WizardRoleCreation[] = [],
+    roleMatches: readonly WizardRoleMatch[] = [],
   ): boolean {
     const state = this.getSession(userId, guildId);
     if (!state) return false;
     state.access = access;
-    state.createHost = access !== undefined && createHost;
+    state.roleCreations = access !== undefined ? [...roleCreations] : [];
+    state.roleMatches = access !== undefined ? [...roleMatches] : [];
     return this.updateSession(userId, guildId, state);
   }
 
@@ -376,6 +415,11 @@ export class WizardService {
     userId: string,
     guildId: string,
     derived: Record<string, unknown> = {},
+    /**
+     * The choices as the caller validated them (a copy taken at the start of
+     * its apply). Absent: the session's own, as they are now.
+     */
+    configuration?: WizardConfiguration,
   ): Promise<WizardApplyResult> {
     const state = this.getSession(userId, guildId);
     if (!state) {
@@ -394,7 +438,7 @@ export class WizardService {
     // dependents a confirmed cascade turns off, #1622). They are never saved
     // into the session, so a failed attempt leaves the choices as they were.
     const batch: Record<string, unknown> = {
-      ...state.configuration,
+      ...(configuration ?? state.configuration),
       ...derived,
     };
 

@@ -1,10 +1,11 @@
 /**
- * Can the bot create a channel or a category here? (#1660) The answer the
+ * Can the bot create a channel, a category or a role here? (#1660) The answer the
  * Picker's create row (#1658) needs, read from the same snapshot of the server
  * as the Bot permissions page (`bot-permission-check.ts`), never guessed.
  *
- * Discord lets the bot create a channel or category when it holds Manage
- * Channels server-wide. A channel under a category also needs Manage Channels
+ * Discord lets the bot create a role when it holds Manage Roles (#1618);
+ * Administrator holds it too, as below. It lets the bot create a channel or
+ * category when it holds Manage Channels server-wide. A channel under a category also needs Manage Channels
  * in that category, where an overwrite can take it away. Administrator holds
  * every permission everywhere, and discord.js's `permissions` and
  * `permissionsIn` already fold that in, so it is not special-cased here.
@@ -21,7 +22,9 @@ import { PERM } from "./bot-permission-registry.js";
 import logger from "../utils/logger.js";
 
 export type CreateTarget =
-  { kind: "channel"; parentId?: string } | { kind: "category" };
+  | { kind: "channel"; parentId?: string }
+  | { kind: "category" }
+  | { kind: "role" };
 
 export type CanCreate =
   { ok: true } | { ok: false; reason: string } | { ok: "unknown" };
@@ -36,6 +39,9 @@ export const CREATE_REASON = {
   parent: `The bot has ${PERM.manageChannels.name}, but the chosen category denies it for the bot, so it cannot create a channel there. Check the category's permission overwrites for the bot; the Bot permissions page shows what is missing.`,
 } as const;
 
+/** The help line for a role (a proposal for the owner, #1618): the same shape, naming Manage Roles. */
+export const CREATE_REASON_ROLE = `The bot needs ${PERM.manageRoles.name} to create a role. Give the bot's role ${PERM.manageRoles.name} in Server Settings, Roles; the Bot permissions page shows what is missing.`;
+
 export async function canBotCreate(
   client: Client,
   guildId: string,
@@ -47,6 +53,12 @@ export async function canBotCreate(
     const snapshot = await getSnapshot(client, guildId, deps);
     const me = snapshot?.me;
     if (!snapshot || !me) return unknown;
+    if (target.kind === "role") {
+      // A role is created server-wide: Manage Roles, nothing per category.
+      return me.permissions.has(PermissionFlagsBits.ManageRoles)
+        ? { ok: true }
+        : { ok: false, reason: CREATE_REASON_ROLE };
+    }
     const bit = PermissionFlagsBits.ManageChannels;
     if (!me.permissions.has(bit)) {
       return {
@@ -73,12 +85,12 @@ export async function canBotCreate(
 
 /** The Picker's `create` flag (#1658) for an answer; nothing for unknown, so no row and no line. */
 export function toPickerCreate(
-  kind: "channel" | "category",
+  kind: "channel" | "category" | "role",
   answer: CanCreate,
   channelKind?: "text" | "voice",
 ):
   | {
-      kind: "channel" | "category";
+      kind: "channel" | "category" | "role";
       channelKind?: "text" | "voice";
       ok: boolean;
       reason?: string;

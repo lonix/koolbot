@@ -15,10 +15,8 @@ import {
   type AccessScope,
   type AccessSelection,
 } from "../services/wizard-access.js";
-import type {
-  HostCreateState,
-  HostReview,
-} from "../services/wizard-host-role.js";
+import { pickerCreateValue, type PickerCreate } from "./setting-pickers.js";
+import type { WizardRoleReview } from "./wizard-role-create.js";
 
 /**
  * The Setup wizard's Access step (#1321) and the step indicator the other
@@ -170,41 +168,42 @@ function canList(can: readonly string[], cannot: readonly string[]): string {
   return `<ul class="kb-access__can">${items.join("")}</ul>`;
 }
 
+/**
+ * The help line under a card's Picker. The create sentence is only written when
+ * the Picker really offers the row (`create.ok`), and the reason only when the
+ * Picker shows it; an unreadable answer says nothing more.
+ */
+function roleHelp(create: PickerCreate | undefined): string {
+  const base = "Leave it empty for none.";
+  if (create?.ok === true) {
+    return `${base} To create a role, type its name and choose Create new role. It is created with no Discord permissions and nobody is added to it; Review lists it first.`;
+  }
+  if (create?.reason) return `${base} ${create.reason}`;
+  return base;
+}
+
 function roleSelect(
   scope: AccessScope,
   options: readonly AccessRole[],
   chosen: readonly string[],
+  create: PickerCreate | undefined,
+  pending: readonly string[],
 ): string {
   // A saved role that can no longer be picked (deleted, or moved above the bot)
   // stays selected and is listed as unavailable, so saving does not silently
-  // drop it.
+  // drop it. A role chosen to be created is drawn as a pending choice
+  // ("(will be created)") whether or not the Picker can still offer the row.
   const id = `access-${scope}`;
   return `<label class="kb-label" for="${id}">Discord roles</label>
 ${renderRolePicker({
   id,
   name: `roles_${scope}`,
   options: options.map((r) => ({ id: r.id, name: r.name })),
-  selected: chosen,
+  selected: [...chosen, ...pending.map(pickerCreateValue)],
   describedBy: `${id}-help`,
+  ...(create ? { create } : {}),
 })}
-<p class="kb-help" id="${id}-help">Leave it empty for none.</p>`;
-}
-
-/**
- * The Event host card's option to create the role (#1365). Offered only when
- * no such role exists; a bot without Manage Roles gets the switch disabled and
- * the reason beside it, so the refusal is never silent.
- */
-function hostCreateControl(state: HostCreateState, checked: boolean): string {
-  if (!state.available && state.reason === "exists") return "";
-  const id = "access-host-create";
-  const help = state.available
-    ? "There is no Event host role yet. Applying creates one with no Discord permissions and adds nobody to it. Review shows exactly what it will do first."
-    : state.message;
-  return `<div class="kb-field">
-  <label class="kb-switch"><input type="checkbox" role="switch" name="create_host" value="1" aria-describedby="${id}-help"${state.available && checked ? " checked" : ""}${state.available ? "" : " disabled"}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Create @Event host</label>
-  <p class="kb-help" id="${id}-help">${escapeHtml(help)}</p>
-</div>`;
+<p class="kb-help" id="${id}-help">${escapeHtml(roleHelp(create))}</p>`;
 }
 
 export interface WizardAccessPageProps {
@@ -215,10 +214,14 @@ export interface WizardAccessPageProps {
   /** Roles that may be picked; `null` when Discord or the groups couldn't be read. */
   options: AccessRole[] | null;
   gaps: AccessGap[];
-  /** Whether the Event host role can be created here; `null` = not known. */
-  hostCreate?: HostCreateState | null;
-  /** *Create @Event host* is ticked. */
-  createHost?: boolean;
+  /**
+   * The role Picker's create flag (#1618, #1658): `ok` offers "Create new
+   * role", a refusal shows its reason instead. Absent when the permission could
+   * not be read (no row, no line) or the page offers nothing.
+   */
+  create?: PickerCreate;
+  /** Names chosen to be created, per scope; drawn as pending choices. */
+  pending?: Partial<Record<AccessScope, readonly string[]>>;
   flash?: { type: "ok" | "warn" | "err"; text: string } | null;
 }
 
@@ -238,29 +241,22 @@ export function renderWizardAccessPage(props: WizardAccessPageProps): string {
     const picker =
       options === null
         ? `<p class="kb-help">Roles can't be listed right now.</p>`
-        : roleSelect(c.scope, options, props.selection[c.scope]);
-    const noRole =
-      options !== null && c.scope === "host" && props.hostCreate
-        ? hostCreateControl(props.hostCreate, props.createHost === true)
-        : "";
+        : roleSelect(
+            c.scope,
+            options,
+            props.selection[c.scope],
+            props.create,
+            props.pending?.[c.scope] ?? [],
+          );
     return `<article class="kb-access__card" aria-labelledby="access-${c.scope}-title">
   <header class="kb-access__head"><div><h3 class="kb-access__title" id="access-${c.scope}-title">${escapeHtml(c.title)}</h3><p class="kb-access__how">${escapeHtml(c.how)}</p></div></header>
   ${canList(c.can, c.cannot)}
   <div class="kb-access__roles">
     <div class="kb-field">${picker}</div>
     ${c.help ? `<p class="kb-help">${escapeHtml(c.help)}</p>` : ""}
-    ${noRole}
   </div>
 </article>`;
   }).join("\n");
-
-  const members = `<article class="kb-access__card" aria-labelledby="access-members-title">
-  <header class="kb-access__head"><div><h3 class="kb-access__title" id="access-members-title">Members</h3><p class="kb-access__how">Sign in to their own page with /me.</p></div></header>
-  ${canList(["Set their own preferences", "See their own stats and reminders"], ["Change settings", "See other people's private data"])}
-  <div class="kb-access__roles">
-    <p class="kb-help">Everyone on the server may use /me. To narrow it to some roles, use <a href="/admin/permissions">Command permissions</a>.</p>
-  </div>
-</article>`;
 
   const form =
     options === null
@@ -284,7 +280,6 @@ ${form}
   <h2 class="kb-panel__title">Who can do what</h2>
   <div class="kb-access">
 ${cards}
-${members}
   </div>
   <div class="actions">
     <button type="submit" class="kb-btn kb-btn--primary"${options === null ? " disabled" : ""}>Save access and continue</button>
@@ -311,15 +306,48 @@ function scopeNames(scopes: readonly AccessScope[]): string {
         .join(", ");
 }
 
+/** A typed name that selected an EXISTING role, for Review's warning. */
+export interface ReviewRoleMatch {
+  /** The role's own name. */
+  name: string;
+  scopes: AccessScope[];
+  /** Everyone who holds it already; `null` when Discord could not say. */
+  members: number | null;
+}
+
+/**
+ * Review's first line for a typed name that matched an existing role (#1618):
+ * no role is created, and everyone who already holds that role gets what the
+ * scope gives. A warning Callout when a scope is Admins or Moderators, a plain
+ * one for Event hosts only. The wording is a PROPOSAL for the owner.
+ */
+function renderRoleMatches(matches: readonly ReviewRoleMatch[]): string {
+  if (matches.length === 0) return "";
+  const strong = matches.some((m) => m.scopes.some((s) => s !== "host"));
+  const rows = matches
+    .map((m) => {
+      const who =
+        m.members === null
+          ? "its members could not be counted"
+          : `${m.members} ${m.members === 1 ? "member holds" : "members hold"} it now`;
+      return `<li>${roleMention(m.name)} is an existing role, ${escapeHtml(who)}. It will be mapped to ${escapeHtml(
+        m.scopes.map((s) => SCOPE_NAMES[s]).join(" and "),
+      )}; no role is created.</li>`;
+    })
+    .join("");
+  return `<div class="kb-callout${strong ? " kb-callout--warn" : ""}" role="status" id="wizard-role-matches">${toneIcon(strong ? "warn" : "")}<div class="kb-callout__body"><p class="kb-callout__title">A name you typed is an existing role</p><ul>${rows}</ul><p class="kb-callout__text">Everyone who already holds an existing role gets what its scope allows. Go back to Access if you meant a new role.</p></div></div>`;
+}
+
 /** The role-mapping part of the review step: what Apply will write to role groups. */
 export function renderAccessReview(
   changes: readonly AccessChange[],
   problem: string | null,
   gaps: readonly AccessGap[],
-  host: HostReview | null = null,
+  roles: WizardRoleReview | null = null,
+  matches: readonly ReviewRoleMatch[] = [],
 ): string {
-  const parts: string[] = [];
-  const hostBlock = host ? renderHostReview(host) : "";
+  const parts: string[] = [renderRoleMatches(matches)];
+  const roleBlock = roles ? renderRoleCreateReview(roles) : "";
   if (problem) {
     parts.push(
       callout(
@@ -332,8 +360,8 @@ export function renderAccessReview(
   }
   parts.push(gapCallouts(gaps));
   if (changes.length === 0) {
-    parts.push(hostBlock);
-    if (!problem && !host) {
+    parts.push(roleBlock);
+    if (!problem && !roles) {
       parts.push(
         `<div class="card"><h2>Role access</h2><p class="muted">No role mapping changes.</p></div>`,
       );
@@ -358,29 +386,47 @@ export function renderAccessReview(
     <tbody>${rows}</tbody>
   </table>
 </div>`);
-  parts.push(hostBlock);
+  parts.push(roleBlock);
   return parts.filter(Boolean).join("\n");
 }
 
-/** The plan for creating the Event host role: what the engine will do, or why it can't. */
-function renderHostReview(host: HostReview): string {
+const SCOPE_NAMES: Record<AccessScope, string> = {
+  admin: "Admins",
+  staff: "Moderators",
+  host: "Event hosts",
+};
+
+/**
+ * The Review entry for the roles the Access step will create (#1618): one list
+ * row per role, in a Panel, with a Mention for the name, and a line saying which
+ * scopes it is mapped to. Nothing is created and nobody is added; the role has
+ * no Discord permissions. The wording is a PROPOSAL for the owner. Empty when
+ * there is nothing planned and nothing wrong, so a Review without roles renders
+ * as before.
+ */
+export function renderRoleCreateReview(review: WizardRoleReview): string {
   const problems =
-    host.problems.length > 0
-      ? callout(
-          "err",
-          "The Event host role can't be created.",
-          `${host.problems.join(" ")} Go back to Access and untick it, or apply is blocked.`,
-          "alert",
-        )
+    review.problems.length > 0
+      ? `<div class="kb-callout kb-callout--err" role="alert" id="wizard-role-problems">${toneIcon("err")}<div class="kb-callout__body"><p class="kb-callout__title">The roles can't be created</p><ul>${review.problems
+          .map((p) => `<li>${escapeHtml(p)}</li>`)
+          .join(
+            "",
+          )}</ul><p class="kb-callout__text">Nothing is changed until this is fixed. Go back to Access and change it, or fix it in Discord and open Review again.</p></div></div>`
       : "";
-  const ops =
-    host.problems.length === 0 && host.operations.length > 0
-      ? `<ul>${host.operations.map((o) => `<li>${escapeHtml(o)}</li>`).join("")}</ul>
-  <p class="muted">Applying starts this as a background job and takes you to Role groups to follow it. The role has no Discord permissions and nobody is added to it. The group is mapped to Event hosts when the role exists; if the job fails, no group is mapped.</p>`
-      : "";
+  if (review.roles.length === 0) return problems;
+  const id = "wizard-role-review";
+  const rows = review.roles
+    .map(
+      (r) =>
+        `<li><span class="kb-list__main"><span>Create the role ${roleMention(r.name)} (no Discord permissions, nobody added)</span><span class="kb-list__desc">Mapped to ${escapeHtml(r.scopes.map((s) => SCOPE_NAMES[s]).join(" and "))}.</span></span></li>`,
+    )
+    .join("");
   return `${problems}
-<div class="card">
-  <h2>Event host role</h2>
-  ${ops || `<p class="muted">Not created.</p>`}
-</div>`;
+<section class="kb-panel" id="${id}" aria-labelledby="${id}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${id}-h">Roles to create</h2><span class="kb-panel__meta">${review.roles.length}</span></header>
+  <div class="kb-panel__body kb-panel__body--flush">
+    <ul class="kb-list">${rows}</ul>
+  </div>
+  <footer class="kb-panel__foot"><p class="kb-help">Nothing is created until you apply. If applying fails, KoolBot removes what it created and puts the role groups back; anything it keeps because something now points at it, or could not remove, is named.</p></footer>
+</section>`;
 }

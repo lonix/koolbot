@@ -54,9 +54,7 @@ describe("renderCreateReview (#1661)", () => {
       "Create the voice channel Lobby for Lobby channel",
     );
     expect(plain(html)).toContain("Not in a category");
-    expect(plain(html)).toContain(
-      "Visible to everyone who can see the server",
-    );
+    expect(plain(html)).toContain("Visible to everyone who can see the server");
     expect(html).toContain('aria-label="Voice channel"');
     expect(html).not.toContain("Inherits access");
   });
@@ -67,9 +65,7 @@ describe("renderCreateReview (#1661)", () => {
       "Create the category Hangout for Voice category",
     );
     expect(html).toContain("kb-mention kb-mention--category");
-    expect(plain(html)).toContain(
-      "Visible to everyone who can see the server",
-    );
+    expect(plain(html)).toContain("Visible to everyone who can see the server");
     expect(plain(html)).not.toContain("#");
   });
 
@@ -77,7 +73,7 @@ describe("renderCreateReview (#1661)", () => {
     const html = renderCreateReview([text, voice, category]);
     expect(plain(html)).toContain("Nothing is created until you apply.");
     expect(plain(html)).toContain(
-      "If applying fails, nothing it created is left behind.",
+      "If applying fails, KoolBot removes what it created; anything it keeps because something now points at it, or could not remove, is named.",
     );
     expect(html.match(/<li>/g)).toHaveLength(3);
   });

@@ -594,7 +594,9 @@ describe("a refused preset editor (#1523)", () => {
     expect(res.status).toBe(422);
     const html = await res.text();
     expect(html).toContain(`name="preset_id" value="lib:${OID}"`);
-    expect(html).toMatch(/<h2 class="kb-panel__title" id="editor-h">Edit .{1,6}Stored name.{1,6}<\/h2>/);
+    expect(html).toMatch(
+      /<h2 class="kb-panel__title" id="editor-h">Edit .{1,6}Stored name.{1,6}<\/h2>/,
+    );
   });
 
   it("does not draw an Add form for an edit whose preset is gone: the flash goes back to the editor", async () => {

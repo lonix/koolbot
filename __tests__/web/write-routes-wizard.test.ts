@@ -1444,14 +1444,12 @@ describe("GET /wizard/done: the optional narrowing step (#1617)", () => {
     expect(html).not.toContain('method="POST" action="/admin/wizard');
   });
 
-  it("shows the flash and the Event host job link, and ignores a job id that is not an id", async () => {
-    const ok = await (await harness.get("/wizard/done?job=abc-123_DEF")).text();
-    expect(ok).toContain("/admin/role-groups?job=abc-123_DEF");
-    const bad = await (
-      await harness.get("/wizard/done?job=%22%3E%3Cscript%3E")
-    ).text();
-    expect(bad).not.toContain("/admin/role-groups?job=");
-    expect(bad).not.toContain("<script>x");
+  it("no longer links an Event host role job: the role is created by Apply itself (#1618)", async () => {
+    for (const job of ["abc-123_DEF", "%22%3E%3Cscript%3E"]) {
+      const html = await (await harness.get(`/wizard/done?job=${job}`)).text();
+      expect(html).not.toContain("/admin/role-groups?job=");
+      expect(html).not.toContain("<script>x");
+    }
   });
 
   it("says there is nothing to swap when the bot does not have Administrator", async () => {

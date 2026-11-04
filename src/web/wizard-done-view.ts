@@ -28,8 +28,6 @@ export interface WizardDonePageProps {
   navFeatureStatus?: NavFeatureStatus;
   report: BotPermissionReport;
   admin: AdministratorCheck;
-  /** An Event host role job the wizard started; Role groups shows how it ends. */
-  hostJobId?: string | null;
   flash?: FlashMessage | null;
 }
 
@@ -156,11 +154,6 @@ export function renderWizardDonePage(props: WizardDonePageProps): string {
   const parts: string[] = [];
   const flash = renderFlash(props.flash);
   if (flash) parts.push(flash);
-  if (props.hostJobId) {
-    parts.push(
-      `<div class="kb-callout" role="status">${toneIcon("")}<div class="kb-callout__body"><p class="kb-callout__title">The Event host role is being created</p><p class="kb-callout__text">Role groups shows how it ends.</p></div><div class="kb-callout__actions"><a class="kb-btn kb-btn--sm" href="/admin/role-groups?job=${encodeURIComponent(props.hostJobId)}">Open Role groups</a></div></div>`,
-    );
-  }
   if (admin.state === "has") {
     parts.push(
       callout(

@@ -31,7 +31,8 @@ the markup from `feature-page.ts` until the shared icon helper (#1369) replaces 
 **As built (#1638).** *Needs you* has one more source: the slash-command check (`CommandManager.checkCommandSync`, read with the same 2.5 s limit). When the
 registered commands differ from the ones the switched-on features need, the first row names what to add, remove and update (at most five names, then "and N
 more"), says what members see, and links to All settings (`/admin/settings#commands-sync`), where Reload commands is: the Dashboard stays read-only. When the
-check could not be made the row says *Not checked* with the reason (`kb-badge--info`, info icon), never "in sync". The row is first so the six-row cut does not
+check could not be made the row says *Not checked* with the reason (`kb-badge--info`, info icon), never "in sync". The row is first so the six-row
+cut does not
 hide it. All settings shows the same state beside its button as a `kb-status` word (*In sync*, *Out of sync*, *Not checked*) and one sentence.
 
 ### EventsPage
@@ -51,7 +52,8 @@ The pattern for every feature page (#1301), shown on Events.
 
 Bot permissions (#1306): what to do comes first, then every permission in one matrix.
 
-The intro says Administrator is fine to start with (the Setup wizard asks for it) and that the permissions listed here are the target to narrow the bot to (#1617).
+The intro says Administrator is fine to start with (the Setup wizard asks for it) and that the permissions listed here are the target to narrow the
+bot to (#1617).
 
 1. **How to fix**, only when something is missing: a numbered, deduplicated list of steps and *Re-authorise KoolBot*, which opens Discord's bot-invite
    page with every permission the switched-on features need. Whether Discord applies the new bits to the existing role still needs checking; if it
@@ -151,9 +153,22 @@ from the game. The footer line says how a missing game gets added: each game is 
 The Setup wizard's Access step: who can do what, before any channel is set up.
 
 - Steps: Choose features → **Access** → Features → Review.
-- One AccessCard per scope: Admins (`/config`), Moderators, Event hosts and Members (all `/me`). Each maps Discord roles through a Picker, or offers
-  to create the role (*Create @Event host*), and writes a role group with the matching capability.
-- A callout warns when a switched-on feature has nobody to run it ("Events is on and nobody can host yet").
+- One AccessCard per scope that maps roles: Admins (`/config`), Moderators and Event hosts (both `/me`). Each maps Discord roles through a Picker and
+  writes a role group with the matching capability. There is no Members card: members have no role mapping, and everyone on the server may use `/me`
+  (narrowing it is on Command permissions).
+- **Proposal for the owner, not final manual text (#1618).** The Picker also offers to create the role: the last row, *Create new role: 'typed text'*,
+  as the Settings pages and the feature steps do for channels (see Picker). There are no fixed names; the admin types the name. A text that matches an
+  existing role, in any case, selects that role instead. Choosing the row only marks the name ("Quartermaster (will be created)") and the step saves it
+  with the picks; nothing is created on the step. The help line under the Picker says the role is created with no Discord permissions and nobody is
+  added; when the bot lacks Manage Roles there is no row and the Picker's line gives the reason, and when that cannot be read there is neither row nor
+  line (a role already chosen stays drawn as pending). *Review* lists each role in the Panel *Roles to create*, "Create the role @Name (no Discord
+  permissions, nobody added)", with the scopes it is mapped to, and an error Callout *The roles can't be created* blocks Apply with the reason.
+  **Apply** creates the roles first, then writes the role groups, then the channels and settings; if anything after the roles fails, the role groups
+  are put back and the
+  roles it created are removed; a role something now points at is kept and named, and anything that could not be removed or checked is named too.
+  This replaces the *Create @Event host* switch (#1365): all three cards behave the same.
+- A callout warns when a switched-on feature has nobody to run it ("Events is on and nobody can host yet"); a role chosen to be created counts as someone.
+- Components: Picker (create row and help line), AccessCard, Panel, List, Callout `--err`, Mention. No new component.
 
 ### WizardAdministratorCheck and WizardDonePage (#1617)
 
@@ -167,7 +182,8 @@ proposal until the owner settles it.
   back on Review until the switch is on.
 - The wizard ends on `/admin/wizard/done`, not a fifth step in the Steps bar: *Narrow the bot's permissions*, optional, read-only. A Panel of the
   permissions the switched-on features need with chips for the features, a Panel *Used, but not checked here* (the permissions KoolBot uses that
-  Bot permissions does not check, never called unneeded), a folded *Not needed* list of what only switched-off features use, a Panel of four numbered steps to swap
+  Bot permissions does not check, never called unneeded), a folded *Not needed* list of what only switched-off features use, a Panel of four numbered
+  steps to swap
   Administrator in Discord, and one primary button, *Open Bot permissions*, next to *Skip for now*.
 
 ### WizardFeatureStep, creating a channel (#1662)
@@ -210,7 +226,8 @@ leaves adopted events out as the overview card does. A failed read says so inste
 
 ### NewEventPage
 
-Creating an event, here as an event host. Admins get the same form on a page of their own, `/admin/events/new`, which the Events page opens, with *Repeat* added.
+Creating an event, here as an event host. Admins get the same form on a page of their own, `/admin/events/new`, which the Events page opens, with
+*Repeat* added.
 
 1. **When** first: *Now*, *In 15 min*, *In 30 min*, *In 1 hour*, *Pick date & time*. *Now* creates the channels at once and announces the event as
    happening now. Native date and time inputs; the timezone select puts the server's zone first.
@@ -266,7 +283,8 @@ the problems, the board (`src/web/host-board-view.ts`), the folded *Group detail
 
 *Mod log*: the home of the Moderator scope, for people who moderate but are not admins.
 
-- Header: why they see it, once, under the title ("You can moderate because you are in @Moderator"). The sidebar is the navigation: no Mod log / Command audit tabs.
+- Header: why they see it, once, under the title ("You can moderate because you are in @Moderator"). The sidebar is the navigation: no Mod log /
+Command audit tabs.
 - Tiles: open cases (warn when any), actions in the last 7 days, timeouts running now.
 - *Open cases* with *Review*, then *Actions* (filter by kind) with mentions for channels and a link to each case.
 - Moderators read the log and review cases; moderation settings stay with admins. Tickets joins this section once the server switches it on.

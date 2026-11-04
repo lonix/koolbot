@@ -270,3 +270,46 @@ describe("toPickerCreate", () => {
     ).toBeUndefined();
   });
 });
+
+describe("canBotCreate for a role (#1618)", () => {
+  it("is ok when the bot has Manage Roles, and ignores Manage Channels", async () => {
+    const client = makeClient({ serverBits: P.ManageRoles });
+    expect(
+      await create.canBotCreate(client, "guild-1", { kind: "role" }, direct),
+    ).toEqual({ ok: true });
+  });
+
+  it("is ok for Administrator, which holds every permission", async () => {
+    const client = makeClient({ serverBits: P.Administrator });
+    expect(
+      await create.canBotCreate(client, "guild-1", { kind: "role" }, direct),
+    ).toEqual({ ok: true });
+  });
+
+  it("says why without Manage Roles, even when the bot has Manage Channels", async () => {
+    const client = makeClient({ serverBits: P.ManageChannels });
+    expect(
+      await create.canBotCreate(client, "guild-1", { kind: "role" }, direct),
+    ).toEqual({ ok: false, reason: create.CREATE_REASON_ROLE });
+    expect(create.CREATE_REASON_ROLE).toContain("Manage Roles");
+    expect(create.CREATE_REASON_ROLE).toContain("Bot permissions");
+  });
+
+  it("answers unknown when the server cannot be read", async () => {
+    const client = makeClient({ guildUnreadable: true });
+    expect(
+      await create.canBotCreate(client, "guild-1", { kind: "role" }, direct),
+    ).toEqual({ ok: "unknown" });
+  });
+
+  it("gives the Picker a role flag, and none for unknown", () => {
+    expect(create.toPickerCreate("role", { ok: true })).toEqual({
+      kind: "role",
+      ok: true,
+    });
+    expect(create.toPickerCreate("role", { ok: false, reason: "why" })).toEqual(
+      { kind: "role", ok: false, reason: "why" },
+    );
+    expect(create.toPickerCreate("role", { ok: "unknown" })).toBeUndefined();
+  });
+});
