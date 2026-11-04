@@ -954,7 +954,7 @@ describe("switching a feature's master off on a revisited step (#1622)", () => {
     const html = await (await harness.get("/wizard?step=confirm")).text();
     expect(html).toContain('name="cascadeOff"');
     expect(html).not.toContain("These settings can't be applied together");
-    expect(html).not.toMatch(/<button[^>]*btn-primary[^>]*disabled/);
+    expect(html).not.toMatch(/<button[^>]*kb-btn--primary[^>]*disabled/);
 
     const res = await harness.post("/wizard/apply", {
       cascadeOff: "voicetracking.announcements.enabled",
@@ -1047,7 +1047,7 @@ describe("a feature turned off while a part that needs it stays on (#1622)", () 
       'name="cascadeOff" value="voicetracking.announcements.enabled"',
     );
     expect(html).toContain('form="wizard-apply-form"');
-    expect(html).not.toMatch(/<button[^>]*btn-primary[^>]*disabled/);
+    expect(html).not.toMatch(/<button[^>]*kb-btn--primary[^>]*disabled/);
   });
 
   it("Review shows nothing about it when nothing depends on what is turned off", async () => {
@@ -1174,7 +1174,7 @@ describe("a feature turned off while a part that needs it stays on (#1622)", () 
     mockConfigGetBoolean.mockImplementation(async () => false);
     const html = await (await harness.get("/wizard?step=confirm")).text();
     expect(html).toContain("These settings can't be applied together");
-    expect(html).toMatch(/<button[^>]*btn-primary[^>]*disabled/);
+    expect(html).toMatch(/<button[^>]*kb-btn--primary[^>]*disabled/);
     const res = await harness.post("/wizard/apply");
     expect(res.headers.get("location")).toContain("step=confirm");
     expect(mockApplyConfiguration).not.toHaveBeenCalled();
@@ -1295,7 +1295,7 @@ describe("the Administrator check on the first page and on Review (#1617)", () =
     expect(html).toContain('form="wizard-apply-form"');
     expect(html).toContain('id="wizard-apply-form"');
     // Apply is never greyed out for this: that would be a hard block.
-    expect(html).not.toMatch(/btn-primary"[^>]* disabled>Apply/);
+    expect(html).not.toMatch(/kb-btn--primary"[^>]* disabled[^>]*>Apply/);
   });
 
   it("shows no continue switch on Review when the bot has Administrator or the check is unknown", async () => {

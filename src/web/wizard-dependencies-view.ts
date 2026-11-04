@@ -141,6 +141,6 @@ export function renderDependencyReview(
   }
 
   return parts.length > 0
-    ? `<div class="kb-stack" style="margin-bottom: var(--space-3)">${parts.join("\n")}</div>`
+    ? `<div class="kb-stack">${parts.join("\n")}</div>`
     : "";
 }

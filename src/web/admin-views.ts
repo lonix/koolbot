@@ -2877,19 +2877,31 @@ export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
     accessChanges.length === 0 &&
     !roleReview &&
     creations.length === 0;
-  const rows =
-    props.pending.length === 0
-      ? `<tr><td colspan="3" class="empty">No settings configured.</td></tr>`
-      : props.pending
-          .map(
-            ([k, v]) =>
-              `<tr>
-<th scope="row" class="mono">${escapeHtml(k)}</th>
-<td class="mono">${escapeHtml(v)}</td>
-<td class="muted">${escapeHtml(props.metadata[k]?.description ?? "")}</td>
+  const rows = props.pending
+    .map(
+      ([k, v]) =>
+        `<tr>
+<th scope="row" class="kb-mono">${escapeHtml(k)}</th>
+<td class="kb-mono">${escapeHtml(v)}</td>
+<td class="kb-muted">${escapeHtml(props.metadata[k]?.description ?? "")}</td>
 </tr>`,
-          )
-          .join("");
+    )
+    .join("");
+  // The settings the wizard will write (#1752): a Panel, a DataTable that
+  // scrolls inside it, or an EmptyState when no setting was chosen. The panel
+  // stays open and last: it is what Apply writes, so it is not folded away.
+  const settingsId = "wizard-settings-review";
+  const settingsHtml = `<section class="kb-panel" id="${settingsId}" aria-labelledby="${settingsId}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${settingsId}-h">Settings to apply</h2>${props.pending.length > 0 ? `<span class="kb-panel__meta">${props.pending.length}</span>` : ""}</header>
+  ${
+    props.pending.length === 0
+      ? `<div class="kb-panel__body">${kbEmptyState("settings", "No settings configured.", "Settings you choose on the earlier steps are listed here before you apply.")}</div>`
+      : `<div class="kb-panel__body kb-panel__body--flush"><table class="kb-table" aria-label="Settings to apply">
+    <thead><tr><th scope="col">Key</th><th scope="col">New value</th><th scope="col">Description</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`
+  }
+</section>`;
 
   // Empty (no blank line, no form id) when there is nothing to say, so a Review
   // without dependency conflicts renders exactly as before (#1622).
@@ -2916,29 +2928,37 @@ export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
         },
       })}\n${adminContinue ? `${adminContinue}\n` : ""}`
     : "";
+  // Why Apply is off, said next to the button (#1752). A blocked plan is named
+  // as blocked, so it never reads as "nothing to apply".
+  const blocked = Boolean(
+    props.accessProblem ||
+    createProblems.length > 0 ||
+    (roleReview && roleReview.problems.length > 0) ||
+    dependencyReviewBlocksApply(props.dependencies),
+  );
+  const applyOff = nothingToApply || blocked;
+  const applyWhy = blocked
+    ? "Apply is blocked until the problems above are fixed."
+    : "There is nothing to apply yet. Choose a feature or change a setting in an earlier step.";
   const body = `
+<div class="kb-stack">
 ${renderWizardSteps("review")}
-<h1>Review configuration</h1>
-<p class="subtitle">The following settings will be applied when you click <strong>Apply</strong>.</p>
+<header class="kb-pagehead"><div class="kb-pagehead__text"><h1 class="kb-pagehead__title">Review configuration</h1><p class="kb-pagehead__sub">The following settings will be applied when you click <strong>Apply</strong>.</p></div></header>
 ${renderFlash(props.flash)}
 ${adminHtml}${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGaps ?? [], roleReview, props.roleMatches ?? [])}
-${createHtml}${dependencyHtml}<div class="card">
-  <table>
-    <thead><tr><th scope="col">Key</th><th scope="col">New value</th><th scope="col">Description</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table>
-</div>
-<div class="actions">
+${createHtml}${dependencyHtml}${settingsHtml}
+<div class="kb-row">
   <form method="POST" action="/admin/wizard/apply"${dependencyHtml || adminContinue ? ` id="${WIZARD_APPLY_FORM_ID}"` : ""}>
     <input type="hidden" name="_csrf" value="${csrf}">
     ${props.accessFingerprint ? `<input type="hidden" name="accessFingerprint" value="${escapeHtml(props.accessFingerprint)}">` : ""}
     ${roleReview?.planId ? `<input type="hidden" name="rolePlanId" value="${escapeHtml(roleReview.planId)}">` : ""}${props.createPlanId ? `<input type="hidden" name="channelPlanId" value="${escapeHtml(props.createPlanId)}">` : ""}
-    <button type="submit" class="btn btn-primary"${nothingToApply || props.accessProblem || createProblems.length > 0 || (roleReview && roleReview.problems.length > 0) || dependencyReviewBlocksApply(props.dependencies) ? " disabled" : ""}>Apply</button>
+    <button type="submit" class="kb-btn kb-btn--primary"${applyOff ? ' disabled aria-describedby="wizard-apply-why"' : ""}>Apply</button>
   </form>
   <form method="POST" action="/admin/wizard/cancel">
     <input type="hidden" name="_csrf" value="${csrf}">
-    <button type="submit" class="btn btn-danger">Cancel</button>
+    <button type="submit" class="kb-btn kb-btn--danger">Cancel</button>
   </form>
+</div>${applyOff ? `\n<p class="kb-help" id="wizard-apply-why">${applyWhy}</p>` : ""}
 </div>
 `;
   return renderAdminPage({

@@ -5147,7 +5147,7 @@ describe("renderWizardConfirmPage", () => {
     expect(html).toContain('action="/admin/wizard/apply"');
     expect(html).toContain('action="/admin/wizard/cancel"');
     expect(html).toMatch(
-      /<button[^>]*type="submit"[^>]*class="btn btn-primary"[^>]*>Apply<\/button>/,
+      /<button[^>]*type="submit"[^>]*class="kb-btn kb-btn--primary"[^>]*>Apply<\/button>/,
     );
   });
 
