@@ -1,4 +1,6 @@
-# Moderation labels
+# Labels
+
+The words the Web UI and Discord show that were reviewed once and are kept here: the moderation words first, then the Picker's create row.
 
 The words moderation shows people, reviewed once for plain English (#1353). Many moderators and members read English as a second language, so a word
 that is correct but uncommon (*uphold*, *readmit*, *unban*) is replaced by a plain one where that loses no meaning. The same decision uses the same
@@ -106,3 +108,31 @@ Discord shows the word with a capital letter and an emoji in front (`🕊️ Ban
 | expired | Plain. |
 | Moderator, Member, Reason, Source | Plain. |
 | Server Members intent, View Audit Log | Discord's own names. |
+
+## The Picker's create row
+
+The words of the create row (#1658, #1660, #1661), as built and approved by the owner on #1666. The code holds them (`setting-pickers.ts`, `bot-create-check.ts`,
+`wizard-create-review.ts`, `wizard-access-view.ts`, `wizard-create.ts`, `setting-create.ts`); [components.md](components.md#the-create-row) says when each shows.
+`<kind>` is *channel*, *category* or *role*, and `<typed>` is the text the person typed, shown as typed.
+
+| Where | Words |
+| --- | --- |
+| The row | `Create new <kind>: '<typed>'` |
+| The pending marker | `<typed> (will be created)` |
+| Status line, row offered | `No existing <kind> matches. You can create '<typed>'.` or `2 matches, or create '<typed>'.` |
+| Status line, already chosen | `'<typed>' is already chosen to be created.` |
+| Status line, too long | `No matches. Names can be up to 100 characters.` |
+| Help line, channel | `The bot needs Manage Channels to create a channel. Give the bot's role Manage Channels in Server Settings, Roles; the Bot permissions page shows what is missing.` |
+| Help line, category | The same with *category*. |
+| Help line, role | `The bot needs Manage Roles to create a role. Give the bot's role Manage Roles in Server Settings, Roles; the Bot permissions page shows what is missing.` |
+| Access step help line, row offered | `Leave it empty for none. To create a role, type its name and choose Create new role. It is created with no Discord permissions and nobody is added to it; Review lists it first.` |
+| Review, a channel or category | `Create the text channel <name> for <setting label>`, `Create the category <name> for <setting label>`; under it `Not in a category. Visible to everyone who can see the server.` or `Visible to everyone who can see the server.` |
+| Review, the managed voice category | The line above and `The lobby is created in it by the voice feature, not by this step.` |
+| Review, a role | `Create the role @<name> (no Discord permissions, nobody added)` and `Mapped to <scopes>.` |
+| Review, an existing role | `A name you typed is an existing role`: `@<name> is an existing role, <n> members hold it now. It will be mapped to <scopes>; no role is created.` |
+| Review panels | `Channels and categories to create`, `Roles to create` |
+| Review, blocked | `The channels can't be created`, `The roles can't be created` |
+| Review table value | `# <name> (will be created)`, `# <name> (existing channel)`, `<name> (existing category)` |
+| The flash on a save | `Created # <name> for <setting label>.`, `Used the existing # <name> for <setting label>.`, `Created category <name> for <label> and <label>.` |
+| Two matches | `More than one text channel on this server has that name. Pick the one you want from the list.`, the same with *category*, `Two roles are called "<name>". Pick the one you mean from the list.` |
+| Not offered | `Pick one from the list; a new one cannot be created from here.` |

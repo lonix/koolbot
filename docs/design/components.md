@@ -95,7 +95,7 @@ Access step and on Role groups.
 
 **Markup.** `div.kb-access` (grid) → `article.kb-access__card` → `header.kb-access__head` (icon well, `h3.kb-access__title`, `p.kb-access__how`),
 `ul.kb-access__can` (a check per thing they can do; `li.is-not` with a minus for what they cannot), and `div.kb-access__roles` (a Picker of roles, plus an
-optional help line). On the Setup wizard's Access step the Picker may also offer _Create new role_ (a proposal, #1618; see WizardAccessPage).
+optional help line). On the Setup wizard's Access step the Picker also offers _Create new role_ (see the Picker's create row and WizardAccessPage).
 
 - Write _can_ lines as plain verbs in the member's terms ("Run the host panel: teams, moves, clan tags").
 - List _cannot_ lines only where people would expect otherwise ("Change settings").
@@ -372,6 +372,120 @@ follows the trigger on scroll and resize. The trigger mirrors the select's `aria
 `aria-activedescendant` in the search box, Enter chooses, Escape closes from anywhere in the open picker (the search box, _Add_, a chip's remove button;
 not while an input method is composing) and returns to _Add_, and the arrow keys on _Add_ return to the search box while it is
 open. A multi-select list (`select[multiple]`) is built the same way (see above); its "Selected:" summary shows only without JavaScript.
+
+#### The create row
+
+A Picker may offer to create the channel, category or role the admin typed, so they do not leave the page to make it first. Only a Picker that its page
+flags offers it; every other Picker is unchanged. Nothing is created when the row is chosen: the choice is only marked, and the page creates the item
+when it is saved (Settings, Announcements, Polls) or applied (the Setup wizard). The pages that use it are in [pages.md](pages.md): _WizardAccessPage_,
+_WizardFeatureStep and Review_ and _Settings pages and forms_.
+
+**Where it is offered, by kind.**
+
+| Kind | Offered on | Created as |
+| --- | --- | --- |
+| Channel | The text channel settings that post a feature's messages (Settings and the feature pages' Settings cards; the Setup wizard's Features pages for all of them but _Celebrations channel_), and the _Channel_ field of the Announcements and Polls forms | A text channel, name in lower case with hyphens for spaces |
+| Category | _Managed category_, _Event channel category_ and _Ticket channel category_, on the same pages | A category |
+| Role | The three role Pickers of the Setup wizard's Access step | A role |
+
+**Not offered.**
+
+- Voice channels: a voice setting never shows the row.
+- Log channels (the `core.*` ones, `moderation.raid.alert_channel_id`): a created channel has no permission overwrites, so everyone who can see the server could
+  read a log in it. Making a log channel private is open (see _Still a proposal_).
+- Roles anywhere else: only the Access step offers the row, and no role with Discord permissions is ever created (a created role has none). Other role
+  fields list existing roles only, and what a posted `create:` value does there depends on the field:
+  - Refused as a create value: the Polls _Role to ping_ field ("Pick one from the list; a new one cannot be created from here.") and every role setting saved
+    through the Settings pages, the wizard steps or an import (the tickets staff role, the birthdays, rules and quarantine roles, the roles that delete
+    quotes): "this setting cannot create a new one from here".
+  - Refused because it is not a role: linking a role to a role group ("That role couldn't be read from Discord. Reload and try again."), binding a reaction
+    role ("Role `create:Helpers` was not found in this server.") and a leaderboard tier ("Pick a role from the list."). There is no check for a create value
+    there, only the check that the role exists.
+  - Not refused: Command permissions. A `create:Helpers` posted to it is stored as a role id (a crafted post only; the page's own Picker cannot send it).
+    This is a known gap, listed below.
+- Anything the bot cannot create: with the permission missing there is no row (see the states below).
+- Without JavaScript there is no row. The native select is as before, and a form that is shown again after a refusal keeps a name already chosen to be
+  created as a selected "(will be created)" option.
+
+**Markup.** The row adds no new class. The wrapper's `data-picker-meta` is the usual array when the Picker does not offer the row, and an object
+(`items` and `create`: the kind, for a channel its `channelKind`, `ok`, and the `reason` when `ok` is false) when it does; the page then loads the
+script that builds the row. With JavaScript the listbox gets a last `li.kb-picker__opt[role=option][data-create]` holding a `plus` icon and the text
+in a `span` (without the span the icon would be the row's last child, and the stylesheet pushes that to the right edge). The text reads
+_Create new channel: 'typed'_, _Create new category: 'typed'_ or _Create new role: 'typed'_. A hidden
+`span.kb-visually-hidden[role=status]` after the trigger is the live region.
+The status line of the popover (`p.kb-picker__hint[role=status]`) is the one that already says
+how many items match.
+
+Choosing the row adds `<option value="create:<typed>" data-create data-name="<typed>" selected>` to the same select, so the select is still the field.
+A stored id is only digits, so a `create:` value is never an id and never overwrites one. The server reads the value with `parsePickerCreateValue`
+(trimmed, 1 to 100 characters) and is the real check; the browser only mirrors it. A pending option is never removed from the select (the save bar tracks
+options by index): undoing deselects it, and the same name reuses it. The pending name is marked with a `kb-pill`, " (will be created)", after the
+Mention in the trigger or after the Mention in a chip. A single select holds at most one pending name; a multi-select one per name.
+
+**States.**
+
+| State | What the person sees |
+| --- | --- |
+| Idle, or an empty search | No create row. |
+| Text typed, and no item of that kind has that name | The create row, last in the list. With no other match it is the active row, so Enter creates; with matches the first match is active and the arrow keys reach the row. The status line reads "No existing channel matches. You can create 'Support'." or "2 matches, or create 'Support'." |
+| Text typed that is the name of an existing item (any case) | No create row. That item is the active row, so Enter selects it. |
+| Text typed that is already chosen to be created | No create row and no active row, so Enter does nothing. The status line reads "'Support' is already chosen to be created." |
+| Row chosen and pending | A single Picker closes and shows `# Support (will be created)` (a Mention and the pill). A multi-select stays open with the search cleared and gains a chip `@Helpers (will be created)`. |
+| Permission refused | No row. While the typed name matches no existing item, the status line adds the reason after the match count: "No matches. The bot needs Manage Channels to create a channel. Give the bot's role Manage Channels in Server Settings, Roles; the Bot permissions page shows what is missing." The category and role lines say "a category" and Manage Channels, and "a role" and Manage Roles. On the Setup wizard's Access step the same reason is also kept as the help line under each Picker. |
+| Permission unreadable | No row and no reason. A name already chosen to be created stays drawn as "(will be created)" on categories, roles and the Announcements and Polls forms. A text channel setting does not: the wizard step shows the stored value instead, and a Settings page that is drawn again shows the typed name as unavailable (a known gap). |
+| A name over 100 characters | No row. The status line reads "No matches. Names can be up to 100 characters." |
+| A prefix the kind does not take | No row. A text channel Picker takes `#` only, a role Picker `@` only, a category Picker no prefix. The prefix is not part of the name. |
+| A refused save shown again | The name comes back as a selected "(will be created)" option, not as an unavailable id. |
+| A save that created it, in place | The pending option becomes the created item under the name Discord has, and the page stays as it is. The new item joins the searchable list when the page is next loaded. |
+
+**Keyboard.** The arrow keys, Home and End include the create row as the last row. Enter chooses the active row. Escape closes without creating. Backspace in the
+empty search of a multi-select removes the last chip shown, a pending one included; chips stay in option order, so that is not always the last choice made.
+Undo is: choose another row (single), Backspace or the chip's remove button (multi), or Discard on the save bar.
+
+**Screen-reader text.**
+
+- The row is an option in the listbox, reached with `aria-activedescendant`, and reads "Create new channel: 'Support'".
+- The trigger and the chip read "… (will be created)". A chip's remove button reads "Remove @Helpers (will be created)".
+- Choosing in a single Picker says "Will be created: channel 'Support'. Choose another row to undo." and, when it replaces a pending name, "Will be created:
+  channel 'Fresh'. Removed: new channel 'Old'. Choose another row to undo."
+- Choosing in a multi-select says "Will be created: role 'Helpers'. Press Backspace in the empty search, or use its remove button, to undo." When the new
+  chip is not the last one it says "Use its remove button to undo." only.
+- Choosing an existing item over a pending name in a single Picker says "Removed: new channel 'Old'. #general selected." Removing a pending chip says
+  "Removed: new role 'Helpers'".
+- Discard says what it took away and brought back, for example "Removed: new channel 'Support'. Restored: #general." or "Will be created: role
+  'Helpers'. Restored: @Staff." with "Nothing selected." when nothing is left.
+- An action that is not possible is never offered as a disabled row: with no permission there is no row, only the reason.
+
+**What a typed name does when it is saved.**
+
+- A name that matches an item on the server selects that item and creates nothing. Names are compared without regard to case; a text channel name is
+  compared as Discord stores it (lower case, hyphens), so _Quote Wall_ finds _quote-wall_ even though the browser still offers the row for it. The flash
+  then says "Used the existing # quote-wall for …" (or _category_). A channel keeps the category it is in.
+- A name that matches two channels, two categories or two roles is refused with "More than one text channel on this server has that name. Pick the one you
+  want from the list." (or _category_). Two roles with the name are refused on the Access step as 'Two roles are called "Helpers". Pick the one you mean from
+  the list.' A role group is not a role.
+- A name that appears on the server between Review (or the save's first read) and the moment of creating is not selected silently: the save or Apply
+  refuses and creates nothing: "The channels on the server changed since Review, so nothing was created. Review the changes again." (or _roles_).
+- A created channel or category has no parent category and no permission overwrites, so it can be read by everyone who can see the server. A created role has
+  no Discord permissions, is not listed apart from other members and cannot be mentioned by everyone, and nobody is added to it. The bot needs
+  _Manage Channels_ for a channel or a category and _Manage Roles_ for a role, and the server checks again when it creates.
+- When one create in a save or Apply fails, KoolBot removes what the same call had already created. What it could not remove, or keeps because something now
+  points at it, is named. A failure that comes later, when the settings are written, can leave settings saved; the pages say which.
+
+> [!NOTE]
+> Two limits are known and accepted. A create whose reply is lost or times out after Discord accepted it can still complete; the person is told the outcome is
+> unknown and to check Discord (#1714). And between a failed Setup wizard Apply creating something and its cleanup, another admin's save can point at it and
+> lose it; the reservation that closes this is #1748.
+
+**Still a proposal, and known gaps.** The owner has not decided the proposals; they are not built.
+
+- A neutral look for the pending marker, a gap between the pill and the remove button in a chip, and a divider that sets the create row apart (these
+  need `kb.css` rules).
+- Creating log channels privately (staff only), so that the log channels can offer the row.
+- A parent category for a created channel, picked with the name.
+- Selecting, rather than refusing, a name another admin created while a save was waiting (#1714).
+- Known gap: Command permissions does not refuse a `create:` value posted to it (see _Not offered_).
+- Offering the row for other role settings (leaderboard tiers, the host and staff roles, the roles that delete quotes) and for Role groups.
 
 ### DiscordEmbed
 
