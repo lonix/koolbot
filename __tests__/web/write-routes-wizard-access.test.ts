@@ -1774,6 +1774,82 @@ describe("roles created from the Access step's Picker (#1618)", () => {
       expect(roles.has("40000000000000001")).toBe(false);
     });
 
+    it.each([
+      // Different capabilities, and the very ones Review showed for the new
+      // group: the re-read diff has no group for the placeholder's id, so a
+      // group that points at the real id always shows as a change.
+      ["host", "changed-during-roles"],
+      ["staff", "changed-during-roles"],
+    ])(
+      "writes nothing when a role group (%s) came to point at a role created for this apply, instead of updating it",
+      async (caps, reason) => {
+        const A = { name: "Alpha", scopes: ["staff"] };
+        const B = { name: "Beta", scopes: ["host"] };
+        mockGetSession.mockReturnValue(
+          wizardState(access, ["quotes"], {}, [A, B]),
+        );
+        const shown = review(access, [A, B]);
+        let n = 0;
+        mockPost.mockImplementation(async (_route: unknown, opts: any) => {
+          n += 1;
+          const id = `4000000000000000${n}`;
+          roles.set(id, role(id, opts.body.name, 1));
+          if (n === 2) {
+            // Another admin links the first new role to a group meanwhile.
+            stored.push(
+              group({
+                id: "g-ext",
+                name: "Linked",
+                roleId: "40000000000000001",
+                capabilities: [caps] as never,
+              }),
+            );
+          }
+          return { id, name: opts.body.name, position: 1 };
+        });
+        const res = await harness.post("/wizard/apply", shown);
+        const flash = parseFlashRedirect(res.headers.get("location"));
+        expect(flash.type).toBe("err");
+        expect(flash.msg).toContain("The settings were not applied.");
+        expect(createSpy).not.toHaveBeenCalled();
+        expect(updateSpy).not.toHaveBeenCalled();
+        expect(mockApplyConfiguration).not.toHaveBeenCalled();
+        // The linked role is kept (a group points at it); the other is removed.
+        expect(flash.msg).toContain("Kept, because");
+        expect(flash.msg).toContain("40000000000000001");
+        expect(roles.has("40000000000000002")).toBe(false);
+        expect(lastAuditFor("wizard.apply")).toMatchObject({
+          details: { reason },
+        });
+      },
+    );
+
+    it("writes nothing when the group of a role selected by name changed since Review", async () => {
+      // "moderator" typed: the Access step resolved it to the existing role,
+      // so Review diffs by its real id; a group for it appearing is a plain
+      // fingerprint mismatch, caught before anything is created.
+      const picks = { ...none, staff: [MOD] };
+      mockGetSession.mockReturnValue(
+        wizardState(picks, ["quotes"], {}, [CREW]),
+      );
+      const shown = review(picks, [CREW]);
+      stored.push(
+        group({
+          id: "g-ext",
+          name: "Mods",
+          roleId: MOD,
+          capabilities: ["host"],
+        }),
+      );
+      const res = await harness.post("/wizard/apply", shown);
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+        "changed since you opened Review",
+      );
+      expect(mockPost).not.toHaveBeenCalled();
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
     it("ranks the new group by the role's position in the fresh read, not the one in the create response", async () => {
       const picks = { ...none, staff: [MOD] };
       stored = [
