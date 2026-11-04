@@ -49,7 +49,7 @@ describe("admin width rule (#1734)", () => {
   it("keeps descriptions, help text and callouts at content-max on a wide page", () => {
     const text = rule(
       KB_CSS,
-      ".kb-main--wide :is(.kb-pagehead__sub, .kb-help, .kb-callout)",
+      ".kb-main--wide :is(.kb-pagehead__sub, .kb-help, .kb-callout, p.kb-muted)",
     );
     expect(text).toContain("max-width: var(--content-max)");
   });
@@ -128,5 +128,42 @@ describe("which admin pages take the wide column (#1734)", () => {
       /<main[\s\S]*?style="[^"]*max-width/.test(p.html),
     );
     expect(own.map((p) => p.name)).toEqual([]);
+  });
+
+  it("caps the legacy text blocks in the admin sheet only, and covers every one a wide page renders", () => {
+    // kb.css is the post-#1652 sheet and carries no legacy class names; the admin sheet's rule goes with them.
+    expect(KB_CSS).not.toMatch(/\.subtitle|\.notice/);
+    const html = renderAdminPage({
+      title: "T",
+      active: "/admin/",
+      body: "<p>x</p>",
+      csrfToken: "c",
+      remainingMs: 1,
+      wide: true,
+    });
+    const legacy = rule(
+      html,
+      "main.kb-main--wide :is(.subtitle,.notice,p.muted)",
+    );
+    expect(legacy).toContain("max-width:var(--content-max)");
+    // Every legacy text class that appears in a wide fixture's page column is in that list.
+    const used = new Set<string>();
+    for (const page of pages) {
+      if (!/<main [^>]*class="[^"]*kb-main--wide/.test(page.html)) continue;
+      if (/class="subtitle"/.test(page.html)) used.add("subtitle");
+      if (/class="notice[ "]/.test(page.html)) used.add("notice");
+      if (/<p class="muted"/.test(page.html)) used.add("p.muted");
+      for (const m of page.html.matchAll(
+        /<(p|div) class="(subtitle|notice|help|helper|lead|hint)[ "]/g,
+      )) {
+        used.add(
+          m[2] === "subtitle" || m[2] === "notice" ? m[2] : `unlisted:${m[2]}`,
+        );
+      }
+    }
+    expect([...used].filter((c) => c.startsWith("unlisted:"))).toEqual([]);
+    expect(
+      used.has("subtitle") && used.has("notice") && used.has("p.muted"),
+    ).toBe(true);
   });
 });

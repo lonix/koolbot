@@ -474,6 +474,10 @@ const STYLE = [
   // and the text caps (descriptions, help text and callouts stay at `content-max`).
   "main{flex:1;padding:1.5rem 2rem;max-width:calc(var(--content-max) + 2 * var(--space-8));min-width:0;overflow-x:auto}",
   "main.kb-main--wide{max-width:calc(var(--content-max-wide) + 2 * var(--space-8))}",
+  // Legacy text blocks keep their line length on a wide page too (#1734): the intro `.subtitle`, the `.notice` bar and a
+  // `p.muted` paragraph on pages not yet on the kb- components. These class names belong to the old sheet, so the rule
+  // lives here and not in kb.css: #1652 deletes it together with the old classes.
+  "main.kb-main--wide :is(.subtitle,.notice,p.muted){max-width:var(--content-max)}",
   // A scroll container is where `position:sticky` resolves, so on a page with a settings
   // save bar `main` must not be one, or the bar sticks inside `main`/the card instead of the
   // viewport. `renderAdminPage` adds `has-savebar` to `main` only for those pages; every
