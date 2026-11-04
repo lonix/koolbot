@@ -213,10 +213,6 @@ function countOf(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-function tagOnOff(on: boolean, onLabel = "ON", offLabel = "OFF"): string {
-  return `<span class="tag ${on ? "tag-on" : "tag-off"}">${on ? onLabel : offLabel}</span>`;
-}
-
 // ---------- Dashboard ----------
 
 export interface DashboardProps extends CommonProps {
@@ -483,6 +479,7 @@ export function renderDependencyHint(
   unmet: UnmetDependency[],
   linkSections = true,
   id = "",
+  kb = false,
 ): string {
   if (unmet.length === 0) return "";
   const names = unmet
@@ -501,6 +498,11 @@ export function renderDependencyHint(
   // the lock reason is announced with the field rather than only being visible
   // beside it (#854).
   const idAttr = id ? ` id="${escapeHtml(id)}"` : "";
+  // `kb`: the same hint as a design-system help line (the Setup wizard, #1751).
+  // The Settings page keeps its own markup until it is migrated.
+  if (kb) {
+    return `<p class="kb-help"${idAttr} role="note">Requires ${names} enabled</p>`;
+  }
   return `<div class="settings-dep-hint"${idAttr} role="note" style="margin-top:.4rem;color:var(--muted);font-size:.85em">Requires ${names} enabled</div>`;
 }
 
@@ -1692,7 +1694,7 @@ function renderControlInput(
  * don't need it. Shown unconditionally (not gated on a feature toggle) so the
  * degraded state is visible without editing — and it re-renders after a save.
  */
-export function renderWarnBelow(r: SettingRow, id = ""): string {
+export function renderWarnBelow(r: SettingRow, id = "", kb = false): string {
   if (!r.warnBelow) return "";
   // Only warn on a value that's genuinely a number below the threshold.
   // An unset key (null/undefined/empty string) renders as a blank input via
@@ -1710,6 +1712,12 @@ export function renderWarnBelow(r: SettingRow, id = ""): string {
   // As with the dependency hint, an `id` lets the caller wire this into the
   // control's `aria-describedby` (#854).
   const idAttr = id ? ` id="${escapeHtml(id)}"` : "";
+  // `kb`: the same message as a warning Callout (the Setup wizard, #1751); the
+  // title is the message, as in `renderFlash`. The Settings page keeps its own
+  // markup until it is migrated.
+  if (kb) {
+    return `<div class="kb-callout kb-callout--warn"${idAttr} role="status">${toneIcon("warn")}<div class="kb-callout__body"><p class="kb-callout__title">${escapeHtml(r.warnBelow.message)}</p></div></div>`;
+  }
   // --warn is 8.1:1 on the card; a darker amber was 3.47:1 (#855).
   return `<div class="settings-warn"${idAttr} role="status" style="margin-top:.4rem;color:var(--warn);font-size:.85em">${escapeHtml(r.warnBelow.message)}</div>`;
 }
@@ -2570,19 +2578,29 @@ export function renderWizardPage(props: WizardPageProps): string {
       Number(Boolean(props.featureStatus[b])) -
       Number(Boolean(props.featureStatus[a])),
   );
+  // One SettingRow per feature: the name with today's state as a Badge, what it
+  // does, and a Switch that posts the `features` checkbox. The Switch's On/Off
+  // word says whether the feature is chosen to configure, the Badge whether it
+  // is on now (a proposal, see the PR).
   const cards = orderedKeys
     .map((fk) => {
       const info = WIZARD_FEATURE_LABELS[fk] ?? { name: fk, desc: "" };
       const currentlyOn = Boolean(props.featureStatus[fk]);
-      const indicator = `<span class="fc-current">${tagOnOff(currentlyOn)}</span>`;
       const id = `feat-${fk}`;
-      const tick = props.ticked?.includes(fk) ? " checked" : "";
-      return `<div class="feature-card">
-  <input type="checkbox" name="features" value="${escapeHtml(fk)}" id="${escapeHtml(id)}"${tick}>
-  <div class="fc-info">
-    <label for="${escapeHtml(id)}" class="fc-name">${escapeHtml(info.name)} ${indicator}</label>
-    <div class="fc-desc">${escapeHtml(info.desc)}</div>
+      const nameId = `${id}-name`;
+      const descId = `${id}-desc`;
+      const tick = props.ticked?.includes(fk) ?? false;
+      return `<div class="kb-setting">
+  <div>
+    <p class="kb-setting__name" id="${escapeHtml(nameId)}"><label for="${escapeHtml(id)}">${escapeHtml(info.name)}</label> ${kbCurrently(currentlyOn)}</p>
+    ${info.desc ? `<p class="kb-setting__desc" id="${escapeHtml(descId)}">${escapeHtml(info.desc)}</p>` : ""}
   </div>
+  <div class="kb-setting__control">${renderSwitch("features", tick, {
+    id,
+    labelledBy: nameId,
+    describedBy: info.desc ? descId : undefined,
+    onValue: fk,
+  })}</div>
 </div>`;
     })
     .join("");
@@ -2604,33 +2622,36 @@ export function renderWizardPage(props: WizardPageProps): string {
       ? `<button type="submit" hidden tabindex="-1">Next</button>\n  `
       : "";
   const body = `
-<h1>Setup Wizard</h1>
+<div class="kb-stack">
+<header class="kb-pagehead"><div class="kb-pagehead__text"><h1 class="kb-pagehead__title">Setup Wizard</h1><p class="kb-pagehead__sub">Pick the features you want to configure and click <strong>Next</strong>. The wizard walks you through each feature's key settings.</p></div></header>
 ${renderWizardSteps("features")}
-<p class="subtitle">Pick the features you want to configure and click <strong>Next</strong>. The wizard walks you through each feature's key settings.</p>
-<div class="notice info">Changes are only applied at the final confirmation step. Cancel any time without affecting the current configuration.</div>
-<div class="card" id="wizard-adoption">
-  <h2>Adopting an existing server?</h2>
-  <p>If this server already has roles, categories and channels, let KoolBot take them over instead of creating new ones. Nothing is changed until you preview a plan and apply it, every apply is saved as a snapshot, and you can restore it later. Steps 2 to 4 are optional.</p>
-  <ol>
-    <li><a href="/admin/adopt">Scan the server</a>: roles, channels, other bots and what to fix first.</li>
-    <li><a href="/admin/role-groups">Role groups</a>: tie your Admin, Mod or VIP roles to groups.</li>
-    <li><a href="/admin/rules">Rules role</a>: an optional rules acceptance gate.</li>
-    <li><a href="/admin/adopt/claims">Channel claims</a>: preview, then apply, read-only and gated channels and feature bindings.</li>
-    <li><a href="/admin/adopt/history">History</a>: review snapshots and restore one.</li>
-  </ol>
-  <p class="muted">Starting from a fresh server? Skip this and pick features below.</p>
-</div>
-<form method="POST" action="/admin/wizard/start">
-  <input type="hidden" name="_csrf" value="${csrf}">
-  ${defaultNext}${adminHtml}<div class="card">
-    <h2>Select features to configure</h2>
-    <div class="wizard-features">${cards}</div>
+<div class="kb-callout" role="status">${toneIcon("")}<div class="kb-callout__body"><p class="kb-callout__title">Changes are only applied at the final confirmation step. Cancel any time without affecting the current configuration.</p></div></div>
+<section class="kb-panel" id="wizard-adoption" aria-labelledby="wizard-adoption-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="wizard-adoption-h">Adopting an existing server?</h2></header>
+  <div class="kb-panel__body">
+    <p>If this server already has roles, categories and channels, let KoolBot take them over instead of creating new ones. Nothing is changed until you preview a plan and apply it, every apply is saved as a snapshot, and you can restore it later. Steps 2 to 4 are optional.</p>
+    <ol>
+      <li><a href="/admin/adopt">Scan the server</a>: roles, channels, other bots and what to fix first.</li>
+      <li><a href="/admin/role-groups">Role groups</a>: tie your Admin, Mod or VIP roles to groups.</li>
+      <li><a href="/admin/rules">Rules role</a>: an optional rules acceptance gate.</li>
+      <li><a href="/admin/adopt/claims">Channel claims</a>: preview, then apply, read-only and gated channels and feature bindings.</li>
+      <li><a href="/admin/adopt/history">History</a>: review snapshots and restore one.</li>
+    </ol>
   </div>
-  <div class="actions">
-    <button type="submit" class="btn btn-primary">Next →</button>
-    <a href="/admin/" class="btn">Cancel</a>
+  <footer class="kb-panel__foot"><p class="kb-help">Starting from a fresh server? Skip this and pick features below.</p></footer>
+</section>
+<form method="POST" action="/admin/wizard/start" class="kb-stack">
+  <input type="hidden" name="_csrf" value="${csrf}">
+  ${defaultNext}${adminHtml}<section class="kb-panel" aria-labelledby="wizard-features-h">
+    <header class="kb-panel__head"><h2 class="kb-panel__title" id="wizard-features-h">Select features to configure</h2></header>
+    <div class="kb-panel__body"><div class="kb-settings">${cards}</div></div>
+  </section>
+  <div class="kb-row">
+    <button type="submit" class="kb-btn kb-btn--primary">Next →</button>
+    <a href="/admin/" class="kb-btn">Cancel</a>
   </div>
 </form>
+</div>
 `;
   return renderAdminPage({
     title: "Setup Wizard",
@@ -2765,10 +2786,9 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
   const fields = rows
     .map((r) => {
       // Grey + disable any control whose hard dependencies aren't all on
-      // (#666), mirroring the Settings page's `dep-off` treatment.
+      // (#666), mirroring the Settings page's locked rows.
       const unmet = unmetDependenciesFor(r.key, enabledByKey);
       const depLocked = unmet.length > 0;
-      const rowClass = depLocked ? " dep-off" : "";
       // Stamp an id onto the primary control so the human-readable label can
       // associate with it via `for` (#703), and link the help / warning /
       // dependency text beside it via `aria-describedby` (#854). The cron
@@ -2779,12 +2799,14 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
       const helpId = `${inputId}-help`;
       const warnId = `${inputId}-warn`;
       const depId = `${inputId}-dep`;
-      const warnHtml = renderWarnBelow(r, warnId);
-      const depHtml = renderDependencyHint(unmet, false, depId);
+      const keyId = `${inputId}-key`;
+      const warnHtml = renderWarnBelow(r, warnId, true);
+      const depHtml = renderDependencyHint(unmet, false, depId, true);
       const describedBy = [
         warnHtml ? warnId : "",
         depHtml ? depId : "",
         r.description ? helpId : "",
+        keyId,
       ]
         .filter(Boolean)
         .join(" ");
@@ -2795,19 +2817,20 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
         depLocked,
         { id: inputId, describedBy, labelledBy: labelId },
       );
-      const labelFor = isGroupControl(r) ? "" : ` for="${escapeHtml(inputId)}"`;
-      // Human-readable label (#702) with the raw dotted key demoted to
-      // monospace helper text — the same treatment the Settings page gives its
-      // rows, wrapped in a `<label>` so the whole caption stays clickable.
-      return `<div class="field-row${rowClass}">
-  <label class="field-label" id="${labelId}"${labelFor}>
-    <strong>${escapeHtml(r.label)}</strong>
-    <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
-  </label>
-  ${control}
-  ${warnHtml}
-  ${depHtml}
-  <div class="help" id="${helpId}">${escapeHtml(r.description)}</div>
+      // Human-readable label (#702). The raw dotted key is demoted to monospace
+      // text on its own line under the row (a long key beside a wide control
+      // would squeeze or overlap the name) and stays in the control's
+      // description. A group control (cron picker, segmented control) has no
+      // single input to point `for` at, so its caption is a plain name that the
+      // group is labelled by.
+      const caption = escapeHtml(r.label);
+      const nameHtml = isGroupControl(r)
+        ? `<p class="kb-setting__name" id="${labelId}">${caption}</p>`
+        : `<p class="kb-setting__name"><label id="${labelId}" for="${escapeHtml(inputId)}">${caption}</label></p>`;
+      const extra = `\n  <div class="kb-setting__extra">${warnHtml}${depHtml}<p class="kb-help"><span class="kb-mono" id="${keyId}">${escapeHtml(r.key)}</span></p></div>`;
+      return `<div class="${depLocked ? "kb-setting kb-setting--locked" : "kb-setting"}">
+  <div>${nameHtml}${r.description ? `<p class="kb-setting__desc" id="${helpId}">${escapeHtml(r.description)}</p>` : ""}</div>
+  <div class="kb-setting__control">${control}</div>${extra}
 </div>`;
     })
     .join("");
@@ -2816,7 +2839,7 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
   // They are chosen in the tier editor, which needs the feature to exist first.
   const stepNote =
     props.featureKey === "leaderboard_roles"
-      ? `\n  <p class="muted">Which roles each rank earns is set in the tier editor on the <a href="/admin/leaderboard-roles">Leaderboard Roles</a> page, once you have applied the wizard.</p>`
+      ? `\n    <footer class="kb-panel__foot"><p class="kb-help">Which roles each rank earns is set in the tier editor on the <a href="/admin/leaderboard-roles">Leaderboard Roles</a> page, once you have applied the wizard.</p></footer>`
       : "";
   const nextLabel =
     props.stepIndex + 1 < props.featureKeys.length ? "Next →" : "Review →";
@@ -2828,7 +2851,7 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
   // this step's form (issue #485).
   const previousButton = `<a href="/admin/wizard?step=${
     props.stepIndex >= 1 ? props.stepIndex - 1 : "access"
-  }" class="btn">← Previous</a>`;
+  }" class="kb-btn">← Previous</a>`;
 
   const subSteps = renderWizardSubSteps(
     props.featureKeys.map((fk) => ({
@@ -2838,27 +2861,31 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
   );
   const subStepsHtml = subSteps ? `${subSteps}\n` : "";
   const body = `
+<div class="kb-stack">
 ${renderWizardSteps("settings")}
-${subStepsHtml}<h1>${escapeHtml(info.name)}</h1>
-<p class="subtitle">${escapeHtml(info.desc)}</p>
+${subStepsHtml}<header class="kb-pagehead"><div class="kb-pagehead__text"><h1 class="kb-pagehead__title">${escapeHtml(info.name)}</h1>${info.desc ? `<p class="kb-pagehead__sub">${escapeHtml(info.desc)}</p>` : ""}</div></header>
 ${renderFlash(props.flash)}
 ${
   props.settingsUnavailable
-    ? `<div class="card">${renderSettingsUnavailableNotice()}</div>
-<div class="actions">
+    ? `${renderSettingsUnavailableNotice()}
+<div class="kb-row">
   ${previousButton}
-  <a href="/admin/wizard" class="btn">← Back to Choose features</a>
+  <a href="/admin/wizard" class="kb-btn kb-btn--ghost">← Back to Choose features</a>
 </div>`
-    : `<form method="POST" action="/admin/wizard/step/${props.stepIndex}" data-cascade-scope>
+    : `<form method="POST" action="/admin/wizard/step/${props.stepIndex}" data-cascade-scope class="kb-stack">
   <input type="hidden" name="_csrf" value="${csrf}">
-  <div class="card">${fields}</div>${stepNote}
-  <div class="actions">
-    <button type="submit" class="btn btn-primary">${nextLabel}</button>
+  <section class="kb-panel" aria-labelledby="wizard-settings-h">
+    <header class="kb-panel__head"><h2 class="kb-panel__title" id="wizard-settings-h">Settings</h2><span class="kb-panel__meta">${rows.length}</span></header>
+    <div class="kb-panel__body"><div class="kb-settings">${fields}</div></div>${stepNote}
+  </section>
+  <div class="kb-row">
+    <button type="submit" class="kb-btn kb-btn--primary">${nextLabel}</button>
     ${previousButton}
-    <a href="/admin/wizard" class="btn">← Back to Choose features</a>
+    <a href="/admin/wizard" class="kb-btn kb-btn--ghost">← Back to Choose features</a>
   </div>
 </form>`
 }
+</div>
 `;
   return renderAdminPage({
     title: `Wizard — ${info.name}`,
@@ -4358,6 +4385,16 @@ const POLL_IMPORT_UPLOAD_SCRIPT =
 /** A row's On / Off state as a Badge: a word and a colour, never colour alone. */
 function kbOnOff(on: boolean): string {
   return `<span class="kb-badge ${on ? "kb-badge--on" : "kb-badge--off"}">${on ? "On" : "Off"}</span>`;
+}
+
+/**
+ * Today's state of a feature as a Badge that says what it is: "Currently on".
+ * Beside the Switch of the Setup wizard's overview, whose own On/Off word says
+ * whether the feature is chosen to configure, a bare On would read as the same
+ * thing.
+ */
+function kbCurrently(on: boolean): string {
+  return `<span class="kb-badge ${on ? "kb-badge--on" : "kb-badge--off"}">Currently ${on ? "on" : "off"}</span>`;
 }
 
 /** The id of a Field's control, and its `aria-invalid` and error link when the server refused it. */
