@@ -1653,7 +1653,10 @@ Moderation is on and no role is mapped to run it.
 **Creating the role a card maps (#1618, a proposal for the owner).** Each role picker on the Access step offers **Create new role: 'typed text'**
 as its last row (the Picker's create row, #1658), so an admin whose server has no suitable role does not have to leave the wizard. There are no fixed
 names: the admin types the name (1 to 100 characters, not blank). A text that matches an existing role, in any case, selects that role instead and is
-checked like any picked role; two roles with the name are refused. This replaces the _Create @Event host_ switch of #1365, so all three cards behave
+checked like any picked role; two roles with the name are refused. The match ignores case and collapses or trims spaces (and control or
+zero-width characters, which count as spaces); it does not fold look-alike letters, so a name with a look-alike letter is a different name and creates a
+new role. **Review** says first, in a warning callout when a scope is Admins or Moderators, that such a name is an existing role, how many members hold it
+now (or that they could not be counted) and that no role is created, because everyone who holds it gets that access. This replaces the _Create @Event host_ switch of #1365, so all three cards behave
 the same. The row is offered only when the bot has **Manage Roles** (`canBotCreate` with the `role` kind; Administrator counts). Without it there is no row
 and the Picker's line names the permission and the **Bot permissions** page; when the permission could not be read there is neither row nor line, and a
 role already chosen stays drawn as pending. Choosing the row only marks the name ("Quartermaster (will be created)"). Saving the step reads the posted
@@ -1669,7 +1672,7 @@ cannot create, or a role of that name has appeared, an error callout names the r
 (`role-write-lock.ts`), then writes the role groups, then creates the channels, then applies the settings. A closed request abandons the apply while it
 waits for the role lock or the channel lock. The role lock is separate from the channel lock: roles and channels are different things, so neither waits
 for the other, but it has the same bounded wait and the same rules (`withKeyedLock`). It is taken only by this apply. Other code creates roles outside
-it: the server scan (Role groups) under its own database lock, so Apply refuses while a scan apply is running and tells the admin to try later (an
+it: the server scan (Role groups) under its own database lock, so Apply refuses while a scan apply is running (one with no activity for 30 minutes, the engine's own staleness rule, no longer counts) and tells the admin where to look and to try later (an
 apply that starts a moment after that check is not serialised with it), and the reaction-role services under their own lock, which are not serialised
 with it at all; the plan's fresh read inside the lock still sees a role they had finished creating.
 

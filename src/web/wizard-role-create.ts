@@ -37,7 +37,10 @@ import { type Client } from "discord.js";
 import { canBotCreate } from "../services/bot-create-check.js";
 import { CommandManager } from "../services/command-manager.js";
 import { ConfigService } from "../services/config-service.js";
-import { AdoptionSnapshot } from "../models/adoption-snapshot.js";
+import {
+  AdoptionSnapshot,
+  ADOPTION_STALE_AFTER_MS,
+} from "../models/adoption-snapshot.js";
 import { CommandPermission } from "../models/command-permissions.js";
 import { PollSchedule } from "../models/poll-schedule.js";
 import { RoleGroupService } from "../services/role-group-service.js";
@@ -48,7 +51,10 @@ import {
   type AccessScope,
   type AccessSelection,
 } from "../services/wizard-access.js";
-import type { WizardRoleCreation } from "../services/wizard-service.js";
+import type {
+  WizardRoleCreation,
+  WizardRoleMatch,
+} from "../services/wizard-service.js";
 import logger from "../utils/logger.js";
 import { readWithin, ChannelReadTimeoutError } from "./channel-write-lock.js";
 import { cancellableCall } from "./channel-write-rest.js";
@@ -61,6 +67,7 @@ import {
   type RoleView,
 } from "./role-create.js";
 import { withRoleLock } from "./role-write-lock.js";
+import type { ReviewRoleMatch } from "./wizard-access-view.js";
 import { writeRestFor } from "./setting-create-save.js";
 import { parsePickerCreateValue } from "./setting-pickers.js";
 import { idsIn } from "./wizard-create.js";
@@ -72,7 +79,7 @@ const NOT_SIGNED_IN =
 const NOT_READ =
   "KoolBot couldn't read the roles from Discord, so nothing was created. Try again.";
 const ADOPTION_BUSY =
-  "Another apply or rollback is already running for this server.";
+  "A server scan apply or rollback is still running for this server (its last activity was within the last 30 minutes). Wait for it to finish, check Adoption history, then try again; a run with no activity for 30 minutes no longer blocks this.";
 
 const SNOWFLAKE = /^\d{1,25}$/;
 
@@ -130,6 +137,8 @@ export type ResolvedPicks =
       /** The picks with every name that matched an existing role turned into its id. */
       selection: AccessSelection;
       creations: WizardRoleCreation[];
+      /** Typed names that matched an EXISTING role (its holders are mapped too). */
+      matches: WizardRoleMatch[];
     }
   | { ok: false; error: string };
 
@@ -163,9 +172,15 @@ export function resolvePicks(
     host: [...picks.ids.host],
   };
   const creations: WizardRoleCreation[] = [];
+  const matches: WizardRoleMatch[] = [];
   plan.entries.forEach((entry, i) => {
     const scopes = unique[i].scopes;
     if (entry.action === "existing") {
+      matches.push({
+        id: entry.existingId as string,
+        name: entry.name,
+        scopes: highestScopes(scopes),
+      });
       for (const scope of scopes) {
         selection[scope].push(entry.existingId as string);
       }
@@ -173,7 +188,12 @@ export function resolvePicks(
       creations.push({ name: entry.name, scopes: highestScopes(scopes) });
     }
   });
-  return { ok: true, selection: normaliseSelection(selection), creations };
+  return {
+    ok: true,
+    selection: normaliseSelection(selection),
+    creations,
+    matches,
+  };
 }
 
 // ---- placeholders for Review and Apply -------------------------------------
@@ -311,6 +331,33 @@ export async function reviewWizardRoles(
   };
 }
 
+// ---- Review: typed names that selected an existing role ---------------------
+
+/**
+ * The member count of each role a typed name selected, for Review's warning.
+ * Bounded; a count that cannot be read is `null` and Review says so, it does
+ * not stop Review.
+ */
+export async function reviewRoleMatches(
+  client: Client,
+  guildId: string,
+  matches: readonly WizardRoleMatch[],
+): Promise<ReviewRoleMatch[]> {
+  if (matches.length === 0) return [];
+  let counts: Map<string, number> | null = null;
+  try {
+    const guild = await readWithin(() => client.guilds.fetch(guildId));
+    counts = await readWithin(() => guild.roles.fetchMemberCounts());
+  } catch (error) {
+    logger.warn("wizard: review could not count role members", error);
+  }
+  return matches.map((m) => ({
+    name: m.name,
+    scopes: m.scopes,
+    members: counts?.get(m.id) ?? null,
+  }));
+}
+
 // ---- Apply -------------------------------------------------------------------
 
 /** What became of the roles one apply created, once something after the creation failed. */
@@ -426,7 +473,15 @@ export async function applyWizardRoles(
           name: r.name,
         })),
       busyReason: async (): Promise<string | null> =>
-        (await AdoptionSnapshot.exists({ guildId, active: true }))
+        // Active only while it shows life: the adoption engine's own rule
+        // (`ADOPTION_STALE_AFTER_MS`, no heartbeat for that long means dead,
+        // not slow). It clears a dead one only when the next apply starts, so
+        // a crashed run must not block roles until then.
+        (await AdoptionSnapshot.exists({
+          guildId,
+          active: true,
+          heartbeatAt: { $gte: new Date(Date.now() - ADOPTION_STALE_AFTER_MS) },
+        }))
           ? ADOPTION_BUSY
           : null,
       reason: `KoolBot web UI, setup wizard, by ${actorId}`,

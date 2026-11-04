@@ -184,6 +184,7 @@ import {
 } from "./wizard-admin-view.js";
 import type { AdministratorCheck } from "../services/wizard-admin-check.js";
 import type { WizardRoleReview } from "./wizard-role-create.js";
+import type { ReviewRoleMatch } from "./wizard-access-view.js";
 import {
   renderPermissionNotice,
   splitEventFormNotice,
@@ -2851,6 +2852,8 @@ export interface WizardConfirmPageProps extends CommonProps {
   accessFingerprint?: string;
   /** The roles Apply would create (#1618), with the plan id and any problem; absent when none were chosen. */
   roleReview?: WizardRoleReview | null;
+  /** Typed names that selected an existing role (#1618): Review says so first. */
+  roleMatches?: ReviewRoleMatch[];
   /** Channels Apply would create (#1661, #1662): one panel row each, listed before the settings table. */
   creations?: PlannedCreation[];
   /** The plan Review showed, posted back as `channelPlanId` so Apply can tell it went stale (#1662). */
@@ -2918,7 +2921,7 @@ ${renderWizardSteps("review")}
 <h1>Review configuration</h1>
 <p class="subtitle">The following settings will be applied when you click <strong>Apply</strong>.</p>
 ${renderFlash(props.flash)}
-${adminHtml}${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGaps ?? [], roleReview)}
+${adminHtml}${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGaps ?? [], roleReview, props.roleMatches ?? [])}
 ${createHtml}${dependencyHtml}<div class="card">
   <table>
     <thead><tr><th scope="col">Key</th><th scope="col">New value</th><th scope="col">Description</th></tr></thead>

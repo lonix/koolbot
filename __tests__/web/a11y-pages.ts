@@ -3283,6 +3283,19 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Setup wizard confirm, a typed name is an existing role",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [],
+        metadata: {},
+        accessChanges: [],
+        roleMatches: [
+          { name: "Moderator", scopes: ["admin"], members: 12 },
+          { name: "Event crew", scopes: ["host"], members: null },
+        ],
+      }),
+    },
+    {
       name: "Setup wizard confirm, the roles can't be created",
       html: renderWizardConfirmPage({
         ...COMMON,

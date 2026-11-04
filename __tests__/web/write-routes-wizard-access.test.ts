@@ -69,10 +69,18 @@ jest.unstable_mockModule("../../src/models/poll-schedule.js", () => ({
 
 // Another adoption apply being active (#1618): the role creation refuses then.
 let adoptionActive = false;
+// When the active snapshot last showed life; the query's own cut-off decides.
+let adoptionHeartbeat = new Date();
 jest.unstable_mockModule("../../src/models/adoption-snapshot.js", () => ({
+  ADOPTION_STALE_AFTER_MS: 30 * 60 * 1000,
   AdoptionSnapshot: {
-    exists: async (): Promise<unknown> =>
-      adoptionActive ? { _id: "1" } : null,
+    exists: async (query: {
+      heartbeatAt?: { $gte: Date };
+    }): Promise<unknown> => {
+      if (!adoptionActive) return null;
+      const since = query.heartbeatAt?.$gte;
+      return !since || adoptionHeartbeat >= since ? { _id: "1" } : null;
+    },
   },
 }));
 
@@ -224,7 +232,8 @@ const client = {
           return roles;
         },
         cache: roles,
-        fetchMemberCounts: async (): Promise<Map<string, number>> => new Map(),
+        fetchMemberCounts: async (): Promise<Map<string, number>> =>
+          new Map([[MOD, 3]]),
       },
       members: {
         me: {
@@ -320,6 +329,7 @@ beforeEach(async () => {
   ]);
   botCanManageRoles = true;
   adoptionActive = false;
+  adoptionHeartbeat = new Date();
   commandPermRows = [];
   pollRows = [];
   permReadFails = false;
@@ -502,6 +512,7 @@ describe("POST /wizard/access", () => {
       session.guildId,
       { admin: [], staff: [MOD], host: [HOST] },
       [],
+      [],
     );
     expect(createSpy).not.toHaveBeenCalled();
     expect(updateSpy).not.toHaveBeenCalled();
@@ -518,6 +529,7 @@ describe("POST /wizard/access", () => {
       session.discordUserId,
       session.guildId,
       { admin: [ADMIN], staff: [], host: [] },
+      [],
       [],
     );
   });
@@ -1260,6 +1272,7 @@ describe("roles created from the Access step's Picker (#1618)", () => {
         GUILD,
         none,
         [{ name: "Crew", scopes: ["staff"] }],
+        [],
       );
       expect(mockPost).not.toHaveBeenCalled();
       expect(createSpy).not.toHaveBeenCalled();
@@ -1272,6 +1285,7 @@ describe("roles created from the Access step's Picker (#1618)", () => {
         GUILD,
         { admin: [], staff: [MOD], host: [HOST] },
         [{ name: "Crew", scopes: ["staff"] }],
+        [],
       );
     });
 
@@ -1285,6 +1299,7 @@ describe("roles created from the Access step's Picker (#1618)", () => {
         GUILD,
         none,
         [{ name: "Crew", scopes: ["admin"] }],
+        [],
       );
     });
 
@@ -1294,6 +1309,34 @@ describe("roles created from the Access step's Picker (#1618)", () => {
         session.discordUserId,
         GUILD,
         { admin: [], staff: [MOD], host: [] },
+        [],
+        [{ id: MOD, name: "Moderator", scopes: ["staff"] }],
+      );
+    });
+
+    it("selects the existing role for a name that differs by case and trailing or inner spaces only", async () => {
+      roles.set(
+        "100000000000000009",
+        role("100000000000000009", "Event crew", 2),
+      );
+      await save({ roles_admin: ["create:  EVENT   crew  "] });
+      expect(mockSetAccess).toHaveBeenCalledWith(
+        session.discordUserId,
+        GUILD,
+        { admin: ["100000000000000009"], staff: [], host: [] },
+        [],
+        [{ id: "100000000000000009", name: "Event crew", scopes: ["admin"] }],
+      );
+    });
+
+    it("creates a NEW role for a name with a look-alike letter, instead of matching an existing one", async () => {
+      // Cyrillic "о" in place of the Latin one: a different name to Discord too.
+      await save({ roles_admin: ["create:M\u043Ederator"] });
+      expect(mockSetAccess).toHaveBeenCalledWith(
+        session.discordUserId,
+        GUILD,
+        none,
+        [{ name: "M\u043Ederator", scopes: ["admin"] }],
         [],
       );
     });
@@ -1420,6 +1463,23 @@ describe("roles created from the Access step's Picker (#1618)", () => {
       expect(html).toMatch(/name="accessFingerprint" value="[0-9a-f]{32}"/);
       expect(html).not.toMatch(/<button[^>]*disabled[^>]*>Apply/);
       expect(mockPost).not.toHaveBeenCalled();
+    });
+
+    it("says first that a typed name is an EXISTING role, with its holders, for an Admins mapping", async () => {
+      const picks = { ...none, admin: [MOD] };
+      mockGetSession.mockReturnValue({
+        ...wizardState(picks, ["quotes"]),
+        roleMatches: [{ id: MOD, name: "Moderator", scopes: ["admin"] }],
+      });
+      const html = await (await harness.get("/wizard?step=confirm")).text();
+      expect(html).toContain('id="wizard-role-matches"');
+      expect(html).toContain("kb-callout--warn");
+      expect(html).toContain("is an existing role, 3 members hold it now");
+      expect(html).toContain("mapped to Admins; no role is created");
+      // It comes before the role access table.
+      expect(html.indexOf('id="wizard-role-matches"')).toBeLessThan(
+        html.indexOf("<h2>Role access</h2>"),
+      );
     });
 
     it("blocks Apply, with the reason, when the bot lost Manage Roles", async () => {
@@ -1549,11 +1609,25 @@ describe("roles created from the Access step's Picker (#1618)", () => {
       const shown = review(access, [CREW]);
       adoptionActive = true;
       const res = await harness.post("/wizard/apply", shown);
-      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
-        "already running",
-      );
+      const msg = parseFlashRedirect(res.headers.get("location")).msg;
+      // An actionable message: what blocks, where to look, when it stops.
+      expect(msg).toContain("still running");
+      expect(msg).toContain("Adoption history");
+      expect(msg).toContain("30 minutes");
       expect(mockPost).not.toHaveBeenCalled();
       expect(createSpy).not.toHaveBeenCalled();
+    });
+
+    it("is not blocked by an adoption apply left 'applying' with no activity for over 30 minutes", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [CREW]),
+      );
+      const shown = review(access, [CREW]);
+      adoptionActive = true;
+      adoptionHeartbeat = new Date(Date.now() - 31 * 60 * 1000);
+      const res = await harness.post("/wizard/apply", shown);
+      expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+      expect(mockPost).toHaveBeenCalledTimes(1);
     });
 
     it("writes nothing else, and the settings stay unapplied, when Discord refuses the role", async () => {

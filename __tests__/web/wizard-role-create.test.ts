@@ -117,6 +117,21 @@ describe("resolvePicks", () => {
     });
   });
 
+  it("reports a name that matched an existing role, so Review can say so, and never matches a look-alike", () => {
+    const r = m.resolvePicks(
+      picks([
+        { scope: "admin", name: "  mODERATOR " },
+        { scope: "staff", name: "M\u043Ederator" },
+      ]),
+      roles,
+    );
+    expect(r).toMatchObject({
+      ok: true,
+      matches: [{ id: "2", name: "Moderator", scopes: ["admin"] }],
+      creations: [{ name: "M\u043Ederator", scopes: ["staff"] }],
+    });
+  });
+
   it("refuses a name two roles share", () => {
     const r = m.resolvePicks(picks([{ scope: "host", name: "Moderator" }]), [
       ...roles,

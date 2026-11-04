@@ -306,14 +306,47 @@ function scopeNames(scopes: readonly AccessScope[]): string {
         .join(", ");
 }
 
+/** A typed name that selected an EXISTING role, for Review's warning. */
+export interface ReviewRoleMatch {
+  /** The role's own name. */
+  name: string;
+  scopes: AccessScope[];
+  /** Everyone who holds it already; `null` when Discord could not say. */
+  members: number | null;
+}
+
+/**
+ * Review's first line for a typed name that matched an existing role (#1618):
+ * no role is created, and everyone who already holds that role gets what the
+ * scope gives. A warning Callout when a scope is Admins or Moderators, a plain
+ * one for Event hosts only. The wording is a PROPOSAL for the owner.
+ */
+function renderRoleMatches(matches: readonly ReviewRoleMatch[]): string {
+  if (matches.length === 0) return "";
+  const strong = matches.some((m) => m.scopes.some((s) => s !== "host"));
+  const rows = matches
+    .map((m) => {
+      const who =
+        m.members === null
+          ? "its members could not be counted"
+          : `${m.members} ${m.members === 1 ? "member holds" : "members hold"} it now`;
+      return `<li>${roleMention(m.name)} is an existing role, ${escapeHtml(who)}. It will be mapped to ${escapeHtml(
+        m.scopes.map((s) => SCOPE_NAMES[s]).join(" and "),
+      )}; no role is created.</li>`;
+    })
+    .join("");
+  return `<div class="kb-callout${strong ? " kb-callout--warn" : ""}" role="status" id="wizard-role-matches">${toneIcon(strong ? "warn" : "")}<div class="kb-callout__body"><p class="kb-callout__title">A name you typed is an existing role</p><ul>${rows}</ul><p class="kb-callout__text">Everyone who already holds an existing role gets what its scope allows. Go back to Access if you meant a new role.</p></div></div>`;
+}
+
 /** The role-mapping part of the review step: what Apply will write to role groups. */
 export function renderAccessReview(
   changes: readonly AccessChange[],
   problem: string | null,
   gaps: readonly AccessGap[],
   roles: WizardRoleReview | null = null,
+  matches: readonly ReviewRoleMatch[] = [],
 ): string {
-  const parts: string[] = [];
+  const parts: string[] = [renderRoleMatches(matches)];
   const roleBlock = roles ? renderRoleCreateReview(roles) : "";
   if (problem) {
     parts.push(

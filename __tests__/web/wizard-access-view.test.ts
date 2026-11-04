@@ -98,6 +98,34 @@ describe("renderWizardSubSteps (#1620)", () => {
   });
 });
 
+describe("renderAccessReview, typed names that are existing roles (#1618)", () => {
+  it("warns first for Admins or Moderators, with the holders, and says no role is created", () => {
+    const html = renderAccessReview([], null, [], null, [
+      { name: "Moderator", scopes: ["admin"], members: 12 },
+      { name: "Crew", scopes: ["staff"], members: null },
+    ]);
+    expect(html).toContain("kb-callout--warn");
+    expect(html).toContain("A name you typed is an existing role");
+    expect(html).toContain("12 members hold it now");
+    expect(html).toContain("its members could not be counted");
+    expect(html).toContain("mapped to Admins; no role is created");
+  });
+
+  it("is a plain note when only Event hosts are mapped", () => {
+    const html = renderAccessReview([], null, [], null, [
+      { name: "Crew", scopes: ["host"], members: 1 },
+    ]);
+    expect(html).not.toContain("kb-callout--warn");
+    expect(html).toContain("1 member holds it now");
+  });
+
+  it("says nothing when no name matched", () => {
+    expect(renderAccessReview([], null, [])).not.toContain(
+      "wizard-role-matches",
+    );
+  });
+});
+
 describe("renderAccessReview, roles to create (#1618)", () => {
   const two = {
     roles: [

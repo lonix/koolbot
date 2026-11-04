@@ -61,6 +61,18 @@ export interface WizardRoleCreation {
   scopes: AccessScope[];
 }
 
+/**
+ * A typed name on the Access step that matched an EXISTING role (#1618): that
+ * role, with everyone who already holds it, is what gets mapped. Kept so Review
+ * can say so; the id is also in the picks.
+ */
+export interface WizardRoleMatch {
+  id: string;
+  /** The role's own name. */
+  name: string;
+  scopes: AccessScope[];
+}
+
 export interface DetectedResources {
   categories?: CategoryChannel[];
   voiceChannels?: VoiceChannel[];
@@ -91,6 +103,8 @@ export interface WizardState {
    * added) before the role groups that map them are written.
    */
   roleCreations?: WizardRoleCreation[];
+  /** Typed names that selected an existing role, for Review's warning. */
+  roleMatches?: WizardRoleMatch[];
   /**
    * What a REFUSED Access save posted (#1618): the ids and the names typed to be
    * created. Read once by the next Access page, which draws them again (the
@@ -311,11 +325,13 @@ export class WizardService {
     guildId: string,
     access: AccessSelection | undefined,
     roleCreations: readonly WizardRoleCreation[] = [],
+    roleMatches: readonly WizardRoleMatch[] = [],
   ): boolean {
     const state = this.getSession(userId, guildId);
     if (!state) return false;
     state.access = access;
     state.roleCreations = access !== undefined ? [...roleCreations] : [];
+    state.roleMatches = access !== undefined ? [...roleMatches] : [];
     return this.updateSession(userId, guildId, state);
   }
 

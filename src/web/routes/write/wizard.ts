@@ -13,6 +13,7 @@ import { ConfigService } from "../../../services/config-service.js";
 import {
   WizardService,
   type WizardRoleCreation,
+  type WizardRoleMatch,
   type WizardState,
 } from "../../../services/wizard-service.js";
 import { RoleGroupService } from "../../../services/role-group-service.js";
@@ -121,8 +122,10 @@ import {
   splitPicks,
   swapPlaceholders,
   type WizardRoleApply,
+  reviewRoleMatches,
   type WizardRoleReview,
 } from "../../wizard-role-create.js";
+import type { ReviewRoleMatch } from "../../wizard-access-view.js";
 import {
   activeWizardCreations,
   applyWizardCreations,
@@ -371,6 +374,7 @@ export function createWizardRouter(client: Client): Router {
           let gaps: AccessGap[] = [];
           let fingerprint: string | undefined;
           let roleReview: WizardRoleReview | null = null;
+          let roleMatches: ReviewRoleMatch[] = [];
           if (existing.access) {
             try {
               const ctx = await readAccess(session);
@@ -388,6 +392,11 @@ export function createWizardRouter(client: Client): Router {
               gaps = accessGaps(
                 await enabledGapFeatures(existing),
                 selectionWithNew(existing.access, planned),
+              );
+              roleMatches = await reviewRoleMatches(
+                client,
+                session.guildId,
+                existing.roleMatches ?? [],
               );
               if (planned.length > 0) {
                 roleReview = await reviewWizardRoles(
@@ -452,6 +461,7 @@ export function createWizardRouter(client: Client): Router {
               accessGaps: gaps,
               accessFingerprint: fingerprint,
               roleReview,
+              roleMatches,
               dependencies,
               flash,
             }),
@@ -763,6 +773,7 @@ export function createWizardRouter(client: Client): Router {
       });
       let selection: AccessSelection = normaliseSelection(picks.ids);
       let creations: WizardRoleCreation[] = [];
+      let matches: WizardRoleMatch[] = [];
       const stay = (text: string): void => {
         // Nothing is saved, but what was posted is kept for the next page
         // load (once), so the admin does not retype it.
@@ -797,6 +808,7 @@ export function createWizardRouter(client: Client): Router {
             } else {
               selection = resolved.selection;
               creations = resolved.creations;
+              matches = resolved.matches;
             }
           }
           if (!problem) {
@@ -833,6 +845,7 @@ export function createWizardRouter(client: Client): Router {
         session.guildId,
         selection,
         creations,
+        matches,
       );
       await recordAudit(session, {
         action: "wizard.access",
