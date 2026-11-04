@@ -1774,6 +1774,52 @@ describe("roles created from the Access step's Picker (#1618)", () => {
       expect(roles.has("40000000000000001")).toBe(false);
     });
 
+    it.each([
+      ["is deleted", "no longer exists"],
+      ["moves above the bot", "at or above the bot's own role"],
+    ])(
+      "writes nothing and cleans up when a role created earlier %s while a later create is pending",
+      async (what, message) => {
+        const A = { name: "Alpha", scopes: ["staff"] };
+        const B = { name: "Beta", scopes: ["host"] };
+        mockGetSession.mockReturnValue(
+          wizardState(access, ["quotes"], {}, [A, B]),
+        );
+        const shown = review(access, [A, B]);
+        let n = 0;
+        mockPost.mockImplementation(async (_route: unknown, opts: any) => {
+          n += 1;
+          const id = `4000000000000000${n}`;
+          roles.set(id, role(id, opts.body.name, 1));
+          if (n === 2) {
+            // While the second create is pending, the first role changes.
+            if (what === "is deleted") roles.delete("40000000000000001");
+            else
+              roles.set(
+                "40000000000000001",
+                role("40000000000000001", "Alpha", 11),
+              );
+          }
+          return { id, name: opts.body.name, position: 1 };
+        });
+        const res = await harness.post("/wizard/apply", shown);
+        const flash = parseFlashRedirect(res.headers.get("location"));
+        expect(flash.type).toBe("err");
+        expect(flash.msg).toContain(message);
+        expect(flash.msg).toContain("The settings were not applied.");
+        expect(createSpy).not.toHaveBeenCalled();
+        expect(mockApplyConfiguration).not.toHaveBeenCalled();
+        expect(mockEndSession).not.toHaveBeenCalled();
+        // The second role is removed again; the first is gone or removed too.
+        expect(roles.has("40000000000000002")).toBe(false);
+        expect(flash.msg).toContain("removed again");
+        expect(lastAuditFor("wizard.apply")).toMatchObject({
+          result: "failure",
+          details: { stage: "access", reason: "changed-during-roles" },
+        });
+      },
+    );
+
     it("writes what it validated when the session's picks change during the role creation", async () => {
       const live = wizardState(access, ["quotes"], {}, [CREW]);
       mockGetSession.mockReturnValue(live);

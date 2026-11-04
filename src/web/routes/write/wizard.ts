@@ -1546,7 +1546,17 @@ export function createWizardRouter(client: Client): Router {
               ...again,
               roles: again.roles.filter((r) => !madeIds.has(r.id)),
             };
-            const problemNow = validateSelection(fresh, state.access);
+            // The picks as they stand, then the FULL mapping (placeholders
+            // swapped for the real ids) against the unfiltered fresh read: a
+            // created role that was deleted, moved above the bot, or is now
+            // refused for any other reason must not be mapped.
+            const finalSelection = swapPlaceholders(
+              selectionWithNew(state.access, plannedRoles),
+              new Map(made.created.map((c) => [c.placeholder, c.id])),
+            );
+            const problemNow =
+              validateSelection(fresh, state.access) ??
+              validateSelection(again, finalSelection);
             const fingerprintNow = accessFingerprint(
               diffAccess(
                 fresh.groups,
