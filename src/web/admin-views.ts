@@ -2981,6 +2981,8 @@ export interface AnnouncementsProps extends CommonProps {
   enabled: boolean;
   rows: AnnouncementRow[];
   textChannels: ChannelOption[];
+  /** The channel Picker's create row (#1665): the bot-permission answer, or nothing when unreadable. */
+  createChannel?: PickerCreate;
   /** The create or one-off form the server just refused, to draw again with its values and messages (#1517). */
   refusedForm?: RefusedForm | null;
   /**
@@ -3109,25 +3111,6 @@ export function renderPageFlash(flash?: FlashMessage | null): string {
   return flash?.openSettings ? "" : renderFlash(flash);
 }
 
-function channelOptionsHtml(
-  options: ChannelOption[],
-  selectedId?: string,
-): string {
-  if (options.length === 0 && !selectedId) {
-    return `<option value="">(no text channels available)</option>`;
-  }
-  // buildOptionsHtml keeps a selected channel that's no longer in the list
-  // (deleted, or the bot lost access) as a selected "unavailable" option.
-  // Without a matching <option> the browser would default to the first
-  // channel, so editing only the cron/duration would silently reassign the
-  // schedule's channel on submit.
-  return buildOptionsHtml(
-    options,
-    new Set(selectedId ? [selectedId] : []),
-    false,
-  );
-}
-
 function roleOptionsHtml(options: RoleOption[], selectedId?: string): string {
   const out = [
     `<option value=""${!selectedId ? " selected" : ""}>(none)</option>`,
@@ -3202,8 +3185,9 @@ function renderAnnouncementFields(
   f: FormView,
   textChannels: ChannelOption[],
   withSchedule: boolean,
+  create?: PickerCreate,
 ): string {
-  return `${pollSelect(f, "channelId", "Channel", channelOptionsHtml(textChannels, f.selected("channelId") || undefined), true)}
+  return `${pollChannelPicker(f, textChannels, f.selected("channelId") || undefined, create)}
     ${withSchedule ? renderCronField(f, "cron", "Schedule", "0 9 * * *") : ""}
     ${pollField(f, "message", "Message", `<textarea class="kb-textarea" name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"${fieldControlAttrs(f.control("message"))}>${f.textareaContent("message")}</textarea>`)}
     <label class="kb-switch"><input type="checkbox" role="switch" name="placeholders" value="1"${f.checked("placeholders") ? " checked" : ""}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span><span>Process placeholders (replace <code>{server_name}</code>, <code>{date}</code>, etc.)</span></label>
@@ -3220,7 +3204,7 @@ function renderAnnouncementFields(
 
 export function renderAnnouncementsPage(props: AnnouncementsProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
-  const create = formView(props.refusedForm, ANNOUNCEMENT_CREATE_FORM);
+  const createForm = formView(props.refusedForm, ANNOUNCEMENT_CREATE_FORM);
   const once = formView(props.refusedForm, ANNOUNCEMENT_ONCE_FORM);
 
   const tableRows = props.rows
@@ -3265,7 +3249,7 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
     "Create a new announcement",
     `<form method="POST" action="/admin/announcements/create" class="kb-stack">
     ${csrfInput}
-    ${renderAnnouncementFields(create, props.textChannels, true)}
+    ${renderAnnouncementFields(createForm, props.textChannels, true, props.createChannel)}
     <div class="kb-row"><button type="submit" class="${mainKbButtonClass(props.enabled)}">Create announcement</button></div>
   </form>`,
   );
@@ -3275,7 +3259,7 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
     `<form method="POST" action="/admin/announcements/post-once" class="kb-stack">
     ${csrfInput}
     <p class="kb-help">Post a one-off announcement immediately — no cron schedule is stored.</p>
-    ${renderAnnouncementFields(once, props.textChannels, false)}
+    ${renderAnnouncementFields(once, props.textChannels, false, props.createChannel)}
     <div class="kb-row"><button type="submit" class="kb-btn">Post now</button></div>
   </form>`,
   );
@@ -3327,20 +3311,20 @@ function renderExpected(e: EventRow): string {
   const x = e.expected;
   let html: string;
   if (!x) {
-    html = '<span class="muted">—</span>';
+    html = '<span class="kb-muted">—</span>';
   } else if (x.kind === "ok") {
     const count = `${x.count}${x.truncated ? "+" : ""}`;
     const names =
       x.names.length > 0
-        ? `<br><span class="muted">${x.names.map((n) => escapeHtml(n)).join(", ")}${x.count > x.names.length || x.truncated ? ", …" : ""}</span>`
+        ? `<br><span class="kb-muted">${x.names.map((n) => escapeHtml(n)).join(", ")}${x.count > x.names.length || x.truncated ? ", …" : ""}</span>`
         : "";
     html = `<span aria-hidden="true">⭐</span> ${count} interested${names}`;
   } else {
-    html = `<span class="muted">${escapeHtml(x.message)}</span>`;
+    html = `<span class="kb-muted">${escapeHtml(x.message)}</span>`;
   }
   const l = e.legacyRsvps;
   if (l) {
-    html += `<br><span class="muted">Old RSVP buttons: ${l.going} going · ${l.maybe} maybe · ${l.cant} can't</span>`;
+    html += `<br><span class="kb-muted">Old RSVP buttons: ${l.going} going · ${l.maybe} maybe · ${l.cant} can't</span>`;
   }
   return html;
 }
@@ -3351,31 +3335,36 @@ function renderCoverCell(
   csrfToken: string,
 ): string {
   const c = e.cover;
-  if (!c) return '<span class="muted">—</span>';
+  if (!c) return '<span class="kb-muted">—</span>';
   if (c.kind === "adopted") {
-    return '<span class="muted">Managed in Discord. This event was adopted, so KoolBot keeps its existing cover and never changes it.</span>';
+    return '<span class="kb-muted">Managed in Discord. This event was adopted, so KoolBot keeps its existing cover and never changes it.</span>';
   }
   if (c.kind === "detached") {
-    return '<span class="muted">Not available. This event was deleted from Discord\'s Events list and is no longer mirrored, so a cover would never be shown.</span>';
+    return '<span class="kb-muted">Not available. This event was deleted from Discord\'s Events list and is no longer mirrored, so a cover would never be shown.</span>';
   }
   const id = escapeHtml(e.id);
   const scope = c.series
-    ? '<span class="muted">Applies to every occurrence of the series.</span><br>'
+    ? '<p class="kb-help">Applies to every occurrence of the series.</p>'
     : "";
   const remove = c.hasCover
-    ? `<form method="POST" action="/admin/events/${id}/cover/remove" data-confirm="Remove the cover image${c.series ? " from the whole series" : ""}?">${csrfInput}<button type="submit" class="btn btn-danger">Remove cover</button></form>`
+    ? `<form method="POST" action="/admin/events/${id}/cover/remove" data-confirm="Remove the cover image${c.series ? " from the whole series" : ""}?">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger">Remove cover</button></form>`
     : "";
-  return `<details class="helper edit-details"><summary>${c.hasCover ? "Cover set — change" : "Add cover"}</summary>
-    ${scope}<form method="POST" action="/admin/events/${id}/cover" class="stack" data-cover-upload data-max-bytes="${COVER_MAX_BYTES}">
-      <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
-      <label>Image (PNG, JPEG or GIF, up to ${COVER_MAX_BYTES / (1024 * 1024)} MB)
-        <input type="file" accept="image/png,image/jpeg,image/gif">
-      </label>
-      <button type="submit" class="btn">${c.hasCover ? "Replace cover" : "Upload cover"}</button>
-      <span class="cover-msg muted" role="status" aria-live="polite"></span>
-    </form>
-  </details>
-  ${remove}`;
+  // Each row's file Field has its own id, so its label points at it.
+  const fileId = `cover-file-${id}`;
+  return `<div class="kb-stack">
+  <details class="kb-disclosure kb-disclosure--inline"><summary>${CHEVRON_ICON}${c.hasCover ? "Cover set — change" : "Add cover"}</summary>
+    <div class="kb-disclosure__body kb-stack">${scope}
+      <form method="POST" action="/admin/events/${id}/cover" class="kb-stack" data-cover-upload data-max-bytes="${COVER_MAX_BYTES}">
+        <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
+        <div class="kb-field">
+          <label class="kb-label" for="${fileId}">Image (PNG, JPEG or GIF, up to ${COVER_MAX_BYTES / (1024 * 1024)} MB)</label>
+          <input class="kb-input" id="${fileId}" type="file" accept="image/png,image/jpeg,image/gif">
+        </div>
+        <div class="kb-row"><button type="submit" class="kb-btn kb-btn--sm">${c.hasCover ? "Replace cover" : "Upload cover"}</button> <span class="kb-help" data-cover-msg role="status" aria-live="polite"></span></div>
+      </form>
+    </div>
+  </details>${remove ? `\n  ${remove}` : ""}
+</div>`;
 }
 
 // ---------- Event groups form section (#1188) ----------
@@ -3982,17 +3971,17 @@ export function renderEventsPage(props: EventsProps): string {
 
   const renderEventRow = (e: EventRow, cols: EventCols): string => {
     const finished = e.state === "cancelled" || e.state === "ended";
-    const seriesForm = `<form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel the whole '${escapeHtml(e.title)}' series?"${EVENT_CANCEL_SERIES_LIST}>${csrfInput}<input type="hidden" name="scope" value="series"><button type="submit" class="btn btn-danger">Cancel series</button></form>`;
+    const seriesForm = `<form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel the whole '${escapeHtml(e.title)}' series?"${EVENT_CANCEL_SERIES_LIST}>${csrfInput}<input type="hidden" name="scope" value="series"><button type="submit" class="kb-btn kb-btn--sm kb-btn--danger">Cancel series</button></form>`;
     // A finished occurrence still awaiting its successor (e.g. recurrence
     // was switched off meanwhile) keeps the series live: allow stopping it.
     // The host panel lives on the member surface (#1189); an admin may open
     // it for any event, including a finished one (read-only summary).
-    const hostLink = `<a class="btn" href="${escapeHtml(hostPanelPath(e.id))}">Host panel</a>`;
+    const hostLink = `<a class="kb-btn kb-btn--sm" href="${escapeHtml(hostPanelPath(e.id))}">Host panel</a>`;
     // End now (#1193): only a running event, behind a confirmation the server
     // checks again. Shared with the host panel's End section.
     const endNow =
       e.state === "active"
-        ? `<details class="end-now"><summary class="btn btn-danger">End now</summary>${renderEndEventForm(
+        ? `<details class="kb-disclosure" data-end-now><summary>${CHEVRON_ICON}End now</summary><div class="kb-disclosure__body">${renderEndEventForm(
             {
               actionPath: `/admin/events/${encodeURIComponent(e.id)}/end-now`,
               csrfToken: props.csrfToken,
@@ -4000,24 +3989,24 @@ export function renderEventsPage(props: EventsProps): string {
               hasGroupChannels: e.hasGroupChannels === true,
               adopted: e.nativeAdopted === true,
             },
-          )}</details>`
+          )}</div></details>`
         : "";
     // Edit (#1298): an open event of our own, one-off or a series occurrence
     // (the form asks how far the change reaches). An adopted event is edited in
     // Discord, so no link is offered for it.
     const editLink =
       !finished && e.nativeAdopted !== true
-        ? `<a class="btn" href="${escapeHtml(hostPanelPath(e.id))}/edit">Edit</a>\n  `
+        ? `<a class="kb-btn kb-btn--sm" href="${escapeHtml(hostPanelPath(e.id))}/edit">Edit</a>\n  `
         : "";
     const actions = finished
       ? e.awaitingSuccessor
         ? `${hostLink}\n  ${seriesForm}`
         : hostLink
       : `${hostLink}
-  ${editLink}<form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="btn">Start now</button></form>${
+  ${editLink}<form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm">Start now</button></form>${
     endNow ? `\n  ${endNow}` : ""
   }
-  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel ${e.recurrence ? "this occurrence of " : ""}event '${escapeHtml(e.title)}'?"${eventCancelList(e.nativeAdopted === true, Boolean(e.recurrence))}>${csrfInput}<button type="submit" class="btn btn-danger">${e.recurrence ? "Cancel occurrence" : "Cancel"}</button></form>${
+  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" data-confirm="Cancel ${e.recurrence ? "this occurrence of " : ""}event '${escapeHtml(e.title)}'?"${eventCancelList(e.nativeAdopted === true, Boolean(e.recurrence))}>${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger">${e.recurrence ? "Cancel occurrence" : "Cancel"}</button></form>${
     e.recurrence ? `\n  ${seriesForm}` : ""
   }`;
     const channelCell = e.channelId
@@ -4025,20 +4014,20 @@ export function renderEventsPage(props: EventsProps): string {
           name: e.channelName ?? e.channelId,
           type: e.channelType,
         })
-      : '<span class="muted">—</span>';
+      : '<span class="kb-muted">—</span>';
     return `<tr>
 <th scope="row">${escapeHtml(e.title)}${
       e.recurrence
-        ? ` <span class="tag" title="Part of a recurring series"><span aria-hidden="true">🔁</span> ${escapeHtml(e.recurrence)}${e.occurrence ? ` · #${e.occurrence}` : ""}</span>`
+        ? ` <span class="kb-pill" title="Part of a recurring series"><span aria-hidden="true">🔁</span> ${escapeHtml(e.recurrence)}${e.occurrence ? ` · #${e.occurrence}` : ""}</span>`
         : ""
     }${
       e.groupCount
-        ? ` <span class="tag" title="Groups set up for this event">${e.groupCount} ${e.groupCount === 1 ? "group" : "groups"}</span> <a href="/admin/events/presets?fromEvent=${encodeURIComponent(e.id)}">Save as server preset</a>`
+        ? ` <span class="kb-pill" title="Groups set up for this event">${e.groupCount} ${e.groupCount === 1 ? "group" : "groups"}</span> <a href="/admin/events/presets?fromEvent=${encodeURIComponent(e.id)}">Save as server preset</a>`
         : ""
     }</th>
-<td class="mono">${escapeHtml(e.when)}</td>
+<td class="kb-mono">${escapeHtml(e.when)}</td>
 <td>${renderEventStateBadge(e.state, e.running === true)}</td>
-${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>${channelCell}</td>\n` : ""}${cols.cover ? `<td>${renderCoverCell(e, csrfInput, props.csrfToken)}</td>\n` : ""}<td class="actions">${actions}</td>
+${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>${channelCell}</td>\n` : ""}${cols.cover ? `<td>${renderCoverCell(e, csrfInput, props.csrfToken)}</td>\n` : ""}<td class="kb-actions"><div class="kb-row">${actions}</div></td>
 </tr>`;
   };
 
@@ -4052,7 +4041,7 @@ ${cols.expected ? `<td>${renderExpected(e)}</td>\n` : ""}${cols.channel ? `<td>$
   });
   const renderEventsTable = (rows: EventRow[]): string => {
     const cols = colsFor(rows);
-    return `<table class="data">
+    return `<table class="kb-table">
 <thead><tr><th scope="col">Title</th><th scope="col">When</th><th scope="col">State</th>${cols.expected ? '<th scope="col">Expected to show up</th>' : ""}${cols.channel ? '<th scope="col">Channel</th>' : ""}${cols.cover ? '<th scope="col">Cover image</th>' : ""}<th scope="col">Actions</th></tr></thead>
 <tbody>${rows.map((e) => renderEventRow(e, cols)).join("")}</tbody>
 </table>`;
@@ -4241,6 +4230,8 @@ export interface PollsProps extends CommonProps {
   schedules: PollScheduleRow[];
   items: PollItemRow[];
   textChannels: ChannelOption[];
+  /** The channel Picker's create row (#1665): the bot-permission answer, or nothing when unreadable. */
+  createChannel?: PickerCreate;
   roles: RoleOption[];
   /** The schedule or question form the server just refused, to draw again with its values and messages (#1517). */
   refusedForm?: RefusedForm | null;
@@ -4341,6 +4332,47 @@ function pollSelect(
   );
 }
 
+/**
+ * The Channel field of a schedule form as the Picker (#1665): `span.kb-picker[data-picker]`
+ * around the native select, with the options and the stored-but-unavailable
+ * handling of {@link buildOptionsHtml} (a saved channel that is gone stays selected
+ * and is listed as unavailable, so a cron-only edit never reassigns it). `create`
+ * offers "Create new channel: '...'" (or its help line when the bot cannot); a
+ * refused form draws the typed name again as a pending option. Without JavaScript
+ * it is the select, posting the channel id as before.
+ */
+function pollChannelPicker(
+  f: FormView,
+  options: ChannelOption[],
+  selectedId: string | undefined,
+  create?: PickerCreate,
+): string {
+  const meta: PickerMeta[] = [];
+  // A refused form with a pending name, drawn when the permission could not be
+  // read: keep it a pending creation ("will be created"), with neither a create
+  // row nor a help line (ok false and no reason).
+  if (!create && selectedId && parsePickerCreateValue(selectedId)) {
+    create = { kind: "channel", channelKind: "text", ok: false };
+  }
+  // With no text channel and nothing stored, the empty row says so and keeps
+  // `meta` in step with the options.
+  const empty = options.length === 0 && !selectedId;
+  const optionsHtml = buildOptionsHtml(
+    options,
+    new Set(selectedId ? [selectedId] : []),
+    empty,
+    meta,
+    "(no text channels available)",
+    create,
+  );
+  return pollField(
+    f,
+    "channelId",
+    "Channel",
+    `<span class="kb-picker" data-picker data-picker-meta="${pickerMetaAttr(meta, create)}"><select class="kb-select" name="channelId" required${fieldControlAttrs(f.control("channelId"))}>${optionsHtml}</select></span>`,
+  );
+}
+
 /** The multiple-answers choice of a question form: a Switch that posts `multiSelect=1` when on. */
 function pollMultiSelectSwitch(checked: boolean): string {
   return `<label class="kb-switch"><input type="checkbox" role="switch" name="multiSelect" value="1"${checked ? " checked" : ""}><span class="kb-switch__track" aria-hidden="true"></span><span class="kb-switch__state" aria-hidden="true"></span>Allow multiple answer selections</label>`;
@@ -4391,7 +4423,7 @@ export function renderPollsPage(props: PollsProps): string {
 <td class="kb-actions"><div class="kb-row kb-row--nowrap">
   <details class="kb-disclosure"${f.open()}><summary>${CHEVRON_ICON}Edit</summary>
     <div class="kb-disclosure__body"><form method="POST" action="${base}/edit" class="kb-stack">${csrfInput}
-      ${pollSelect(f, "channelId", "Channel", channelOptionsHtml(props.textChannels, f.selected("channelId", s.channelId)), true)}
+      ${pollChannelPicker(f, props.textChannels, f.selected("channelId", s.channelId), props.createChannel)}
       ${renderCronField(f, "cron", "Schedule", s.cron)}
       ${renderPollDurationField(f, String(s.durationHours))}
       ${pollSelect(f, "pingRoleId", "Ping role", roleOptionsHtml(props.roles, f.selected("pingRoleId", s.pingRoleId ?? "") || undefined))}
@@ -4450,7 +4482,7 @@ export function renderPollsPage(props: PollsProps): string {
     "Create a new schedule",
     `<form method="POST" action="/admin/polls/schedules/create" class="kb-stack">
     ${csrfInput}
-    ${pollSelect(newSchedule, "channelId", "Channel", channelOptionsHtml(props.textChannels, newSchedule.selected("channelId") || undefined), true)}
+    ${pollChannelPicker(newSchedule, props.textChannels, newSchedule.selected("channelId") || undefined, props.createChannel)}
     ${renderCronField(newSchedule, "cron", "Schedule", "0 12 * * *")}
     ${renderPollDurationField(newSchedule, String(props.defaultDurationHours))}
     ${pollSelect(newSchedule, "pingRoleId", "Ping role", roleOptionsHtml(props.roles, newSchedule.selected("pingRoleId") || undefined))}
@@ -6634,24 +6666,26 @@ export interface DigestProps extends CommonProps {
  * sees the real output, not just counts.
  */
 function renderDigestEmbedCard(entry: DigestPreviewEntryView): string {
+  const nl2br = (v: string): string => escapeHtml(v).replace(/\n/g, "<br>");
   const fieldsHtml = entry.fields
     .map(
-      (f) => `<div class="digest-field${f.inline ? " inline" : ""}">
-  <div class="digest-field-name">${escapeHtml(f.name)}</div>
-  <div class="digest-field-value">${escapeHtml(f.value).replace(/\n/g, "<br>")}</div>
-</div>`,
+      (
+        f,
+      ) => `<div class="kb-embed__field${f.inline ? "" : " kb-embed__field--wide"}">
+        <p class="kb-embed__name">${escapeHtml(f.name)}</p>
+        <p class="kb-embed__value">${nl2br(f.value)}</p>
+      </div>`,
     )
     .join("");
 
-  return `<div class="digest-embed">
-  <div class="digest-embed-head">
-    <span class="tag tag-info">#${entry.rank}</span>
-    <strong>${escapeHtml(entry.username)}</strong>
-  </div>
-  <div class="digest-embed-title">${escapeHtml(entry.title)}</div>
-  <div class="digest-embed-desc">${escapeHtml(entry.description)}</div>
-  <div class="digest-fields">${fieldsHtml}</div>
-  <div class="digest-embed-footer">${escapeHtml(entry.footer).replace(/\n/g, "<br>")}</div>
+  return `<div class="kb-stack">
+  <div class="kb-row"><span class="kb-badge kb-badge--info">#${entry.rank}</span><strong>${escapeHtml(entry.username)}</strong></div>
+  <div class="kb-embed"><div class="kb-embed__body">
+    <p class="kb-embed__title">${escapeHtml(entry.title)}</p>
+    <p class="kb-embed__text">${escapeHtml(entry.description)}</p>
+    <div class="kb-embed__fields">${fieldsHtml}</div>
+    <p class="kb-embed__foot">${nl2br(entry.footer)}</p>
+  </div></div>
 </div>`;
 }
 
@@ -6673,62 +6707,62 @@ export function renderDigestPage(props: DigestProps): string {
 
     const achievementsNote = p.includeAchievements
       ? ""
-      : `<p class="muted">Achievements are excluded from the digest (<code>digest.include_achievements</code> is off).</p>`;
+      : `<p class="kb-help">Achievements are excluded from the digest (<code>digest.include_achievements</code> is off).</p>`;
 
-    const dmsNote = `<p class="muted">Users with DMs closed can't be detected without sending — those skips only show up on a real run.</p>`;
+    const dmsNote = `<p class="kb-help">Users with DMs closed can't be detected without sending — those skips only show up on a real run.</p>`;
 
     const capNote =
       p.optedIn > p.entries.length
-        ? `<p class="muted">Showing the top ${p.entries.length} of ${p.optedIn} opted-in members (capped at ${p.limit}).</p>`
+        ? `<p class="kb-help">Showing the top ${p.entries.length} of ${p.optedIn} opted-in members (capped at ${p.limit}).</p>`
         : "";
 
     const embeds =
       p.entries.length === 0
-        ? `<div class="empty">No opted-in members qualify for the digest this week.</div>`
+        ? kbEmptyState(
+            "newspaper",
+            "No opted-in members qualify for the digest this week.",
+            "Members who had voice activity that week and have not opted out show up here.",
+          )
         : p.entries.map(renderDigestEmbedCard).join("");
 
-    previewHtml = `<div class="card">
-  <h2>Preview <span class="muted">(week of ${escapeHtml(p.weekRange)})</span></h2>
-  <div class="notice">${summary}</div>
-  ${achievementsNote}
-  ${dmsNote}
-  ${capNote}
-  ${embeds}
-  <p class="muted">Generated ${escapeHtml(p.generatedAt)}. No DMs were sent and nothing was written.</p>
-</div>`;
+    previewHtml = `<section class="kb-panel" id="digest-preview" aria-labelledby="digest-preview-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="digest-preview-h">Preview</h2><span class="kb-panel__meta">Week of ${escapeHtml(p.weekRange)}</span></header>
+  <div class="kb-panel__body kb-stack">
+    <div class="kb-callout" role="status">${toneIcon("")}<div class="kb-callout__body"><p class="kb-callout__title">${summary}</p></div></div>
+    ${achievementsNote}
+    ${dmsNote}
+    ${capNote}
+    ${embeds}
+  </div>
+  <footer class="kb-panel__foot">Generated ${escapeHtml(p.generatedAt)}. No DMs were sent and nothing was written.</footer>
+</section>`;
   }
 
   const body = `
-<style>
-.digest-embed{border-left:4px solid var(--embed-brand);background:var(--chrome);border-radius:4px;padding:.75rem 1rem;margin:.75rem 0}
-.digest-embed-head{display:flex;gap:.5rem;align-items:center;margin-bottom:.35rem;font-size:.9rem}
-.digest-embed-title{font-weight:600;margin-bottom:.25rem}
-.digest-embed-desc{color:var(--text-secondary);margin-bottom:.6rem}
-.digest-fields{display:flex;flex-wrap:wrap;gap:.75rem 1.5rem}
-.digest-field{flex:1 1 100%}
-.digest-field.inline{flex:1 1 28%;min-width:120px}
-.digest-field-name{font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
-.digest-field-value{color:var(--text)}
-.digest-embed-footer{margin-top:.75rem;padding-top:.5rem;border-top:1px solid var(--border);font-size:.78rem;color:var(--muted)}
-</style>
-<h1>Weekly Digest</h1>
-<p class="subtitle">Preview the weekly voice digest before it sends — a dry run of the same query and embeds the cron job DMs to qualifying members, with no DMs sent.</p>
+<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Weekly Digest</h1>
+    <p class="kb-pagehead__sub">Preview the weekly voice digest before it sends — a dry run of the same query and embeds the cron job DMs to qualifying members, with no DMs sent.</p>
+    ${renderStatusLine({ enabled: props.enabled, chips: [] })}
+  </div>
+</header>
 ${renderPageFlash(props.flash)}
 ${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Weekly digest", featureKey: "digest.enabled", returnTo: "/admin/digest", csrfToken: props.csrfToken })}
-${renderStatusLine({ enabled: props.enabled, chips: [] })}
-
-<div class="card">
-  <h2>Actions</h2>
-  <form method="GET" action="/admin/digest" class="inline-form">
-    <button type="submit" name="preview" value="1" class="${mainButtonClass(props.enabled)}"${props.enabled ? "" : " disabled"}>Preview digest</button>
-    <span class="muted">Renders the digest for the most recent complete week without sending anything.</span>
-  </form>
-  <form method="POST" action="/admin/digest/send-now" class="inline-form" style="margin-top:.75rem" data-confirm="Send the weekly digest to all qualifying members right now?"${CONFIRM_NEUTRAL_ATTR}>
-    ${csrfInput}
-    <button type="submit" class="btn btn-danger"${sendDisabled ? " disabled" : ""}>Send now</button>
-    <span class="muted">${sendHint}</span>
-  </form>
-</div>
+<section class="kb-panel" id="digest-actions" aria-labelledby="digest-actions-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="digest-actions-h">Actions</h2></header>
+  <div class="kb-panel__body kb-stack">
+    <form method="GET" action="/admin/digest" class="kb-row">
+      <button type="submit" name="preview" value="1" class="${mainKbButtonClass(props.enabled)}"${props.enabled ? "" : " disabled"}>Preview digest</button>
+      <span class="kb-help">Renders the digest for the most recent complete week without sending anything.</span>
+    </form>
+    <form method="POST" action="/admin/digest/send-now" class="kb-row" data-confirm="Send the weekly digest to all qualifying members right now?"${CONFIRM_NEUTRAL_ATTR}>
+      ${csrfInput}
+      <button type="submit" class="kb-btn"${sendDisabled ? " disabled" : ""}>Send now</button>
+      <span class="kb-help">${sendHint}</span>
+    </form>
+  </div>
+</section>
 ${previewHtml}
 ${renderFeatureSettingsCard({
   intro:
@@ -6743,6 +6777,7 @@ ${renderFeatureSettingsCard({
   enabled: props.enabled,
   flash: props.flash,
 })}
+</div>
 `;
   return renderAdminPage({
     title: "Weekly Digest",
@@ -6837,7 +6872,7 @@ const LEADERBOARD_TIER_EDITOR_SCRIPT =
   "var tpl=document.getElementById('lb-tier-template');" +
   "var add=document.getElementById('lb-tier-add');" +
   "if(!body||!tpl||!add||!('content' in tpl))return;" +
-  "function reveal(el){el.querySelectorAll('.lb-tier-remove').forEach(function(b){b.hidden=false})}" +
+  "function reveal(el){el.querySelectorAll('[data-tier-remove]').forEach(function(b){b.hidden=false})}" +
   "add.hidden=false;reveal(body);" +
   "add.addEventListener('click',function(){" +
   "var row=tpl.content.firstElementChild.cloneNode(true);" +
@@ -6845,7 +6880,7 @@ const LEADERBOARD_TIER_EDITOR_SCRIPT =
   "var f=row.querySelector('input');if(f)f.focus()});" +
   "body.addEventListener('click',function(e){" +
   "var t=e.target;if(!t||!t.closest)return;" +
-  "var b=t.closest('.lb-tier-remove');if(!b)return;" +
+  "var b=t.closest('[data-tier-remove]');if(!b)return;" +
   "var row=b.closest('tr');if(row)row.remove();" +
   "add.focus()})})();";
 
@@ -6863,9 +6898,9 @@ function renderTierEditorRow(
   const topN = refused ? refused.topN : tier ? String(tier.topN) : "";
   const roleId = refused ? refused.roleId : tier?.roleId;
   return `<tr>
-<th scope="row"><input type="number" name="topN" min="1" max="${Math.max(MAX_TIER_TOP_N, tier?.topN ?? 0)}" step="1" inputmode="numeric" aria-label="Top N" value="${escapeHtml(topN)}" style="width:6rem"${view?.attrs(topNKey) ?? ""}>${view?.error(topNKey) ?? ""}</th>
-<td><select name="roleId" aria-label="Role"${view?.attrs(roleKey) ?? ""}>${roleOptionsHtml(roles, roleId)}</select>${view?.error(roleKey) ?? ""}</td>
-<td><button type="button" class="btn lb-tier-remove" hidden>Remove</button></td>
+<th scope="row"><input type="number" class="kb-input kb-input--sm kb-input--num" name="topN" min="1" max="${Math.max(MAX_TIER_TOP_N, tier?.topN ?? 0)}" step="1" inputmode="numeric" aria-label="Top N" value="${escapeHtml(topN)}"${view?.attrs(topNKey) ?? ""}>${view?.error(topNKey) ?? ""}</th>
+<td><select class="kb-select" name="roleId" aria-label="Role"${view?.attrs(roleKey) ?? ""}>${roleOptionsHtml(roles, roleId)}</select>${view?.error(roleKey) ?? ""}</td>
+<td class="kb-actions"><button type="button" class="kb-btn kb-btn--sm" data-tier-remove hidden>Remove</button></td>
 </tr>`;
 }
 
@@ -6881,24 +6916,24 @@ function renderTierRoleIssue(tier: LeaderboardTierView): string {
     const label = tier.roleIssue
       ? TIER_ROLE_ISSUE_LABELS[tier.roleIssue]
       : "can’t be assigned";
-    return ` <span class="tag tag-warn">${label}</span>`;
+    return ` <span class="kb-badge kb-badge--warn">${label}</span>`;
   }
   if (tier.assignable === null) {
-    return ` <span class="muted">(couldn’t check whether the bot can assign it)</span>`;
+    return ` <span class="kb-muted">(couldn’t check whether the bot can assign it)</span>`;
   }
   return "";
 }
 
 function renderTierHolders(tier: LeaderboardTierView): string {
   if (tier.holders.length === 0) {
-    return `<span class="muted">nobody yet</span>`;
+    return `<span class="kb-muted">nobody yet</span>`;
   }
-  return tier.holders
+  return `<div class="kb-row">${tier.holders
     .map(
       (h) =>
-        `<span class="tag tag-info" title="${escapeHtml(h.id)}">${escapeHtml(h.label)}</span>`,
+        `<span class="kb-chip" title="${escapeHtml(h.id)}">${escapeHtml(h.label)}</span>`,
     )
-    .join(" ");
+    .join("")}</div>`;
 }
 
 export function renderLeaderboardRolesPage(
@@ -6908,36 +6943,39 @@ export function renderLeaderboardRolesPage(
 
   const trackingNotice = props.voiceTrackingEnabled
     ? ""
-    : `<div class="notice warn" role="status">Voice tracking is off (<code>voicetracking.enabled</code>), so there is no ranking to compute tiers from and recalculation is skipped. Enable it under <a href="/admin/settings">Settings</a>.</div>`;
+    : `<div class="kb-callout kb-callout--warn" role="status">${toneIcon("warn")}<div class="kb-callout__body"><p class="kb-callout__title">Voice tracking is off (<code>voicetracking.enabled</code>), so there is no ranking to compute tiers from and recalculation is skipped.</p><p class="kb-callout__text">Enable it under <a href="/admin/settings">Settings</a>.</p></div></div>`;
 
   const holderRows = props.tiers
     .map((t) => {
       const roleCell =
         t.roleName === null
-          ? `<span class="mono">${escapeHtml(t.roleId)}</span> <span class="tag tag-warn">role not found</span>`
+          ? `<span class="kb-mono">${escapeHtml(t.roleId)}</span> <span class="kb-badge kb-badge--warn">role not found</span>`
           : `${roleMention(t.roleName)}${renderTierRoleIssue(t)}`;
       return `<tr>
 <th scope="row">Top ${t.topN}</th>
 <td>${roleCell}</td>
 <td>${renderTierHolders(t)}</td>
-<td class="muted">${escapeHtml(t.lastUpdated ?? "never")}</td>
+<td class="kb-muted">${escapeHtml(t.lastUpdated ?? "never")}</td>
 </tr>`;
     })
     .join("");
   const holdersHtml =
     props.tiers.length === 0
-      ? `<div class="empty">No tiers configured yet. Add one below.</div>`
-      : `<table><thead><tr><th scope="col">Tier</th><th scope="col">Role</th><th scope="col">Current holders</th><th scope="col">Last recalculated</th></tr></thead><tbody>${holderRows}</tbody></table>
-  <p class="muted">Holders are the members the bot recorded on its last recalculation, not a live read of the role.</p>`;
+      ? `<div class="kb-panel__body">${kbEmptyState("trophy", "No tiers configured yet.", "Add one in the Tiers panel below. Each tier gives its role to everyone ranked within its Top N.")}</div>`
+      : `<div class="kb-panel__body--flush"><table class="kb-table"><thead><tr><th scope="col">Tier</th><th scope="col">Role</th><th scope="col">Current holders</th><th scope="col">Last recalculated</th></tr></thead><tbody>${holderRows}</tbody></table></div>`;
+  const holdersNote =
+    props.tiers.length === 0
+      ? ""
+      : `\n  <footer class="kb-panel__foot">Holders are the members the bot recorded on its last recalculation, not a live read of the role.</footer>`;
 
   const ignoredHtml =
     props.ignoredEntries.length === 0
       ? ""
-      : `<div class="notice warn" role="status">The stored tiers contain entries the bot ignores: ${props.ignoredEntries
+      : `<div class="kb-callout kb-callout--warn" role="status">${toneIcon("warn")}<div class="kb-callout__body"><p class="kb-callout__title">The stored tiers contain entries the bot ignores.</p><p class="kb-callout__text">${props.ignoredEntries
           .map((e) => `<code>${escapeHtml(e)}</code>`)
           .join(
             ", ",
-          )}. They are not shown below, and saving a change removes them.</div>`;
+          )}. They are not shown below, and saving a change removes them.</p></div></div>`;
 
   const tiersForm = formView(props.refusedForm, LEADERBOARD_TIERS_FORM);
   // A refused save draws the rows as submitted, so a row that was added (and
@@ -6966,52 +7004,63 @@ export function renderLeaderboardRolesPage(
     : "Recalculates every tier now — the same run the schedule triggers, including the announcement. Concurrent runs coalesce, so this is safe during a scheduled run.";
 
   const body = `
-<h1>Leaderboard Roles</h1>
-<p class="subtitle">Reward the top voice-leaderboard members with Discord roles. Each tier gives its role to everyone ranked within its Top N.</p>
+<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Leaderboard Roles</h1>
+    <p class="kb-pagehead__sub">Reward the top voice-leaderboard members with Discord roles. Each tier gives its role to everyone ranked within its Top N.</p>
+    ${renderStatusLine({
+      enabled: props.enabled,
+      chips: [
+        { text: `Period ${props.period}` },
+        { text: `Schedule ${props.cron || "(unset)"}`, mono: true },
+        { text: countOf(props.tiers.length, "tier") },
+      ],
+    })}
+  </div>
+</header>
 ${renderPageFlash(props.flash)}
 ${renderFeatureDisabledCallout({ enabled: props.enabled, label: "Leaderboard roles", featureKey: "leaderboard_roles.enabled", returnTo: "/admin/leaderboard-roles", csrfToken: props.csrfToken })}
 ${trackingNotice}
-${renderStatusLine({
-  enabled: props.enabled,
-  chips: [
-    { text: `Period ${props.period}` },
-    { text: `Schedule ${props.cron || "(unset)"}`, mono: true },
-    { text: countOf(props.tiers.length, "tier") },
-  ],
-})}${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
-
-<div class="card">
-  <h2>Current holders</h2>
+${renderPermissionNotice(props.permissionNotice ?? null, { canLinkToPage: true })}
+<section class="kb-panel" id="current-holders" aria-labelledby="current-holders-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="current-holders-h">Current holders</h2></header>
   ${holdersHtml}
-  <form method="POST" action="/admin/leaderboard-roles/run-now" class="inline-form" style="margin-top:.75rem" data-confirm="Recalculate leaderboard roles now? Roles are granted and revoked immediately."${CONFIRM_NEUTRAL_ATTR}>
-    ${csrfInput}
-    <button type="submit" class="btn"${runDisabled ? " disabled" : ""}>Run now</button>
-    <span class="muted">${runHint}</span>
-  </form>
-</div>
-<div class="card">
-  <h2>Tiers</h2>
-  <p class="muted">One row per tier. Top N must be unique, and each role must sit below the bot’s highest role so the bot can assign it. Clear a row to remove it.</p>
-  ${
-    props.settingsUnavailable
-      ? // The stored tiers may not be what was read, so offering the editor
-        // could overwrite them with an empty or default list.
-        renderSettingsUnavailableNotice()
-      : `${ignoredHtml}
-  <form method="POST" action="/admin/leaderboard-roles/tiers">
-    ${csrfInput}
-    <table>
-      <thead><tr><th scope="col">Top N</th><th scope="col">Role</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
-      <tbody id="lb-tier-rows">${editorRows}</tbody>
-    </table>
-    <template id="lb-tier-template">${renderTierEditorRow(props.roles, null)}</template>
-    <div class="actions" style="margin-top:.75rem">
-      <button type="button" class="btn" id="lb-tier-add" hidden>Add tier</button>
-      <button type="submit" class="${mainButtonClass(props.enabled)}">Save tiers</button>
-    </div>
-  </form>`
-  }
-</div>
+  <div class="kb-panel__body">
+    <form method="POST" action="/admin/leaderboard-roles/run-now" class="kb-row" data-confirm="Recalculate leaderboard roles now? Roles are granted and revoked immediately."${CONFIRM_NEUTRAL_ATTR}>
+      ${csrfInput}
+      <button type="submit" class="kb-btn"${runDisabled ? " disabled" : ""}>Run now</button>
+      <span class="kb-help">${runHint}</span>
+    </form>
+  </div>${holdersNote}
+</section>
+<section class="kb-panel" id="tiers" aria-labelledby="tiers-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="tiers-h">Tiers</h2></header>
+  <div class="kb-panel__body kb-stack">
+    <p class="kb-help">One row per tier. Top N must be unique, and each role must sit below the bot’s highest role so the bot can assign it. Clear a row to remove it.</p>
+    ${
+      props.settingsUnavailable
+        ? // The stored tiers may not be what was read, so offering the editor
+          // could overwrite them with an empty or default list.
+          renderSettingsUnavailableNotice()
+        : `${ignoredHtml}
+    <form method="POST" action="/admin/leaderboard-roles/tiers" class="kb-stack">
+      ${csrfInput}
+      <div class="kb-panel__body--flush">
+        <table class="kb-table">
+          <thead><tr><th scope="col">Top N</th><th scope="col">Role</th><th scope="col"><span class="kb-visually-hidden">Actions</span></th></tr></thead>
+          <tbody id="lb-tier-rows">${editorRows}</tbody>
+        </table>
+      </div>
+      <template id="lb-tier-template">${renderTierEditorRow(props.roles, null)}</template>
+      <div class="kb-row">
+        <button type="button" class="kb-btn" id="lb-tier-add" hidden>Add tier</button>
+        <button type="submit" class="${mainKbButtonClass(props.enabled)}">Save tiers</button>
+      </div>
+    </form>`
+    }
+  </div>
+</section>
 ${renderFeatureSettingsCard({
   intro:
     "Change leaderboard role settings here without leaving the page. Saved through the shared settings route.",
@@ -7026,6 +7075,7 @@ ${renderFeatureSettingsCard({
   flash: props.flash,
 })}
 ${scriptTag(LEADERBOARD_TIER_EDITOR_SCRIPT)}
+</div>
 `;
   return renderAdminPage({
     title: "Leaderboard Roles",

@@ -12,6 +12,7 @@
 
 import { ChannelType, PermissionFlagsBits } from "discord.js";
 import { settingsMetadata } from "../../src/services/config-schema.js";
+import type { PickerCreate } from "../../src/web/setting-pickers.js";
 import {
   renderAnalyticsPage,
   renderAnnouncementsPage,
@@ -88,7 +89,10 @@ import {
   renderRoleDeletePage,
   renderRoleGroupsPage,
 } from "../../src/web/role-groups-views.js";
-import { planned as plannedEventAdoption } from "./event-adoption-fixtures.js";
+import {
+  blockedPlanned as blockedEventPlan,
+  planned as plannedEventAdoption,
+} from "./event-adoption-fixtures.js";
 import {
   renderChannelDeleteConfirmPage,
   renderChannelManagerPage,
@@ -205,6 +209,22 @@ export interface A11yPage {
 }
 
 const COMMON = { csrfToken: "csrf-token", remainingMs: 900_000 };
+
+// The Channel Picker's create row on the Announcements and Polls forms (#1665).
+const CREATE_OK: PickerCreate = {
+  kind: "channel",
+  channelKind: "text",
+  ok: true,
+};
+const CREATE_NOT_POSSIBLE: PickerCreate = {
+  kind: "channel",
+  channelKind: "text",
+  ok: false,
+  reason:
+    "The bot needs Manage Channels to create a channel. Give the bot's role Manage Channels in Server Settings, Roles; the Bot permissions page shows what is missing.",
+};
+const CREATE_FAILED =
+  "Discord refused to create the channel, so nothing was saved. Check the bot's permissions.";
 
 /** The per-feature permission notice (#1253): a missing permission, and a check that could not run. */
 const MISSING_PERMISSION_NOTICE: PermissionNotice = {
@@ -933,9 +953,13 @@ const ADOPTION_SNAPSHOT = {
 };
 
 /** The Polls page with one schedule and one question, drawing the form the server refused. */
-function pollsRefusedPage(refusedForm: RefusedForm): string {
+function pollsRefusedPage(
+  refusedForm: RefusedForm,
+  createChannel?: PickerCreate,
+): string {
   return renderPollsPage({
     ...COMMON,
+    createChannel,
     enabled: true,
     defaultDurationHours: 24,
     cooldownDays: 30,
@@ -1738,6 +1762,78 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Adopt Discord events (list)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption(),
+        previewing: false,
+      }),
+    },
+    {
+      name: "Adopt Discord events (events off, nothing to announce with)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption({
+          eventsEnabled: false,
+          announcementConfigured: false,
+          canManageEvents: false,
+        }),
+        previewing: false,
+      }),
+    },
+    {
+      name: "Adopt Discord events (blocked plan)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: blockedEventPlan(),
+        previewing: true,
+      }),
+    },
+    {
+      name: "Adopt Discord events (nothing chosen)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption({}, undefined, []),
+        previewing: true,
+      }),
+    },
+    {
+      name: "Adopt Discord events (no events)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption({}, [], []),
+        previewing: false,
+      }),
+    },
+    {
+      name: "Adopt Discord events (none can be adopted)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption(
+          {},
+          [plannedEventAdoption().candidates[1].info],
+          [],
+        ),
+        previewing: false,
+      }),
+    },
+    {
+      name: "Adopt Discord events (applying)",
+      html: renderEventAdoptionPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        planned: plannedEventAdoption(),
+        previewing: false,
+        jobId: "123e4567-e89b-12d3-a456-426614174000",
+      }),
+    },
+    {
       name: "Channel claims",
       html: renderChannelClaimsPage(claimsProps()),
     },
@@ -2531,6 +2627,33 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      name: "Adoption history (first page, latest apply partly applied)",
+      html: renderAdoptionHistoryPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        snapshots: [
+          { ...ADOPTION_SNAPSHOT, status: "partial", failed: 1 },
+          {
+            ...ADOPTION_SNAPSHOT,
+            id: "b".repeat(24),
+            status: "rolled_back",
+            rolledBackBy: "9",
+            rolledBackAt: new Date("2026-10-02T10:00:00Z"),
+          },
+        ],
+        hasMore: true,
+      }),
+    },
+    {
+      name: "Adoption history (no older snapshots)",
+      html: renderAdoptionHistoryPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        snapshots: [],
+        page: 3,
+      }),
+    },
+    {
       name: "Adoption history (empty)",
       html: renderAdoptionHistoryPage({
         ...COMMON,
@@ -2562,6 +2685,25 @@ export function adminPages(): A11yPage[] {
           revertibleCreatedRoles: 1,
           uncertainCreatedRoles: 1,
           dependentRepairs: 2,
+        },
+      }),
+    },
+    {
+      name: "Restore snapshot (nothing left to revert)",
+      html: renderRestoreConfirmPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        destructiveNote: "n",
+        snapshot: {
+          ...ADOPTION_SNAPSHOT,
+          status: "rollback_partial",
+          destructive: 0,
+          createdRoles: 0,
+          operations: [],
+          interrupted: 0,
+          revertibleCreatedRoles: 0,
+          uncertainCreatedRoles: 0,
+          dependentRepairs: 0,
         },
       }),
     },
@@ -3240,6 +3382,77 @@ export function adminPages(): A11yPage[] {
           text: "Saved 1 setting in events.",
           openSettings: true,
         },
+      }),
+    },
+    {
+      name: "Events (recurring, groups, expected, covers)",
+      html: renderEventsPage({
+        ...COMMON,
+        enabled: true,
+        categoryConfigured: true,
+        announcementConfigured: true,
+        timezone: "UTC",
+        settingRows: [],
+        rows: [
+          {
+            id: "e1",
+            title: "Weekly quiz",
+            when: "2026-02-01 20:00",
+            state: "scheduled",
+            channelId: "c1",
+            channelName: "quiz",
+            channelType: ChannelType.GuildVoice,
+            recurrence: "weekly",
+            occurrence: 3,
+            groupCount: 2,
+            expected: {
+              kind: "ok",
+              count: 5,
+              names: ["alice", "bob"],
+              truncated: true,
+            },
+            legacyRsvps: { going: 1, maybe: 2, cant: 3 },
+            cover: { kind: "editable", hasCover: true, series: true },
+          },
+          {
+            id: "e2",
+            title: "Game night",
+            when: "2026-02-02 20:00",
+            state: "scheduled",
+            channelId: null,
+            expected: {
+              kind: "unavailable",
+              message: "Could not read the list.",
+            },
+            cover: { kind: "editable", hasCover: false, series: false },
+          },
+          {
+            id: "e3",
+            title: "Adopted movie night",
+            when: "2026-02-03 20:00",
+            state: "ended",
+            channelId: null,
+            nativeAdopted: true,
+            cover: { kind: "adopted" },
+          },
+          {
+            id: "e4",
+            title: "Deleted in Discord",
+            when: "2026-02-04 20:00",
+            state: "scheduled",
+            channelId: null,
+            cover: { kind: "detached" },
+          },
+          {
+            id: "e5",
+            title: "Daily sync",
+            when: "2026-01-30 20:00",
+            state: "ended",
+            channelId: null,
+            recurrence: "daily",
+            awaitingSuccessor: true,
+          },
+        ],
       }),
     },
     {
@@ -4948,6 +5161,81 @@ export function adminPages(): A11yPage[] {
         },
       }),
     },
+    // A channel asked for in a form of the Announcements or Polls page (#1665):
+    // the typed name is drawn again as a pending option and the error stands
+    // under the field; or creating is not possible and the help line says why.
+    {
+      name: "Announcements (create form, channel to be created)",
+      html: renderAnnouncementsPage({
+        ...COMMON,
+        enabled: true,
+        textChannels: CHANNELS,
+        rows: [],
+        createChannel: CREATE_OK,
+        refusedForm: {
+          formId: "announcement-create",
+          errors: { channelId: CREATE_FAILED },
+          values: {
+            channelId: "create:Daily News",
+            cron: "0 9 * * *",
+            message: "Good morning!",
+          },
+        },
+      }),
+    },
+    {
+      name: "Announcements (creating a channel is not possible)",
+      html: renderAnnouncementsPage({
+        ...COMMON,
+        enabled: true,
+        textChannels: CHANNELS,
+        rows: [],
+        createChannel: CREATE_NOT_POSSIBLE,
+      }),
+    },
+    {
+      name: "Polls (schedule create form, channel to be created)",
+      html: pollsRefusedPage(
+        {
+          formId: "poll-schedule-create",
+          errors: { channelId: CREATE_FAILED },
+          values: {
+            channelId: "create:Weekly Poll",
+            cron: "0 12 * * 3",
+            durationHours: "24",
+            pingRoleId: "",
+          },
+        },
+        CREATE_OK,
+      ),
+    },
+    {
+      name: "Polls (schedule edit form, channel to be created)",
+      html: pollsRefusedPage(
+        {
+          formId: "poll-schedule-edit-s1",
+          errors: { channelId: CREATE_FAILED },
+          values: {
+            channelId: "create:Weekly Poll",
+            cron: "0 12 * * 3",
+            durationHours: "24",
+            pingRoleId: "",
+          },
+        },
+        CREATE_OK,
+      ),
+    },
+    {
+      name: "Polls (creating a channel is not possible)",
+      html: pollsRefusedPage(
+        {
+          formId: "poll-schedule-create",
+          errors: {},
+          values: {},
+        },
+        CREATE_NOT_POSSIBLE,
+      ),
+    },
     {
       // An empty pool (#1642): the EmptyState, and the Callout that says the built-in defaults are in use.
       name: "Bot status (nothing stored, defaults in use)",
@@ -5184,6 +5472,100 @@ export function adminPages(): A11yPage[] {
         flash: FLASH,
       }),
     })),
+    {
+      name: "Digest (nobody qualifies, achievements excluded)",
+      html: renderDigestPage({
+        ...COMMON,
+        enabled: true,
+        settingRows: [],
+        preview: {
+          generatedAt: "2026-01-09 16:00",
+          weekRange: "2026-01-02 – 2026-01-08",
+          qualifying: 1,
+          optedIn: 0,
+          skippedOptOut: 1,
+          alreadySentAt: "2026-01-09 08:00",
+          includeAchievements: false,
+          limit: 10,
+          entries: [],
+        },
+      }),
+    },
+    {
+      name: "Digest (several embeds, capped)",
+      html: renderDigestPage({
+        ...COMMON,
+        enabled: true,
+        settingRows: [],
+        preview: {
+          generatedAt: "2026-01-09 16:00",
+          weekRange: "2026-01-02 – 2026-01-08",
+          qualifying: 5,
+          optedIn: 4,
+          skippedOptOut: 1,
+          alreadySentAt: null,
+          includeAchievements: true,
+          limit: 2,
+          entries: [1, 2].map((rank) => ({
+            username: rank === 1 ? "alice" : "bob",
+            rank,
+            title: "Your week in voice",
+            description: "5 hr 12 min across 9 sessions.",
+            fields: [
+              { name: "Streak", value: "4 days", inline: true },
+              { name: "Rank", value: `#${rank}`, inline: true },
+              {
+                name: "Achievements",
+                value: "First hour\nNight owl",
+                inline: false,
+              },
+            ],
+            footer: "Reply /digest off to opt out.\nSee you next week.",
+          })),
+        },
+      }),
+    },
+    {
+      name: "Leaderboard roles (no tiers)",
+      html: renderLeaderboardRolesPage({
+        ...COMMON,
+        enabled: true,
+        voiceTrackingEnabled: true,
+        period: "week",
+        cron: "0 0 * * 1",
+        tiers: [],
+        ignoredEntries: [],
+        roles: ROLES,
+        settingRows: [],
+      }),
+    },
+    {
+      name: "Leaderboard roles (settings unavailable)",
+      html: renderLeaderboardRolesPage({
+        ...COMMON,
+        enabled: true,
+        voiceTrackingEnabled: true,
+        period: "week",
+        cron: "0 0 * * 1",
+        tiers: [
+          {
+            topN: 5,
+            roleId: "r2",
+            roleName: "Top 5",
+            assignable: true,
+            holders: [
+              { id: "u2", label: "bob" },
+              { id: "u3", label: "carol" },
+            ],
+            lastUpdated: "2026-01-05T00:00:00.000Z",
+          },
+        ],
+        ignoredEntries: [],
+        roles: ROLES,
+        settingRows: [],
+        settingsUnavailable: true,
+      }),
+    },
     ...[true, false].map((enabled) => ({
       name: enabled ? "Leaderboard roles" : "Leaderboard roles (feature off)",
       html: renderLeaderboardRolesPage({
@@ -5986,6 +6368,129 @@ export function adminPages(): A11yPage[] {
         },
         jobId: null,
       }),
+    },
+    {
+      // Set up but the message is not posted: the verdict asks for the post, and
+      // the rollout form offers to create the role (#1731).
+      name: "Rules acceptance (message not posted, rollout with a ticked channel)",
+      html: renderRulesPage({
+        ...COMMON,
+        enabled: true,
+        channelId: "100000000000000010",
+        roleId: "",
+        messagePosted: false,
+        messageId: "",
+        accepted: 0,
+        native: { screening: true, community: true },
+        intentMissing: false,
+        plan: null,
+        channels: [
+          {
+            id: "100000000000000010",
+            name: "rules",
+            type: ChannelType.GuildText,
+          },
+          {
+            id: "100000000000000012",
+            name: "general",
+            type: ChannelType.GuildText,
+          },
+        ],
+        roleName: null,
+        unavailable: "The server couldn't be read from Discord.",
+        options: {
+          createRole: true,
+          grantExisting: true,
+          gateChannelIds: ["100000000000000012"],
+        },
+        jobId: null,
+      }),
+    },
+    {
+      // The rollout when the server already matches and no channel can be read:
+      // the empty states of the Preview and of the channel list (#1731).
+      name: "Rules acceptance (rollout previewed, nothing to change, no channels)",
+      html: renderRulesPage({
+        ...COMMON,
+        enabled: true,
+        channelId: "100000000000000010",
+        roleId: "100000000000000011",
+        messagePosted: true,
+        messageId: "900000000000000003",
+        accepted: 1,
+        native: { screening: false, community: false },
+        intentMissing: false,
+        plan: {
+          plan: {
+            id: "plan-2",
+            guildId: "g",
+            plannedBy: "a",
+            operations: [],
+            warnings: [],
+            errors: [],
+          } as never,
+          extraErrors: [],
+          preview: { totalMembers: null, holders: null, lockedOut: null },
+          roleId: "100000000000000011",
+          roleName: "Accepted",
+          channels: [],
+          options: {
+            createRole: false,
+            grantExisting: false,
+            gateChannelIds: [],
+          },
+          membersUnavailable: true,
+        },
+        channels: [],
+        roleName: "Accepted",
+        unavailable: null,
+        options: {
+          createRole: false,
+          grantExisting: false,
+          gateChannelIds: [],
+        },
+        jobId: null,
+      } as never),
+    },
+    {
+      // A previewed rollout the engine refuses, while an apply job runs (#1731).
+      name: "Rules acceptance (rollout blocked, apply running)",
+      html: renderRulesPage({
+        ...COMMON,
+        enabled: true,
+        channelId: "100000000000000010",
+        roleId: "100000000000000011",
+        messagePosted: true,
+        messageId: "900000000000000003",
+        accepted: 12,
+        native: { screening: false, community: false },
+        intentMissing: false,
+        plan: {
+          plan: (CLAIMS_DESTRUCTIVE_PLAN as { plan: never }).plan,
+          extraErrors: [
+            { code: "admin-lockout", message: "Your own access would end." },
+          ],
+          preview: { totalMembers: 10, holders: 2, lockedOut: 1 },
+          roleId: "100000000000000011",
+          roleName: "Accepted",
+          channels: [],
+          options: {
+            createRole: false,
+            grantExisting: false,
+            gateChannelIds: [],
+          },
+          membersUnavailable: false,
+        },
+        channels: [],
+        roleName: "Accepted",
+        unavailable: null,
+        options: {
+          createRole: false,
+          grantExisting: false,
+          gateChannelIds: [],
+        },
+        jobId: "job-1",
+      } as never),
     },
     {
       // The Re-post cards with the button off and the reason shown (#1428).

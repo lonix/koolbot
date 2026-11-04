@@ -1100,6 +1100,24 @@ enable/disable and delete. **Post weekly VC stats now** triggers the weekly
 voice-stats announcement on demand, and **Compose & send once** posts a one-off
 announcement without storing a schedule. Every action is CSRF-protected and audited.
 
+**Announcements and Polls: the Channel field is the Picker, and it can create a channel (#1665, a proposal for the owner).** The Channel
+field of the announcement create form, the **Compose & send once** form and every poll schedule form (new, and the edit form of each row) is
+the same Picker as in Settings: `span.kb-picker[data-picker]` around the select, with the same options, so without JavaScript it posts the
+channel id exactly as before. A saved channel that is no longer on the server stays selected and is listed as unavailable, so editing only
+the schedule never reassigns it. These fields are not settings keys, so nothing goes through `coerceConfigValue`: each route reads the posted
+value with `parsePickerCreateValue` before it uses it as an id, and the Picker's create row is offered only when `canBotCreate` says the bot
+can create a channel (one check per page, `loadTextChannelCreateAnswer`); without Manage Channels the Picker shows the help line, and when the
+permissions cannot be read it shows nothing. Choosing the row only marks the name in the Picker; nothing is created until you submit. The
+route first checks every other field (a form with another mistake creates nothing), then, for a poll edit, that the schedule still exists, and
+then creates the channel through the Settings pages' path (`createPendingChannels`: the permission checked again, an existing text channel of
+that name selected, an apply inside the per-server lock that refuses with "changed since Review" when the server changed meanwhile, no parent
+and no permission overwrites). The announcement, the one-off post or the poll schedule is stored only after its channel exists. A failed create
+stores and posts nothing, and the form comes back with what was typed, the name still pending and the error under the Channel field. The flash
+names what was created ("Created announcement 5. Created # daily-news for Channel.") and the audit entry lists it under `channel`. Names are
+de-duplicated before planning (`createFormChannels`), so one submit never creates the same name twice. A save that fails after the channel was
+created leaves the channel in place and the flash says so; a refused create is audited as a failure with the
+typed name. A `create:` value posted for the ping role is refused instead of stored.
+
 **Feature forms use the setting controls (#1533).** A schedule on the **Announcements** and **Polls** forms is the
 same picker as in Settings (Daily, Weekly, Monthly or Custom for a cron expression), with one help line under it
 instead of a list of examples. An announcement's embed colour is a swatch with a **No colour** box, and a poll

@@ -68,7 +68,7 @@ export const EVENT_COVER_UPLOAD_SCRIPT =
   "var forms=document.querySelectorAll('form[data-cover-upload]');" +
   "Array.prototype.forEach.call(forms,function(form){" +
   "var file=form.querySelector('input[type=file]');" +
-  "var msg=form.querySelector('.cover-msg');" +
+  "var msg=form.querySelector('[data-cover-msg],.cover-msg');" +
   "var btn=form.querySelector('button[type=submit]');" +
   "var tok=form.querySelector('input[name=_csrf]');" +
   "var max=parseInt(form.getAttribute('data-max-bytes'),10)||0;" +

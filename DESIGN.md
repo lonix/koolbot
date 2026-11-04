@@ -132,6 +132,23 @@ should not send its admins' browsers to a font CDN, and the native face is the f
 
 - **Admin:** TopBar (`topbar-height`), SideNav (`sidebar-width`), and a main column up to `content-max`. Page order: PageHeader → Callout (only if
   needed) → tiles → content panels → settings, folded. Two-column rows use `kb-cols` (wide left, narrow right); cards are as tall as their content.
+- **Admin width, as built (#1629).** The admin `main` is capped at `1100px` *including* its `space-8` gutters (`admin-layout.ts`), a content column of
+  64.75rem, and no admin page uses `kb-main__inner`, so `content-max` (72rem of content) governs none of them: the two caps disagree by 116px. The
+  member pages with a sidebar use `kb-main__inner` at `member-content-max` minus the gutters. A fixed cap gives a wider window no more room: at 1600px,
+  1920px and 2560px an admin page has the same 1036px of content, with the empty area to the right.
+- **Admin width, proposal for the owner (#1629, recommended rule (c)).** The cap is for reading: prose, forms and settings read best in a column of
+  about `content-max`. A table or a board is read across and needs more room, not less. So the width follows what the page is mainly made of:
+  - **Prose and form pages** (overviews, feature pages, settings, wizard steps, plan and review pages) keep the admin column at `content-max`.
+  - **Table and board pages** (a DataTable with a row-actions column or about six columns, the team board, a heatmap) set one class on the page,
+    which raises the column to a second token, `content-max-wide` (proposed 96rem). The class is defined once in `admin-layout.ts` and `kb.css`
+    from the same two tokens, so the caps cannot disagree; a page never sets a width of its own.
+  - **Text keeps its line length on a wide page:** descriptions, help text and callouts stay at `content-max` through their own `max-width`.
+  - **Scrolling stays the fallback** (#855), but only a fallback: a table that scrolls inside its panel at 1920px is a bug in the page, to be fixed
+    with fewer columns, controls that stack under their row's name or row details in a disclosure. The wide column starts to give room above about
+    1340px and reaches its full width at about 1840px; at 1280px the room is the same under either cap (976px), so those fixes are needed either way.
+  - **When to opt in:** because of what the page's main content is, never because a form is long. A page that has both puts the table first and keeps
+    its forms in panels of their own.
+  - **Admin pages only.** Member pages are not part of this proposal and keep `member-content-max` (see *Member pages* below).
 - **Scopes:** four, each granted by a role group capability and shown as a ScopeBadge next to the person's name in the TopBar.
 
   | Scope | Granted by | Signs in with | Sees |

@@ -4130,8 +4130,8 @@ describe("renderDigestPage", () => {
     });
     expect(html).toContain('method="GET" action="/admin/digest"');
     expect(html).toContain('action="/admin/digest/send-now"');
-    // No preview requested → no rendered embed card (the CSS in <style> stays).
-    expect(html).not.toContain('<div class="digest-embed">');
+    // No preview requested → no rendered embed card.
+    expect(html).not.toContain('class="kb-embed"');
   });
 
   it("renders the summary line and embed cards for a preview", () => {
@@ -4170,7 +4170,7 @@ describe("renderDigestPage", () => {
     expect(html).toContain("opted in");
     expect(html).toContain("opted out");
     expect(html).toContain("digest has not been sent yet this week");
-    expect(html).toContain('<div class="digest-embed">');
+    expect(html).toContain('<div class="kb-embed">');
     expect(html).toContain("alice");
     // Newlines in field values become <br> in the HTML approximation.
     expect(html).toContain("▲ 1h vs last week");
@@ -6170,7 +6170,7 @@ describe("renderLeaderboardRolesPage (#985)", () => {
     const html = render();
     // Without JS a visible Remove would do nothing; rows are removed by
     // clearing them, so both buttons start hidden.
-    const removes = html.match(/<button[^>]*lb-tier-remove[^>]*>/g) ?? [];
+    const removes = html.match(/<button[^>]*data-tier-remove[^>]*>/g) ?? [];
     expect(removes.length).toBeGreaterThan(0);
     for (const b of removes) expect(b).toContain(" hidden");
     expect(html).toMatch(/id="lb-tier-add" hidden/);
