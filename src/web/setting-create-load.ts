@@ -25,3 +25,19 @@ export async function loadCreateChannelAnswer(
     "text",
   );
 }
+
+/**
+ * The same answer for a page whose channel choice is not a settings key (the
+ * Announcements and Polls forms, #1665): one `canBotCreate` per page, nothing
+ * when the permissions could not be read.
+ */
+export async function loadTextChannelCreateAnswer(
+  client: Client,
+  guildId: string,
+): Promise<PickerCreate | undefined> {
+  return toPickerCreate(
+    "channel",
+    await canBotCreate(client, guildId, { kind: "channel" }),
+    "text",
+  );
+}

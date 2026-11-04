@@ -12,6 +12,7 @@
 
 import { ChannelType, PermissionFlagsBits } from "discord.js";
 import { settingsMetadata } from "../../src/services/config-schema.js";
+import type { PickerCreate } from "../../src/web/setting-pickers.js";
 import {
   renderAnalyticsPage,
   renderAnnouncementsPage,
@@ -205,6 +206,22 @@ export interface A11yPage {
 }
 
 const COMMON = { csrfToken: "csrf-token", remainingMs: 900_000 };
+
+// The Channel Picker's create row on the Announcements and Polls forms (#1665).
+const CREATE_OK: PickerCreate = {
+  kind: "channel",
+  channelKind: "text",
+  ok: true,
+};
+const CREATE_NOT_POSSIBLE: PickerCreate = {
+  kind: "channel",
+  channelKind: "text",
+  ok: false,
+  reason:
+    "The bot needs Manage Channels to create a channel. Give the bot's role Manage Channels in Server Settings, Roles; the Bot permissions page shows what is missing.",
+};
+const CREATE_FAILED =
+  "Discord refused to create the channel, so nothing was saved. Check the bot's permissions.";
 
 /** The per-feature permission notice (#1253): a missing permission, and a check that could not run. */
 const MISSING_PERMISSION_NOTICE: PermissionNotice = {
@@ -933,9 +950,13 @@ const ADOPTION_SNAPSHOT = {
 };
 
 /** The Polls page with one schedule and one question, drawing the form the server refused. */
-function pollsRefusedPage(refusedForm: RefusedForm): string {
+function pollsRefusedPage(
+  refusedForm: RefusedForm,
+  createChannel?: PickerCreate,
+): string {
   return renderPollsPage({
     ...COMMON,
+    createChannel,
     enabled: true,
     defaultDurationHours: 24,
     cooldownDays: 30,
@@ -4988,6 +5009,81 @@ export function adminPages(): A11yPage[] {
           values: { channelId: "c1", message: "" },
         },
       }),
+    },
+    // A channel asked for in a form of the Announcements or Polls page (#1665):
+    // the typed name is drawn again as a pending option and the error stands
+    // under the field; or creating is not possible and the help line says why.
+    {
+      name: "Announcements (create form, channel to be created)",
+      html: renderAnnouncementsPage({
+        ...COMMON,
+        enabled: true,
+        textChannels: CHANNELS,
+        rows: [],
+        createChannel: CREATE_OK,
+        refusedForm: {
+          formId: "announcement-create",
+          errors: { channelId: CREATE_FAILED },
+          values: {
+            channelId: "create:Daily News",
+            cron: "0 9 * * *",
+            message: "Good morning!",
+          },
+        },
+      }),
+    },
+    {
+      name: "Announcements (creating a channel is not possible)",
+      html: renderAnnouncementsPage({
+        ...COMMON,
+        enabled: true,
+        textChannels: CHANNELS,
+        rows: [],
+        createChannel: CREATE_NOT_POSSIBLE,
+      }),
+    },
+    {
+      name: "Polls (schedule create form, channel to be created)",
+      html: pollsRefusedPage(
+        {
+          formId: "poll-schedule-create",
+          errors: { channelId: CREATE_FAILED },
+          values: {
+            channelId: "create:Weekly Poll",
+            cron: "0 12 * * 3",
+            durationHours: "24",
+            pingRoleId: "",
+          },
+        },
+        CREATE_OK,
+      ),
+    },
+    {
+      name: "Polls (schedule edit form, channel to be created)",
+      html: pollsRefusedPage(
+        {
+          formId: "poll-schedule-edit-s1",
+          errors: { channelId: CREATE_FAILED },
+          values: {
+            channelId: "create:Weekly Poll",
+            cron: "0 12 * * 3",
+            durationHours: "24",
+            pingRoleId: "",
+          },
+        },
+        CREATE_OK,
+      ),
+    },
+    {
+      name: "Polls (creating a channel is not possible)",
+      html: pollsRefusedPage(
+        {
+          formId: "poll-schedule-create",
+          errors: {},
+          values: {},
+        },
+        CREATE_NOT_POSSIBLE,
+      ),
     },
     {
       // An empty pool (#1642): the EmptyState, and the Callout that says the built-in defaults are in use.
