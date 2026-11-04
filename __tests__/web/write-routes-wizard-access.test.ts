@@ -1478,7 +1478,7 @@ describe("roles created from the Access step's Picker (#1618)", () => {
       expect(html).toContain("mapped to Admins; no role is created");
       // It comes before the role access table.
       expect(html.indexOf('id="wizard-role-matches"')).toBeLessThan(
-        html.indexOf("<h2>Role access</h2>"),
+        html.indexOf('id="wizard-access-review"'),
       );
     });
 

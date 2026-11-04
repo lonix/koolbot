@@ -1,6 +1,6 @@
 import { icon, toneIcon } from "./icons.js";
 import { roleMention } from "./discord-labels.js";
-import { renderRolePicker } from "./admin-views.js";
+import { kbEmptyState, renderRolePicker } from "./admin-views.js";
 import {
   escapeHtml,
   renderAdminPage,
@@ -281,7 +281,7 @@ ${form}
   <div class="kb-access">
 ${cards}
   </div>
-  <div class="actions">
+  <div class="kb-row">
     <button type="submit" class="kb-btn kb-btn--primary"${options === null ? " disabled" : ""}>Save access and continue</button>
     <a href="/admin/wizard" class="kb-btn kb-btn--ghost">Back to Choose features</a>
   </div>
@@ -338,6 +338,9 @@ function renderRoleMatches(matches: readonly ReviewRoleMatch[]): string {
   return `<div class="kb-callout${strong ? " kb-callout--warn" : ""}" role="status" id="wizard-role-matches">${toneIcon(strong ? "warn" : "")}<div class="kb-callout__body"><p class="kb-callout__title">A name you typed is an existing role</p><ul>${rows}</ul><p class="kb-callout__text">Everyone who already holds an existing role gets what its scope allows. Go back to Access if you meant a new role.</p></div></div>`;
 }
 
+/** The id of the Role access panel on Review. */
+const ACCESS_REVIEW_ID = "wizard-access-review";
+
 /** The role-mapping part of the review step: what Apply will write to role groups. */
 export function renderAccessReview(
   changes: readonly AccessChange[],
@@ -363,7 +366,10 @@ export function renderAccessReview(
     parts.push(roleBlock);
     if (!problem && !roles) {
       parts.push(
-        `<div class="card"><h2>Role access</h2><p class="muted">No role mapping changes.</p></div>`,
+        `<section class="kb-panel" id="${ACCESS_REVIEW_ID}" aria-labelledby="${ACCESS_REVIEW_ID}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${ACCESS_REVIEW_ID}-h">Role access</h2></header>
+  <div class="kb-panel__body">${kbEmptyState("shield-check", "No role mapping changes.", "Roles you map on the Access step are listed here before you apply.")}</div>
+</section>`,
       );
     }
     return parts.filter(Boolean).join("\n");
@@ -371,21 +377,23 @@ export function renderAccessReview(
   const rows = changes
     .map(
       (c) =>
-        `<tr><th scope="row">${roleMention(c.roleName)}</th><td>${escapeHtml(scopeNames(c.scopesBefore))}</td><td>${escapeHtml(scopeNames(c.scopesAfter))}</td><td class="muted">${
+        `<tr><th scope="row">${roleMention(c.roleName)}</th><td>${escapeHtml(scopeNames(c.scopesBefore))}</td><td>${escapeHtml(scopeNames(c.scopesAfter))}</td><td class="kb-muted">${
           c.kind === "create"
             ? `Creates the role group "${escapeHtml(c.groupName)}"`
             : `Updates the role group "${escapeHtml(c.groupName)}"`
         }</td></tr>`,
     )
     .join("");
-  parts.push(`<div class="card">
-  <h2>Role access</h2>
-  <p class="muted">Applying saves these role groups. It links existing Discord roles to groups and changes what they may do in KoolBot; it does not change the roles in Discord.</p>
-  <table>
-    <thead><tr><th scope="col">Role</th><th scope="col">Now</th><th scope="col">After</th><th scope="col">Change</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table>
-</div>`);
+  parts.push(`<section class="kb-panel" id="${ACCESS_REVIEW_ID}" aria-labelledby="${ACCESS_REVIEW_ID}-h">
+  <header class="kb-panel__head"><h2 class="kb-panel__title" id="${ACCESS_REVIEW_ID}-h">Role access</h2><span class="kb-panel__meta">${changes.length}</span></header>
+  <div class="kb-panel__body kb-panel__body--flush">
+    <table class="kb-table" aria-label="Role access">
+      <thead><tr><th scope="col">Role</th><th scope="col">Now</th><th scope="col">After</th><th scope="col">Change</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+  <footer class="kb-panel__foot"><p class="kb-help">Applying saves these role groups. It links existing Discord roles to groups and changes what they may do in KoolBot; it does not change the roles in Discord.</p></footer>
+</section>`);
   parts.push(roleBlock);
   return parts.filter(Boolean).join("\n");
 }

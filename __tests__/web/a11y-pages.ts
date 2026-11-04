@@ -3452,6 +3452,24 @@ export function adminPages(): A11yPage[] {
         accessProblem: "A role you picked no longer exists in Discord.",
       }),
     },
+    // The Review page's states added with its kb- migration (#1752).
+    {
+      name: "Setup wizard confirm, nothing to apply",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [],
+        metadata: {},
+      }),
+    },
+    {
+      name: "Setup wizard confirm, after a failed apply",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [["voicechannels.enabled", true]],
+        metadata: WIZARD_ADMIN_METADATA,
+        flash: { type: "err", text: "Apply failed. Nothing was changed." },
+      }),
+    },
     ...[true, false].map((enabled) => ({
       name: enabled ? "Announcements" : "Announcements (feature off)",
       html: renderAnnouncementsPage({

@@ -433,7 +433,7 @@ describe("Review of planned creations (#1662)", () => {
     // The settings table shows the setting with what it will point at.
     expect(html).toContain("(will be created)");
     expect(html).not.toMatch(
-      /<button type="submit" class="btn btn-primary" disabled>Apply/,
+      /<button type="submit" class="kb-btn kb-btn--primary" disabled aria-describedby="wizard-apply-why">Apply/,
     );
     expect(mockPost).not.toHaveBeenCalled();
   });
@@ -477,7 +477,7 @@ describe("Review of planned creations (#1662)", () => {
       "More than one text channel on this server has that name.",
     );
     expect(html).toMatch(
-      /<button type="submit" class="btn btn-primary" disabled>Apply/,
+      /<button type="submit" class="kb-btn kb-btn--primary" disabled aria-describedby="wizard-apply-why">Apply/,
     );
   });
 
@@ -488,7 +488,7 @@ describe("Review of planned creations (#1662)", () => {
     const html = await (await harness.get("/wizard?step=confirm")).text();
     expect(html).toContain("The bot needs Manage Channels.");
     expect(html).toMatch(
-      /<button type="submit" class="btn btn-primary" disabled>Apply/,
+      /<button type="submit" class="kb-btn kb-btn--primary" disabled aria-describedby="wizard-apply-why">Apply/,
     );
   });
 
