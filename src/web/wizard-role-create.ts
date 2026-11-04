@@ -360,13 +360,19 @@ export type WizardRoleApply =
  * Call it inside the role lock.
  */
 async function readReferenced(guildId: string): Promise<Set<string>> {
-  const [rows, groups] = await Promise.all([
+  const service = RoleGroupService.getInstance();
+  // `featureRoleUses` is the list of every role a feature hands out or binds
+  // (role-grants.ts, leaderboard tiers, reaction-role bindings), used as it is;
+  // `idsIn` only sees plain id lists in the settings.
+  const [rows, groups, uses] = await Promise.all([
     readWithin(() => ConfigService.getInstance().getAll()),
-    readWithin(() => RoleGroupService.getInstance().list(guildId)),
+    readWithin(() => service.list(guildId)),
+    readWithin(() => service.featureRoleUses(guildId)),
   ]);
   return new Set([
     ...rows.flatMap((r) => idsIn(r.value)),
     ...groups.flatMap((g) => (g.roleId ? [g.roleId] : [])),
+    ...uses.keys(),
   ]);
 }
 

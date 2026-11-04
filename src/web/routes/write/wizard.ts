@@ -1539,9 +1539,14 @@ export function createWizardRouter(client: Client): Router {
           // never overwritten, and a rollback never restores stale values.
           const madeIds = new Set(made.created.map((c) => c.id));
           let fresh: AccessContext | null = null;
+          // Every role as the fresh read has it, created ones included, with
+          // their CURRENT positions: the ranking of the new groups uses these,
+          // not the positions in the create responses.
+          let freshRoles: AccessContext["roles"] = [];
           let staleWhy: string | null = null;
           try {
             const again = await readAccess(session);
+            freshRoles = again.roles;
             fresh = {
               ...again,
               roles: again.roles.filter((r) => !madeIds.has(r.id)),
@@ -1594,15 +1599,7 @@ export function createWizardRouter(client: Client): Router {
           );
           writeCtx = {
             ...writeBase,
-            roles: [
-              ...writeBase.roles,
-              ...made.created.map((c) => ({
-                id: c.id,
-                name: c.name,
-                managed: false,
-                position: c.position,
-              })),
-            ],
+            roles: freshRoles,
           };
           writeChanges = diffAccess(
             writeBase.groups,

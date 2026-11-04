@@ -38,7 +38,7 @@ import { DiscordAPIError, RateLimitError, Routes, type REST } from "discord.js";
 import { cleanName } from "./channel-manager.js";
 import { readWithin } from "./channel-write-lock.js";
 import { unwrapWriteError } from "./channel-create.js";
-import { describeWriteFailure } from "./channel-write-rest.js";
+import { describeWriteFailure, rateLimitWaitMs } from "./channel-write-rest.js";
 import { ROLE_LOCK_BUSY_MESSAGE, withRoleLock } from "./role-write-lock.js";
 import logger from "../utils/logger.js";
 
@@ -294,10 +294,19 @@ async function applyLocked(
 
 function failureCause(error: unknown, createdBefore: number): string {
   const root = unwrapWriteError(error);
-  if (createdBefore === 0) return describeWriteFailure(root);
-  return root instanceof RateLimitError
-    ? "Discord is limiting changes right now, so the request to create the next role was cancelled."
-    : describeWriteFailure(root);
+  // The shared rate-limit text talks about channel renames; a role create gets
+  // its own words, for the first role as for a later one.
+  if (root instanceof RateLimitError) {
+    const seconds = Math.max(1, Math.ceil(rateLimitWaitMs(root) / 1000));
+    const wait =
+      seconds < 60
+        ? `${seconds} seconds`
+        : `${Math.ceil(seconds / 60)} minute${Math.ceil(seconds / 60) === 1 ? "" : "s"}`;
+    return createdBefore === 0
+      ? `Discord is limiting changes right now, so the request to create the role was cancelled and nothing was created. Try again in about ${wait}.`
+      : `Discord is limiting changes right now, so the request to create the next role was cancelled.`;
+  }
+  return describeWriteFailure(root);
 }
 
 function failureMessage(

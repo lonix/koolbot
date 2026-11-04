@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, jest, afterEach } from "@jest/globals";
-import { DiscordAPIError, Routes } from "discord.js";
+import { DiscordAPIError, RateLimitError, Routes } from "discord.js";
 import type { RoleCreateDeps } from "../../src/web/role-create.js";
 
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
@@ -237,6 +237,34 @@ describe("applyRolePlan", () => {
     );
     expect(res).toMatchObject({ ok: false, removed: [], stuck: ["901"] });
     expect(del).not.toHaveBeenCalled();
+  });
+
+  it("words a rate limit on the first role create as a role, never as a channel", async () => {
+    const { deps, post } = setup();
+    const plan = planRoles([{ name: "Crew" }], live);
+    if (!plan.ok) throw new Error("plan");
+    post.mockRejectedValueOnce(
+      new RateLimitError({
+        timeToReset: 0,
+        retryAfter: 120_000,
+        sublimitTimeout: 0,
+        limit: 2,
+        method: "POST",
+        hash: "h",
+        url: "https://discord.com/api/v10/guilds/1/roles",
+        route: "/guilds/:id/roles",
+        majorParameter: "1",
+        global: false,
+        scope: "user",
+      }),
+    );
+    const res = await applyRolePlan(deps, [{ name: "Crew" }], plan.planId);
+    expect(res.ok).toBe(false);
+    const text = res.ok === false ? res.error : "";
+    expect(text).toContain("create the role");
+    expect(text).toContain("2 minutes");
+    expect(text.toLowerCase()).not.toContain("channel");
+    expect(text).not.toContain("renames");
   });
 
   it("names a role it could not remove and never says nothing changed", async () => {

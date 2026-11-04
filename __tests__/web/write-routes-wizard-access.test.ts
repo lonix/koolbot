@@ -1774,6 +1774,96 @@ describe("roles created from the Access step's Picker (#1618)", () => {
       expect(roles.has("40000000000000001")).toBe(false);
     });
 
+    it("ranks the new group by the role's position in the fresh read, not the one in the create response", async () => {
+      const picks = { ...none, staff: [MOD] };
+      stored = [
+        group({
+          id: "g-mod",
+          name: "Moderator",
+          roleId: MOD,
+          capabilities: ["staff"],
+        }),
+      ];
+      const crew = { name: "Crew", scopes: ["host"] };
+      mockGetSession.mockReturnValue(
+        wizardState(picks, ["quotes"], {}, [crew]),
+      );
+      const shown = review(picks, [crew]);
+      const reorderSpy = jest.spyOn(svc, "reorder");
+      mockPost.mockImplementation(async (_route: unknown, opts: any) => {
+        const id = "40000000000000001";
+        // Discord answers position 1, but by the time of the re-read the role
+        // sits above the Moderator role (5), still below the bot (10).
+        roles.set(id, role(id, opts.body.name, 7));
+        return { id, name: opts.body.name, position: 1 };
+      });
+      const res = await harness.post("/wizard/apply", shown);
+      expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+      // The new group already ranks above the Moderator group (newest first):
+      // with the stale position 1 it would have been moved below it.
+      expect(reorderSpy).not.toHaveBeenCalled();
+      expect(stored.map((g) => g.name)).toEqual(["Crew", "Moderator"]);
+    });
+
+    it("keeps created roles that a leaderboard tier or a reaction-role binding now uses, and names them", async () => {
+      const A = { name: "Alpha", scopes: ["staff"] };
+      const B = { name: "Beta", scopes: ["host"] };
+      const C = { name: "Gamma", scopes: ["host"] };
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [A, B, C]),
+      );
+      const shown = review(access, [A, B, C]);
+      let n = 0;
+      mockPost.mockImplementation(async (_route: unknown, opts: any) => {
+        n += 1;
+        if (n === 3) {
+          // Two feature saves complete while the third create is pending.
+          featureUsesSpy.mockResolvedValue(
+            new Map([
+              ["40000000000000001", ["Leaderboard Roles"]],
+              ["40000000000000002", ["Reaction Roles"]],
+            ]),
+          );
+          throw new Error("Missing Permissions");
+        }
+        const id = `4000000000000000${n}`;
+        roles.set(id, role(id, opts.body.name, 1));
+        return { id, name: opts.body.name, position: 1 };
+      });
+      const res = await harness.post("/wizard/apply", shown);
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(flash.msg).toContain("Kept, because");
+      expect(flash.msg).toContain("40000000000000001");
+      expect(flash.msg).toContain("40000000000000002");
+      expect(flash.msg).not.toContain("removed again");
+    });
+
+    it("deletes nothing and says the roles may still exist when the feature uses cannot be read", async () => {
+      const A = { name: "Alpha", scopes: ["staff"] };
+      const B = { name: "Beta", scopes: ["host"] };
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [A, B]),
+      );
+      const shown = review(access, [A, B]);
+      let n = 0;
+      mockPost.mockImplementation(async (_route: unknown, opts: any) => {
+        n += 1;
+        if (n === 2) {
+          featureUsesSpy.mockRejectedValue(new Error("db down"));
+          throw new Error("Missing Permissions");
+        }
+        const id = `4000000000000000${n}`;
+        roles.set(id, role(id, opts.body.name, 1));
+        return { id, name: opts.body.name, position: 1 };
+      });
+      const res = await harness.post("/wizard/apply", shown);
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(flash.msg).toContain("May still exist");
+      expect(flash.msg).toContain("40000000000000001");
+    });
+
     it.each([
       ["is deleted", "no longer exists"],
       ["moves above the bot", "at or above the bot's own role"],
