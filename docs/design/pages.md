@@ -151,9 +151,20 @@ from the game. The footer line says how a missing game gets added: each game is 
 The Setup wizard's Access step: who can do what, before any channel is set up.
 
 - Steps: Choose features → **Access** → Features → Review.
-- One AccessCard per scope: Admins (`/config`), Moderators, Event hosts and Members (all `/me`). Each maps Discord roles through a Picker, or offers
-  to create the role (*Create @Event host*), and writes a role group with the matching capability.
-- A callout warns when a switched-on feature has nobody to run it ("Events is on and nobody can host yet").
+- One AccessCard per scope that maps roles: Admins (`/config`), Moderators and Event hosts (both `/me`). Each maps Discord roles through a Picker and
+  writes a role group with the matching capability. There is no Members card: members have no role mapping, and everyone on the server may use `/me`
+  (narrowing it is on Command permissions).
+- **Proposal for the owner, not final manual text (#1618).** The Picker also offers to create the role: the last row, *Create new role: 'typed text'*,
+  as the Settings pages and the feature steps do for channels (see Picker). There are no fixed names; the admin types the name. A text that matches an
+  existing role, in any case, selects that role instead. Choosing the row only marks the name ("Quartermaster (will be created)") and the step saves it
+  with the picks; nothing is created on the step. The help line under the Picker says the role is created with no Discord permissions and nobody is
+  added; when the bot lacks Manage Roles there is no row and the Picker's line gives the reason, and when that cannot be read there is neither row nor
+  line (a role already chosen stays drawn as pending). *Review* lists each role in the Panel *Roles to create*, "Create the role @Name (no Discord
+  permissions, nobody added)", with the scopes it is mapped to, and an error Callout *The roles can't be created* blocks Apply with the reason.
+  **Apply** creates the roles first, then writes the role groups, then the channels and settings; if anything after the roles fails, the groups and the
+  roles it created are removed again. This replaces the *Create @Event host* switch (#1365): all three cards behave the same.
+- A callout warns when a switched-on feature has nobody to run it ("Events is on and nobody can host yet"); a role chosen to be created counts as someone.
+- Components: Picker (create row and help line), AccessCard, Panel, List, Callout `--err`, Mention. No new component.
 
 ### WizardAdministratorCheck and WizardDonePage (#1617)
 

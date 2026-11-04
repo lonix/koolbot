@@ -161,7 +161,8 @@ should not send its admins' browsers to a font CDN, and the native face is the f
 - **Navigation:** non-admins get one section per scope in the sidebar, and no sidebar at all when they only have one. The admin console is grouped by
   task: Dashboard, Features (switched-on, A to Z, the rest folded under *N turned off*), Access, Server setup, Bot, and All settings pinned at the bottom.
   [SideNav](docs/design/components.md#sidenav) has the full lists and the renames.
-- **Setup wizard:** Choose features → Access → Features → Review. The Access step maps Discord roles to the four scopes before anything else is set up.
+- **Setup wizard:** Choose features → Access → Features → Review. The Access step maps Discord roles to Admins, Moderators and
+  Event hosts before anything else is set up.
 - **Member pages** (My preferences, host panel): TopBar, then one centred column up to `member-content-max`, with Tabs under the bar.
 - **As built (#1317):** the TopBar and the non-admin SideNav are rendered by `src/web/app-shell.ts` (the nav registry is `SHELL_NAV`), a section shows
   once it has a page that exists, and the sidebar once two sections do. The admin console's sidebar is the same

@@ -44,26 +44,34 @@ jest.unstable_mockModule("../../src/web/audit.js", () => ({
   recordAuditOrThrow: mockRecordAudit,
 }));
 
-const mockStartApply = jest.fn<(...a: unknown[]) => { id: string }>();
-jest.unstable_mockModule(
-  "../../src/services/server-adoption-service.js",
-  () => ({
-    ServerAdoptionService: {
-      getInstance: async (): Promise<unknown> => ({
-        startApply: mockStartApply,
-      }),
-    },
-  }),
-);
+// Another adoption apply being active (#1618): the role creation refuses then.
+let adoptionActive = false;
+jest.unstable_mockModule("../../src/models/adoption-snapshot.js", () => ({
+  AdoptionSnapshot: {
+    exists: async (): Promise<unknown> =>
+      adoptionActive ? { _id: "1" } : null,
+  },
+}));
 
 // Channel creation (#1662): the permission check, the live channel list and
 // the Discord write client are faked; the planner and the helper are real.
-type CreateAnswer = { ok: true } | { ok: false; reason: string };
+type CreateAnswer =
+  { ok: true } | { ok: false; reason: string } | { ok: "unknown" };
 let createAnswer: CreateAnswer = { ok: true };
 const mockCanBotCreate = jest.fn<(...a: unknown[]) => Promise<CreateAnswer>>();
 jest.unstable_mockModule("../../src/services/bot-create-check.js", () => ({
   canBotCreate: mockCanBotCreate,
-  toPickerCreate: jest.fn(),
+  toPickerCreate: (
+    kind: string,
+    answer: { ok: boolean | "unknown"; reason?: string },
+  ): unknown =>
+    answer.ok === "unknown"
+      ? undefined
+      : {
+          kind,
+          ok: answer.ok,
+          ...(answer.ok === false ? { reason: answer.reason } : {}),
+        },
 }));
 const mockFetchViews = jest.fn<(...a: unknown[]) => Promise<unknown[]>>();
 jest.unstable_mockModule("../../src/web/channel-manager-data.js", () => ({
@@ -138,6 +146,11 @@ const { reviewWizardCreations } =
   await import("../../src/web/wizard-create.js");
 const { withChannelLock, CHANNEL_LOCK_BUSY_MESSAGE } =
   await import("../../src/web/channel-write-lock.js");
+const { withRoleLock, ROLE_LOCK_BUSY_MESSAGE } =
+  await import("../../src/web/role-write-lock.js");
+const { planRoles } = await import("../../src/web/role-create.js");
+const { contextWithNew, selectionWithNew } =
+  await import("../../src/web/wizard-role-create.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
 
@@ -169,7 +182,6 @@ const ADMIN = "100000000000000003";
 const BOOSTER = "100000000000000004";
 const ABOVE_BOT = "100000000000000005";
 const BOTROLE = "100000000000000006";
-const JOB = "11111111-1111-4111-8111-111111111111";
 
 let roles: Map<string, FakeRole>;
 let rolesFetchError: Error | null;
@@ -249,9 +261,9 @@ function wizardState(
   access: unknown,
   selectedFeatures: string[] = ["quotes"],
   configuration: Record<string, unknown> = {},
-  createHost = false,
+  roleCreations: Array<{ name: string; scopes: string[] }> = [],
 ): Record<string, unknown> {
-  return { selectedFeatures, configuration, access, createHost };
+  return { selectedFeatures, configuration, access, roleCreations };
 }
 
 function lastAuditFor(action: string): Record<string, unknown> {
@@ -283,8 +295,9 @@ beforeEach(async () => {
     ],
   ]);
   botCanManageRoles = true;
-  mockStartApply.mockReset();
-  mockStartApply.mockReturnValue({ id: JOB });
+  adoptionActive = false;
+  createAnswer = { ok: true };
+  mockCanBotCreate.mockImplementation(async () => createAnswer);
   stored = [];
   mockGetSession.mockReturnValue(null);
   jest.spyOn(svc, "groupBackedRoles").mockResolvedValue([]);
@@ -456,7 +469,7 @@ describe("POST /wizard/access", () => {
       session.discordUserId,
       session.guildId,
       { admin: [], staff: [MOD], host: [HOST] },
-      false,
+      [],
     );
     expect(createSpy).not.toHaveBeenCalled();
     expect(updateSpy).not.toHaveBeenCalled();
@@ -473,7 +486,7 @@ describe("POST /wizard/access", () => {
       session.discordUserId,
       session.guildId,
       { admin: [ADMIN], staff: [], host: [] },
-      false,
+      [],
     );
   });
 
@@ -1039,306 +1052,7 @@ describe("a role a feature hands out to members", () => {
   });
 });
 
-describe("Create @Event host (#1365)", () => {
-  const none = { admin: [], staff: [], host: [] };
-
-  beforeEach(() => {
-    roles.delete(HOST); // a server with no Event host role
-  });
-
-  /** Open Review and read the plan id it posts back with Apply. */
-  async function reviewedPlanId(
-    state: Record<string, unknown>,
-  ): Promise<string> {
-    mockGetSession.mockReturnValue(state);
-    const html = await (await harness.get("/wizard?step=confirm")).text();
-    const hit = /name="hostPlanId" value="([0-9a-f]{24})"/.exec(html);
-    expect(hit).not.toBeNull();
-    return (hit as RegExpExecArray)[1];
-  }
-
-  async function applyWith(
-    state: Record<string, unknown>,
-    hostPlanId: string,
-  ): ReturnType<AdminHarness["post"]> {
-    mockGetSession.mockReturnValue(state);
-    const shown = accessFingerprint(
-      diffAccess(stored, [...roles.values()], state.access as AccessSelection),
-    );
-    return harness.post("/wizard/apply", {
-      accessFingerprint: shown,
-      hostPlanId,
-    });
-  }
-
-  const hostAudits = (): string[] =>
-    mockRecordAudit.mock.calls
-      .map((c) => (c[1] as { action: string }).action)
-      .filter((a) => a.startsWith("wizard.access.host"));
-
-  describe("the Access step", () => {
-    it("offers to create the role when none exists, and says what it does", async () => {
-      mockGetSession.mockReturnValue(wizardState(undefined));
-      const html = await (await harness.get("/wizard?step=access")).text();
-      expect(html).toMatch(/name="create_host" value="1"[^>]*>/);
-      expect(html).not.toMatch(/name="create_host"[^>]*disabled/);
-      expect(html).toContain("adds nobody to it");
-    });
-
-    it("shows the choice as made when it was ticked earlier", async () => {
-      mockGetSession.mockReturnValue(wizardState(none, ["quotes"], {}, true));
-      const html = await (await harness.get("/wizard?step=access")).text();
-      expect(html).toMatch(/name="create_host"[^>]*checked/);
-    });
-
-    it("does not offer it when an Event host role exists", async () => {
-      roles.set(HOST, role(HOST, "Event host", 4));
-      mockGetSession.mockReturnValue(wizardState(undefined));
-      const html = await (await harness.get("/wizard?step=access")).text();
-      expect(html).not.toContain("create_host");
-    });
-
-    it("disables it with the reason when the bot can't manage roles", async () => {
-      botCanManageRoles = false;
-      mockGetSession.mockReturnValue(wizardState(undefined));
-      const html = await (await harness.get("/wizard?step=access")).text();
-      expect(html).toMatch(/name="create_host"[^>]*disabled/);
-      expect(html).toContain("Manage Roles");
-    });
-
-    it("counts the pending create as someone to host", async () => {
-      mockGetSession.mockReturnValue(
-        wizardState(none, ["events"], { "events.enabled": true }, true),
-      );
-      const html = await (await harness.get("/wizard?step=access")).text();
-      expect(html).not.toContain("nobody can host yet");
-    });
-
-    it("keeps the choice in the wizard session and writes nothing", async () => {
-      mockGetSession.mockReturnValue(wizardState(undefined));
-      const res = await harness.post("/wizard/access", { create_host: "1" });
-      expect(res.headers.get("location")).toBe("/admin/wizard?step=0");
-      expect(mockSetAccess).toHaveBeenCalledWith(
-        session.discordUserId,
-        session.guildId,
-        none,
-        true,
-      );
-      expect(createSpy).not.toHaveBeenCalled();
-      expect(mockStartApply).not.toHaveBeenCalled();
-    });
-
-    it("refuses it when the bot lacks Manage Roles", async () => {
-      botCanManageRoles = false;
-      mockGetSession.mockReturnValue(wizardState(undefined));
-      const res = await harness.post("/wizard/access", { create_host: "1" });
-      const flash = parseFlashRedirect(res.headers.get("location"));
-      expect(flash.msg).toContain("Manage Roles");
-      expect(mockSetAccess).not.toHaveBeenCalled();
-      expect(lastAuditFor("wizard.access")).toMatchObject({
-        result: "failure",
-      });
-    });
-
-    it("refuses it when an Event host role already exists", async () => {
-      roles.set(HOST, role(HOST, "Event host", 4));
-      mockGetSession.mockReturnValue(wizardState(undefined));
-      const res = await harness.post("/wizard/access", { create_host: "1" });
-      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
-        "already exists",
-      );
-      expect(mockSetAccess).not.toHaveBeenCalled();
-    });
-
-    it("refuses it together with picked Event host roles", async () => {
-      roles.set("100000000000000007", role("100000000000000007", "Crew", 3));
-      mockGetSession.mockReturnValue(wizardState(undefined));
-      const res = await harness.post("/wizard/access", {
-        create_host: "1",
-        roles_host: "100000000000000007",
-      });
-      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
-        "not both",
-      );
-      expect(mockSetAccess).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("Review", () => {
-    it("lists what the engine would do and posts the plan id", async () => {
-      mockGetSession.mockReturnValue(wizardState(none, ["quotes"], {}, true));
-      const html = await (await harness.get("/wizard?step=confirm")).text();
-      expect(html).toContain("Create role &quot;Event host&quot;");
-      expect(html).toMatch(/name="hostPlanId" value="[0-9a-f]{24}"/);
-      expect(html).not.toMatch(/<button[^>]*disabled[^>]*>Apply/);
-      expect(createSpy).not.toHaveBeenCalled();
-    });
-
-    it("blocks Apply when the bot can't manage roles", async () => {
-      botCanManageRoles = false;
-      mockGetSession.mockReturnValue(wizardState(none, ["quotes"], {}, true));
-      const html = await (await harness.get("/wizard?step=confirm")).text();
-      expect(html).toContain("Manage Roles");
-      expect(html).toMatch(/<button[^>]*disabled[^>]*>Apply/);
-    });
-
-    it("blocks Apply when the plan holds changes the wizard did not cause", async () => {
-      stored = [
-        group({
-          id: "g-1",
-          name: "Moderator",
-          roleId: MOD,
-          permissions: String(1n << 28n),
-          capabilities: ["staff"],
-        }),
-      ];
-      mockGetSession.mockReturnValue(
-        wizardState(
-          { admin: [], staff: [MOD], host: [] },
-          ["quotes"],
-          {},
-          true,
-        ),
-      );
-      const html = await (await harness.get("/wizard?step=confirm")).text();
-      expect(html).toContain("other pending role changes");
-      expect(html).toMatch(/<button[^>]*disabled[^>]*>Apply/);
-    });
-  });
-
-  describe("Apply", () => {
-    const state = (): Record<string, unknown> =>
-      wizardState(none, ["quotes"], {}, true);
-
-    it("saves the group, starts the job and goes to it", async () => {
-      mockApplyConfiguration.mockResolvedValue(okConfig);
-      const id = await reviewedPlanId(state());
-      const res = await applyWith(state(), id);
-      const location = res.headers.get("location") ?? "";
-      expect(location).toContain("/admin/wizard/done?");
-      expect(location).toContain(`job=${JOB}`);
-      expect(parseFlashRedirect(location).msg).toContain(
-        "Event host role is being created",
-      );
-      expect(createSpy).toHaveBeenCalledTimes(1);
-      expect(createSpy).toHaveBeenCalledWith(
-        GUILD,
-        expect.objectContaining({
-          name: "Event host",
-          roleId: null,
-          permissions: "0",
-          capabilities: ["host"],
-        }),
-      );
-      expect(mockStartApply).toHaveBeenCalledTimes(1);
-      const plan = mockStartApply.mock.calls[0][0] as {
-        id: string;
-        operations: Array<{ type: string; name: string }>;
-      };
-      expect(plan.id).toBe(id);
-      expect(plan.operations).toHaveLength(1);
-      expect(plan.operations[0]).toMatchObject({
-        type: "role.create",
-        name: "Event host",
-      });
-      expect(hostAudits()).toEqual([
-        "wizard.access.host-group",
-        "wizard.access.host-role",
-      ]);
-      expect(mockApplyConfiguration).toHaveBeenCalled();
-      expect(mockEndSession).toHaveBeenCalled();
-    });
-
-    it("runs the Access writes and the host plan together, and the plans agree", async () => {
-      mockApplyConfiguration.mockResolvedValue(okConfig);
-      const both = (): Record<string, unknown> =>
-        wizardState(
-          { admin: [], staff: [MOD], host: [] },
-          ["quotes"],
-          {},
-          true,
-        );
-      const id = await reviewedPlanId(both());
-      const res = await applyWith(both(), id);
-      expect(res.headers.get("location")).toContain(`job=${JOB}`);
-      expect(createSpy).toHaveBeenCalledTimes(2);
-      expect(createSpy.mock.calls[0][1]).toMatchObject({ roleId: MOD });
-      expect(createSpy.mock.calls[1][1]).toMatchObject({ roleId: null });
-      expect(mockStartApply).toHaveBeenCalledTimes(1);
-    });
-
-    it("writes nothing when the plan id is not the one Review showed", async () => {
-      const res = await applyWith(state(), "0".repeat(24));
-      const flash = parseFlashRedirect(res.headers.get("location"));
-      expect(flash.msg).toContain("Nothing was applied");
-      expect(createSpy).not.toHaveBeenCalled();
-      expect(mockApplyConfiguration).not.toHaveBeenCalled();
-      expect(mockStartApply).not.toHaveBeenCalled();
-    });
-
-    it("writes nothing when no plan id was posted", async () => {
-      await applyWith(state(), "");
-      expect(createSpy).not.toHaveBeenCalled();
-      expect(mockStartApply).not.toHaveBeenCalled();
-    });
-
-    it("refuses before any write when the bot lost Manage Roles", async () => {
-      const id = await reviewedPlanId(state());
-      botCanManageRoles = false;
-      const res = await applyWith(state(), id);
-      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
-        "Manage Roles",
-      );
-      expect(createSpy).not.toHaveBeenCalled();
-      expect(mockApplyConfiguration).not.toHaveBeenCalled();
-    });
-
-    it("refuses before any write when an Event host role appeared meanwhile", async () => {
-      const id = await reviewedPlanId(state());
-      roles.set(HOST, role(HOST, "Event host", 4));
-      const res = await applyWith(state(), id);
-      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
-        "already exists",
-      );
-      expect(createSpy).not.toHaveBeenCalled();
-      expect(mockApplyConfiguration).not.toHaveBeenCalled();
-    });
-
-    it("removes the group and says the role was not created when the job can't start", async () => {
-      mockApplyConfiguration.mockResolvedValue(okConfig);
-      mockStartApply.mockImplementation(() => {
-        throw new Error("another apply is running");
-      });
-      const id = await reviewedPlanId(state());
-      const res = await applyWith(state(), id);
-      const flash = parseFlashRedirect(res.headers.get("location"));
-      expect(flash.path).toBe("/admin/role-groups");
-      expect(flash.type).toBe("err");
-      expect(flash.msg).toContain("was not created");
-      expect(flash.msg).toContain("another apply is running");
-      expect(flash.msg).toContain("Wizard applied");
-      expect(removeSpy).toHaveBeenCalledTimes(1);
-      expect(stored).toEqual([]);
-      expect(hostAudits()).toContain("wizard.access.host-group.rollback");
-    });
-
-    it("does not start the role when the settings fail to apply", async () => {
-      mockApplyConfiguration.mockResolvedValue({
-        success: false,
-        appliedKeys: [],
-        rolledBackKeys: [],
-        revertFailedKeys: [],
-        failedKey: "quotes.enabled",
-        errorMessage: "write failed",
-      });
-      const id = await reviewedPlanId(state());
-      await applyWith(state(), id);
-      expect(createSpy).not.toHaveBeenCalled();
-      expect(mockStartApply).not.toHaveBeenCalled();
-      expect(mockEndSession).not.toHaveBeenCalled();
-    });
-  });
-
+describe("a group whose role was never created", () => {
   it("leaves a group whose role was never created out of the mapping", async () => {
     // A job that failed in Discord leaves the group with no role. It must not
     // read as mapped, and the card says the group is waiting for its role.
@@ -1353,7 +1067,671 @@ describe("Create @Event host (#1365)", () => {
     mockGetSession.mockReturnValue(wizardState(undefined));
     const html = await (await harness.get("/wizard?step=access")).text();
     expect(html).not.toMatch(/<option[^>]*selected/);
-    expect(html).toContain("waiting for its role");
+  });
+});
+
+describe("roles created from the Access step's Picker (#1618)", () => {
+  const none = { admin: [], staff: [], host: [] };
+  const CREW = { name: "Crew", scopes: ["staff"] };
+  const accessRoles = (): Array<{
+    id: string;
+    name: string;
+    managed: boolean;
+    position: number;
+  }> =>
+    [...roles.values()].map((r) => ({
+      id: r.id,
+      name: r.name,
+      managed: r.managed,
+      position: r.position,
+    }));
+  let seq = 0;
+  const roleRoute = (route: unknown): boolean =>
+    String(route).endsWith(`/guilds/${GUILD}/roles`);
+
+  beforeEach(() => {
+    seq = 0;
+    createAnswer = { ok: true };
+    mockCanBotCreate.mockImplementation(async () => createAnswer);
+    mockFetchViews.mockImplementation(async () => []);
+    mockPost.mockReset();
+    mockDelete.mockReset();
+    mockPost.mockImplementation(async (route: unknown, opts: any) => {
+      if (roleRoute(route)) {
+        const id = `4000000000000000${++seq}`;
+        roles.set(id, role(id, opts.body.name, 1));
+        return { id, name: opts.body.name, position: 1 };
+      }
+      return { id: "500000000000000001", name: opts.body.name };
+    });
+    mockDelete.mockImplementation(async (route: unknown) => {
+      roles.delete(String(route).split("/").pop() as string);
+      return {};
+    });
+    mockApplyConfiguration.mockResolvedValue(okConfig);
+  });
+
+  /** What Review would post for these picks and creations. */
+  function review(
+    access: AccessSelection,
+    creations: Array<{ name: string; scopes: string[] }>,
+  ): { accessFingerprint: string; rolePlanId: string } {
+    const plan = planRoles(
+      creations.map((c) => ({ name: c.name })),
+      accessRoles(),
+    );
+    if (!plan.ok) throw new Error(plan.errors.join(" "));
+    const ctx = contextWithNew(
+      { roles: accessRoles(), groups: stored } as never,
+      creations as never,
+    );
+    return {
+      accessFingerprint: accessFingerprint(
+        diffAccess(
+          stored,
+          ctx.roles,
+          selectionWithNew(access, creations as never),
+        ),
+      ),
+      rolePlanId: plan.planId,
+    };
+  }
+
+  describe("the Access step", () => {
+    const metaOf = (html: string, scope: string): any => {
+      const card = html.split(`id="access-${scope}-title"`)[1];
+      const raw = /data-picker-meta="([^"]*)"/.exec(card)?.[1] ?? "";
+      return JSON.parse(raw.replace(/&quot;/g, '"').replace(/&amp;/g, "&"));
+    };
+
+    it("offers the create row on all three cards when the bot can manage roles", async () => {
+      mockGetSession.mockReturnValue(wizardState(undefined));
+      const html = await (await harness.get("/wizard?step=access")).text();
+      for (const scope of ["admin", "staff", "host"]) {
+        expect(metaOf(html, scope).create).toEqual({ kind: "role", ok: true });
+      }
+      expect(html).not.toContain("create_host");
+      expect(html).not.toContain(">Members</h3>");
+      expect(mockCanBotCreate).toHaveBeenCalledWith(client, GUILD, {
+        kind: "role",
+      });
+    });
+
+    it("does not offer it, and says why, when the bot lacks Manage Roles", async () => {
+      createAnswer = { ok: false, reason: "The bot needs Manage Roles." };
+      mockGetSession.mockReturnValue(wizardState(undefined));
+      const html = await (await harness.get("/wizard?step=access")).text();
+      expect(metaOf(html, "host").create).toEqual({
+        kind: "role",
+        ok: false,
+        reason: "The bot needs Manage Roles.",
+      });
+      expect(html).toContain("The bot needs Manage Roles.");
+      expect(html).not.toContain("To create a role");
+    });
+
+    it("draws no row and no line when the permission could not be read, yet keeps a chosen role pending", async () => {
+      createAnswer = { ok: "unknown" };
+      mockGetSession.mockReturnValue(
+        wizardState({ ...none, staff: [] }, ["quotes"], {}, [CREW]),
+      );
+      const html = await (await harness.get("/wizard?step=access")).text();
+      expect(metaOf(html, "staff").create).toEqual({
+        kind: "role",
+        ok: false,
+      });
+      expect(html).toContain("Crew (will be created)");
+      expect(html).not.toContain("To create a role");
+    });
+
+    it("renders as before, with no flag, when it could not be read and nothing is chosen", async () => {
+      createAnswer = { ok: "unknown" };
+      mockGetSession.mockReturnValue(wizardState(undefined));
+      const html = await (await harness.get("/wizard?step=access")).text();
+      expect(html).not.toContain('data-picker-meta="{');
+    });
+
+    it("counts a role chosen to be created as someone who can host", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(none, ["events"], {}, [
+          { name: "Hosts", scopes: ["host"] },
+        ]),
+      );
+      const html = await (await harness.get("/wizard?step=access")).text();
+      expect(html).not.toContain("nobody can host yet");
+    });
+  });
+
+  describe("saving the step", () => {
+    const save = (
+      body: Record<string, unknown>,
+    ): ReturnType<AdminHarness["post"]> => {
+      mockGetSession.mockReturnValue(wizardState(undefined));
+      return harness.post("/wizard/access", body);
+    };
+
+    it("keeps a typed name beside the picks, and creates nothing", async () => {
+      const res = await save({ roles_staff: ["create:Crew"] });
+      expect(res.headers.get("location")).toContain("step=0");
+      expect(mockSetAccess).toHaveBeenCalledWith(
+        session.discordUserId,
+        GUILD,
+        none,
+        [{ name: "Crew", scopes: ["staff"] }],
+      );
+      expect(mockPost).not.toHaveBeenCalled();
+      expect(createSpy).not.toHaveBeenCalled();
+    });
+
+    it("takes the create value out before the picks are read, so the ids beside it are kept", async () => {
+      await save({ roles_staff: ["create:Crew", MOD], roles_host: HOST });
+      expect(mockSetAccess).toHaveBeenCalledWith(
+        session.discordUserId,
+        GUILD,
+        { admin: [], staff: [MOD], host: [HOST] },
+        [{ name: "Crew", scopes: ["staff"] }],
+      );
+    });
+
+    it("makes one role of a name typed twice, in different cases and scopes, at the higher scope", async () => {
+      await save({
+        roles_admin: ["create:Crew"],
+        roles_staff: ["create:crew  "],
+      });
+      expect(mockSetAccess).toHaveBeenCalledWith(
+        session.discordUserId,
+        GUILD,
+        none,
+        [{ name: "Crew", scopes: ["admin"] }],
+      );
+    });
+
+    it("selects the existing role when the name matches one, ignoring case", async () => {
+      await save({ roles_staff: ["create:mODerator"] });
+      expect(mockSetAccess).toHaveBeenCalledWith(
+        session.discordUserId,
+        GUILD,
+        { admin: [], staff: [MOD], host: [] },
+        [],
+      );
+    });
+
+    it("applies the mapping's own refusal to a name that matches a managed role", async () => {
+      const res = await save({ roles_staff: ["create:booster"] });
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.msg).toContain("managed by an integration");
+      expect(mockSetAccess).not.toHaveBeenCalled();
+    });
+
+    it("refuses @everyone typed as a name", async () => {
+      const res = await save({ roles_staff: ["create:@everyone"] });
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+        "@everyone can't be mapped",
+      );
+      expect(mockSetAccess).not.toHaveBeenCalled();
+    });
+
+    it("refuses a blank name and one over 100 characters", async () => {
+      let res = await save({ roles_staff: ["create:   "] });
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+        "cannot be blank",
+      );
+      res = await save({ roles_staff: [`create:${"x".repeat(101)}`] });
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+        "at most 100 characters",
+      );
+      expect(mockSetAccess).not.toHaveBeenCalled();
+    });
+
+    it("refuses a name two roles share", async () => {
+      roles.set(
+        "100000000000000009",
+        role("100000000000000009", "moderator", 2),
+      );
+      const res = await save({ roles_staff: ["create:Moderator"] });
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+        "Two roles are called",
+      );
+    });
+
+    it("refuses, with the reason, when the bot lacks Manage Roles, and saves nothing", async () => {
+      createAnswer = { ok: false, reason: "The bot needs Manage Roles." };
+      const res = await save({ roles_staff: ["create:Crew"] });
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toBe(
+        "The bot needs Manage Roles.",
+      );
+      expect(mockSetAccess).not.toHaveBeenCalled();
+    });
+
+    it("refuses when the permission could not be read", async () => {
+      createAnswer = { ok: "unknown" };
+      const res = await save({ roles_staff: ["create:Crew"] });
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+        "could not check",
+      );
+      expect(mockSetAccess).not.toHaveBeenCalled();
+    });
+
+    it("does not ask for the permission when nothing is typed", async () => {
+      await save({ roles_staff: [MOD] });
+      expect(mockCanBotCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Review", () => {
+    it("lists the role to create, the group that maps it, and posts both plan ids", async () => {
+      mockGetSession.mockReturnValue(wizardState(none, ["quotes"], {}, [CREW]));
+      const html = await (await harness.get("/wizard?step=confirm")).text();
+      expect(html).toContain(
+        'Create the role <span class="kb-mention">@Crew</span> (no Discord permissions, nobody added)',
+      );
+      expect(html).toContain('Creates the role group "Crew"');
+      expect(html).toMatch(/name="rolePlanId" value="[0-9a-f]{16}"/);
+      expect(html).toMatch(/name="accessFingerprint" value="[0-9a-f]{32}"/);
+      expect(html).not.toMatch(/<button[^>]*disabled[^>]*>Apply/);
+      expect(mockPost).not.toHaveBeenCalled();
+    });
+
+    it("blocks Apply, with the reason, when the bot lost Manage Roles", async () => {
+      createAnswer = { ok: false, reason: "The bot needs Manage Roles." };
+      mockGetSession.mockReturnValue(wizardState(none, ["quotes"], {}, [CREW]));
+      const html = await (await harness.get("/wizard?step=confirm")).text();
+      expect(html).toContain("The roles can't be created");
+      expect(html).toContain("The bot needs Manage Roles.");
+      expect(html).toMatch(/<button[^>]*disabled[^>]*>Apply/);
+    });
+
+    it("blocks Apply when a role of that name appeared since the step was saved", async () => {
+      roles.set("100000000000000009", role("100000000000000009", "crew", 2));
+      mockGetSession.mockReturnValue(wizardState(none, ["quotes"], {}, [CREW]));
+      const html = await (await harness.get("/wizard?step=confirm")).text();
+      expect(html).toContain("exists now");
+      expect(html).toMatch(/<button[^>]*disabled[^>]*>Apply/);
+    });
+  });
+
+  describe("Apply", () => {
+    const access = { ...none, staff: [] as string[] };
+
+    it("creates the role with no permissions, then maps it, then applies the settings", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [CREW]),
+      );
+      const res = await harness.post("/wizard/apply", review(access, [CREW]));
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.type).toBe("ok");
+      expect(flash.msg).toContain("1 role group change");
+      expect(flash.msg).toContain("created 1 role");
+      const roleCalls = mockPost.mock.calls.filter((c) => roleRoute(c[0]));
+      expect(roleCalls).toHaveLength(1);
+      expect(roleCalls[0][1]).toMatchObject({
+        body: {
+          name: "Crew",
+          permissions: "0",
+          hoist: false,
+          mentionable: false,
+        },
+      });
+      // The group maps the role Discord made, with no permissions of its own.
+      expect(createSpy).toHaveBeenCalledWith(
+        GUILD,
+        expect.objectContaining({
+          name: "Crew",
+          roleId: "40000000000000001",
+          capabilities: ["staff"],
+          permissions: null,
+        }),
+      );
+      expect(mockApplyConfiguration).toHaveBeenCalled();
+      expect(mockEndSession).toHaveBeenCalled();
+      expect(mockDelete).not.toHaveBeenCalled();
+    });
+
+    it("maps a role created for Admins with the admin capability and still no permissions", async () => {
+      const a = { ...none };
+      const admin = { name: "Wardens", scopes: ["admin"] };
+      mockGetSession.mockReturnValue(wizardState(a, ["quotes"], {}, [admin]));
+      await harness.post("/wizard/apply", review(a, [admin]));
+      expect(
+        mockPost.mock.calls.find((c) => roleRoute(c[0]))?.[1],
+      ).toMatchObject({
+        body: { permissions: "0" },
+      });
+      expect(createSpy).toHaveBeenCalledWith(
+        GUILD,
+        expect.objectContaining({
+          capabilities: ["admin", "staff"],
+          permissions: null,
+        }),
+      );
+    });
+
+    it("creates nothing when the role plan id is missing or is not the one Review showed", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [CREW]),
+      );
+      const shown = review(access, [CREW]);
+      for (const rolePlanId of [undefined, "0000000000000000"]) {
+        const res = await harness.post("/wizard/apply", {
+          accessFingerprint: shown.accessFingerprint,
+          ...(rolePlanId ? { rolePlanId } : {}),
+        });
+        const flash = parseFlashRedirect(res.headers.get("location"));
+        expect(flash.msg).toContain("Nothing was applied.");
+        expect(flash.msg).toContain("changed since you opened Review");
+      }
+      expect(mockPost).not.toHaveBeenCalled();
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    });
+
+    it("creates nothing when a role of that name appeared after Review", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [CREW]),
+      );
+      const shown = review(access, [CREW]);
+      roles.set("100000000000000009", role("100000000000000009", "crew", 2));
+      const res = await harness.post("/wizard/apply", shown);
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+        "Nothing was applied.",
+      );
+      expect(mockPost).not.toHaveBeenCalled();
+      expect(createSpy).not.toHaveBeenCalled();
+    });
+
+    it("refuses with nothing created when the bot lost Manage Roles", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [CREW]),
+      );
+      const shown = review(access, [CREW]);
+      createAnswer = { ok: false, reason: "The bot needs Manage Roles." };
+      const res = await harness.post("/wizard/apply", shown);
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+        "The bot needs Manage Roles.",
+      );
+      expect(mockPost).not.toHaveBeenCalled();
+    });
+
+    it("refuses with nothing created while an adoption apply is running", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [CREW]),
+      );
+      const shown = review(access, [CREW]);
+      adoptionActive = true;
+      const res = await harness.post("/wizard/apply", shown);
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+        "already running",
+      );
+      expect(mockPost).not.toHaveBeenCalled();
+      expect(createSpy).not.toHaveBeenCalled();
+    });
+
+    it("writes nothing else, and the settings stay unapplied, when Discord refuses the role", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [CREW]),
+      );
+      const shown = review(access, [CREW]);
+      mockPost.mockRejectedValue(new Error("Missing Permissions"));
+      const res = await harness.post("/wizard/apply", shown);
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.msg).toContain("Nothing was applied.");
+      expect(flash.msg).toContain("Missing Permissions");
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(mockApplyConfiguration).not.toHaveBeenCalled();
+      expect(lastAuditFor("wizard.apply")).toMatchObject({
+        result: "failure",
+        details: { stage: "roles" },
+      });
+    });
+
+    it("removes the role again when writing the role group fails, and says so", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [CREW]),
+      );
+      const shown = review(access, [CREW]);
+      createSpy.mockResolvedValueOnce({
+        ok: false,
+        error: "disk full",
+      } as never);
+      const res = await harness.post("/wizard/apply", shown);
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.msg).toContain("disk full");
+      expect(flash.msg).toContain("created for this apply was removed again");
+      expect(mockDelete).toHaveBeenCalledTimes(1);
+      expect(String(mockDelete.mock.calls[0][0])).toContain(
+        `/guilds/${GUILD}/roles/40000000000000001`,
+      );
+      expect(roles.has("40000000000000001")).toBe(false);
+      expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    });
+
+    it("removes the role, after putting the mapping back, when the settings fail to apply", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [CREW]),
+      );
+      const shown = review(access, [CREW]);
+      mockApplyConfiguration.mockResolvedValue({
+        success: false,
+        appliedKeys: [],
+        failedKey: "quotes.enabled",
+        errorMessage: "write failed",
+        rolledBackKeys: [],
+        revertFailedKeys: [],
+      });
+      const res = await harness.post("/wizard/apply", shown);
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.msg).toContain("role mapping was undone");
+      expect(flash.msg).toContain("created for this apply was removed again");
+      expect(stored).toHaveLength(0);
+      expect(roles.has("40000000000000001")).toBe(false);
+      // The mapping went first, so the role was no longer referenced.
+      const removeOrder = removeSpy.mock.invocationCallOrder[0];
+      const deleteOrder = mockDelete.mock.invocationCallOrder[0];
+      expect(removeOrder).toBeLessThan(deleteOrder);
+      expect(mockEndSession).not.toHaveBeenCalled();
+    });
+
+    it("removes the role when applying the settings throws", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [CREW]),
+      );
+      const shown = review(access, [CREW]);
+      mockApplyConfiguration.mockRejectedValue(new Error("db gone"));
+      const res = await harness.post("/wizard/apply", shown);
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.msg).toContain("db gone");
+      expect(flash.msg).toContain("removed again");
+      expect(stored).toHaveLength(0);
+      expect(roles.has("40000000000000001")).toBe(false);
+    });
+
+    it("keeps a role a group still points at, and says so, when the group could not be removed", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [CREW]),
+      );
+      const shown = review(access, [CREW]);
+      mockApplyConfiguration.mockResolvedValue({
+        success: false,
+        appliedKeys: [],
+        failedKey: "quotes.enabled",
+        errorMessage: "write failed",
+        rolledBackKeys: [],
+        revertFailedKeys: [],
+      });
+      removeSpy.mockResolvedValue(false);
+      const res = await harness.post("/wizard/apply", shown);
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.msg).toContain("could not be fully undone");
+      expect(flash.msg).toContain(
+        "Kept, because a role group or a saved setting points at it: 40000000000000001",
+      );
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(roles.has("40000000000000001")).toBe(true);
+    });
+
+    it("keeps the outcome and the recovery text whole when the cause is long", async () => {
+      const A = { name: "Alpha", scopes: ["staff"] };
+      const B = { name: "Beta", scopes: ["host"] };
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [A, B]),
+      );
+      const shown = review(access, [A, B]);
+      let n = 0;
+      mockPost.mockImplementation(async (route: unknown, opts: any) => {
+        n += 1;
+        if (n === 2) throw new Error("x".repeat(900));
+        const id = `4000000000000000${n}`;
+        roles.set(id, role(id, opts.body.name, 1));
+        return { id, name: opts.body.name, position: 1 };
+      });
+      const res = await harness.post("/wizard/apply", shown);
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.msg).toContain("Nothing was applied.");
+      expect(flash.msg).toContain("…");
+      expect(flash.msg).toContain("created for this apply was removed again");
+      expect(flash.msg.length).toBeLessThanOrEqual(500);
+      expect(createSpy).not.toHaveBeenCalled();
+    });
+
+    it("names a role it could not remove, and never says the apply left nothing", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [CREW]),
+      );
+      const shown = review(access, [CREW]);
+      createSpy.mockResolvedValueOnce({
+        ok: false,
+        error: "disk full",
+      } as never);
+      mockDelete.mockRejectedValue(new Error("Discord down"));
+      const res = await harness.post("/wizard/apply", shown);
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.msg).toContain(
+        "May still exist (not removed or checked): 40000000000000001",
+      );
+      expect(flash.msg).not.toContain("removed again");
+    });
+
+    describe("a request that closes while queued", () => {
+      /** Post Apply, close the request after `closeAfterMs`, and wait for the server to notice. */
+      async function postAndClose(
+        body: Record<string, string>,
+        closeAfterMs: number,
+      ): Promise<void> {
+        const gone = new AbortController();
+        const sent = fetch(`${harness.baseUrl}/admin/wizard/apply`, {
+          method: "POST",
+          redirect: "manual",
+          signal: gone.signal,
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            cookie: `koolbot_csrf=${encodeURIComponent(TEST_CSRF_TOKEN)}`,
+          },
+          body: new globalThis.URLSearchParams({
+            _csrf: TEST_CSRF_TOKEN,
+            ...body,
+          }).toString(),
+        }).catch(() => null);
+        await new Promise((r) => setTimeout(r, closeAfterMs));
+        gone.abort();
+        await sent;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      it("creates and writes nothing when it waits for the role lock", async () => {
+        mockGetSession.mockReturnValue(
+          wizardState(access, ["quotes"], {}, [CREW]),
+        );
+        const shown = review(access, [CREW]);
+        let release: () => void = () => undefined;
+        const holding = withRoleLock(
+          GUILD,
+          () => new Promise<void>((resolve) => (release = resolve)),
+        );
+        await postAndClose(shown, 400);
+        release();
+        await holding;
+        await new Promise((r) => setTimeout(r, 300));
+        expect(mockPost).not.toHaveBeenCalled();
+        expect(createSpy).not.toHaveBeenCalled();
+        expect(mockApplyConfiguration).not.toHaveBeenCalled();
+        expect(lastAuditFor("wizard.apply")).toMatchObject({
+          result: "failure",
+          errorMessage: ROLE_LOCK_BUSY_MESSAGE,
+          details: { stage: "roles" },
+        });
+      });
+
+      it("puts the mapping back and removes the role when it waits for the channel lock", async () => {
+        const channels = {
+          "quotes.channel_id": { name: "wall", kind: "text" },
+        };
+        const chReview = await reviewWizardCreations(client, GUILD, channels);
+        expect(chReview.problems).toEqual([]);
+        mockGetSession.mockReturnValue({
+          ...wizardState(access, ["quotes"], {}, [CREW]),
+          creations: channels,
+        });
+        const shown = review(access, [CREW]);
+        let release: () => void = () => undefined;
+        const holding = withChannelLock(
+          GUILD,
+          () => new Promise<void>((resolve) => (release = resolve)),
+        );
+        await postAndClose(
+          { ...shown, channelPlanId: chReview.planId as string },
+          500,
+        );
+        release();
+        await holding;
+        await new Promise((r) => setTimeout(r, 300));
+        // The role was made and mapped, then both were put back.
+        expect(mockPost.mock.calls.filter((c) => roleRoute(c[0]))).toHaveLength(
+          1,
+        );
+        expect(
+          mockPost.mock.calls.filter((c) => !roleRoute(c[0])),
+        ).toHaveLength(0);
+        expect(createSpy).toHaveBeenCalledTimes(1);
+        expect(removeSpy).toHaveBeenCalledTimes(1);
+        expect(stored).toHaveLength(0);
+        expect(roles.has("40000000000000001")).toBe(false);
+        expect(mockApplyConfiguration).not.toHaveBeenCalled();
+        expect(lastAuditFor("wizard.apply")).toMatchObject({
+          result: "failure",
+          errorMessage: CHANNEL_LOCK_BUSY_MESSAGE,
+          details: { stage: "channels" },
+        });
+      });
+    });
+
+    it("puts the mapping back and removes the role when creating a channel fails", async () => {
+      const channels = { "quotes.channel_id": { name: "wall", kind: "text" } };
+      const chReview = await reviewWizardCreations(client, GUILD, channels);
+      mockGetSession.mockReturnValue({
+        ...wizardState(access, ["quotes"], {}, [CREW]),
+        creations: channels,
+      });
+      const shown = review(access, [CREW]);
+      mockPost.mockImplementation(async (route: unknown, opts: any) => {
+        if (roleRoute(route)) {
+          const id = "40000000000000001";
+          roles.set(id, role(id, opts.body.name, 1));
+          return { id, name: opts.body.name, position: 1 };
+        }
+        throw new Error("Missing Permissions");
+      });
+      const res = await harness.post("/wizard/apply", {
+        ...shown,
+        channelPlanId: chReview.planId as string,
+      });
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.msg).toContain("Missing Permissions");
+      expect(flash.msg).toContain("role mapping was undone");
+      expect(flash.msg).toContain("created for this apply was removed again");
+      expect(stored).toHaveLength(0);
+      expect(roles.has("40000000000000001")).toBe(false);
+      expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    });
   });
 });
 

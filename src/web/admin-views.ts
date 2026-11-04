@@ -183,7 +183,7 @@ import {
   renderAdministratorContinue,
 } from "./wizard-admin-view.js";
 import type { AdministratorCheck } from "../services/wizard-admin-check.js";
-import type { HostReview } from "../services/wizard-host-role.js";
+import type { WizardRoleReview } from "./wizard-role-create.js";
 import {
   renderPermissionNotice,
   splitEventFormNotice,
@@ -2838,8 +2838,8 @@ export interface WizardConfirmPageProps extends CommonProps {
   accessGaps?: AccessGap[];
   /** What Review showed; posted back so Apply can tell if it went stale. */
   accessFingerprint?: string;
-  /** The plan for creating the Event host role (#1365), when it was chosen. */
-  hostRole?: HostReview | null;
+  /** The roles Apply would create (#1618), with the plan id and any problem; absent when none were chosen. */
+  roleReview?: WizardRoleReview | null;
   /** Channels Apply would create (#1661, #1662): one panel row each, listed before the settings table. */
   creations?: PlannedCreation[];
   /** The plan Review showed, posted back as `channelPlanId` so Apply can tell it went stale (#1662). */
@@ -2856,12 +2856,12 @@ export interface WizardConfirmPageProps extends CommonProps {
 export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
   const csrf = escapeHtml(props.csrfToken);
   const accessChanges = props.accessChanges ?? [];
-  const hostRole = props.hostRole ?? null;
+  const roleReview = props.roleReview ?? null;
   const creations = props.creations ?? [];
   const nothingToApply =
     props.pending.length === 0 &&
     accessChanges.length === 0 &&
-    !hostRole &&
+    !roleReview &&
     creations.length === 0;
   const rows =
     props.pending.length === 0
@@ -2907,7 +2907,7 @@ ${renderWizardSteps("review")}
 <h1>Review configuration</h1>
 <p class="subtitle">The following settings will be applied when you click <strong>Apply</strong>.</p>
 ${renderFlash(props.flash)}
-${adminHtml}${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGaps ?? [], hostRole)}
+${adminHtml}${renderAccessReview(accessChanges, props.accessProblem ?? null, props.accessGaps ?? [], roleReview)}
 ${createHtml}${dependencyHtml}<div class="card">
   <table>
     <thead><tr><th scope="col">Key</th><th scope="col">New value</th><th scope="col">Description</th></tr></thead>
@@ -2918,8 +2918,8 @@ ${createHtml}${dependencyHtml}<div class="card">
   <form method="POST" action="/admin/wizard/apply"${dependencyHtml || adminContinue ? ` id="${WIZARD_APPLY_FORM_ID}"` : ""}>
     <input type="hidden" name="_csrf" value="${csrf}">
     ${props.accessFingerprint ? `<input type="hidden" name="accessFingerprint" value="${escapeHtml(props.accessFingerprint)}">` : ""}
-    ${hostRole?.planId ? `<input type="hidden" name="hostPlanId" value="${escapeHtml(hostRole.planId)}">` : ""}${props.createPlanId ? `<input type="hidden" name="channelPlanId" value="${escapeHtml(props.createPlanId)}">` : ""}
-    <button type="submit" class="btn btn-primary"${nothingToApply || props.accessProblem || createProblems.length > 0 || (hostRole && hostRole.problems.length > 0) || dependencyReviewBlocksApply(props.dependencies) ? " disabled" : ""}>Apply</button>
+    ${roleReview?.planId ? `<input type="hidden" name="rolePlanId" value="${escapeHtml(roleReview.planId)}">` : ""}${props.createPlanId ? `<input type="hidden" name="channelPlanId" value="${escapeHtml(props.createPlanId)}">` : ""}
+    <button type="submit" class="btn btn-primary"${nothingToApply || props.accessProblem || createProblems.length > 0 || (roleReview && roleReview.problems.length > 0) || dependencyReviewBlocksApply(props.dependencies) ? " disabled" : ""}>Apply</button>
   </form>
   <form method="POST" action="/admin/wizard/cancel">
     <input type="hidden" name="_csrf" value="${csrf}">

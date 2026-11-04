@@ -98,44 +98,62 @@ describe("renderWizardSubSteps (#1620)", () => {
   });
 });
 
-describe("renderAccessReview, Event host role", () => {
-  it("lists the engine's operations and says what happens next", () => {
-    const html = renderAccessReview([], null, [], {
-      planId: "abc",
-      operations: ['Create role "Event host"'],
-      problems: [],
-    });
-    expect(html).toContain("<h2>Event host role</h2>");
-    expect(html).toContain("Create role &quot;Event host&quot;");
-    expect(html).toContain("background job");
+describe("renderAccessReview, roles to create (#1618)", () => {
+  const two = {
+    roles: [
+      { name: "Crew", scopes: ["staff"] as Array<"staff"> },
+      { name: "Hosts", scopes: ["host"] as Array<"host"> },
+    ],
+    planId: "0123456789abcdef",
+    problems: [],
+  };
+
+  it("lists each role with the sentence the owner asked for, and which scope it is mapped to", () => {
+    const html = renderAccessReview([], null, [], two);
+    expect(html).toContain('id="wizard-role-review"');
+    expect(html).toContain(
+      'Create the role <span class="kb-mention">@Crew</span> (no Discord permissions, nobody added)',
+    );
+    expect(html).toContain(
+      'Create the role <span class="kb-mention">@Hosts</span> (no Discord permissions, nobody added)',
+    );
+    expect(html).toContain("Mapped to Moderators.");
+    expect(html).toContain("Mapped to Event hosts.");
+    expect(html).toContain("Nothing is created until you apply.");
     expect(html).not.toContain("No role mapping changes.");
   });
 
-  it("blocks with the reasons, in an alert, and shows no operations", () => {
+  it("names every scope of a role typed under two", () => {
     const html = renderAccessReview([], null, [], {
-      planId: null,
-      operations: ['Create role "Event host"'],
-      problems: [
-        "The bot needs the Manage Roles permission for these changes.",
-      ],
+      ...two,
+      roles: [{ name: "Crew", scopes: ["staff", "host"] }],
     });
-    expect(html).toContain('role="alert"');
-    expect(html).toContain("Manage Roles");
-    expect(html).toContain("Not created.");
-    expect(html).not.toContain("<li>Create role");
+    expect(html).toContain("Mapped to Moderators and Event hosts.");
   });
 
-  it("escapes what the engine reports", () => {
+  it("blocks with the reasons, in an alert, and lists no role", () => {
     const html = renderAccessReview([], null, [], {
-      planId: "abc",
-      operations: ["<img src=x onerror=alert(1)>"],
-      problems: [],
+      roles: [],
+      planId: null,
+      problems: ["The bot needs Manage Roles to create a role."],
+    });
+    expect(html).toContain('role="alert"');
+    expect(html).toContain('id="wizard-role-problems"');
+    expect(html).toContain("The roles can't be created");
+    expect(html).toContain("Manage Roles");
+    expect(html).not.toContain("Create the role");
+  });
+
+  it("escapes a typed name", () => {
+    const html = renderAccessReview([], null, [], {
+      ...two,
+      roles: [{ name: "<img src=x onerror=alert(1)>", scopes: ["host"] }],
     });
     expect(html).not.toContain("<img");
   });
 });
 
-describe("renderWizardConfirmPage, Event host role", () => {
+describe("renderWizardConfirmPage, roles to create (#1618)", () => {
   const props = {
     csrfToken: "tok",
     remainingMs: 60_000,
@@ -143,27 +161,26 @@ describe("renderWizardConfirmPage, Event host role", () => {
     metadata: {},
   };
 
-  it("posts the plan id back and enables Apply when only the role is created", () => {
+  it("posts the plan id back as rolePlanId and enables Apply when only a role is created", () => {
     const html = renderWizardConfirmPage({
       ...props,
-      hostRole: {
-        planId: "0123456789abcdef01234567",
-        operations: ['Create role "Event host"'],
+      roleReview: {
+        roles: [{ name: "Crew", scopes: ["staff"] }],
+        planId: "0123456789abcdef",
         problems: [],
       },
     });
-    expect(html).toContain(
-      'name="hostPlanId" value="0123456789abcdef01234567"',
-    );
+    expect(html).toContain('name="rolePlanId" value="0123456789abcdef"');
     expect(html).not.toMatch(/<button[^>]*disabled[^>]*>Apply/);
   });
 
-  it("disables Apply while the role has problems", () => {
+  it("disables Apply while the roles have problems", () => {
     const html = renderWizardConfirmPage({
       ...props,
-      hostRole: { planId: "x", operations: [], problems: ["Not possible."] },
+      roleReview: { roles: [], planId: null, problems: ["Not possible."] },
     });
     expect(html).toMatch(/<button[^>]*disabled[^>]*>Apply/);
+    expect(html).not.toContain('name="rolePlanId"');
   });
 });
 
@@ -209,78 +226,106 @@ describe("renderWizardAccessPage", () => {
     gaps: [],
   };
 
-  it("has a card per scope, plus Members pointing at Command permissions", () => {
+  it("has a card for Admins, Moderators and Event hosts, and no Members card (#1618)", () => {
     const html = renderWizardAccessPage({ ...base, options: [] });
-    for (const title of ["Admins", "Moderators", "Event hosts", "Members"]) {
+    for (const title of ["Admins", "Moderators", "Event hosts"]) {
       expect(html).toContain(`>${title}</h3>`);
     }
-    expect(html).toContain('href="/admin/permissions"');
+    expect(html.match(/class="kb-access__card"/g)).toHaveLength(3);
+    expect(html).not.toContain(">Members</h3>");
+    expect(html).not.toContain("access-members");
+    expect(html).not.toContain("Everyone on the server may use /me");
+    expect(html.split('<main id="main"')[1]).not.toContain(
+      'href="/admin/permissions"',
+    );
     expect(html).toContain('name="_csrf" value="tok"');
   });
 
-  describe("Create @Event host", () => {
+  describe("the role Picker's create row (#1618)", () => {
     const options = [{ id: "1", name: "Mods", managed: false, position: 1 }];
+    const metaOf = (html: string, scope: string): Record<string, unknown> => {
+      const card = html.split(`id="access-${scope}-title"`)[1];
+      const raw = /data-picker-meta="([^"]*)"/.exec(card)?.[1] ?? "";
+      return JSON.parse(raw.replace(/&quot;/g, '"').replace(/&amp;/g, "&"));
+    };
 
-    it("offers a switch when no Event host role exists", () => {
+    it("flags every scope's Picker as able to create a role, and says what it does", () => {
       const html = renderWizardAccessPage({
         ...base,
         options,
-        hostCreate: { available: true },
+        create: { kind: "role", ok: true },
       });
-      expect(html).toContain("Create @Event host");
-      expect(html).toMatch(
-        /<input type="checkbox" role="switch" name="create_host" value="1" aria-describedby="access-host-create-help">/,
-      );
-      expect(html).toContain('id="access-host-create-help"');
-    });
-
-    it("shows the switch on when it was chosen", () => {
-      const html = renderWizardAccessPage({
-        ...base,
-        options,
-        hostCreate: { available: true },
-        createHost: true,
-      });
-      expect(html).toMatch(/name="create_host"[^>]*checked/);
-    });
-
-    it("disables the switch and says why when it can't be created", () => {
-      const html = renderWizardAccessPage({
-        ...base,
-        options,
-        hostCreate: {
-          available: false,
-          reason: "permission",
-          message:
-            "The bot needs the Manage Roles permission to create a role.",
-        },
-        createHost: true,
-      });
-      expect(html).toMatch(/name="create_host"[^>]*disabled/);
-      expect(html).not.toMatch(/name="create_host"[^>]*checked/);
-      expect(html).toContain("The bot needs the Manage Roles permission");
-    });
-
-    it("offers nothing when the role already exists", () => {
-      const html = renderWizardAccessPage({
-        ...base,
-        options,
-        hostCreate: {
-          available: false,
-          reason: "exists",
-          message: "An Event host role already exists. Pick it above.",
-        },
-      });
+      for (const scope of ["admin", "staff", "host"]) {
+        expect(metaOf(html, scope)).toMatchObject({
+          create: { kind: "role", ok: true },
+        });
+      }
+      expect(html).toContain("no Discord permissions");
+      expect(html).toContain("nobody is added to it");
+      // The old switch is gone.
       expect(html).not.toContain("create_host");
+      expect(html).not.toContain("Create @Event host");
+    });
+
+    it("renders the Picker as before when the page passes no flag", () => {
+      const html = renderWizardAccessPage({ ...base, options });
+      expect(html).not.toContain('data-picker-meta="{');
+      expect(html).not.toContain("To create a role");
+      expect(html).toContain("Leave it empty for none.");
+    });
+
+    it("passes the reason, and writes no create sentence, when the bot cannot create", () => {
+      const html = renderWizardAccessPage({
+        ...base,
+        options,
+        create: { kind: "role", ok: false, reason: "Needs Manage Roles." },
+      });
+      expect(metaOf(html, "admin")).toMatchObject({
+        create: { ok: false, reason: "Needs Manage Roles." },
+      });
+      expect(html).toContain("Needs Manage Roles.");
+      expect(html).not.toContain("To create a role");
+    });
+
+    it("draws a chosen name as a pending option, selected, in the scope it was chosen for", () => {
+      const html = renderWizardAccessPage({
+        ...base,
+        options,
+        create: { kind: "role", ok: true },
+        pending: { staff: ["Crew"] },
+      });
+      const staff = html
+        .split('id="access-staff-title"')[1]
+        .split("</article>")[0];
+      expect(staff).toContain(
+        '<option value="create:Crew" data-create data-name="Crew" selected>Crew (will be created)</option>',
+      );
+      expect(html.match(/<option [^>]*data-create/g)).toHaveLength(1);
+    });
+
+    it("still draws a pending name, with no row and no line, when the permission was unreadable", () => {
+      const html = renderWizardAccessPage({
+        ...base,
+        options,
+        create: { kind: "role", ok: false },
+        pending: { host: ["Crew"] },
+      });
+      expect(html).toContain("Crew (will be created)");
+      expect(metaOf(html, "host")).toEqual({
+        items: expect.any(Array),
+        create: { kind: "role", ok: false },
+      });
+      expect(html).not.toContain("To create a role");
     });
 
     it("offers nothing when the roles could not be read", () => {
       const html = renderWizardAccessPage({
         ...base,
         options: null,
-        hostCreate: { available: true },
+        create: { kind: "role", ok: true },
       });
-      expect(html).not.toContain("create_host");
+      expect(html).not.toContain("data-picker");
+      expect(html).toContain("Roles can't be listed right now.");
     });
   });
 

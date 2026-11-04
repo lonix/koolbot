@@ -35,7 +35,7 @@
  * the channel may not be visible yet.
  */
 
-import { createKeyedLock } from "../utils/keyed-lock.js";
+import { createKeyedLock, type KeyedLock } from "../utils/keyed-lock.js";
 
 /**
  * How long a caller waits for another write to the same server (owner
@@ -118,11 +118,25 @@ export function withChannelLock<T>(
   work: () => Promise<T>,
   signal?: AbortSignal,
 ): Promise<ChannelLockResult<T>> {
+  return withKeyedLock(channelWriteLock, guildId, work, signal);
+}
+
+/**
+ * `withChannelLock`'s mechanism on any keyed lock, so another domain (the
+ * roles, `role-write-lock.ts`, #1618) gets the same bounded wait, the same
+ * cancellation and the same release rules without a second copy.
+ */
+export function withKeyedLock<T>(
+  lock: KeyedLock,
+  guildId: string,
+  work: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<ChannelLockResult<T>> {
   let state: "waiting" | "running" | "abandoned" = "waiting";
   let reason: "busy" | "cancelled" = "busy";
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;
-  const queued = channelWriteLock.run(guildId, async () => {
+  const queued = lock.run(guildId, async () => {
     if (state === "abandoned") return null;
     state = "running";
     clearTimeout(timer);

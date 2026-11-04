@@ -10,17 +10,11 @@ import { Router } from "express";
 import { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
 import { ConfigService } from "../../../services/config-service.js";
-import { WizardService } from "../../../services/wizard-service.js";
-import { RoleGroupService } from "../../../services/role-group-service.js";
-import { planRoleGroups } from "../../../services/role-group-adoption.js";
-import { ServerAdoptionService } from "../../../services/server-adoption-service.js";
 import {
-  hostCreateState,
-  reviewHostRole,
-  startHostRole,
-  type HostReview,
-  type HostRoleResult,
-} from "../../../services/wizard-host-role.js";
+  WizardService,
+  type WizardRoleCreation,
+} from "../../../services/wizard-service.js";
+import { RoleGroupService } from "../../../services/role-group-service.js";
 import {
   accessFingerprint,
   accessGaps,
@@ -102,7 +96,10 @@ import {
   planWizardDependencies,
   type WizardDependencyPlan,
 } from "./wizard-dependencies.js";
-import { canBotCreate } from "../../../services/bot-create-check.js";
+import {
+  canBotCreate,
+  toPickerCreate,
+} from "../../../services/bot-create-check.js";
 import { offersCreateChannel } from "../../setting-create.js";
 import { loadCreateChannelAnswer } from "../../setting-create-load.js";
 import {
@@ -110,20 +107,25 @@ import {
   pickerCreateValue,
 } from "../../setting-pickers.js";
 import {
+  applyWizardRoles,
+  contextWithNew,
+  pendingNames,
+  resolvePicks,
+  reviewWizardRoles,
+  scopesBeingCreated,
+  selectionWithNew,
+  splitPicks,
+  swapPlaceholders,
+  type WizardRoleApply,
+  type WizardRoleReview,
+} from "../../wizard-role-create.js";
+import {
   activeWizardCreations,
   applyWizardCreations,
   reviewWizardCreations,
   type CreatedForSetting,
   type WizardCreateReview,
 } from "../../wizard-create.js";
-
-/** A role id as Discord sends it: digits only. Anything else is ignored. */
-const SNOWFLAKE = /^\d{1,25}$/;
-
-function pickedRoles(raw: unknown): string[] {
-  const list = Array.isArray(raw) ? raw : raw === undefined ? [] : [raw];
-  return [...new Set(list.map(String).filter((id) => SNOWFLAKE.test(id)))];
-}
 
 /** The first pending role setting that names a role the Access step maps. */
 function pendingConfigOverlap(
@@ -136,9 +138,6 @@ function pendingConfigOverlap(
   }
   return null;
 }
-
-/** An Event host role job id as the engine makes it; anything else is ignored. */
-const JOB_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 /** The wizard's features named in a query value (comma separated), in a form the page can tick again. */
 function tickedFeatures(raw: unknown): string[] {
@@ -195,16 +194,6 @@ export function createWizardRouter(client: Client): Router {
       check: await checkBotAdministrator(client, session.guildId, { refresh }),
       inviteUrl: administratorInviteUrl(client),
     };
-  }
-
-  /** The plan for creating the Event host role, previewed with nothing written. */
-  async function previewHostRole(
-    session: { guildId: string; discordUserId: string },
-    ctx: AccessContext,
-    changes: readonly AccessChange[],
-  ): Promise<HostReview> {
-    const guild = await client.guilds.fetch(session.guildId);
-    return reviewHostRole(guild, session.discordUserId, ctx, changes);
   }
 
   /**
@@ -279,6 +268,22 @@ export function createWizardRouter(client: Client): Router {
           const selection =
             existing.access ??
             (ctx ? currentMapping(ctx.groups) : emptySelection());
+          const planned = existing.roleCreations ?? [];
+          // The role Picker's create row (#1618): one permission answer for the
+          // page. A role already chosen to be created stays drawn as pending
+          // even when the answer is unreadable (no row, no line then).
+          let create =
+            ctx === null
+              ? undefined
+              : toPickerCreate(
+                  "role",
+                  await canBotCreate(client, session.guildId, {
+                    kind: "role",
+                  }),
+                );
+          if (!create && ctx && planned.length > 0) {
+            create = { kind: "role", ok: false };
+          }
           res.type("text/html").send(
             renderWizardAccessPage({
               csrfToken,
@@ -290,13 +295,11 @@ export function createWizardRouter(client: Client): Router {
                 ? accessGaps(
                     await enabledGapFeatures(existing),
                     selection,
-                    existing.createHost
-                      ? new Set(["host"] as const)
-                      : undefined,
+                    scopesBeingCreated(planned),
                   )
                 : [],
-              hostCreate: ctx ? hostCreateState(ctx) : null,
-              createHost: existing.createHost === true,
+              create,
+              pending: pendingNames(planned),
               flash,
             }),
           );
@@ -309,24 +312,33 @@ export function createWizardRouter(client: Client): Router {
           let accessProblem: string | null = null;
           let gaps: AccessGap[] = [];
           let fingerprint: string | undefined;
-          let hostRole: HostReview | null = null;
+          let roleReview: WizardRoleReview | null = null;
           if (existing.access) {
             try {
               const ctx = await readAccess(session);
+              const planned = existing.roleCreations ?? [];
               accessProblem = validateSelection(ctx, existing.access);
+              // A role that does not exist yet stands in as a placeholder, so
+              // the same diff maps it (see `wizard-role-create.ts`).
+              const mapped = selectionWithNew(existing.access, planned);
               accessChanges = diffAccess(
                 ctx.groups,
-                ctx.roles,
-                existing.access,
+                contextWithNew(ctx, planned).roles,
+                mapped,
               );
               fingerprint = accessFingerprint(accessChanges);
               gaps = accessGaps(
                 await enabledGapFeatures(existing),
                 existing.access,
-                existing.createHost ? new Set(["host"] as const) : undefined,
+                scopesBeingCreated(planned),
               );
-              if (existing.createHost) {
-                hostRole = await previewHostRole(session, ctx, accessChanges);
+              if (planned.length > 0) {
+                roleReview = await reviewWizardRoles(
+                  client,
+                  session.guildId,
+                  ctx,
+                  planned,
+                );
               }
             } catch (err) {
               logger.warn("wizard: review could not read the server", err);
@@ -382,7 +394,7 @@ export function createWizardRouter(client: Client): Router {
               accessProblem,
               accessGaps: gaps,
               accessFingerprint: fingerprint,
-              hostRole,
+              roleReview,
               dependencies,
               flash,
             }),
@@ -597,7 +609,6 @@ export function createWizardRouter(client: Client): Router {
     "/wizard/done",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
-      const job = req.query.job;
       const [report, admin, navFeatureStatus] = await Promise.all([
         loadPermissionReport({ client, guildId: session.guildId }),
         checkBotAdministrator(client, session.guildId),
@@ -610,7 +621,6 @@ export function createWizardRouter(client: Client): Router {
           navFeatureStatus,
           report,
           admin,
-          hostJobId: typeof job === "string" && JOB_ID.test(job) ? job : null,
           flash: readSignedFlash(req.query),
         }),
       );
@@ -672,45 +682,64 @@ export function createWizardRouter(client: Client): Router {
         return;
       }
       const body = (req.body as Record<string, unknown> | undefined) ?? {};
-      const selection: AccessSelection = normaliseSelection({
-        admin: pickedRoles(body["roles_admin"]),
-        staff: pickedRoles(body["roles_staff"]),
-        host: pickedRoles(body["roles_host"]),
+      // The `create:` values are taken out first, before anything reads the
+      // picks as ids (`splitPicks`); a name is never coerced or stored as a pick.
+      const picks = splitPicks({
+        admin: body["roles_admin"],
+        staff: body["roles_staff"],
+        host: body["roles_host"],
       });
-      const createHost = body["create_host"] === "1";
+      let selection: AccessSelection = normaliseSelection(picks.ids);
+      let creations: WizardRoleCreation[] = [];
       const stay = (text: string): void => {
         res.redirect(
           303,
           `/admin/wizard?step=access&${flashRedirectQuery({ type: "warn", text })}`,
         );
       };
-      let problem: string | null;
-      try {
-        const ctx = await readAccess(session);
-        problem =
-          validateSelection(ctx, selection) ??
-          pendingConfigOverlap(state.configuration, selection);
-        if (!problem && createHost) {
-          const offer = hostCreateState(ctx);
-          if (!offer.available) {
-            problem = offer.message;
-          } else if (selection.host.length > 0) {
-            problem =
-              "Pick existing Event host roles or create a new one, not both.";
+      let problem: string | null = picks.errors[0] ?? null;
+      if (!problem) {
+        try {
+          const ctx = await readAccess(session);
+          if (picks.named.length > 0) {
+            // Nothing is created for a refused or unreadable permission: the
+            // reason is the answer, and the save stops here.
+            const can = await canBotCreate(client, session.guildId, {
+              kind: "role",
+            });
+            if (can.ok === false) problem = can.reason;
+            else if (can.ok !== true) {
+              problem =
+                "KoolBot could not check whether it may create roles. Try again.";
+            }
           }
+          if (!problem) {
+            const resolved = resolvePicks(picks, ctx.roles);
+            if (!resolved.ok) {
+              problem = resolved.error;
+            } else {
+              selection = resolved.selection;
+              creations = resolved.creations;
+            }
+          }
+          if (!problem) {
+            problem =
+              validateSelection(ctx, selection) ??
+              pendingConfigOverlap(state.configuration, selection);
+          }
+        } catch (err) {
+          logger.warn("wizard: access picks could not be checked", err);
+          await recordAudit(session, {
+            action: "wizard.access",
+            details: { selection },
+            result: "failure",
+            errorMessage: "Discord or the role groups could not be read",
+          });
+          stay(
+            "Discord or the role groups could not be read, so nothing was saved. Try again in a moment.",
+          );
+          return;
         }
-      } catch (err) {
-        logger.warn("wizard: access picks could not be checked", err);
-        await recordAudit(session, {
-          action: "wizard.access",
-          details: { selection },
-          result: "failure",
-          errorMessage: "Discord or the role groups could not be read",
-        });
-        stay(
-          "Discord or the role groups could not be read, so nothing was saved. Try again in a moment.",
-        );
-        return;
       }
       if (problem) {
         await recordAudit(session, {
@@ -726,13 +755,13 @@ export function createWizardRouter(client: Client): Router {
         session.discordUserId,
         session.guildId,
         selection,
-        createHost,
+        creations,
       );
       await recordAudit(session, {
         action: "wizard.access",
         details: {
           selection,
-          createHost,
+          createRoles: creations.map((c) => c.name),
           counts: Object.fromEntries(
             ACCESS_SCOPES.map((sc) => [sc, selection[sc].length]),
           ),
@@ -1072,6 +1101,16 @@ export function createWizardRouter(client: Client): Router {
         derived[gate] = false;
       }
 
+      // A closed request abandons any apply that still waits for a lock (the
+      // role lock or the channel lock), as the Settings save does: queued work
+      // never runs after the browser left. One that has started is not cut off.
+      const gone = new AbortController();
+      const onClose = (): void => {
+        if (!res.writableEnded) gone.abort();
+      };
+      res.once("close", onClose);
+      if (res.destroyed) onClose();
+
       const confirmFailure = (text: string, keep = ""): void => {
         const msg = flashKeepingTail(text, keep);
         const qs = new globalThis.URLSearchParams({
@@ -1230,6 +1269,39 @@ export function createWizardRouter(client: Client): Router {
       let accessUndo: AccessUndo[] = [];
       let accessGuildId = session.guildId;
       let accessApplied: AccessChange[] = [];
+      // The roles the Access step creates (#1618) are made first, because the
+      // role groups map their ids; `undoRoles` removes them again.
+      const plannedRoles = state.access ? (state.roleCreations ?? []) : [];
+      let rolesMade: Extract<WizardRoleApply, { ok: true }> | null = null;
+      // What became of the roles this apply created, said once however many
+      // failure paths ask. Decided from a fresh read inside the role lock.
+      let roleNote: Promise<string> | null = null;
+      async function undoRoles(): Promise<string> {
+        const made = rolesMade;
+        if (!made) return "";
+        roleNote ??= (async (): Promise<string> => {
+          const back = await made.cleanup();
+          if (back.kept.length > 0 || back.stuck.length > 0) {
+            logger.warn("wizard: roles left after a failed apply", {
+              kept: back.kept,
+              stuck: back.stuck,
+            });
+          }
+          const many = (n: number): boolean => n !== 1;
+          return [
+            back.removed.length > 0
+              ? ` The ${many(back.removed.length) ? "roles" : "role"} created for this apply ${many(back.removed.length) ? "were" : "was"} removed again.`
+              : "",
+            back.kept.length > 0
+              ? ` Kept, because a role group or a saved setting points at ${many(back.kept.length) ? "them" : "it"}: ${idList(back.kept)}.`
+              : "",
+            back.stuck.length > 0
+              ? ` May still exist (not removed or checked): ${idList(back.stuck)}. Check them in Discord before applying again.`
+              : "",
+          ].join("");
+        })();
+        return roleNote;
+      }
       if (state.access) {
         let ctx: AccessContext;
         try {
@@ -1268,7 +1340,11 @@ export function createWizardRouter(client: Client): Router {
           );
           return;
         }
-        const changes = diffAccess(ctx.groups, ctx.roles, state.access);
+        const changes = diffAccess(
+          ctx.groups,
+          contextWithNew(ctx, plannedRoles).roles,
+          selectionWithNew(state.access, plannedRoles),
+        );
         // Apply only what Review showed. If the groups changed since (another
         // admin edited one), the recomputed changes differ: stop and re-review.
         const shown = (req.body as Record<string, unknown> | undefined)
@@ -1285,42 +1361,118 @@ export function createWizardRouter(client: Client): Router {
           );
           return;
         }
-        // The Event host role (#1365): the plan Review showed must still be the
-        // plan, and it must hold that one role and nothing else. Checked before
-        // the first write so a refusal leaves everything as it was.
-        if (state.createHost) {
+        // The roles to create (#1618): the plan Review showed must still be
+        // the plan, checked before the first write so a refusal leaves
+        // everything as it was. The permission is checked again inside.
+        if (plannedRoles.length > 0) {
           const posted = (req.body as Record<string, unknown> | undefined)
-            ?.hostPlanId;
-          let refusal: string | null = null;
-          try {
-            const host = await previewHostRole(session, ctx, changes);
-            if (host.problems.length > 0) {
-              refusal = host.problems[0];
-            } else if (posted !== host.planId) {
-              refusal =
-                "the server or the role groups changed since you opened Review. Look at the updated plan and apply again.";
-            }
-          } catch (err) {
-            logger.warn("wizard: host role plan could not be made", err);
-            refusal =
-              "Discord could not be read, so the Event host role can't be checked.";
-          }
+            ?.rolePlanId;
+          const review = await reviewWizardRoles(
+            client,
+            session.guildId,
+            ctx,
+            plannedRoles,
+          ).catch((err: unknown): WizardRoleReview => {
+            logger.warn("wizard: apply could not plan the roles", err);
+            return {
+              roles: [],
+              planId: null,
+              problems: [
+                "Discord could not be read, so the roles can't be checked.",
+              ],
+            };
+          });
+          const refusal =
+            review.problems.length > 0
+              ? review.problems.join(" ")
+              : posted !== review.planId
+                ? "The roles on the server changed since you opened Review. Look at the updated list and apply again."
+                : null;
           if (refusal) {
             await recordAudit(session, {
               action: "wizard.apply",
-              details: { stage: "host-role" },
+              details: {
+                stage: "roles",
+                names: plannedRoles.map((r) => r.name),
+              },
               result: "failure",
               errorMessage: refusal,
             });
-            confirmFailure(`Nothing was applied: ${refusal}`);
+            confirmFailure(`Nothing was applied. ${refusal}`);
             return;
           }
         }
-        if (changes.length > 0) {
+        // From here on writes are made. The role creation comes first; the
+        // groups are then diffed again with the real ids standing where the
+        // placeholders were (not compared with the fingerprint again).
+        let writeCtx = ctx;
+        let writeChanges = changes;
+        if (plannedRoles.length > 0) {
+          const made = await applyWizardRoles(
+            client,
+            session.guildId,
+            session.discordUserId,
+            plannedRoles,
+            String(
+              (req.body as Record<string, unknown> | undefined)?.rolePlanId ??
+                "",
+            ),
+            gone.signal,
+          );
+          if (!made.ok) {
+            await recordAudit(session, {
+              action: "wizard.apply",
+              details: {
+                stage: "roles",
+                names: plannedRoles.map((r) => r.name),
+              },
+              result: "failure",
+              errorMessage: made.error,
+            });
+            const stuck = made.stuck ?? [];
+            const removed = made.removed ?? [];
+            const outcome =
+              stuck.length > 0
+                ? ` May still exist (not removed or checked): ${idList(stuck)}. Check them in Discord before applying again.`
+                : removed.length > 0
+                  ? ` The ${removed.length === 1 ? "role" : "roles"} created for this apply ${removed.length === 1 ? "was" : "were"} removed again.`
+                  : "";
+            confirmFailure(
+              `Nothing was applied. ${made.cause ?? made.error}`,
+              outcome,
+            );
+            return;
+          }
+          rolesMade = made;
+          const byPlaceholder = new Map(
+            made.created.map((c) => [c.placeholder, c.id]),
+          );
+          writeCtx = {
+            ...ctx,
+            roles: [
+              ...ctx.roles,
+              ...made.created.map((c) => ({
+                id: c.id,
+                name: c.name,
+                managed: false,
+                position: c.position,
+              })),
+            ],
+          };
+          writeChanges = diffAccess(
+            ctx.groups,
+            writeCtx.roles,
+            swapPlaceholders(
+              selectionWithNew(state.access, plannedRoles),
+              byPlaceholder,
+            ),
+          );
+        }
+        if (writeChanges.length > 0) {
           const written = await applyAccessChanges(
             accessDeps(session),
-            ctx,
-            changes,
+            writeCtx,
+            writeChanges,
           );
           if (!written.ok) {
             await recordAudit(session, {
@@ -1333,14 +1485,22 @@ export function createWizardRouter(client: Client): Router {
               result: "failure",
               errorMessage: written.error,
             });
+            // The roles this apply created go too (a role a stuck group still
+            // points at is kept and reported). Only the cause is shortened.
+            const roleNote = await undoRoles();
             confirmFailure(
               written.stuck.length > 0
-                ? `Nothing else was applied. ${written.error} These could not be undone and are live: ${written.stuck.join(", ")}. Check Role groups.`
-                : `Nothing was applied. ${written.error} ${
-                    written.rolledBack > 0
-                      ? "The role groups written before it were undone."
-                      : "No role group was written."
-                  }`,
+                ? `Nothing else was applied. ${written.error}`
+                : `Nothing was applied. ${written.error}`,
+              `${
+                written.stuck.length > 0
+                  ? ` These could not be undone and are live: ${written.stuck.join(", ")}. Check Role groups.`
+                  : ` ${
+                      written.rolledBack > 0
+                        ? "The role groups written before it were undone."
+                        : "No role group was written."
+                    }`
+              }${roleNote}`,
             );
             return;
           }
@@ -1359,6 +1519,9 @@ export function createWizardRouter(client: Client): Router {
           ? ` The role mapping could not be fully undone and is live for: ${back.stuck.join(", ")}. Check Role groups.`
           : " The role mapping was undone too.";
       };
+      // The mapping first, then the roles it pointed at.
+      const undoAll = async (): Promise<string> =>
+        (await undoAccess()) + (await undoRoles());
 
       // The channels are created after the role access (which can be undone)
       // and before the settings that point at them. One call makes them all and
@@ -1372,15 +1535,6 @@ export function createWizardRouter(client: Client): Router {
         leftover: boolean;
       }> => ({ note: "", leftover: false });
       if (Object.keys(plannedChannels).length > 0) {
-        // A closed request abandons the apply while it still waits for the
-        // lock (another channel write is running), as the Settings save does:
-        // queued work never runs after the browser left.
-        const gone = new AbortController();
-        const onClose = (): void => {
-          if (!res.writableEnded) gone.abort();
-        };
-        res.once("close", onClose);
-        if (res.destroyed) onClose();
         const made = await applyWizardCreations(
           client,
           session.guildId,
@@ -1389,7 +1543,6 @@ export function createWizardRouter(client: Client): Router {
           channelPlanId,
           gone.signal,
         );
-        res.off("close", onClose);
         if (!made.ok) {
           await recordAudit(session, {
             action: "wizard.apply",
@@ -1421,7 +1574,7 @@ export function createWizardRouter(client: Client): Router {
                 : "";
           confirmFailure(
             `The settings were not applied. ${made.cause ?? made.error}`,
-            `${outcome}${await undoAccess()}`,
+            `${outcome}${await undoAll()}`,
           );
           return;
         }
@@ -1484,6 +1637,14 @@ export function createWizardRouter(client: Client): Router {
             ...(createdChannels.length > 0
               ? { channels: createdChannels }
               : {}),
+            ...(rolesMade
+              ? {
+                  roles: rolesMade.created.map((c) => ({
+                    id: c.id,
+                    name: c.name,
+                  })),
+                }
+              : {}),
           },
           result: result.success ? "success" : "failure",
           errorMessage: result.success
@@ -1495,68 +1656,20 @@ export function createWizardRouter(client: Client): Router {
           const madeCount = new Set(
             createdChannels.filter((c) => c.created).map((c) => c.id),
           ).size;
+          const roleCount = rolesMade?.created.length ?? 0;
+          const madeParts = [
+            roleCount > 0
+              ? `${roleCount} role${roleCount === 1 ? "" : "s"}`
+              : "",
+            madeCount > 0
+              ? `${madeCount} channel${madeCount === 1 ? "" : "s"}`
+              : "",
+          ].filter(Boolean);
           const summary = `Wizard applied ${pendingKeys.length} setting${pendingKeys.length === 1 ? "" : "s"}${
             accessApplied.length > 0
               ? ` and ${accessApplied.length} role group change${accessApplied.length === 1 ? "" : "s"}`
               : ""
-          }${
-            madeCount > 0
-              ? ` and created ${madeCount} channel${madeCount === 1 ? "" : "s"}`
-              : ""
-          }`;
-          if (state.createHost) {
-            // Last, because the engine's job is the one step that can't be
-            // taken back inside this request. It reports only that the job
-            // started; Role groups shows how it ended.
-            const started = await startHostRole(
-              {
-                groups: RoleGroupService.getInstance(),
-                audit: async (entry): Promise<void> => {
-                  await recordAudit(session, entry);
-                },
-                plan: async () =>
-                  planRoleGroups(
-                    await client.guilds.fetch(session.guildId),
-                    session.discordUserId,
-                  ),
-                start: async (plan) =>
-                  (
-                    await ServerAdoptionService.getInstance(
-                      client,
-                      await client.guilds.fetch(session.guildId),
-                    )
-                  ).startApply(plan, { actor: session }),
-              },
-              session.guildId,
-              String(
-                (req.body as Record<string, unknown> | undefined)?.hostPlanId ??
-                  "",
-              ),
-            ).catch((err: unknown): HostRoleResult => ({
-              ok: false,
-              error: `The Event host role could not be started (${err instanceof Error ? err.message : String(err)}).`,
-              groupStuck: false,
-            }));
-            if (started.ok) {
-              res.redirect(
-                303,
-                `/admin/wizard/done?${flashRedirectQuery({
-                  type: "ok",
-                  text: `${summary}. The Event host role is being created.`,
-                })}&job=${encodeURIComponent(started.jobId)}`,
-              );
-              return;
-            }
-            flashRedirect(res, "/admin/role-groups", {
-              type: "err",
-              text: `${summary}, but the Event host role was not created. ${started.error}${
-                started.groupStuck
-                  ? " The Event host group could not be removed again; check it here."
-                  : " Nothing was left behind for it; add it again with the Event host preset."
-              }`,
-            });
-            return;
-          }
+          }${madeParts.length > 0 ? ` and created ${madeParts.join(" and ")}` : ""}`;
           flashRedirect(res, "/admin/wizard/done", {
             type: "ok",
             text: `${summary}.`,
@@ -1583,7 +1696,7 @@ export function createWizardRouter(client: Client): Router {
         // channels' outcome and the role mapping's are kept whole.
         const failureMsg = flashKeepingTail(
           base,
-          channelBack.note + (await undoAccess()),
+          channelBack.note + (await undoAll()),
         );
         const qs = new globalThis.URLSearchParams({
           step: "confirm",
@@ -1595,7 +1708,7 @@ export function createWizardRouter(client: Client): Router {
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
         logger.error("Wizard apply failed", err);
-        const accessNote = await undoAccess();
+        const accessNote = await undoAll();
         // A throw after the engine returned (the audit write) leaves the
         // settings stored: the cleanup keeps every channel a stored setting
         // points at, so only a throw before the first write removes them.

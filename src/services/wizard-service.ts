@@ -3,7 +3,7 @@ import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
 import { DependencyError, hasOwn, settingsMetadata } from "./config-schema.js";
 import type { IConfig } from "../models/config.js";
-import type { AccessSelection } from "./wizard-access.js";
+import type { AccessScope, AccessSelection } from "./wizard-access.js";
 
 export interface WizardConfiguration {
   [key: string]: string | number | boolean;
@@ -48,6 +48,18 @@ export interface WizardCreation {
   kind: "text";
 }
 
+/**
+ * A role the admin chose to create from the Access step's Picker (#1618). Held
+ * beside the picks, never in them: nothing is created until Apply. A name typed
+ * under two scopes is one role with both scopes (`scopes` is the highest only:
+ * Admins already implies the rest).
+ */
+export interface WizardRoleCreation {
+  /** The name as typed, cleaned and already checked against the live roles. */
+  name: string;
+  scopes: AccessScope[];
+}
+
 export interface DetectedResources {
   categories?: CategoryChannel[];
   voiceChannels?: VoiceChannel[];
@@ -73,10 +85,11 @@ export interface WizardState {
    */
   access?: AccessSelection;
   /**
-   * *Create @Event host* was chosen on the Access step (#1365). Held like the
-   * picks: the role is created by Apply, through the adoption engine.
+   * The roles the Access step plans to create (#1618), one per distinct name.
+   * Held like the picks: Apply creates them (no Discord permissions, nobody
+   * added) before the role groups that map them are written.
    */
-  createHost?: boolean;
+  roleCreations?: WizardRoleCreation[];
   /**
    * The channels the feature steps plan to create (#1662), by the setting key
    * that will point at each. A key is here or in `configuration`, never both.
@@ -286,12 +299,12 @@ export class WizardService {
     userId: string,
     guildId: string,
     access: AccessSelection | undefined,
-    createHost = false,
+    roleCreations: readonly WizardRoleCreation[] = [],
   ): boolean {
     const state = this.getSession(userId, guildId);
     if (!state) return false;
     state.access = access;
-    state.createHost = access !== undefined && createHost;
+    state.roleCreations = access !== undefined ? [...roleCreations] : [];
     return this.updateSession(userId, guildId, state);
   }
 

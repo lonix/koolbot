@@ -280,7 +280,7 @@ export type WizardCreateApply =
     };
 
 /** The ids a stored setting value names: the value itself, or the entries of a comma list or array. */
-function idsIn(value: unknown): string[] {
+export function idsIn(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(idsIn);
   if (typeof value === "string") {
     return value.split(",").map((v) => v.trim());

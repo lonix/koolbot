@@ -1603,11 +1603,12 @@ page per feature you chose, with its settings (channel settings are ordinary set
 own for channels). When you chose more than one feature, a row of markers under the step indicator shows which feature page you are on, and reads
 "Feature 2 of 3: Name history"; finished features link back. The **Access**
 step comes right after you pick features and maps Discord roles to who can do what: one card each for Admins
-(`/config`), Moderators and Event hosts (`/me`), with what they can and cannot do and a searchable role picker (the same one as All settings, #1547), and a
-Members card that points to Command permissions to narrow `/me`. Re-running the wizard shows the current mapping.
+(`/config`), Moderators and Event hosts (`/me`), with what they can and cannot do and a searchable role picker (the same one as All settings, #1547).
+There is no Members card: members have no role mapping, and everyone on the server may use `/me` (to narrow it to some roles, use Command permissions).
+Re-running the wizard shows the current mapping.
 It writes the same role groups as the Role groups page, with the `admin`, `staff` (shown as Moderator) and `host`
-capabilities, and only links existing roles: it does not change a role in Discord. The one role it can create is the
-Event host (below). Nothing is written when
+capabilities, and links existing roles without changing them in Discord. The one thing it can add to Discord is a new role, created from the picker (below).
+Nothing is written when
 you save the step. The picks wait in the wizard session and are applied from **Review**, which lists the role
 groups it will create or change. Apply checks the roles against Discord again, refuses if the role groups changed since Review,
 writes the groups one at a time with an audit entry each, and undoes them if a write fails or the settings that follow fail to apply, so a mapping is
@@ -1616,23 +1617,39 @@ a bot group, a role a feature hands out to members (rules, birthday, leaderboard
 and removing `admin` from a group (that goes through Role groups, where it is reviewed). A callout says when Events or
 Moderation is on and no role is mapped to run it.
 
-When no Event host role exists (no role of that name in Discord, no group carrying `host`), the Event hosts card offers
-**Create @Event host**: a role with no Discord permissions and nobody in it, mapped to the `host` capability. Ticking it
-only saves the choice in the wizard session. **Review** lists what the adoption engine would do (a single role create) and
-carries the plan id. Roles are only ever created through the engine, never with a direct Discord call: Apply recomputes
-the plan from the live server and refuses, before writing anything, if the plan id no longer matches, if the plan holds
-anything besides that one role (drift or reorders on other groups belong on Role groups), or if the bot lacks Manage
-Roles (the card and the Access step refuse it up front as well). The role is created last: after the role mapping and the
-settings have applied, Apply saves the Event host group (with no role yet), plans again from the saved groups, starts the
-engine's background job only if that plan is the one Review showed, and goes to `/admin/role-groups?job=…`, which shows
-the job's outcome and links the group to the new role when it finishes. Apply waits until the job is committed (past
-the busy-server lock and the live checks, before the first Discord write). If the group can't be saved or the job can't
-start, the group is removed again; once the job is committed it is never removed. The new group ranks strictly below
-every other group, so it is never inside another group's "group and above"; if a group already has rank 0 the card
-refuses until the order is re-saved on Role groups. A new group is only ever linked to a role created after it was
-saved. When the role was not created, the message says the settings and mapping are live.
-A job that fails in Discord leaves the group without a role, which does not count as mapped; finish it on Role groups.
-The group write and the role creation each get an audit entry.
+**Creating the role a card maps (#1618, a proposal for the owner).** Each role picker on the Access step offers **Create new role: 'typed text'**
+as its last row (the Picker's create row, #1658), so an admin whose server has no suitable role does not have to leave the wizard. There are no fixed
+names: the admin types the name (1 to 100 characters, not blank). A text that matches an existing role, in any case, selects that role instead and is
+checked like any picked role; two roles with the name are refused. This replaces the _Create @Event host_ switch of #1365, so all three cards behave
+the same. The row is offered only when the bot has **Manage Roles** (`canBotCreate` with the `role` kind; Administrator counts). Without it there is no row
+and the Picker's line names the permission and the **Bot permissions** page; when the permission could not be read there is neither row nor line, and a
+role already chosen stays drawn as pending. Choosing the row only marks the name ("Quartermaster (will be created)"). Saving the step reads the posted
+`create:` values first, before the role ids are read, checks the permission again and keeps each name in the wizard session
+(`WizardState.roleCreations`, beside the picks, never in them). A name typed under several cards is one role, mapped at the highest of them (Admins
+implies the rest). Nothing is created on the step.
+
+**Review** lists each role in the _Roles to create_ panel as "Create the role @Name (no Discord permissions, nobody added)" with the scopes it is
+mapped to, and the role group that maps it shows in the _Role access_ table. A hidden `rolePlanId` carries the plan Apply must reproduce; when the bot
+cannot create, or a role of that name has appeared, an error callout names the reason and Apply is disabled. **Apply** checks every refusal first
+(Administrator, dependencies, the channel plan, the role mapping, and the role plan id), then creates the roles in the per-server **role lock**
+(`role-write-lock.ts`), then writes the role groups, then creates the channels, then applies the settings. A closed request abandons the apply while it
+waits for the role lock or the channel lock. The role lock is separate from the channel lock: roles and channels are different things, so neither waits
+for the other, but it has the same bounded wait and the same rules (`withKeyedLock`). It is taken only by this apply; the server scan (Role groups) creates
+roles too, under its own database lock, so Apply refuses while a scan apply is running and tells the admin to try later (an apply that starts a moment
+after that check is not serialised with it).
+
+A created role carries **no Discord permissions** (`permissions: "0"` is sent explicitly, because a role created without the field gets @everyone's),
+is not hoisted or mentionable, and nobody is added to it; the role group that maps it has no permissions of its own either, so no later sync gives it any.
+That fits the refusal of powerful roles as follows: the wizard still refuses a mapped role that has Administrator or other powerful permissions
+wherever it did (the feature steps and Apply), and a role selected by name goes through those checks like any picked role; a role the wizard created
+has none of those bits, so there is nothing to refuse.
+
+If anything after the roles fails (a role group write, the channels, the settings), the role groups are put back first, and then each role this apply
+created is decided on its own, inside the role lock and from a fresh read of the role groups and the stored settings: one that is still pointed at is
+kept and named, the rest are removed again, and any that could not be removed or checked are named as possibly still there. The message keeps that
+outcome whole and shortens only the cause. Known limit (the same as the channels', #1748): between the creation and that read another save can point at a
+role this apply created; the cleanup keeps one it sees, but a save made after the read and before the delete can still lose its role. The
+reservation design is tracked in #1748. The audit entry lists the roles under `roles`.
 
 The wizard also makes sure the bot has the Discord **Administrator** permission (#1617): the easy path is to give the bot
 Administrator when it is invited and narrow it afterwards. The first page and **Review** each start with a callout that says
@@ -1648,8 +1665,7 @@ the apply reads the bot again, so an admin who fixed it in Discord is not stoppe
 bot's roles cannot be read), the callout says so and claims neither way, and nothing is blocked. Nothing about the check is stored;
 a refused apply gets the usual `wizard.apply` audit entry (stage `administrator`).
 
-After a successful apply the wizard ends on `/admin/wizard/done` (also after the Event host role was started, with a link to
-`/admin/role-groups?job=…`): an optional **Narrow the bot's permissions** step. It lists the permissions the switched-on features
+After a successful apply the wizard ends on `/admin/wizard/done`: an optional **Narrow the bot's permissions** step. It lists the permissions the switched-on features
 need (the same list as **Bot permissions**, plus a feature that is on but posts in whichever channel it is used in, such as
 Looking for group with no channel set, or Announcements with no schedule, whose message sent once picks its channel) with the features that need each,
 then **Used, but not checked here**: the permissions

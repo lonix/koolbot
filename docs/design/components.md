@@ -94,8 +94,8 @@ One scope explained in one card: how its people sign in, what they can and canno
 Access step and on Role groups.
 
 **Markup.** `div.kb-access` (grid) → `article.kb-access__card` → `header.kb-access__head` (icon well, `h3.kb-access__title`, `p.kb-access__how`),
-`ul.kb-access__can` (a check per thing they can do; `li.is-not` with a minus for what they cannot), and `div.kb-access__roles` (a Picker of roles, or
-_Create @Event host_ when none exists, plus an optional help line).
+`ul.kb-access__can` (a check per thing they can do; `li.is-not` with a minus for what they cannot), and `div.kb-access__roles` (a Picker of roles, plus an
+optional help line). On the Setup wizard's Access step the Picker may also offer _Create new role_ (a proposal, #1618; see WizardAccessPage).
 
 - Write _can_ lines as plain verbs in the member's terms ("Run the host panel: teams, moves, clan tags").
 - List _cannot_ lines only where people would expect otherwise ("Change settings").

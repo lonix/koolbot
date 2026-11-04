@@ -2929,15 +2929,6 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
-      name: "Setup wizard done, Event host role started",
-      html: renderWizardDonePage({
-        ...COMMON,
-        report: botPermissionReport("ok"),
-        admin: { state: "unknown", reason: "Discord could not be reached." },
-        hostJobId: "job-1",
-      }),
-    },
-    {
       name: "Setup wizard done, permissions could not be checked",
       html: renderWizardDonePage({
         ...COMMON,
@@ -3028,36 +3019,49 @@ export function adminPages(): A11yPage[] {
         flash: FLASH,
       }),
     },
-    {
-      name: "Setup wizard access, create Event host offered",
-      html: renderWizardAccessPage({
-        ...COMMON,
-        selection: { admin: [], staff: [], host: [] },
-        options: [
-          { id: "r-mod", name: "Moderator", managed: false, position: 5 },
-        ],
-        gaps: [],
-        hostCreate: { available: true },
-        createHost: true,
-      }),
-    },
-    {
-      name: "Setup wizard access, create Event host refused",
-      html: renderWizardAccessPage({
-        ...COMMON,
-        selection: { admin: [], staff: [], host: [] },
-        options: [
-          { id: "r-mod", name: "Moderator", managed: false, position: 5 },
-        ],
-        gaps: [],
-        hostCreate: {
-          available: false,
-          reason: "permission",
-          message:
-            "The bot needs the Manage Roles permission to create a role. Give it that in Discord, or pick an existing role instead.",
+    ...[
+      {
+        // Offered (#1618): every Picker carries the create flag and the line says what it does.
+        name: "Setup wizard access, create a role offered",
+        create: { kind: "role" as const, ok: true },
+        pending: {},
+      },
+      {
+        // Not offered: the bot lacks Manage Roles; the reason is the Picker's line.
+        name: "Setup wizard access, create a role not offered",
+        create: {
+          kind: "role" as const,
+          ok: false,
+          reason:
+            "The bot needs Manage Roles to create a role. Give the bot's role Manage Roles in Server Settings, Roles; the Bot permissions page shows what is missing.",
         },
+        pending: {},
+      },
+      {
+        // A role chosen to be created, drawn as a pending choice (and the Admins one chosen twice).
+        name: "Setup wizard access, a role chosen to be created",
+        create: { kind: "role" as const, ok: true },
+        pending: { staff: ["Quartermaster"], host: ["Event crew"] },
+      },
+      {
+        // The permission could not be read: no row and no line, the chosen role stays pending.
+        name: "Setup wizard access, a chosen role and the permission unreadable",
+        create: { kind: "role" as const, ok: false },
+        pending: { staff: ["Quartermaster"] },
+      },
+    ].map((c) => ({
+      name: c.name,
+      html: renderWizardAccessPage({
+        ...COMMON,
+        selection: { admin: [], staff: [], host: [] },
+        options: [
+          { id: "r-mod", name: "Moderator", managed: false, position: 5 },
+        ],
+        gaps: [],
+        create: c.create,
+        pending: c.pending,
       }),
-    },
+    })),
     {
       name: "Setup wizard access, roles unavailable",
       html: renderWizardAccessPage({
@@ -3157,31 +3161,46 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
-      name: "Setup wizard confirm, Event host role",
+      name: "Setup wizard confirm, roles to create",
       html: renderWizardConfirmPage({
         ...COMMON,
         pending: [],
         metadata: {},
-        accessChanges: [],
-        hostRole: {
-          planId: "0123456789abcdef01234567",
-          operations: ['Create role "Event host"'],
+        accessChanges: [
+          {
+            kind: "create",
+            roleId: "new:quartermaster",
+            roleName: "Quartermaster",
+            groupId: null,
+            groupName: "Quartermaster",
+            scopesBefore: [],
+            scopesAfter: ["staff"],
+            capabilitiesBefore: [],
+            capabilitiesAfter: ["staff"],
+          },
+        ],
+        roleReview: {
+          roles: [
+            { name: "Quartermaster", scopes: ["staff"] },
+            { name: "Event crew", scopes: ["host"] },
+          ],
+          planId: "0123456789abcdef",
           problems: [],
         },
       }),
     },
     {
-      name: "Setup wizard confirm, Event host role blocked",
+      name: "Setup wizard confirm, the roles can't be created",
       html: renderWizardConfirmPage({
         ...COMMON,
         pending: [],
         metadata: {},
         accessChanges: [],
-        hostRole: {
+        roleReview: {
+          roles: [],
           planId: null,
-          operations: [],
           problems: [
-            "The bot needs the Manage Roles permission for these changes.",
+            "The bot needs Manage Roles to create a role. Give the bot's role Manage Roles in Server Settings, Roles; the Bot permissions page shows what is missing.",
           ],
         },
       }),

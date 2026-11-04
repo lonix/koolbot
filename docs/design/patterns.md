@@ -54,7 +54,8 @@ destructive steps last, each with a Dialog.
 
 ## Setup wizard
 
-Choose features → **Access** → Features → Review. The Access step maps Discord roles to Admins, Moderators, Event hosts and Members with one AccessCard each,
+Choose features → **Access** → Features → Review. The Access step maps Discord roles to Admins, Moderators and Event hosts with one AccessCard each
+(there is no Members card), offers to create a role from the Picker where none fits (a proposal, #1618),
 and warns when a switched-on feature has nobody to run it.
 
 Each chosen feature then gets its own page under the **Features** step, with a SubSteps bar that counts the pages ("Feature 2 of 3: Quote System").
