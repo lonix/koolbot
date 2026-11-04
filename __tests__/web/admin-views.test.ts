@@ -213,12 +213,14 @@ describe("renderBootstrapPage", () => {
       ],
     });
     expect(html).toContain("WEBUI_SESSION_SECRET");
-    expect(html).toContain('<span class="tag tag-on">configured</span>');
-    expect(html).toContain('<span class="tag tag-off">unset</span>');
+    expect(html).toContain(
+      '<span class="kb-badge kb-badge--on">configured</span>',
+    );
+    expect(html).toContain('<span class="kb-badge kb-badge--off">unset</span>');
     expect(html).not.toContain("TAILZ9");
     expect(html).not.toContain("…TAIL");
     // Non-secret values are unchanged.
-    expect(html).toContain('<span class="mono">123456789</span>');
+    expect(html).toContain('<span class="kb-mono">123456789</span>');
   });
 
   it("states that secrets are presence-only", () => {

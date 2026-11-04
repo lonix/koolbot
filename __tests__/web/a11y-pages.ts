@@ -2794,6 +2794,43 @@ export function adminPages(): A11yPage[] {
         yamlText: "polls:\n  enabled: true\n",
       }),
     },
+    // #1753: the other states of the Import preview and the Environment page.
+    {
+      name: "Import diff (changed, unchanged and new rows)",
+      html: renderImportDiffPage({
+        ...COMMON,
+        rows: [
+          {
+            key: "polls.enabled",
+            status: "pending",
+            before: false,
+            after: true,
+          },
+          { key: "polls.cron", status: "pending", before: "5", after: 5 },
+          { key: "polls.new_key", status: "pending", after: "x" },
+        ],
+        yamlText: "polls:\n  enabled: true\n",
+      }),
+    },
+    {
+      name: "Import diff (every row rejected, nothing to apply)",
+      html: renderImportDiffPage({
+        ...COMMON,
+        rows: [
+          { key: "DISCORD_TOKEN", status: "rejected", reason: "protected key" },
+          { key: "bogus.key", status: "rejected", reason: "unknown key" },
+        ],
+        yamlText: "bogus:\n  key: 1\n",
+      }),
+    },
+    {
+      name: "Import diff (nothing in the file)",
+      html: renderImportDiffPage({ ...COMMON, rows: [], yamlText: "" }),
+    },
+    {
+      name: "Bootstrap (no variables)",
+      html: renderBootstrapPage({ ...COMMON, groups: [] }),
+    },
     {
       name: "Permissions",
       html: renderPermissionsPage({

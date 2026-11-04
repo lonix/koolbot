@@ -317,34 +317,41 @@ export interface BootstrapProps extends CommonProps {
 
 export function renderBootstrapPage(props: BootstrapProps): string {
   const sections = props.groups
-    .map((group) => {
+    .map((group, i) => {
       const rows = group.rows
         .map((r) => {
           const status = r.present
-            ? `<span class="tag tag-on">configured</span>`
-            : `<span class="tag tag-off">unset</span>`;
+            ? `<span class="kb-badge kb-badge--on">configured</span>`
+            : `<span class="kb-badge kb-badge--off">unset</span>`;
           // Secrets are presence-only: never render `display` for them, even
           // if a caller passes one.
           const value =
             r.present && !r.isSecret
-              ? `<span class="mono">${escapeHtml(r.display ?? "")}</span>`
+              ? `<span class="kb-mono">${escapeHtml(r.display ?? "")}</span>`
               : "";
-          return `<tr><th scope="row" class="mono">${escapeHtml(r.key)}</th><td>${status}</td><td>${value}</td></tr>`;
+          return `<tr><th scope="row" class="kb-mono">${escapeHtml(r.key)}</th><td>${status}</td><td>${value}</td></tr>`;
         })
         .join("");
-      return `
-<div class="card">
-  <h2>${escapeHtml(group.category)}</h2>
-  <table><caption class="visually-hidden">Environment variables</caption><thead><tr><th scope="col">Variable</th><th scope="col">Status</th><th scope="col">Value</th></tr></thead><tbody>${rows}</tbody></table>
-</div>`;
+      return monitorPanel({
+        id: `env-group-${i}`,
+        title: group.category,
+        flush: true,
+        body: `<table class="kb-table"><caption class="kb-visually-hidden">Environment variables</caption><thead><tr><th scope="col">Variable</th><th scope="col">Status</th><th scope="col">Value</th></tr></thead><tbody>${rows}</tbody></table>`,
+      });
     })
     .join("");
 
   const body = `
-<h1>Environment</h1>
-<p class="subtitle">Process startup variables loaded from <code>.env</code>. Read-only — change them by editing <code>.env</code> and restarting the bot.</p>
-<div class="notice info">Secrets are shown as configured or unset only, never any part of their value. Never edited from the WebUI, never written to MongoDB.</div>
+<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Environment</h1>
+    <p class="kb-pagehead__sub">Process startup variables loaded from <code class="kb-mono">.env</code>. Read-only — change them by editing <code class="kb-mono">.env</code> and restarting the bot.</p>
+  </div>
+</header>
+<div class="kb-callout" role="status">${toneIcon("")}<div class="kb-callout__body"><p class="kb-callout__title">Secrets are shown as configured or unset only, never any part of their value. Never edited from the WebUI, never written to MongoDB.</p></div></div>
 ${props.session ? `${renderSessionPanel(props.session)}\n` : ""}${sections}
+</div>
 `;
   return renderAdminPage({
     title: "Environment",
@@ -2177,25 +2184,25 @@ export function renderImportDiffPage(props: ImportDiffProps): string {
     .map((r) => {
       if (r.status === "rejected") {
         return `<tr>
-<th scope="row" class="mono">${escapeHtml(r.key)}</th>
-<td><span class="tag tag-diff-reject">rejected</span></td>
-<td class="muted">${escapeHtml(r.reason ?? "")}</td>
+<th scope="row" class="kb-mono">${escapeHtml(r.key)}</th>
+<td><span class="kb-badge kb-badge--off">rejected</span></td>
+<td class="kb-muted">${escapeHtml(r.reason ?? "")}</td>
 <td></td>
 </tr>`;
       }
       const beforeStr =
         r.before === undefined
-          ? `<span class="muted">—</span>`
-          : `<span class="mono">${escapeHtml(r.before)}</span>`;
-      const afterStr = `<span class="mono">${escapeHtml(r.after)}</span>`;
+          ? `<span class="kb-muted">—</span>`
+          : `<span class="kb-mono">${escapeHtml(r.before)}</span>`;
+      const afterStr = `<span class="kb-mono">${escapeHtml(r.after)}</span>`;
       // String-coerce both sides so YAML `5` (number) and DB `"5"` (string)
       // are treated as equal when they round-trip through the form.
       const same = String(r.before ?? "") === String(r.after ?? "");
       const tag = same
-        ? `<span class="tag tag-info">no change</span>`
-        : `<span class="tag tag-diff-change">changed</span>`;
+        ? `<span class="kb-badge kb-badge--info">no change</span>`
+        : `<span class="kb-badge kb-badge--warn">changed</span>`;
       return `<tr>
-<th scope="row" class="mono">${escapeHtml(r.key)}</th>
+<th scope="row" class="kb-mono">${escapeHtml(r.key)}</th>
 <td>${tag}</td>
 <td>${beforeStr}</td>
 <td>${afterStr}</td>
@@ -2207,26 +2214,50 @@ export function renderImportDiffPage(props: ImportDiffProps): string {
   const rejectedCount = props.rows.filter(
     (r) => r.status === "rejected",
   ).length;
+  const nothingPending = pendingCount === 0;
 
   const yamlEncoded = escapeHtml(props.yamlText);
 
-  const body = `
-<h1>Import preview</h1>
-<p class="subtitle">Review the changes below before applying. Rejected rows will not be written.</p>
-<div class="notice info">${pendingCount} key(s) will be written; ${rejectedCount} rejected.</div>
-<div class="card">
-  <table>
+  const changes =
+    props.rows.length === 0
+      ? monitorPanel({
+          id: "import-changes",
+          title: "Changes",
+          body: monitorEmpty(
+            "No keys in this import",
+            "The YAML held no settings to compare.",
+          ),
+        })
+      : monitorPanel({
+          id: "import-changes",
+          title: "Changes",
+          flush: true,
+          body: `<table class="kb-table">
+    <caption class="kb-visually-hidden">Keys in the import</caption>
     <thead><tr><th scope="col">Key</th><th scope="col">Status</th><th scope="col">Current</th><th scope="col">New value</th></tr></thead>
     <tbody>${diffRows}</tbody>
-  </table>
-</div>
-<div class="actions">
+  </table>`,
+        });
+
+  const applyHelpId = "import-apply-help";
+  const body = `
+<div class="kb-stack">
+<header class="kb-pagehead">
+  <div class="kb-pagehead__text">
+    <h1 class="kb-pagehead__title">Import preview</h1>
+    <p class="kb-pagehead__sub">Review the changes below before applying. Rejected rows will not be written.</p>
+  </div>
+</header>
+<div class="kb-callout${nothingPending ? " kb-callout--warn" : ""}" role="status">${toneIcon(nothingPending ? "warn" : "")}<div class="kb-callout__body"><p class="kb-callout__title">${pendingCount} key(s) will be written; ${rejectedCount} rejected.</p></div></div>
+${changes}
+<div class="kb-row">
   <form method="POST" action="/admin/settings/import/apply">
     <input type="hidden" name="_csrf" value="${csrf}">
     <input type="hidden" name="yaml" value="${yamlEncoded}">
-    <button type="submit" class="btn btn-primary"${pendingCount === 0 ? " disabled" : ""}>Apply import</button>
+    <button type="submit" class="kb-btn kb-btn--primary"${nothingPending ? ` aria-describedby="${applyHelpId}" disabled` : ""}>Apply import</button>
   </form>
-  <a href="/admin/settings" class="btn">Cancel</a>
+  <a href="/admin/settings" class="kb-btn">Cancel</a>
+</div>${nothingPending ? `\n<p class="kb-help" id="${applyHelpId}">Nothing can be applied: no key in this import can be written.</p>` : ""}
 </div>
 `;
   return renderAdminPage({
