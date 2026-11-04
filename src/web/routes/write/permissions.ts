@@ -17,6 +17,7 @@ import {
   splitRoleRefs,
 } from "../../../services/role-group-access.js";
 import { recordAudit } from "../../audit.js";
+import { PICKER_CREATE_PREFIX } from "../../setting-pickers.js";
 import { splitCreateValues } from "../../permissions-create-values.js";
 import {
   flashKeepingTail,
@@ -91,10 +92,15 @@ export function createPermissionsRouter(client: Client): Router {
       if (Array.isArray(rawRoleIds)) {
         submitted = rawRoleIds.map(String).filter(Boolean);
       } else if (typeof rawRoleIds === "string" && rawRoleIds) {
-        submitted = rawRoleIds
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
+        // A `create:<Name>` value is one role name, and a role name may hold
+        // commas: it is never split. Plain ids and group references keep the
+        // legacy comma-separated form.
+        submitted = rawRoleIds.startsWith(PICKER_CREATE_PREFIX)
+          ? [rawRoleIds]
+          : rawRoleIds
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean);
       } else {
         submitted = [];
       }

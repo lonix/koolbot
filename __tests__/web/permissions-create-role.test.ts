@@ -252,6 +252,46 @@ describe("POST /permissions/set with a create: role (#1760)", () => {
     expect(flash.msg).toContain("2 role(s) and 1 group(s)");
   });
 
+  it("keeps a comma in a name that is the only selection (string form)", async () => {
+    await harness.post("/permissions/set", {
+      command: "ping",
+      roleIds: "create:Community, Support",
+    });
+    expect(mockPost).toHaveBeenCalledTimes(1);
+    expect(mockPost.mock.calls[0][1]).toMatchObject({
+      body: { name: "Community, Support" },
+    });
+    expect(mockSet).toHaveBeenCalledWith("guild-1", "ping", ["901"], []);
+  });
+
+  it("keeps a comma in a name among several selections (array form)", async () => {
+    await harness.post("/permissions/set", {
+      command: "ping",
+      roleIds: ["role-a", "create:Community, Support", "group:g1"],
+    });
+    expect(mockPost).toHaveBeenCalledTimes(1);
+    expect(mockSet).toHaveBeenCalledWith(
+      "guild-1",
+      "ping",
+      ["role-a", "901"],
+      ["group:g1"],
+    );
+  });
+
+  it("still splits a comma-separated string of plain ids and groups", async () => {
+    await harness.post("/permissions/set", {
+      command: "ping",
+      roleIds: "role-a, role-b,group:g1",
+    });
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockSet).toHaveBeenCalledWith(
+      "guild-1",
+      "ping",
+      ["role-a", "role-b"],
+      ["group:g1"],
+    );
+  });
+
   it("creates two names, and a name typed twice (any case) once", async () => {
     await harness.post("/permissions/set", {
       command: "ping",
