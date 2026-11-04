@@ -927,6 +927,7 @@ ${props.jobId ? `${scriptTag(JOB_SCRIPT(props.jobId))}` : ""}
 `;
   return renderAdminPage({
     title: "Role Groups",
+    wide: true,
     active: "/admin/role-groups",
     body,
     csrfToken: props.csrfToken,

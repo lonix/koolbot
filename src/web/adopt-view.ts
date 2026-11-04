@@ -1008,6 +1008,8 @@ ${content}
 </div>`;
   return renderAdminPage({
     title: "Server scan",
+    // The tabs are one page and keep one width; a failed scan is a message, not a table (#1734).
+    wide: scan !== null,
     active: "/admin/adopt",
     body,
     csrfToken: props.csrfToken,

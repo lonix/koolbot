@@ -438,6 +438,12 @@ export interface AdminPageOptions {
    */
   navFeatureStatus?: NavFeatureStatus;
   /**
+   * The page's main content is a table or a board: raise the column from `content-max` to `content-max-wide`
+   * (#1734). Opt in because of what the page is made of, never because a form is long, and never with a width
+   * of the page's own.
+   */
+  wide?: boolean;
+  /**
    * Who is looking (#1317). Normally omitted: the session middleware sets the
    * request's viewer (see `app-shell.ts`); an admin stand-in is the fallback.
    */
@@ -465,7 +471,16 @@ const STYLE = [
   // `min-width:0` lets the flex child shrink below its content width so a
   // wide table scrolls inside `main` / its card instead of forcing the whole
   // page to scroll sideways (WCAG 1.4.10 reflow, #855).
-  "main{flex:1;padding:1.5rem 2rem;max-width:1100px;min-width:0;overflow-x:auto;position:relative}",
+  // The column is `content-max` plus the two `space-8` gutters (`main` is border-box), the same cap kb.css puts
+  // on `kb-main__inner` (#1734). A page whose main content is a table or a board passes `wide` to
+  // `renderAdminPage`, which adds `kb-main--wide`: the same sum with `content-max-wide`. kb.css holds the class
+  // and the text caps (descriptions, help text and callouts stay at `content-max`).
+  "main{flex:1;padding:1.5rem 2rem;max-width:calc(var(--content-max) + 2 * var(--space-8));min-width:0;overflow-x:auto;position:relative}",
+  "main.kb-main--wide{max-width:calc(var(--content-max-wide) + 2 * var(--space-8))}",
+  // Legacy text blocks keep their line length on a wide page too (#1734): the intro `.subtitle`, the `.notice` bar and a
+  // `p.muted` paragraph on pages not yet on the kb- components. These class names belong to the old sheet, so the rule
+  // lives here and not in kb.css: #1652 deletes it together with the old classes.
+  "main.kb-main--wide :is(.subtitle,.notice,p.muted){max-width:var(--content-max)}",
   // A scroll container is where `position:sticky` resolves, so on a page with a settings
   // save bar `main` must not be one, or the bar sticks inside `main`/the card instead of the
   // viewport. `renderAdminPage` adds `has-savebar` to `main` only for those pages; every
@@ -1052,6 +1067,15 @@ function renderNav(
   }).join("");
 }
 
+/** The `class` attribute of `<main>`: `has-savebar` (no scroll container) and `kb-main--wide` (the wide column). */
+function mainClassAttr(opts: AdminPageOptions, hasSaveBar: boolean): string {
+  const classes = [
+    ...(hasSaveBar ? ["has-savebar"] : []),
+    ...(opts.wide ? ["kb-main--wide"] : []),
+  ];
+  return classes.length > 0 ? ` class="${classes.join(" ")}"` : "";
+}
+
 export function renderAdminPage(opts: AdminPageOptions): string {
   const remainingMs = Math.max(0, Math.floor(opts.remainingMs));
   const inactivityMs = getInactivityWindowMs();
@@ -1088,7 +1112,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     `<nav class="kb-sidenav" aria-label="Admin sections">${renderNav(opts.active, opts.navFeatureStatus)}</nav>`,
     // The body is built on the server and user text in it is HTML-escaped (quotes included), so
     // this literal can only come from `renderSaveBar`; a false positive would only clip `main`.
-    `<main id="main"${opts.body.includes('class="kb-savebar"') ? ' class="has-savebar"' : ""} tabindex="-1">${opts.body}</main></div>`,
+    `<main id="main"${mainClassAttr(opts, opts.body.includes('class="kb-savebar"'))} tabindex="-1">${opts.body}</main></div>`,
     `${scriptTag(SCRIPT)}`,
     `${scriptTag(CONFIRM_SCRIPT)}`,
     // Confirmation links (#1536): only on a page that has one.

@@ -261,7 +261,7 @@ describe("renderAdminPage", () => {
     );
     // Wide tables scroll inside their container, not the page.
     expect(html).toContain(
-      "main{flex:1;padding:1.5rem 2rem;max-width:1100px;min-width:0;overflow-x:auto;position:relative}",
+      "main{flex:1;padding:1.5rem 2rem;max-width:calc(var(--content-max) + 2 * var(--space-8));min-width:0;overflow-x:auto;position:relative}",
     );
     expect(html).toContain(
       "margin:0 0 1rem;overflow-x:auto;position:relative}",
@@ -312,6 +312,52 @@ describe("renderAdminPage", () => {
     expect(
       mainTag(page("&quot;kb-savebar&quot; class=&quot;kb-savebar&quot;")),
     ).not.toContain("has-savebar");
+  });
+
+  describe("the admin width rule (#1734)", () => {
+    const page = (wide?: boolean, body = "<p>hi</p>"): string =>
+      renderAdminPage({
+        title: "T",
+        active: "/admin/settings",
+        body,
+        csrfToken: "c",
+        remainingMs: 1,
+        ...(wide === undefined ? {} : { wide }),
+      });
+    const mainTag = (html: string): string =>
+      html.match(/<main[^>]*>/)?.[0] ?? "";
+    const rule = (css: string, sel: string): string => {
+      const i = css.indexOf(`${sel}{`);
+      expect(i).toBeGreaterThan(-1);
+      return css.slice(i, css.indexOf("}", i));
+    };
+
+    it("caps the column at content-max, not a pixel literal, and the wide column at content-max-wide", () => {
+      const html = page();
+      expect(html).not.toContain("max-width:1100px");
+      expect(rule(html, "main")).toContain(
+        "max-width:calc(var(--content-max) + 2 * var(--space-8))",
+      );
+      expect(rule(html, "main.kb-main--wide")).toContain(
+        "max-width:calc(var(--content-max-wide) + 2 * var(--space-8))",
+      );
+    });
+
+    it("adds kb-main--wide only when the page asks for it", () => {
+      expect(mainTag(page(true))).toBe(
+        '<main id="main" class="kb-main--wide" tabindex="-1">',
+      );
+      expect(mainTag(page(false))).toBe('<main id="main" tabindex="-1">');
+      expect(mainTag(page())).toBe('<main id="main" tabindex="-1">');
+    });
+
+    it("keeps has-savebar and the wide class side by side", () => {
+      const tag = mainTag(
+        page(true, '<form><div class="kb-savebar"></div></form>'),
+      );
+      expect(tag).toContain("has-savebar");
+      expect(tag).toContain("kb-main--wide");
+    });
   });
 
   it("uses colours that clear the WCAG contrast floors (#855)", () => {
