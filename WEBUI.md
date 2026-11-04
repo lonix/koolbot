@@ -1574,7 +1574,8 @@ callout carries the names and links.
 When a feature's channel or category will be created rather than picked (#1658 to #1661), Review lists each one in a **Channels and categories to
 create** panel, one row per entry: "Create the text channel quotes for Quotes channel", the voice and category equivalents, then where it goes and who can
 see it ("In COMMUNITY. Inherits access from COMMUNITY.", or "Not in a category. Visible to everyone who can see the server."). A category is shown in
-capitals and never with a `#`. The panel says "Nothing is created until you apply. If applying fails, nothing it created is left behind." The renderer
+capitals and never with a `#`. The panel says "Nothing is created until you apply. If applying fails, KoolBot removes what it created; anything it
+keeps because something now points at it, or could not remove, is named." The renderer
 (`renderCreateReview`, `src/web/wizard-create-review.ts`) is fed by the wizard from the channels the steps plan
 (below). The wording is a proposal and is not in the design manual.
 
@@ -1697,7 +1698,9 @@ points at a role it just created, whatever that group's name or capabilities.
 If anything after the roles fails (a role group write, the channels, the settings), the role groups are put back first, and then each role this apply
 created is decided on its own, inside the role lock and from a fresh read of the role groups and the stored settings: one that is still pointed at is
 kept and named, the rest are removed again, and any that could not be removed or checked are named as possibly still there. The message keeps that
-outcome whole and shortens only the cause. Known limit (the same as the channels', #1748): between the creation and that read another save can point at a
+outcome whole and shortens only the cause. The intent is that a failed apply leaves nothing behind (the owner's goal for #1618); the cleanup is best effort,
+so what it keeps or cannot remove is always named, never hidden. Known limit (the same as the channels', #1748): between the creation and that read
+another save can point at a
 role this apply created; the cleanup keeps one it sees, but a save made after the read and before the delete can still lose its role. The
 reservation design is tracked in #1748. The audit entry lists the roles under `roles`.
 

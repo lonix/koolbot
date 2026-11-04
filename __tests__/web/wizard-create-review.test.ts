@@ -73,7 +73,7 @@ describe("renderCreateReview (#1661)", () => {
     const html = renderCreateReview([text, voice, category]);
     expect(plain(html)).toContain("Nothing is created until you apply.");
     expect(plain(html)).toContain(
-      "If applying fails, nothing it created is left behind.",
+      "If applying fails, KoolBot removes what it created; anything it keeps because something now points at it, or could not remove, is named.",
     );
     expect(html.match(/<li>/g)).toHaveLength(3);
   });

@@ -148,6 +148,8 @@ describe("renderAccessReview, roles to create (#1618)", () => {
     expect(html).toContain("Mapped to Moderators.");
     expect(html).toContain("Mapped to Event hosts.");
     expect(html).toContain("Nothing is created until you apply.");
+    expect(html).toContain("puts the role groups back");
+    expect(html).not.toContain("left behind");
     expect(html).not.toContain("No role mapping changes.");
   });
 

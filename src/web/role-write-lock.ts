@@ -10,7 +10,7 @@
  *
  * The mechanism is the channel lock's (`withKeyedLock`): in this process only,
  * a bounded wait (`CHANNEL_LOCK_WAIT_MS`), cancellable while waiting, released
- * when the work ends, nothing left behind. Everything in that file's rules
+ * when the work ends. Everything in that file's rules
  * applies here: it is not re-entrant, and every read made inside it goes
  * through `readWithin`.
  *

@@ -427,6 +427,6 @@ export function renderRoleCreateReview(review: WizardRoleReview): string {
   <div class="kb-panel__body kb-panel__body--flush">
     <ul class="kb-list">${rows}</ul>
   </div>
-  <footer class="kb-panel__foot"><p class="kb-help">Nothing is created until you apply. If applying fails, nothing it created is left behind.</p></footer>
+  <footer class="kb-panel__foot"><p class="kb-help">Nothing is created until you apply. If applying fails, KoolBot removes what it created and puts the role groups back; anything it keeps because something now points at it, or could not remove, is named.</p></footer>
 </section>`;
 }
