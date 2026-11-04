@@ -88,18 +88,21 @@ export function createPermissionsRouter(client: Client): Router {
       // nothing selected posts no field at all.
       const rawRoleIds = (req.body as Record<string, unknown> | undefined)
         ?.roleIds;
+      // Every value is trimmed here, once, before anything classifies it: a
+      // padded " create:Name" is a create value like any other.
       let submitted: string[];
       if (Array.isArray(rawRoleIds)) {
-        submitted = rawRoleIds.map(String).filter(Boolean);
-      } else if (typeof rawRoleIds === "string" && rawRoleIds) {
+        submitted = rawRoleIds.map((v) => String(v).trim()).filter(Boolean);
+      } else if (typeof rawRoleIds === "string" && rawRoleIds.trim()) {
         // A `create:<Name>` value is one role name, and a role name may hold
         // commas: it is never split. Plain ids and group references keep the
         // legacy comma-separated form.
-        submitted = rawRoleIds.startsWith(PICKER_CREATE_PREFIX)
-          ? [rawRoleIds]
-          : rawRoleIds
+        const whole = rawRoleIds.trim();
+        submitted = whole.startsWith(PICKER_CREATE_PREFIX)
+          ? [whole]
+          : whole
               .split(",")
-              .map((s) => s.trim())
+              .map((v) => v.trim())
               .filter(Boolean);
       } else {
         submitted = [];
@@ -118,6 +121,16 @@ export function createPermissionsRouter(client: Client): Router {
       // The picker offers role groups next to raw roles (#1023); group
       // entries arrive as `group:<id>` / `group:<id>+` tokens.
       const { roleIds: pickedIds, groupRefs } = splitRoleRefs(typed.rest);
+      // Invariant (#1760): a create value is never stored as a role id. The
+      // values above are handled before this point, so one that is still here
+      // is refused rather than saved.
+      if (pickedIds.some((id) => id.trim().startsWith(PICKER_CREATE_PREFIX))) {
+        flashRedirect(res, "/admin/permissions", {
+          type: "err",
+          text: "A role to be created was not recognised, so nothing was created or saved. Reload the page and try again.",
+        });
+        return;
+      }
       if (groupRefs.length > 0) {
         const groups = await RoleGroupService.getInstance()
           .list(session.guildId)

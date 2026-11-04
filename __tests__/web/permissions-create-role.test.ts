@@ -278,6 +278,28 @@ describe("POST /permissions/set with a create: role (#1760)", () => {
     );
   });
 
+  it("treats a padded array element as a create value, never storing the literal", async () => {
+    await harness.post("/permissions/set", {
+      command: "ping",
+      roleIds: ["123", " create:Helpers"],
+    });
+    expect(mockPost).toHaveBeenCalledTimes(1);
+    expect(mockSet).toHaveBeenCalledWith("guild-1", "ping", ["123", "901"], []);
+    expect(JSON.stringify(mockSet.mock.calls)).not.toContain("create:");
+  });
+
+  it("keeps a padded single string with a comma name whole", async () => {
+    await harness.post("/permissions/set", {
+      command: "ping",
+      roleIds: "  create:Community, Support ",
+    });
+    expect(mockPost).toHaveBeenCalledTimes(1);
+    expect(mockPost.mock.calls[0][1]).toMatchObject({
+      body: { name: "Community, Support" },
+    });
+    expect(mockSet).toHaveBeenCalledWith("guild-1", "ping", ["901"], []);
+  });
+
   it("still splits a comma-separated string of plain ids and groups", async () => {
     await harness.post("/permissions/set", {
       command: "ping",
