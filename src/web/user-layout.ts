@@ -154,10 +154,10 @@ const STYLE = [
   // The column is `kb-member` (no sidebar) or `kb-main` > `kb-main__inner` (with one); both come
   // from kb.css with their own padding and 760px reflow. `min-width:0` + `overflow-x:auto` keep a
   // wide table scrolling inside the content column rather than the whole page (WCAG 1.4.10
-  // reflow, #855). The old cap of `member-content-max` sat on the padded `main`, so its content was that
+  // reflow, #855). `position:relative` makes it the containing block of a visually hidden label (#1735). The old cap of `member-content-max` sat on the padded `main`, so its content was that
   // minus the two `space-8` gutters; the same cap on the unpadded kb-main__inner (the admin's
   // `content-max` otherwise) keeps that content width. `kb-member` carries its gutters, so it is the same.
-  "#main{min-width:0;overflow-x:auto}",
+  "#main{min-width:0;overflow-x:auto;position:relative}",
   // A scroll container is where `position:sticky` resolves, so on a page with a save bar `#main`
   // must not be one, or the bar sticks inside it instead of the viewport (as `main.has-savebar` in the
   // admin layout). `clip` still stops a wide child forcing a sideways page scroll.
