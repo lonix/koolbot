@@ -458,12 +458,12 @@ Undo is: choose another row (single), Backspace or the chip's remove button (mul
   want from the list." (or _category_). Two roles with the name are refused on the Access step as 'Two roles are called "Helpers". Pick the one you mean from
   the list.' A role group is not a role.
 - A name that appears on the server between Review (or the save's first read) and the moment of creating is not selected silently: the save or Apply
-  refuses with "changed since Review", and nothing is created.
+  refuses and creates nothing: "The channels on the server changed since Review, so nothing was created. Review the changes again." (or _roles_).
 - A created channel or category has no parent category and no permission overwrites, so it can be read by everyone who can see the server. A created role has
   no Discord permissions, is not listed apart from other members and cannot be mentioned by everyone, and nobody is added to it. The bot needs
   _Manage Channels_ for a channel or a category and _Manage Roles_ for a role, and the server checks again when it creates.
-- A failed create leaves nothing it made in the same save or Apply: what was created is removed again, and anything it keeps because something now points at
-  it, or could not remove, is named.
+- When one create in a save or Apply fails, KoolBot removes what the same call had already created. What it could not remove, or keeps because something now
+  points at it, is named. A failure that comes later, when the settings are written, can leave settings saved; the pages say which.
 
 > [!NOTE]
 > Two limits are known and accepted. A create whose reply is lost or times out after Discord accepted it can still complete; the person is told the outcome is

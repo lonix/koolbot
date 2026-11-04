@@ -60,7 +60,8 @@ nobody to run it.
 
 Each chosen feature then gets its own page under the **Features** step, with a SubSteps bar that counts the pages ("Feature 2 of 3: Quote System").
 A setting that points at a channel or a category can offer to create it from the same Picker; **Review** then lists the roles, channels and categories
-that Apply will create before it creates anything, and a failed Apply removes what it made (see WizardAccessPage and WizardFeatureStep and Review).
+that Apply will create before it creates anything. A failed Apply removes what it made where it can and names what it could not (see WizardAccessPage and
+WizardFeatureStep and Review).
 
 Review also lists what turning a feature off needs (#1622): a warning Callout, "Turning off X also needs Y turned off", with the human name first, the key
 in `kb-mono` and each dependent linked to All settings, then a SettingRow whose Switch ("Turn them off too") confirms turning the dependents off in the

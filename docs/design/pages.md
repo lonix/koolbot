@@ -158,13 +158,13 @@ The Setup wizard's Access step: who can do what, before any channel is set up.
   (narrowing it is on Command permissions).
 - **Creating a role.** Each Picker also offers *Create new role: 'typed text'* as its last row (the Picker's create row, see [components.md](components.md#picker)).
   There are no fixed names: the admin types the name. A text that matches an existing role, in any case, selects that role instead. Choosing the row only
-  marks the name ("Quartermaster (will be created)"); the step saves it beside the picks and nothing is created on the step. A name typed under several
-  cards makes one role, mapped at the highest of those scopes (Admins already include the others). A refused save saves nothing and draws the picks and the
-  typed names once more.
+  marks the name ("Quartermaster (will be created)"); the step saves it beside the picks and nothing is created on the step. A name typed under
+  several cards makes one role, whatever the case. Admins imply the other scopes, so a name typed under Admins is mapped to Admins only; a name typed under
+  Moderators and Event hosts (without Admins) keeps both, which are independent. A refused save saves nothing and draws the picks and the typed names once more.
   - The help line under each Picker reads "Leave it empty for none." and, when the bot can create roles, "To create a role, type its name and choose Create
     new role. It is created with no Discord permissions and nobody is added to it; Review lists it first." Without *Manage Roles* there is no row and the
     line gives the reason instead; when that cannot be read there is neither row nor reason, and a role already chosen stays drawn as pending.
-  - **Review** opens with the Role access panel, then the Panel *Roles to create*: one row per role, "Create the role @Name (no Discord permissions, nobody
+  - **Review** shows the Role access panel, then the Panel *Roles to create*: one row per role, "Create the role @Name (no Discord permissions, nobody
     added)", with "Mapped to Moderators." under it, and the footer "Nothing is created until you apply. If applying fails, KoolBot removes what it
     created and puts the role groups back; anything it keeps because something now points at it, or could not remove, is named." An error Callout *The
     roles can't be created* (the reason, then "Nothing is changed until this is fixed. Go back to Access and change it, or fix it in Discord and open Review
@@ -174,10 +174,10 @@ The Setup wizard's Access step: who can do what, before any channel is set up.
     existing role gets what its scope allows. Go back to Access if you meant a new role." It is a warning when a scope is Admins or Moderators and a plain
     Callout when it is Event hosts only. The refusals that apply to a picked role (a managed role, one above the bot, *@everyone*, one a feature hands out)
     apply to it too.
-  - **Apply** creates the roles first, then writes the role groups, then the channels and settings. If anything after the roles fails, the role groups are
-    put back and the roles it created are removed; a role something now points at is kept and named, and anything that could not be removed or checked is
-    named too. If the role groups changed while it was creating, Apply writes nothing ("The role groups changed since you opened Review") and removes what
-    it made.
+  - **Apply** creates the roles first, then writes the role groups, then the channels and settings. If something after the roles fails, KoolBot puts the role
+    groups back and removes the roles it created, as far as it can: a role something now points at is kept and named, and a role it could not remove or
+    check is named as possibly still there, so the flash can report roles left behind. If the role groups changed while it was creating ("The role groups
+    changed since you opened Review"), Apply writes no role groups and the created roles go through the same cleanup; a role a group now points at is kept.
   - This replaces the *Create @Event host* switch (#1365): all three cards behave the same.
 - A callout warns when a switched-on feature has nobody to run it ("Events is on and nobody can host yet"); a role chosen to be created counts as someone.
 - Components: Picker (create row and help line), AccessCard, Panel, List, Callout `--err`, Mention. No new component.
@@ -224,11 +224,20 @@ but is not on a wizard page, so only All settings offers it there. Voice setting
   open Review again.", and Apply is disabled with "Apply is blocked until the problems above are fixed." under it.
 - Two settings that type the same new name (any case) share one channel, and the Review row names both settings. A text channel and a category with the
   same name are two. A name that matches one existing text channel anywhere on the server selects it with its own parent.
-- **Apply** creates the roles, then the channels and categories in one go, then writes the settings with their ids. If anything after the creation fails, each
-  created channel is decided on its own from a fresh read of the stored settings: one a saved setting points at is kept and named ("Kept, because a saved
-  setting points at it: …"), the rest are removed ("The channels or categories created for this apply were removed again."), and one that could not be
-  removed or checked is named ("May still exist (not removed or checked): …. Check them in Discord before applying again."). The flash then starts "The
-  settings were not applied." and a success reads "Wizard applied 4 settings and 1 role group change and created 1 role and 1 channel and 1 category."
+- **Apply** creates the roles, then the channels and categories in one go, then writes the settings with their ids. A success reads "Wizard applied 4
+  settings and 1 role group change and created 1 role and 1 channel and 1 category." What a failure says depends on where it failed:
+  - A refusal before anything was created starts "Nothing was applied."
+  - A create that fails (a role, or a channel or category) starts "The settings were not applied." and then the cause. What the same call had created is
+    removed again; one that could not be removed or checked is named ("May still exist (not removed or checked): …. Check them in Discord before applying
+    again.").
+  - A failure after the creation, when the settings are written, starts "Wizard apply failed: …". When every written setting was rolled back it ends "no
+    changes were applied. You can retry." When a rollback failed it names the settings that are saved and in effect ("Could not roll back …, these settings
+    are saved"), and when the reload failed it says to run `/config reload`. When a created channel or role is still there it says "The settings were not
+    saved." instead of "No changes were applied". A failure that throws starts "The settings could not be applied."
+  - After such a failure, each created channel is decided on its own from a fresh read of the stored settings: one a saved setting points at is kept and
+    named ("Kept, because a saved setting points at it: …"), the rest are removed ("The channels or categories created for this apply were removed again."),
+    and one that could not be removed or checked is named as above. So a failed Apply can leave channels, roles or settings in place; the flash names
+    them.
 - Components: Picker (create row), Panel, List, Callout `--err`, Mention. No new component.
 
 ### Settings pages and forms, creating on save
@@ -238,14 +247,17 @@ things as above, except roles: the settings and the forms offer text channels an
 create happen in the save.
 
 - **All settings and the feature pages.** The page asks the permission once and offers the row on every flagged setting. Saving a section reads the typed
-  names first and creates them only when nothing else in the section was refused. One apply creates all of them, so either every item exists and every id is
-  stored, or none is created and none is stored; the error shows under every setting that asked. A section with a channel and a category (Events) checks the
-  permission for each kind.
+  names first and creates them only when nothing else in the section was refused. One apply creates all of them: if the creation fails, what that save
+  created is removed again, nothing is stored, and the flash reads "No changes saved — N invalid values in <section>: <key> (<reason>), …", with the reason under
+  every setting that asked. If the creation succeeds, the settings are then written one by one, and the save can be partial: a setting whose write fails is
+  reported ("Saved 2/3 in <section>. Failed: <key> (<reason>)."), the others stay saved, and the created channels stay, named in the flash. A section with a
+  channel and a category (Events) checks the permission for each kind.
 - **A repeated name.** Two settings that type the same new category share one category. Two settings that type the same new text channel name are refused
   ("appears more than once"); the wizard, in contrast, makes one channel for both.
 - **Announcements and Polls.** The *Channel* field of the create and one-off announcement forms and the poll schedule forms (create and edit) takes the
   same row. The form is checked first; the channel is created only after every other field passed, so an invalid form creates nothing. A failed create refuses
-  the form with the reason under *Channel* and the typed name kept, and nothing is stored. The *Role to ping* field of the poll forms offers no row.
+  the form with the reason under *Channel* and the typed name kept, and nothing is stored. If the channel was created and the form's own save then fails, the
+  flash ("Failed to create announcement: …") still names the channel, and it stays. The *Role to ping* field of the poll forms offers no row.
 - **What the flash says.** The sentence names what was created and what was selected, with the channel as the pages write it (`# name`) and a category with
   its folder: "Saved 1 setting in quotes. Created # quote-wall for Quote channel.", "Used the existing # quote-wall for Quote channel.", "Created category
   📁 Community for Managed category and Ticket channel category." On the forms it follows the form's own sentence: "Created announcement 4. Created # news for
