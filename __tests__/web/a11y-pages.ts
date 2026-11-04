@@ -1197,7 +1197,8 @@ const NESTED_GROUPS: Array<{ category: string; rows: SettingRow[] }> = [
 /**
  * A server the size an admin really has for the Channel Claims page (#1736): four
  * categories, twelve channels with names as long as Discord communities use,
- * five groups and a dozen roles. The small `claimsProps()` scan fits at any width;
+ * five groups and a dozen roles. Channel kinds follow `channelKindOf` (forum is
+ * "other", stage is "voice", announcement is "text"), and the webhook feeds channel 201. The small `claimsProps()` scan fits at any width;
  * this one is what exposes a table whose controls have a minimum width.
  */
 function realisticClaimsProps(): Parameters<typeof renderChannelClaimsPage>[0] {
@@ -1269,6 +1270,18 @@ function realisticClaimsProps(): Parameters<typeof renderChannelClaimsPage>[0] {
     })) as never,
     scan: {
       ...(base.scan as object),
+      webhooks: {
+        known: true,
+        unavailable: null,
+        list: [
+          {
+            id: "w1",
+            name: "server-status",
+            channelId: "201",
+            kind: "incoming",
+          },
+        ],
+      },
       roles: roleNames.map((name, i) => ({
         id: `r${i + 1}`,
         name,
@@ -1283,7 +1296,7 @@ function realisticClaimsProps(): Parameters<typeof renderChannelClaimsPage>[0] {
         chan("101", "counter-strike-2-lobby-finder", "100", 1),
         chan("102", "valorant-ranked-premier-scrims", "100", 2),
         chan("103", "tactical-shooters-clips-and-highlights", "100", 3, {
-          kind: "forum",
+          kind: "other",
           typeName: "GuildForum",
           flags: { forum: true },
         }),
@@ -1299,12 +1312,12 @@ function realisticClaimsProps(): Parameters<typeof renderChannelClaimsPage>[0] {
         cat("300", "Community events and announcements", 8),
         chan("301", "weekly-community-game-night-signups", "300", 9),
         chan("302", "town-hall-and-live-q-and-a-stage", "300", 10, {
-          kind: "stage",
+          kind: "voice",
           typeName: "GuildStageVoice",
           flags: { stage: true },
         }),
         chan("303", "server-news-and-release-announcements", "300", 11, {
-          kind: "announcement",
+          kind: "text",
           typeName: "GuildAnnouncement",
           flags: { announcement: true },
         }),
