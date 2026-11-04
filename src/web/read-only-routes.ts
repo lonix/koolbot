@@ -2866,6 +2866,16 @@ export function createReadOnlyRouter(
           settingsUnavailable: stored === null,
           categoryChannels,
           voiceChannels,
+          // The create row for the Managed category (#1664). Not while the
+          // stored config cannot be read: the card is a notice then.
+          createCategory:
+            stored === null
+              ? undefined
+              : await loadCreateCategoryAnswer(
+                  client,
+                  common.guildId,
+                  settingRows.map((r) => r.key),
+                ),
           managedOnly,
           lobbyOutsideCategory,
           flash: readFlash(req),

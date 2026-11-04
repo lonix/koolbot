@@ -6272,6 +6272,8 @@ export interface VoiceChannelsProps extends CommonProps {
   categoryChannels: ChannelOption[];
   /** Voice channel options backing the `voicechannels.lobby.channel_id` picker. */
   voiceChannels?: ChannelOption[];
+  /** The category-create answer for the Managed category picker (#1664, `loadCreateCategoryAnswer`). */
+  createCategory?: PickerCreate;
   /**
    * `voicechannels.cleanup.managed_only`: cleanup deletes only channels
    * KoolBot created, so the page words the cleanup actions accordingly.
@@ -6608,6 +6610,7 @@ ${renderFeatureSettingsCard({
   pickers: {
     categoryChannels: props.categoryChannels,
     voiceChannels: props.voiceChannels ?? [],
+    createCategory: props.createCategory,
   },
   returnTo: "/admin/voice-channels",
   csrfToken: props.csrfToken,
