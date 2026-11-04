@@ -39,7 +39,10 @@ import {
   type AccessUndo,
 } from "../../../services/wizard-access.js";
 import { ROLE_GRANTING_SETTINGS } from "../../../services/role-grants.js";
-import { renderWizardAccessPage } from "../../wizard-access-view.js";
+import {
+  renderWizardAccessPage,
+  type ReviewRoleMatch,
+} from "../../wizard-access-view.js";
 import { renderWizardDonePage } from "../../wizard-done-view.js";
 import { ADMIN_CONTINUE_FIELD } from "../../wizard-admin-view.js";
 import { loadPermissionReport } from "../../permission-notice.js";
@@ -125,7 +128,6 @@ import {
   reviewRoleMatches,
   type WizardRoleReview,
 } from "../../wizard-role-create.js";
-import type { ReviewRoleMatch } from "../../wizard-access-view.js";
 import {
   activeWizardCreations,
   applyWizardCreations,

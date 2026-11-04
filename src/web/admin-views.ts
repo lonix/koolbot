@@ -166,6 +166,7 @@ import {
   renderAccessReview,
   renderWizardSteps,
   renderWizardSubSteps,
+  type ReviewRoleMatch,
 } from "./wizard-access-view.js";
 import {
   renderCreateProblems,
@@ -184,7 +185,6 @@ import {
 } from "./wizard-admin-view.js";
 import type { AdministratorCheck } from "../services/wizard-admin-check.js";
 import type { WizardRoleReview } from "./wizard-role-create.js";
-import type { ReviewRoleMatch } from "./wizard-access-view.js";
 import {
   renderPermissionNotice,
   splitEventFormNotice,

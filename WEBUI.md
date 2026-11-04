@@ -1656,7 +1656,8 @@ names: the admin types the name (1 to 100 characters, not blank). A text that ma
 checked like any picked role; two roles with the name are refused. The match ignores case and collapses or trims spaces (and control or
 zero-width characters, which count as spaces); it does not fold look-alike letters, so a name with a look-alike letter is a different name and creates a
 new role. **Review** says first, in a warning callout when a scope is Admins or Moderators, that such a name is an existing role, how many members hold it
-now (or that they could not be counted) and that no role is created, because everyone who holds it gets that access. This replaces the _Create @Event host_ switch of #1365, so all three cards behave
+now (or that they could not be counted) and that no role is created, because everyone who holds it gets that access. This replaces the _Create @Event
+host_ switch of #1365, so all three cards behave
 the same. The row is offered only when the bot has **Manage Roles** (`canBotCreate` with the `role` kind; Administrator counts). Without it there is no row
 and the Picker's line names the permission and the **Bot permissions** page; when the permission could not be read there is neither row nor line, and a
 role already chosen stays drawn as pending. Choosing the row only marks the name ("Quartermaster (will be created)"). Saving the step reads the posted
@@ -1672,7 +1673,8 @@ cannot create, or a role of that name has appeared, an error callout names the r
 (`role-write-lock.ts`), then writes the role groups, then creates the channels, then applies the settings. A closed request abandons the apply while it
 waits for the role lock or the channel lock. The role lock is separate from the channel lock: roles and channels are different things, so neither waits
 for the other, but it has the same bounded wait and the same rules (`withKeyedLock`). It is taken only by this apply. Other code creates roles outside
-it: the server scan (Role groups) under its own database lock, so Apply refuses while a scan apply is running (one with no activity for 30 minutes, the engine's own staleness rule, no longer counts) and tells the admin where to look and to try later (an
+it: the server scan (Role groups) under its own database lock, so Apply refuses while a scan apply is running (one with no activity for 30 minutes,
+the engine's own staleness rule, no longer counts) and tells the admin where to look and to try later (an
 apply that starts a moment after that check is not serialised with it), and the reaction-role services under their own lock, which are not serialised
 with it at all; the plan's fresh read inside the lock still sees a role they had finished creating.
 
@@ -1713,16 +1715,15 @@ the apply reads the bot again, so an admin who fixed it in Discord is not stoppe
 bot's roles cannot be read), the callout says so and claims neither way, and nothing is blocked. Nothing about the check is stored;
 a refused apply gets the usual `wizard.apply` audit entry (stage `administrator`).
 
-After a successful apply the wizard ends on `/admin/wizard/done`: an optional **Narrow the bot's permissions** step. It lists the permissions the switched-on features
-need (the same list as **Bot permissions**, plus a feature that is on but posts in whichever channel it is used in, such as
+After a successful apply the wizard ends on `/admin/wizard/done`: an optional **Narrow the bot's permissions** step. It lists the permissions the
+switched-on features need (the same list as **Bot permissions**, plus a feature that is on but posts in whichever channel it is used in, such as
 Looking for group with no channel set, or Announcements with no schedule, whose message sent once picks its channel) with the features that need each,
-then **Used, but not checked here**: the permissions
-KoolBot's code uses that **Bot permissions** does not check (Ban Members for `/ban`, Timeout Members for `/timeout`, and the
-rest of its list), named with what each is for and never called unneeded, because they cannot be tied to a switched-on feature.
-It folds the checked permissions only switched-off features would use, and gives the four steps to swap Administrator for the
-needed set in Discord. The list is what KoolBot checks and uses, not a promise that anything else is safe to remove (Role groups
-can hand out only the permissions the bot holds). It links to **Bot permissions** and never changes a permission in Discord itself. The **Bot permissions**
-intro says the same thing (Administrator is fine to start, the needed set is the target).
+then **Used, but not checked here**: the permissions KoolBot's code uses that **Bot permissions** does not check (Ban Members for `/ban`, Timeout
+Members for `/timeout`, and the rest of its list), named with what each is for and never called unneeded, because they cannot be tied to a switched-on
+feature. It folds the checked permissions only switched-off features would use, and gives the four steps to swap Administrator for the needed set in
+Discord. The list is what KoolBot checks and uses, not a promise that anything else is safe to remove (Role groups can hand out only the permissions
+the bot holds). It links to **Bot permissions** and never changes a permission in Discord itself. The **Bot permissions** intro says the same thing
+(Administrator is fine to start, the needed set is the target).
 
 The **Bot permissions** page (`/admin/bot-permissions`, #1217) says which Discord
 permissions the bot is missing for the features you have switched on, so you do
@@ -3698,7 +3699,8 @@ table without querying the moderation log. A **Settings** card on the page edits
 Core section of Settings); saving returns to the page with a flash message, and
 unticking `moderation.enabled` writes only that flag so the other values are kept.
 Under the status line, a notice (the same one as on Events and Voice Channels, see **Bot permissions**) names any permission the bot lacks
-in the anti-raid alert channel and the moderation and moderation case review log channels, only for a feature that is switched on with its channel set. When the
+in the anti-raid alert channel and the moderation and moderation case review log channels, only for a feature that is switched on with its channel
+set. When the
 check cannot run it says "could not be checked" with the reason, and it is never shown to say all is well.
 
 The same Settings card holds the **anti-raid** keys (`moderation.raid.*`, #1045): the master switch, the **dry

@@ -22,6 +22,7 @@ jest.unstable_mockModule("../../src/services/bot-create-check.js", () => ({
   toPickerCreate: jest.fn(),
 }));
 jest.unstable_mockModule("../../src/models/adoption-snapshot.js", () => ({
+  ADOPTION_STALE_AFTER_MS: 30 * 60 * 1000,
   AdoptionSnapshot: { exists: async (): Promise<null> => null },
 }));
 
@@ -85,6 +86,7 @@ describe("resolvePicks", () => {
       ok: true,
       selection: none,
       creations: [{ name: "Crew", scopes: ["admin"] }],
+      matches: [],
     });
   });
 
@@ -114,6 +116,7 @@ describe("resolvePicks", () => {
       ok: true,
       selection: { admin: [], staff: ["2"], host: ["2"] },
       creations: [],
+      matches: [{ id: "2", name: "Moderator", scopes: ["host"] }],
     });
   });
 
