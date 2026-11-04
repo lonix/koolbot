@@ -45,6 +45,28 @@ jest.unstable_mockModule("../../src/web/audit.js", () => ({
   recordAuditOrThrow: mockRecordAudit,
 }));
 
+// Role ids stored outside the settings (#1618): Command permissions and the
+// role a poll schedule pings. Read by the cleanup of a failed apply.
+let commandPermRows: Array<{ roleIds: string[] }> = [];
+let pollRows: Array<{ roleIdToPing: string | null }> = [];
+let permReadFails = false;
+const chain = (rows: () => unknown[]): unknown => ({
+  select: (): unknown => ({
+    lean: (): unknown => ({
+      exec: async (): Promise<unknown[]> => {
+        if (permReadFails) throw new Error("db down");
+        return rows();
+      },
+    }),
+  }),
+});
+jest.unstable_mockModule("../../src/models/command-permissions.js", () => ({
+  CommandPermission: { find: (): unknown => chain(() => commandPermRows) },
+}));
+jest.unstable_mockModule("../../src/models/poll-schedule.js", () => ({
+  PollSchedule: { find: (): unknown => chain(() => pollRows) },
+}));
+
 // Another adoption apply being active (#1618): the role creation refuses then.
 let adoptionActive = false;
 jest.unstable_mockModule("../../src/models/adoption-snapshot.js", () => ({
@@ -298,6 +320,9 @@ beforeEach(async () => {
   ]);
   botCanManageRoles = true;
   adoptionActive = false;
+  commandPermRows = [];
+  pollRows = [];
+  permReadFails = false;
   // The session object the route reads is the live one, as in the service.
   mockUpdateSession.mockImplementation((_u, _g, updates) => {
     Object.assign(mockGetSession() as object, updates as object);
@@ -1824,6 +1849,72 @@ describe("roles created from the Access step's Picker (#1618)", () => {
       },
     );
 
+    it.each([
+      ["a different name", "Other"],
+      ["the reviewed group's own name", "Wardens"],
+    ])(
+      "writes nothing and grants no admin when a group with no capabilities (%s) is linked to the new Admins role",
+      async (_what, groupName) => {
+        const admin = { name: "Wardens", scopes: ["admin"] };
+        mockGetSession.mockReturnValue(
+          wizardState(access, ["quotes"], {}, [admin]),
+        );
+        const shown = review(access, [admin]);
+        mockPost.mockImplementation(async (_route: unknown, opts: any) => {
+          const id = "40000000000000001";
+          roles.set(id, role(id, opts.body.name, 1));
+          // Another admin links the new role to a group that carries no access
+          // scope yet: the placeholder diff ignores such a group.
+          stored.push(
+            group({
+              id: "g-ext",
+              name: groupName,
+              roleId: id,
+              capabilities: [],
+            }),
+          );
+          return { id, name: opts.body.name, position: 1 };
+        });
+        const res = await harness.post("/wizard/apply", shown);
+        const flash = parseFlashRedirect(res.headers.get("location"));
+        expect(flash.type).toBe("err");
+        expect(flash.msg).toContain("changed since you opened Review");
+        expect(flash.msg).toContain("Kept, because");
+        expect(flash.msg).toContain("40000000000000001");
+        expect(createSpy).not.toHaveBeenCalled();
+        expect(updateSpy).not.toHaveBeenCalled();
+        // No group holds admin, and the unrelated group is untouched.
+        expect(stored.some((g) => g.capabilities.includes("admin"))).toBe(
+          false,
+        );
+        expect(stored.find((g) => g.id === "g-ext")?.capabilities).toEqual([]);
+        expect(mockApplyConfiguration).not.toHaveBeenCalled();
+        expect(mockDelete).not.toHaveBeenCalled();
+        expect(lastAuditFor("wizard.apply")).toMatchObject({
+          result: "failure",
+          details: { stage: "access", reason: "changed-during-roles" },
+        });
+      },
+    );
+
+    it("refuses when a group with no capabilities appears for a role selected by name since Review", async () => {
+      const picks = { ...none, staff: [MOD] };
+      mockGetSession.mockReturnValue(
+        wizardState(picks, ["quotes"], {}, [CREW]),
+      );
+      const shown = review(picks, [CREW]);
+      stored.push(
+        group({ id: "g-ext", name: "Whatever", roleId: MOD, capabilities: [] }),
+      );
+      const res = await harness.post("/wizard/apply", shown);
+      expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+        "changed since you opened Review",
+      );
+      expect(mockPost).not.toHaveBeenCalled();
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
     it("writes nothing when the group of a role selected by name changed since Review", async () => {
       // "moderator" typed: the Access step resolved it to the existing role,
       // so Review diffs by its real id; a group for it appearing is a plain
@@ -2068,6 +2159,94 @@ describe("roles created from the Access step's Picker (#1618)", () => {
       expect(stored).toHaveLength(0);
       expect(roles.has("40000000000000001")).toBe(false);
       expect(mockEndSession).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["a Command permissions list", "command"],
+      ["a poll schedule's role to ping", "poll"],
+    ])(
+      "keeps a created role that %s now points at, and names it",
+      async (_what, store) => {
+        const A = { name: "Alpha", scopes: ["staff"] };
+        const B = { name: "Beta", scopes: ["host"] };
+        mockGetSession.mockReturnValue(
+          wizardState(access, ["quotes"], {}, [A, B]),
+        );
+        const shown = review(access, [A, B]);
+        let n = 0;
+        mockPost.mockImplementation(async (_route: unknown, opts: any) => {
+          n += 1;
+          if (n === 2) {
+            // Saved while the second create is pending.
+            if (store === "command")
+              commandPermRows = [{ roleIds: ["40000000000000001"] }];
+            else pollRows = [{ roleIdToPing: "40000000000000001" }];
+            throw new Error("Missing Permissions");
+          }
+          const id = `4000000000000000${n}`;
+          roles.set(id, role(id, opts.body.name, 1));
+          return { id, name: opts.body.name, position: 1 };
+        });
+        const res = await harness.post("/wizard/apply", shown);
+        const flash = parseFlashRedirect(res.headers.get("location"));
+        expect(mockDelete).not.toHaveBeenCalled();
+        expect(flash.msg).toContain("Kept, because");
+        expect(flash.msg).toContain("40000000000000001");
+        expect(roles.has("40000000000000001")).toBe(true);
+      },
+    );
+
+    it("deletes nothing when the Command permissions cannot be read in the cleanup", async () => {
+      const A = { name: "Alpha", scopes: ["staff"] };
+      const B = { name: "Beta", scopes: ["host"] };
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [A, B]),
+      );
+      const shown = review(access, [A, B]);
+      let n = 0;
+      mockPost.mockImplementation(async (_route: unknown, opts: any) => {
+        n += 1;
+        if (n === 2) {
+          permReadFails = true;
+          throw new Error("Missing Permissions");
+        }
+        const id = `4000000000000000${n}`;
+        roles.set(id, role(id, opts.body.name, 1));
+        return { id, name: opts.body.name, position: 1 };
+      });
+      const res = await harness.post("/wizard/apply", shown);
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(flash.msg).toContain("May still exist");
+      expect(flash.msg).toContain("40000000000000001");
+    });
+
+    it("keeps a role a Command permissions list points at in the later-failure cleanup too", async () => {
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [CREW]),
+      );
+      const shown = review(access, [CREW]);
+      mockApplyConfiguration.mockImplementation(async () => {
+        commandPermRows = [{ roleIds: ["40000000000000001"] }];
+        return {
+          success: false,
+          appliedKeys: [],
+          failedKey: "quotes.enabled",
+          errorMessage: "write failed",
+          rolledBackKeys: [],
+          revertFailedKeys: [],
+        };
+      });
+      removeSpy.mockImplementation(async (_g, id) => {
+        stored = stored.filter((g) => g.id !== id);
+        return true;
+      });
+      const res = await harness.post("/wizard/apply", shown);
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(flash.msg).toContain("Kept, because");
+      expect(flash.msg).toContain("40000000000000001");
+      expect(flash.msg).not.toContain("No changes were applied");
     });
 
     it("keeps ids and the recovery sentence within 500 characters when the mapping, a role and a channel are all left behind", async () => {

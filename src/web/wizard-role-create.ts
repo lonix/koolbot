@@ -38,6 +38,8 @@ import { canBotCreate } from "../services/bot-create-check.js";
 import { CommandManager } from "../services/command-manager.js";
 import { ConfigService } from "../services/config-service.js";
 import { AdoptionSnapshot } from "../models/adoption-snapshot.js";
+import { CommandPermission } from "../models/command-permissions.js";
+import { PollSchedule } from "../models/poll-schedule.js";
 import { RoleGroupService } from "../services/role-group-service.js";
 import {
   ACCESS_SCOPES,
@@ -364,15 +366,27 @@ async function readReferenced(guildId: string): Promise<Set<string>> {
   // `featureRoleUses` is the list of every role a feature hands out or binds
   // (role-grants.ts, leaderboard tiers, reaction-role bindings), used as it is;
   // `idsIn` only sees plain id lists in the settings.
-  const [rows, groups, uses] = await Promise.all([
+  // Stores of a role id outside the settings: the per-command role lists
+  // (`CommandPermission.roleIds`, Command permissions) and the role a poll
+  // schedule pings (`PollSchedule.roleIdToPing`). Role groups, reaction-role
+  // bindings and leaderboard tiers are covered above.
+  const [rows, groups, uses, perms, pings] = await Promise.all([
     readWithin(() => ConfigService.getInstance().getAll()),
     readWithin(() => service.list(guildId)),
     readWithin(() => service.featureRoleUses(guildId)),
+    readWithin(() =>
+      CommandPermission.find({ guildId }).select("roleIds").lean().exec(),
+    ),
+    readWithin(() =>
+      PollSchedule.find({ guildId }).select("roleIdToPing").lean().exec(),
+    ),
   ]);
   return new Set([
     ...rows.flatMap((r) => idsIn(r.value)),
     ...groups.flatMap((g) => (g.roleId ? [g.roleId] : [])),
     ...uses.keys(),
+    ...perms.flatMap((p) => p.roleIds ?? []),
+    ...pings.flatMap((p) => (p.roleIdToPing ? [p.roleIdToPing] : [])),
   ]);
 }
 

@@ -1589,9 +1589,17 @@ export function createWizardRouter(client: Client): Router {
               selectionWithNew(state.access, plannedRoles),
               new Map(made.created.map((c) => [c.placeholder, c.id])),
             );
-            const problemNow =
-              validateSelection(fresh, state.access) ??
-              validateSelection(again, finalSelection);
+            // Any group that already points at a role created for this apply
+            // (another admin linked it meanwhile), whatever its name or
+            // capabilities: the diff ignores a group with no access scope, and
+            // would UPDATE it instead of creating the reviewed group.
+            const linked = again.groups.some(
+              (g) => g.roleId !== null && madeIds.has(g.roleId),
+            );
+            const problemNow = linked
+              ? "The role groups changed since you opened Review. Look at the updated list and apply again."
+              : (validateSelection(fresh, state.access) ??
+                validateSelection(again, finalSelection));
             const fingerprintNow = accessFingerprint(
               diffAccess(
                 fresh.groups,

@@ -1685,6 +1685,10 @@ nothing is written and the new roles are cleaned up as below. If a later role cr
 reference-aware cleanup (a role something now points at is kept and named). A flash that would not fit 500 characters shortens only the cause; the
 recovery sentences become one short sentence naming what is left (lists capped with "and N more", full lists in the log).
 
+"Pointed at" means a role group, a stored setting, a role a feature hands out or binds (`featureRoleUses`: role-granting settings, leaderboard tiers,
+reaction-role bindings), a Command permissions list or the role a poll schedule pings. Before it writes, Apply also refuses when a role group already
+points at a role it just created, whatever that group's name or capabilities.
+
 If anything after the roles fails (a role group write, the channels, the settings), the role groups are put back first, and then each role this apply
 created is decided on its own, inside the role lock and from a fresh read of the role groups and the stored settings: one that is still pointed at is
 kept and named, the rest are removed again, and any that could not be removed or checked are named as possibly still there. The message keeps that
