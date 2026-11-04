@@ -1834,8 +1834,130 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // Detected game-role categories (one proposed, one refused) and a
+      // webhook-fed channel: the Suggestions panel with both of its groups.
       name: "Channel claims",
       html: renderChannelClaimsPage(claimsProps()),
+    },
+    {
+      // Nothing to suggest: no game-role category and no fed channel (#1730).
+      name: "Channel claims with nothing to suggest",
+      html: renderChannelClaimsPage(
+        claimsProps({
+          scan: {
+            ...(claimsProps().scan as object),
+            webhooks: { known: true, unavailable: null, list: [] },
+            channels: [
+              {
+                id: "10",
+                name: "Chat",
+                kind: "category",
+                typeName: "GuildCategory",
+                parentId: null,
+                position: 0,
+                usedBy: [],
+                gatedByRoleIds: [],
+                syncedToParent: null,
+                overwrites: [],
+                flags: {},
+              },
+              {
+                id: "11",
+                name: "general",
+                kind: "text",
+                typeName: "GuildText",
+                parentId: "10",
+                position: 1,
+                usedBy: [],
+                gatedByRoleIds: [],
+                syncedToParent: true,
+                overwrites: [],
+                flags: {},
+              },
+            ],
+          } as never,
+        }),
+      ),
+    },
+    {
+      // The bot cannot read webhooks: the Feeds group says so (#1730).
+      name: "Channel claims with webhook data unavailable",
+      html: renderChannelClaimsPage(
+        claimsProps({
+          scan: {
+            ...(claimsProps().scan as object),
+            webhooks: {
+              known: false,
+              unavailable: "missing-permission",
+              list: [],
+            },
+          } as never,
+        }),
+      ),
+    },
+    {
+      // The form could not be read in full: the ignored values are listed.
+      name: "Channel claims with ignored form values",
+      html: renderChannelClaimsPage(
+        claimsProps({
+          problems: ["Ignored an unknown action for channel 9."],
+        }),
+      ),
+    },
+    {
+      // An apply is running and the page polls it (#1730).
+      name: "Channel claims while applying",
+      html: renderChannelClaimsPage(
+        claimsProps({ jobId: "11111111-1111-1111-1111-111111111111" }),
+      ),
+    },
+    {
+      // The scan itself failed: the failure is an alert, no form follows.
+      name: "Channel claims with a failed scan",
+      html: renderChannelClaimsPage(
+        claimsProps({ scan: null, error: "Missing Access" }),
+      ),
+    },
+    {
+      // A plan that matches the server: nothing to apply (#1730).
+      name: "Channel claims with nothing to change",
+      html: renderChannelClaimsPage(
+        claimsProps({
+          plan: {
+            ...(CLAIMS_DESTRUCTIVE_PLAN as object),
+            plan: {
+              ...(CLAIMS_DESTRUCTIVE_PLAN as { plan: object }).plan,
+              operations: [],
+            },
+          } as never,
+          previewToken: "preview-token",
+        }),
+      ),
+    },
+    {
+      // A plan the engine blocks, with advice: problems first, no Apply (#1730).
+      name: "Channel claims with a blocked plan",
+      html: renderChannelClaimsPage(
+        claimsProps({
+          plan: {
+            ...(CLAIMS_DESTRUCTIVE_PLAN as object),
+            errors: [
+              {
+                code: "voice-cleanup-risk",
+                message: "Managed-only cleanup needs a voice category.",
+              },
+            ],
+            warnings: [
+              {
+                code: "rebind",
+                message:
+                  "The Quotes channel is already set to another channel.",
+              },
+            ],
+          } as never,
+          previewToken: "preview-token",
+        }),
+      ),
     },
     {
       // Arriving from the Server scan's Claim link (#1364).
