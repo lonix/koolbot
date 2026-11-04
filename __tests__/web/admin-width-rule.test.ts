@@ -82,6 +82,7 @@ describe("which admin pages take the wide column (#1734)", () => {
   const WIDE_TITLES = new Set([
     "Announcements",
     "Birthdays",
+    "Channel Claims",
     "Command audit",
     "Database",
     "Events",
@@ -96,11 +97,12 @@ describe("which admin pages take the wide column (#1734)", () => {
     "Voice analytics",
   ]);
   // Role Groups also renders two plan pages (delete review, administrators outside the group) and Server scan
-  // a failed scan: a message, not a table. Those stay at content-max.
+  // and Channel claims a failed scan: a message, not a table. Those stay at content-max.
   const NARROW_FIXTURES = [
     /^Role group deletion review/,
     /^Administrators outside the admin group/,
     /^Server scan \(failed\)/,
+    /^Channel claims with a failed scan/,
   ];
 
   const pages = adminPages().filter((p) =>
