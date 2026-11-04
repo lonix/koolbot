@@ -1931,6 +1931,69 @@ describe("roles created from the Access step's Picker (#1618)", () => {
       );
     });
 
+    it("cleans up a role, a text channel and a category per id when the settings write fails, within 500 characters", async () => {
+      const channels = {
+        "quotes.channel_id": { name: "wall", kind: "text" },
+        "tickets.category_id": { name: "Support", kind: "category" },
+      };
+      const chReview = await reviewWizardCreations(client, GUILD, channels);
+      expect(chReview.problems).toEqual([]);
+      mockGetSession.mockReturnValue({
+        ...wizardState(access, ["quotes", "tickets"], {}, [CREW]),
+        creations: channels,
+      });
+      const shown = review(access, [CREW]);
+      mockPost.mockImplementation(async (route: unknown, opts: any) => {
+        if (roleRoute(route)) {
+          const id = "40000000000000001";
+          roles.set(id, role(id, opts.body.name, 1));
+          return { id, name: opts.body.name, position: 1 };
+        }
+        // Category type 4, text channel type 0.
+        return {
+          id:
+            opts.body.type === 4 ? "500000000000000002" : "500000000000000001",
+          name: opts.body.name,
+        };
+      });
+      mockApplyConfiguration.mockResolvedValue({
+        success: false,
+        appliedKeys: [],
+        failedKey: "quotes.enabled",
+        errorMessage: "x".repeat(900),
+        rolledBackKeys: [],
+        revertFailedKeys: [],
+      });
+      const res = await harness.post("/wizard/apply", {
+        ...shown,
+        channelPlanId: chReview.planId as string,
+      });
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.type).toBe("err");
+      expect(flash.msg.length).toBeLessThanOrEqual(500);
+      expect(flash.msg).toContain("…"); // only the cause is shortened
+      expect(flash.msg).toContain("role mapping was undone");
+      expect(flash.msg).toContain("created for this apply was removed again"); // the role
+      expect(flash.msg).toContain(
+        "channels or categories created for this apply were removed again",
+      );
+      // Every created thing went back, by its own id; nothing is stored.
+      const deleted = mockDelete.mock.calls.map((c) => String(c[0]));
+      expect(deleted.some((r) => r.endsWith("/roles/40000000000000001"))).toBe(
+        true,
+      );
+      expect(
+        deleted.some((r) => r.endsWith("/channels/500000000000000001")),
+      ).toBe(true);
+      expect(
+        deleted.some((r) => r.endsWith("/channels/500000000000000002")),
+      ).toBe(true);
+      expect(deleted).toHaveLength(3);
+      expect(stored).toHaveLength(0);
+      expect(roles.has("40000000000000001")).toBe(false);
+      expect(mockEndSession).not.toHaveBeenCalled();
+    });
+
     it("keeps ids and the recovery sentence within 500 characters when the mapping, a role and a channel are all left behind", async () => {
       const channels = { "quotes.channel_id": { name: "wall", kind: "text" } };
       const chReview = await reviewWizardCreations(client, GUILD, channels);
@@ -2216,5 +2279,141 @@ describe("fitRecovery (#1618)", () => {
     expect(out).toContain("and 2 more"); // channels capped
     expect(out).toContain(ids(5, "4")[0]);
     expect(out).toContain("removed again");
+  });
+});
+
+describe("a planned category after the role mapping (#1664)", () => {
+  const picks = { admin: [], staff: [MOD], host: [HOST] };
+  const creations = {
+    "tickets.category_id": { name: "Support", kind: "category" },
+  };
+
+  async function stateWithCategory(): Promise<{
+    state: Record<string, unknown>;
+    fingerprint: string;
+    planId: string;
+  }> {
+    const review = await reviewWizardCreations(client, GUILD, creations);
+    expect(review.problems).toEqual([]);
+    return {
+      state: { ...wizardState(picks, ["tickets"]), creations },
+      fingerprint: accessFingerprint(
+        diffAccess(stored, [...roles.values()], picks),
+      ),
+      planId: review.planId as string,
+    };
+  }
+
+  beforeEach(() => {
+    createAnswer = { ok: true };
+    mockCanBotCreate.mockImplementation(async () => createAnswer);
+    mockFetchViews.mockImplementation(async () => []);
+    mockPost.mockReset();
+    mockDelete.mockReset();
+    mockDelete.mockResolvedValue({});
+    mockApplyConfiguration.mockResolvedValue(okConfig);
+  });
+
+  it("asks the permission for a category, never for a channel", async () => {
+    await stateWithCategory();
+    expect(mockCanBotCreate.mock.calls.map((c) => c[2])).toEqual([
+      { kind: "category" },
+    ]);
+  });
+
+  it("undoes the role mapping and stores no setting when creating the category fails", async () => {
+    const { state, fingerprint, planId } = await stateWithCategory();
+    mockGetSession.mockReturnValue(state);
+    mockPost.mockRejectedValue(new Error("Missing Permissions"));
+    const res = await harness.post("/wizard/apply", {
+      accessFingerprint: fingerprint,
+      channelPlanId: planId,
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("The settings were not applied.");
+    expect(flash.msg).toContain("Missing Permissions");
+    expect(flash.msg).toContain("role mapping was undone");
+    expect(createSpy).toHaveBeenCalledTimes(2);
+    expect(removeSpy).toHaveBeenCalledTimes(2);
+    expect(stored).toHaveLength(0);
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    expect(mockEndSession).not.toHaveBeenCalled();
+    expect(lastAuditFor("wizard.apply")).toMatchObject({
+      result: "failure",
+      details: { stage: "channels" },
+    });
+  });
+
+  it("creates no category when writing the role mapping fails first", async () => {
+    const { state, fingerprint, planId } = await stateWithCategory();
+    mockGetSession.mockReturnValue(state);
+    createSpy
+      .mockImplementationOnce(async (_g, input) => {
+        const created = group({
+          id: "g-first",
+          name: input.name,
+          roleId: input.roleId ?? null,
+          capabilities: [
+            ...(input.capabilities ?? []),
+          ] as Group["capabilities"],
+        });
+        stored.unshift(created);
+        return { ok: true, group: created };
+      })
+      .mockRejectedValueOnce(new Error("mongo down"));
+    const res = await harness.post("/wizard/apply", {
+      accessFingerprint: fingerprint,
+      channelPlanId: planId,
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("mongo down");
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockDelete).not.toHaveBeenCalled();
+    expect(stored).toHaveLength(0);
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("undoes the role mapping and creates nothing when the browser leaves while the apply waits for the lock", async () => {
+    const { state, fingerprint, planId } = await stateWithCategory();
+    mockGetSession.mockReturnValue(state);
+    let release: () => void = () => undefined;
+    const holding = withChannelLock(
+      GUILD,
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    const gone = new AbortController();
+    const sent = fetch(`${harness.baseUrl}/admin/wizard/apply`, {
+      method: "POST",
+      redirect: "manual",
+      signal: gone.signal,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `koolbot_csrf=${encodeURIComponent(TEST_CSRF_TOKEN)}`,
+      },
+      body: new globalThis.URLSearchParams({
+        _csrf: TEST_CSRF_TOKEN,
+        accessFingerprint: fingerprint,
+        channelPlanId: planId,
+      }).toString(),
+    }).catch(() => null);
+    await new Promise((r) => setTimeout(r, 400));
+    gone.abort();
+    await sent;
+    await new Promise((r) => setTimeout(r, 100));
+    release();
+    await holding;
+    await new Promise((r) => setTimeout(r, 300));
+    expect(createSpy).toHaveBeenCalledTimes(2);
+    expect(removeSpy).toHaveBeenCalledTimes(2);
+    expect(stored).toHaveLength(0);
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    expect(lastAuditFor("wizard.apply")).toMatchObject({
+      result: "failure",
+      errorMessage: CHANNEL_LOCK_BUSY_MESSAGE,
+      details: { stage: "channels" },
+    });
   });
 });

@@ -132,7 +132,9 @@ const { settingsMetadata } =
   await import("../../src/services/config-schema.js");
 const { WIZARD_FEATURE_SETTINGS } =
   await import("../../src/web/routes/write/helpers.js");
-const { offersCreateChannel } = await import("../../src/web/setting-create.js");
+const { offersCreateChannel, offersCreateCategory } =
+  await import("../../src/web/setting-create.js");
+const { defaultConfig } = await import("../../src/services/config-schema.js");
 
 const view = (
   id: string,
@@ -999,5 +1001,540 @@ describe("the flash keeps its tail (#1662)", () => {
   it("shows at most two ids and says how many more", () => {
     expect(idList(["1", "2"])).toBe("1, 2");
     expect(idList(["1", "2", "3", "4", "5"])).toBe("1, 2 and 3 more");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The category kind (#1664): voicechannels.category_id, events.category_id and
+// tickets.category_id are planned on their step and created by Apply.
+// ---------------------------------------------------------------------------
+
+const VOICE_CAT = "voicechannels.category_id";
+const EVENTS_CAT = "events.category_id";
+const EVENTS_CH = "events.announcement_channel_id";
+const TICKETS_CAT = "tickets.category_id";
+const CATEGORY_TYPE = 4;
+
+/** A full step body from the schema defaults (booleans as "true"/"false"), with the overrides on top. */
+function stepBody(
+  feature: string,
+  overrides: Record<string, string>,
+): Record<string, string> {
+  const body: Record<string, string> = {};
+  for (const k of WIZARD_FEATURE_SETTINGS[feature]) {
+    const d = (defaultConfig as Record<string, unknown>)[k];
+    body[`value_${k}`] = String(d ?? "");
+  }
+  body[`value_${feature}.enabled`] = "true";
+  for (const [k, v] of Object.entries(overrides)) body[`value_${k}`] = v;
+  return body;
+}
+const voiceStep = (cat: string): Record<string, string> =>
+  stepBody("voicechannels", { [VOICE_CAT]: cat });
+const ticketsStep = (cat: string): Record<string, string> =>
+  stepBody("tickets", { [TICKETS_CAT]: cat });
+const eventsStep = (cat: string, ch = ""): Record<string, string> =>
+  stepBody("events", { [EVENTS_CAT]: cat, [EVENTS_CH]: ch });
+
+describe("which keys offer the category create row in the wizard (#1664)", () => {
+  it("is exactly the three category settings, read from the schema flag", () => {
+    const inWizard = new Set(Object.values(WIZARD_FEATURE_SETTINGS).flat());
+    const offered = Object.keys(settingsMetadata)
+      .filter((k) => offersCreateCategory(k) && inWizard.has(k))
+      .sort();
+    expect(offered).toEqual([VOICE_CAT, EVENTS_CAT, TICKETS_CAT].sort());
+  });
+});
+
+describe("the step page offers a category (#1664)", () => {
+  it("offers the create row on a category setting, with the category kind", async () => {
+    start(["tickets"]);
+    const html = await (await harness.get("/wizard?step=0")).text();
+    expect(html).toContain(
+      "&quot;create&quot;:{&quot;kind&quot;:&quot;category&quot;,&quot;ok&quot;:true}",
+    );
+    expect(mockCanBotCreate).toHaveBeenCalledTimes(1);
+    expect(mockCanBotCreate.mock.calls[0][2]).toEqual({ kind: "category" });
+  });
+
+  it("shows the help line, not the row, when the bot cannot create", async () => {
+    can = { ok: false, reason: "The bot needs Manage Channels (category)." };
+    start(["tickets"]);
+    const html = await (await harness.get("/wizard?step=0")).text();
+    expect(html).toContain("&quot;ok&quot;:false");
+    expect(html).toContain("The bot needs Manage Channels (category).");
+  });
+
+  it("shows nothing when the permissions cannot be read", async () => {
+    can = { ok: "unknown" };
+    start(["tickets"]);
+    const html = await (await harness.get("/wizard?step=0")).text();
+    expect(html).not.toContain("&quot;create&quot;");
+  });
+
+  it("asks one question per kind on a step that holds both (the events step)", async () => {
+    start(["events"]);
+    const html = await (await harness.get("/wizard?step=0")).text();
+    expect(mockCanBotCreate.mock.calls.map((c) => c[2])).toEqual([
+      { kind: "channel" },
+      { kind: "category" },
+    ]);
+    const catPicker = html.slice(
+      html.indexOf(`name="value_${EVENTS_CAT}"`) - 500,
+      html.indexOf(`name="value_${EVENTS_CAT}"`),
+    );
+    expect(catPicker).toContain("&quot;kind&quot;:&quot;category&quot;");
+    const chPicker = html.slice(
+      html.indexOf(`name="value_${EVENTS_CH}"`) - 500,
+      html.indexOf(`name="value_${EVENTS_CH}"`),
+    );
+    expect(chPicker).toContain("&quot;kind&quot;:&quot;channel&quot;");
+  });
+
+  it("draws a planned category as pending even when the permission cannot be read, with no row and no help line", async () => {
+    start(["tickets"]);
+    await harness.post("/wizard/step/0", ticketsStep("create:Support"));
+    can = { ok: "unknown" };
+    const html = await (await harness.get("/wizard?step=0")).text();
+    expect(html).toContain(
+      '<option value="create:Support" data-create data-name="Support" selected>Support (will be created)</option>',
+    );
+    expect(html).toContain(
+      "&quot;create&quot;:{&quot;kind&quot;:&quot;category&quot;,&quot;ok&quot;:false}",
+    );
+    expect(html).not.toContain("Manage Channels");
+  });
+
+  it("draws a planned category again as a pending option when the step is revisited", async () => {
+    start(["tickets"]);
+    await harness.post("/wizard/step/0", ticketsStep("create:Support"));
+    const html = await (await harness.get("/wizard?step=0")).text();
+    expect(html).toContain(
+      '<option value="create:Support" data-create data-name="Support" selected>Support (will be created)</option>',
+    );
+  });
+});
+
+describe("planning a category on a step (#1664)", () => {
+  it("records the name and the category kind, stages no setting and creates nothing", async () => {
+    start(["tickets"]);
+    const res = await harness.post(
+      "/wizard/step/0",
+      ticketsStep("create:Support"),
+    );
+    expect(res.headers.get("location")).toBe("/admin/wizard?step=confirm");
+    expect(state().creations).toEqual({
+      [TICKETS_CAT]: { name: "Support", kind: "category" },
+    });
+    expect(state().configuration[TICKETS_CAT]).toBeUndefined();
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it("refuses a blank or over-long name and stays on the step", async () => {
+    start(["tickets"]);
+    for (const bad of ["create:   ", `create:${"x".repeat(101)}`]) {
+      const res = await harness.post("/wizard/step/0", ticketsStep(bad));
+      const flash = parseFlashRedirect(res.headers.get("location") ?? "");
+      expect(flash.type).toBe("warn");
+      expect(flash.msg).toContain(TICKETS_CAT);
+    }
+    expect(state().creations).toBeUndefined();
+  });
+
+  it("refuses a create value inside a comma-joined field", async () => {
+    start(["tickets"]);
+    const res = await harness.post(
+      "/wizard/step/0",
+      ticketsStep("123456789012345678,create:Support"),
+    );
+    expect(parseFlashRedirect(res.headers.get("location") ?? "").type).toBe(
+      "warn",
+    );
+    expect(state().configuration[TICKETS_CAT]).toBeUndefined();
+    expect(state().creations).toBeUndefined();
+  });
+
+  it("refuses a category create value on a text channel setting, and a text one on a category setting", async () => {
+    start(["quotes", "tickets"]);
+    // The quotes channel posts nothing the category kind could take: only its own flag counts.
+    await harness.post("/wizard/step/0", quotesStep("create:wall"));
+    expect(state().creations).toEqual({
+      [QUOTES]: { name: "wall", kind: "text" },
+    });
+    await harness.post("/wizard/step/1", ticketsStep("create:Support"));
+    expect(state().creations).toEqual({
+      [QUOTES]: { name: "wall", kind: "text" },
+      [TICKETS_CAT]: { name: "Support", kind: "category" },
+    });
+  });
+
+  it("refuses to plan when the bot cannot create a category, and when that cannot be checked", async () => {
+    start(["tickets"]);
+    can = { ok: false, reason: "The bot needs Manage Channels (category)." };
+    let res = await harness.post(
+      "/wizard/step/0",
+      ticketsStep("create:Support"),
+    );
+    let flash = parseFlashRedirect(res.headers.get("location") ?? "");
+    expect(flash.type).toBe("warn");
+    expect(flash.msg).toContain("Manage Channels (category)");
+    can = { ok: "unknown" };
+    res = await harness.post("/wizard/step/0", ticketsStep("create:Support"));
+    flash = parseFlashRedirect(res.headers.get("location") ?? "");
+    expect(flash.msg).toContain("create categories");
+    expect(state().creations).toBeUndefined();
+  });
+
+  it("clears a planned category when a real category is chosen later, or the feature is switched off", async () => {
+    start(["tickets"]);
+    await harness.post("/wizard/step/0", ticketsStep("create:Support"));
+    await harness.post("/wizard/step/0", ticketsStep("123456789012345678"));
+    expect(state().creations).toEqual({});
+    await harness.post("/wizard/step/0", ticketsStep("create:Support"));
+    await harness.post("/wizard/step/0", { "value_tickets.enabled": "false" });
+    expect(state().creations).toEqual({});
+  });
+
+  it("ignores a category planned on a feature that was dropped from the wizard", async () => {
+    start(["tickets"]);
+    await harness.post("/wizard/step/0", ticketsStep("create:Support"));
+    state().selectedFeatures = ["quotes"];
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).not.toContain("Channels and categories to create");
+  });
+});
+
+describe("Review of a planned category (#1664)", () => {
+  it("lists the category, the setting that gets it and a plan id", async () => {
+    start(["tickets"]);
+    const html = await stageAndReview([[0, ticketsStep("create:Support")]]);
+    expect(html).toContain("Channels and categories to create");
+    expect(html).toContain("Create the category");
+    expect(html).toContain("Support");
+    expect(html).toContain("Ticket channel category");
+    expect(html).toContain("(will be created)");
+    expect(planIdOf(html)).toMatch(/^[0-9a-f]{16}$/);
+    expect(html).not.toContain("by the voice feature");
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it("says the lobby is created by the voice feature for the managed voice category", async () => {
+    start(["voicechannels"]);
+    const html = await stageAndReview([[0, voiceStep("create:Gaming")]]);
+    expect(html).toContain("Create the category");
+    expect(html).toContain(
+      "The lobby is created in it by the voice feature, not by this step.",
+    );
+  });
+
+  it("lists ONE category when two settings type the same new name, with the note when one is the voice category", async () => {
+    start(["voicechannels", "tickets"]);
+    const html = await stageAndReview([
+      [0, voiceStep("create:Community")],
+      [1, ticketsStep("create:  community ")],
+    ]);
+    expect((html.match(/Create the category/g) ?? []).length).toBe(1);
+    expect(html).toContain("Ticket channel category and Managed category");
+    expect(html).toContain("by the voice feature");
+  });
+
+  it("keeps a text channel and a category of the same name apart", async () => {
+    start(["events"]);
+    const html = await stageAndReview([
+      [0, eventsStep("create:Events", "create:events")],
+    ]);
+    expect((html.match(/Create the category/g) ?? []).length).toBe(1);
+    expect((html.match(/Create the text channel/g) ?? []).length).toBe(1);
+  });
+
+  it("selects an existing category of that name instead of listing it", async () => {
+    live = [view("100000000000000050", { name: "SUPPORT", kind: "category" })];
+    start(["tickets"]);
+    const html = await stageAndReview([[0, ticketsStep("create:Support")]]);
+    expect(html).not.toContain("Channels and categories to create");
+    expect(html).toContain("(existing category)");
+  });
+
+  it("blocks Apply when two categories already have the name", async () => {
+    live = [
+      view("100000000000000050", { name: "Support", kind: "category" }),
+      view("100000000000000051", { name: "support", kind: "category" }),
+    ];
+    start(["tickets"]);
+    const html = await stageAndReview([[0, ticketsStep("create:Support")]]);
+    expect(html).toContain("More than one category");
+    expect(planIdOf(html)).toBe("");
+  });
+
+  it("blocks Apply, with the category reason, when the bot cannot create", async () => {
+    start(["tickets"]);
+    const planned = await stageAndReview([[0, ticketsStep("create:Support")]]);
+    expect(planned).toContain("Create the category");
+    can = { ok: false, reason: "The bot needs Manage Channels (category)." };
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    expect(html).toContain("The bot needs Manage Channels (category).");
+    expect(planIdOf(html)).toBe("");
+  });
+});
+
+describe("applying a planned category (#1664)", () => {
+  it("creates the category with no parent, stores its id, audits and ends the session", async () => {
+    start(["tickets"]);
+    const planId = planIdOf(
+      await stageAndReview([[0, ticketsStep("create:Support Desk")]]),
+    );
+    const res = await apply(planId);
+    const flash = parseFlashRedirect(res.headers.get("location") ?? "");
+    expect(res.headers.get("location")).toContain("/admin/wizard/done");
+    expect(flash.msg).toContain("created 1 category");
+    expect(mockPost).toHaveBeenCalledTimes(1);
+    // The stored name is exactly what was typed; no parent, no overwrites.
+    expect(mockPost.mock.calls[0][1].body).toEqual({
+      name: "Support Desk",
+      type: CATEGORY_TYPE,
+    });
+    expect(setWrites()).toEqual(
+      expect.arrayContaining([[TICKETS_CAT, "100000000000000100"]]),
+    );
+    expect(lastAudit()).toMatchObject({
+      action: "wizard.apply",
+      result: "success",
+      details: {
+        channels: [
+          {
+            key: TICKETS_CAT,
+            id: "100000000000000100",
+            name: "Support Desk",
+            created: true,
+            kind: "category",
+          },
+        ],
+      },
+    });
+    expect(state()).toBeNull();
+  });
+
+  it("asks the permission for a category on Apply", async () => {
+    start(["tickets"]);
+    const planId = planIdOf(
+      await stageAndReview([[0, ticketsStep("create:Support")]]),
+    );
+    mockCanBotCreate.mockClear();
+    await apply(planId);
+    expect(
+      mockCanBotCreate.mock.calls.every((c) => c[2].kind === "category"),
+    ).toBe(true);
+    expect(mockCanBotCreate).toHaveBeenCalled();
+  });
+
+  it("creates ONE category for two settings that typed the same name and points both at it", async () => {
+    start(["voicechannels", "tickets"]);
+    const planId = planIdOf(
+      await stageAndReview([
+        [0, voiceStep("create:Community")],
+        [1, ticketsStep("create:community")],
+      ]),
+    );
+    const res = await apply(planId);
+    expect(res.headers.get("location")).toContain("/admin/wizard/done");
+    expect(mockPost).toHaveBeenCalledTimes(1);
+    expect(setWrites()).toEqual(
+      expect.arrayContaining([
+        [VOICE_CAT, "100000000000000100"],
+        [TICKETS_CAT, "100000000000000100"],
+      ]),
+    );
+  });
+
+  it("creates a category and a same-named text channel as two things", async () => {
+    start(["events"]);
+    const planId = planIdOf(
+      await stageAndReview([[0, eventsStep("create:Events", "create:events")]]),
+    );
+    const res = await apply(planId);
+    expect(res.headers.get("location")).toContain("/admin/wizard/done");
+    expect(parseFlashRedirect(res.headers.get("location") ?? "").msg).toContain(
+      "created 1 channel and 1 category",
+    );
+    const bodies = mockPost.mock.calls.map((c) => c[1].body);
+    expect(bodies).toEqual(
+      expect.arrayContaining([
+        { name: "Events", type: CATEGORY_TYPE },
+        { name: "events", type: 0 },
+      ]),
+    );
+    expect(bodies).toHaveLength(2);
+    const stored = Object.fromEntries(setWrites());
+    expect(stored[EVENTS_CAT]).not.toBe(stored[EVENTS_CH]);
+  });
+
+  it("selects the one existing category of that name without creating", async () => {
+    live = [view("100000000000000050", { name: "SUPPORT", kind: "category" })];
+    start(["tickets"]);
+    const planId = planIdOf(
+      await stageAndReview([[0, ticketsStep("create:support")]]),
+    );
+    await apply(planId);
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(setWrites()).toEqual(
+      expect.arrayContaining([[TICKETS_CAT, "100000000000000050"]]),
+    );
+  });
+
+  it("refuses, creating nothing, when the name appeared since Review (no silent select)", async () => {
+    start(["tickets"]);
+    const planId = planIdOf(
+      await stageAndReview([[0, ticketsStep("create:Support")]]),
+    );
+    live = [
+      ...live,
+      view("100000000000000077", { name: "Support", kind: "category" }),
+    ];
+    const res = await apply(planId);
+    const flash = parseFlashRedirect(res.headers.get("location") ?? "");
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("changed since");
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockConfigSet).not.toHaveBeenCalled();
+    expect(state().creations).toEqual({
+      [TICKETS_CAT]: { name: "Support", kind: "category" },
+    });
+  });
+
+  it("refuses when the bot lost the permission after Review", async () => {
+    start(["tickets"]);
+    const planId = planIdOf(
+      await stageAndReview([[0, ticketsStep("create:Support")]]),
+    );
+    can = { ok: false, reason: "The bot needs Manage Channels (category)." };
+    const res = await apply(planId);
+    expect(parseFlashRedirect(res.headers.get("location") ?? "").msg).toContain(
+      "Manage Channels (category)",
+    );
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("removes the category made first when the channel after it fails, and stores nothing", async () => {
+    start(["events"]);
+    const planId = planIdOf(
+      await stageAndReview([[0, eventsStep("create:Events", "create:news")]]),
+    );
+    let calls = 0;
+    mockPost.mockImplementation(async (_r: string, o: any) => {
+      calls += 1;
+      if (calls === 2) throw new Error("Missing Permissions");
+      return { id: "100000000000000200", name: o.body.name };
+    });
+    const res = await apply(planId);
+    const flash = parseFlashRedirect(res.headers.get("location") ?? "");
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("The settings were not applied");
+    expect(flash.msg).toContain("Missing Permissions");
+    expect(flash.msg).toMatch(/was removed again/);
+    expect(mockDelete).toHaveBeenCalledTimes(1);
+    expect(String(mockDelete.mock.calls[0][0])).toContain("100000000000000200");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+    expect(state()).not.toBeNull();
+  });
+
+  it("removes the created category again when writing the settings fails", async () => {
+    start(["tickets"]);
+    const planId = planIdOf(
+      await stageAndReview([[0, ticketsStep("create:Support")]]),
+    );
+    mockConfigSet.mockRejectedValue(new Error("mongo down"));
+    const res = await apply(planId);
+    const flash = parseFlashRedirect(res.headers.get("location") ?? "");
+    expect(flash.type).toBe("err");
+    expect(mockDelete).toHaveBeenCalledTimes(1);
+    expect(flash.msg).toContain("removed again");
+    expect(state().creations).toEqual({
+      [TICKETS_CAT]: { name: "Support", kind: "category" },
+    });
+  });
+
+  it("names a category it could not remove, and does not call it removed", async () => {
+    start(["tickets"]);
+    const planId = planIdOf(
+      await stageAndReview([[0, ticketsStep("create:Support")]]),
+    );
+    mockConfigSet.mockRejectedValue(new Error("mongo down"));
+    mockDelete.mockRejectedValue(new Error("Discord is down"));
+    const res = await apply(planId);
+    const flash = parseFlashRedirect(res.headers.get("location") ?? "");
+    expect(flash.msg).toContain("100000000000000100");
+    expect(flash.msg).toContain("still exist");
+    expect(flash.msg).not.toMatch(/(was|were) removed again/);
+  });
+
+  it("keeps, and reports, a created category that a saved setting now points at (the shared shape of #1748)", async () => {
+    start(["tickets"]);
+    const planId = planIdOf(
+      await stageAndReview([[0, ticketsStep("create:Support")]]),
+    );
+    mockConfigSet.mockRejectedValue(new Error("mongo down"));
+    // Another save adopted the category (id ...100) while this apply ran.
+    mockConfigGetAll.mockResolvedValue([
+      { key: VOICE_CAT, value: "100000000000000100" },
+    ]);
+    const res = await apply(planId);
+    const flash = parseFlashRedirect(res.headers.get("location") ?? "");
+    expect(mockDelete).not.toHaveBeenCalled();
+    expect(flash.msg).toContain(
+      "Kept, because a saved setting points at it: 100000000000000100",
+    );
+  });
+
+  it("does nothing when the browser leaves while the apply waits for the channel lock", async () => {
+    start(["tickets"]);
+    const planId = planIdOf(
+      await stageAndReview([[0, ticketsStep("create:Support")]]),
+    );
+    let release: () => void = () => undefined;
+    const holding = withChannelLock(
+      session.guildId,
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    const gone = new AbortController();
+    const sent = fetch(`${harness.baseUrl}/admin/wizard/apply`, {
+      method: "POST",
+      redirect: "manual",
+      signal: gone.signal,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `koolbot_csrf=${encodeURIComponent(TEST_CSRF_TOKEN)}`,
+      },
+      body: new globalThis.URLSearchParams({
+        _csrf: TEST_CSRF_TOKEN,
+        channelPlanId: planId,
+      }).toString(),
+    }).catch(() => null);
+    await new Promise((r) => setTimeout(r, 400));
+    gone.abort();
+    await sent;
+    await new Promise((r) => setTimeout(r, 100));
+    release();
+    await holding;
+    await new Promise((r) => setTimeout(r, 200));
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockConfigSet).not.toHaveBeenCalled();
+    expect(state().creations).toEqual({
+      [TICKETS_CAT]: { name: "Support", kind: "category" },
+    });
+  });
+
+  it("a settings read that never answers is bounded: the cleanup reports the category as possibly there", async () => {
+    start(["tickets"]);
+    const planId = planIdOf(
+      await stageAndReview([[0, ticketsStep("create:Support")]]),
+    );
+    mockConfigSet.mockRejectedValue(new Error("mongo down"));
+    mockConfigGetAll.mockRejectedValue(new Error("read failed"));
+    const res = await apply(planId);
+    const flash = parseFlashRedirect(res.headers.get("location") ?? "");
+    expect(mockDelete).not.toHaveBeenCalled();
+    expect(flash.msg).toContain("100000000000000100");
+    expect(flash.msg).toContain("May still exist");
   });
 });

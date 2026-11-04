@@ -101,8 +101,11 @@ import {
   canBotCreate,
   toPickerCreate,
 } from "../../../services/bot-create-check.js";
-import { offersCreateChannel } from "../../setting-create.js";
-import { loadCreateChannelAnswer } from "../../setting-create-load.js";
+import { createKindOf } from "../../setting-create.js";
+import {
+  loadCreateCategoryAnswer,
+  loadCreateChannelAnswer,
+} from "../../setting-create-load.js";
 import {
   parsePickerCreateValue,
   pickerCreateValue,
@@ -528,6 +531,12 @@ export function createWizardRouter(client: Client): Router {
             session.guildId,
             settingKeys,
           );
+          // The same for a category setting of the step (#1664).
+          const pickerCreateCategory = await loadCreateCategoryAnswer(
+            client,
+            session.guildId,
+            settingKeys,
+          );
 
           const currentValues: Record<string, unknown> = {};
           for (const k of settingKeys) {
@@ -536,7 +545,15 @@ export function createWizardRouter(client: Client): Router {
             // pending option; without the row (permissions unreadable) the
             // step shows the stored value and the admin chooses again.
             const planned = existing.creations?.[k];
-            if (planned && pickerCreate && offersCreateChannel(k)) {
+            const kind = createKindOf(k);
+            // A planned category is drawn as pending even when the permission
+            // could not be read (the Picker then shows no row and no help line),
+            // so the step agrees with Review.
+            if (
+              planned &&
+              planned.kind === kind &&
+              (kind === "category" || pickerCreate)
+            ) {
               currentValues[k] = pickerCreateValue(planned.name);
             }
           }
@@ -602,6 +619,7 @@ export function createWizardRouter(client: Client): Router {
               groupRoles,
               reactionRoleMessages,
               pickerCreate,
+              pickerCreateCategory,
               enabledByKey,
               flash,
             }),
@@ -881,7 +899,10 @@ export function createWizardRouter(client: Client): Router {
       const dropped: Array<{ key: string; reason: string }> = [];
       // The permission to create, asked once and only if a create value is
       // posted for a flagged setting (#1662).
-      let createAnswer: Awaited<ReturnType<typeof canBotCreate>> | null = null;
+      const createAnswers = new Map<
+        "text" | "category",
+        Awaited<ReturnType<typeof canBotCreate>>
+      >();
       const dropCreation = (k: string): void => {
         if (state.creations?.[k]) {
           wizard.removeCreation(session.discordUserId, session.guildId, k);
@@ -907,29 +928,38 @@ export function createWizardRouter(client: Client): Router {
         // the coercion (which refuses it for every other key). The channel is
         // created by Apply, from Review.
         const posted = body?.[settingValueFieldName(k)];
-        if (offersCreateChannel(k) && typeof posted === "string") {
+        const createKind = createKindOf(k);
+        if (createKind && typeof posted === "string") {
           const named = parsePickerCreateValue(posted);
           if (named) {
             if (!named.ok) {
               dropped.push({ key: k, reason: named.error });
               continue;
             }
-            createAnswer ??= await canBotCreate(client, session.guildId, {
-              kind: "channel",
-            });
+            let createAnswer = createAnswers.get(createKind);
+            if (!createAnswer) {
+              createAnswer = await canBotCreate(
+                client,
+                session.guildId,
+                createKind === "category"
+                  ? { kind: "category" }
+                  : { kind: "channel" },
+              );
+              createAnswers.set(createKind, createAnswer);
+            }
             if (createAnswer.ok !== true) {
               dropped.push({
                 key: k,
                 reason:
                   createAnswer.ok === false
                     ? createAnswer.reason
-                    : "KoolBot could not check whether it may create channels. Try again.",
+                    : `KoolBot could not check whether it may create ${createKind === "category" ? "categories" : "channels"}. Try again.`,
               });
               continue;
             }
             wizard.setCreation(session.discordUserId, session.guildId, k, {
               name: named.name,
-              kind: "text",
+              kind: createKind,
             });
             saved[k] = pickerCreateValue(named.name);
             continue;
@@ -1726,7 +1756,7 @@ export function createWizardRouter(client: Client): Router {
             stuck.length > 0
               ? ` May still exist (not removed or checked): ${idList(stuck)}. Check them in Discord before applying again.`
               : removed.length > 0
-                ? ` The ${removed.length === 1 ? "channel" : "channels"} created for this apply ${removed.length === 1 ? "was" : "were"} removed again.`
+                ? ` The ${removed.length === 1 ? "channel or category" : "channels or categories"} created for this apply ${removed.length === 1 ? "was" : "were"} removed again.`
                 : "";
           leftChannels = stuck;
           const undone = await undoAll();
@@ -1753,7 +1783,7 @@ export function createWizardRouter(client: Client): Router {
           const list = idList;
           const note = [
             back.removed.length > 0
-              ? ` The ${back.removed.length === 1 ? "channel" : "channels"} created for this apply ${back.removed.length === 1 ? "was" : "were"} removed again.`
+              ? ` The ${back.removed.length === 1 ? "channel or category" : "channels or categories"} created for this apply ${back.removed.length === 1 ? "was" : "were"} removed again.`
               : "",
             back.kept.length > 0
               ? ` Kept, because a saved setting points at ${back.kept.length === 1 ? "it" : "them"}: ${list(back.kept)}.`
@@ -1813,9 +1843,14 @@ export function createWizardRouter(client: Client): Router {
         });
         if (result.success) {
           wizard.endSession(session.discordUserId, session.guildId);
-          const madeCount = new Set(
-            createdChannels.filter((c) => c.created).map((c) => c.id),
-          ).size;
+          const madeIds = (kind: "text" | "category"): number =>
+            new Set(
+              createdChannels
+                .filter((c) => c.created && c.kind === kind)
+                .map((c) => c.id),
+            ).size;
+          const madeCount = madeIds("text");
+          const madeCategories = madeIds("category");
           const roleCount = rolesMade?.created.length ?? 0;
           const madeParts = [
             roleCount > 0
@@ -1823,6 +1858,9 @@ export function createWizardRouter(client: Client): Router {
               : "",
             madeCount > 0
               ? `${madeCount} channel${madeCount === 1 ? "" : "s"}`
+              : "",
+            madeCategories > 0
+              ? `${madeCategories} ${madeCategories === 1 ? "category" : "categories"}`
               : "",
           ].filter(Boolean);
           const summary = `Wizard applied ${pendingKeys.length} setting${pendingKeys.length === 1 ? "" : "s"}${

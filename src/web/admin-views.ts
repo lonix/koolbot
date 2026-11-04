@@ -57,7 +57,7 @@ import {
   parsePickerCreateValue,
   type PickerCreate,
 } from "./setting-pickers.js";
-import { pickerCreateFor } from "./setting-create.js";
+import { offersCreateCategory, pickerCreateFor } from "./setting-create.js";
 import type { ReactionRoleMessageOptions } from "./reaction-role-messages.js";
 import { getServerTimezone } from "../utils/timezone.js";
 import {
@@ -1543,7 +1543,16 @@ function renderControlInput(
     const meta: PickerMeta[] = [];
     // #1658: the create row, only when the caller says creation can work. A
     // channel setting carries its text or voice subtype with it.
-    const created = pickers.create?.(r);
+    // A posted category to be created, drawn again when the permission could
+    // not be read (no answer): still pending ("will be created"), with neither a
+    // create row nor a help line (ok false, no reason), as the Polls form does.
+    const created =
+      pickers.create?.(r) ??
+      (r.type === "category" &&
+      offersCreateCategory(r.key) &&
+      parsePickerCreateValue(currentStr)?.ok
+        ? ({ kind: "category", ok: false } satisfies PickerCreate)
+        : undefined);
     const createFor =
       created && r.type === "channel"
         ? {
@@ -2631,6 +2640,8 @@ export interface WizardStepPageProps extends CommonProps {
    * Pickers as they were. The server reads a posted `create:` value itself.
    */
   pickerCreate?: PickerCreate;
+  /** The same for a flagged category setting (#1664): the row, the help line, or nothing. */
+  pickerCreateCategory?: PickerCreate;
   /**
    * Enabled-state of every key on this step *plus* the cross-feature
    * dependency targets those keys reference (e.g. `achievements.enabled`
@@ -2662,7 +2673,7 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
     roles: props.roles,
     groupRoles: props.groupRoles,
     reactionRoleMessages: props.reactionRoleMessages,
-    create: pickerCreateFor(props.pickerCreate),
+    create: pickerCreateFor(props.pickerCreate, props.pickerCreateCategory),
   };
 
   // Build the same `SettingRow` shape the Settings page feeds to
@@ -6261,6 +6272,8 @@ export interface VoiceChannelsProps extends CommonProps {
   categoryChannels: ChannelOption[];
   /** Voice channel options backing the `voicechannels.lobby.channel_id` picker. */
   voiceChannels?: ChannelOption[];
+  /** The category-create answer for the Managed category picker (#1664, `loadCreateCategoryAnswer`). */
+  createCategory?: PickerCreate;
   /**
    * `voicechannels.cleanup.managed_only`: cleanup deletes only channels
    * KoolBot created, so the page words the cleanup actions accordingly.
@@ -6294,6 +6307,8 @@ export interface FeatureSettingsPickers {
    * saying why there is none. Absent: no row.
    */
   createChannel?: PickerCreate;
+  /** The same for a flagged category setting (#1664, `loadCreateCategoryAnswer`). */
+  createCategory?: PickerCreate;
 }
 
 export interface FeatureSettingsCardProps {
@@ -6407,7 +6422,10 @@ export function renderFeatureSettingsCard(
     roles: props.pickers?.roles ?? [],
     groupRoles: props.pickers?.groupRoles,
     reactionRoleMessages: props.pickers?.reactionRoleMessages,
-    create: pickerCreateFor(props.pickers?.createChannel),
+    create: pickerCreateFor(
+      props.pickers?.createChannel,
+      props.pickers?.createCategory,
+    ),
   };
   const masterKey = findFeatureMasterKey(props.settingRows);
   const enabledByKey = new Map<string, boolean>(props.dependencyState ?? []);
@@ -6592,6 +6610,7 @@ ${renderFeatureSettingsCard({
   pickers: {
     categoryChannels: props.categoryChannels,
     voiceChannels: props.voiceChannels ?? [],
+    createCategory: props.createCategory,
   },
   returnTo: "/admin/voice-channels",
   csrfToken: props.csrfToken,

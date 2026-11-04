@@ -195,6 +195,9 @@ notices and the leaderboard role announcements) offers the Picker's create row, 
   error Callout *The channels can't be created* names why and Apply is disabled.
 - Two settings that type the same new name share one channel (a decision for the owner); one Panel row names both settings.
 - **Apply** creates the channels in one go, stores their ids, and removes them again if anything after it fails.
+- **Categories (#1664).** The three category settings (the managed voice category, the event channel category, the ticket channel category) offer *Create
+  new category: 'typed text'* the same way; the Review row reads *Create the category Support for Ticket channel category* with the category in capitals.
+  For the managed voice category the row adds "The lobby is created in it by the voice feature, not by this step." (a proposal for the owner).
 - Components: Picker (create row and help line), Panel, List, Callout `--err`, Mention. No new component.
 
 ## Event host

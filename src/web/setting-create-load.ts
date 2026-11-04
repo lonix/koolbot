@@ -5,7 +5,7 @@
 
 import type { Client } from "discord.js";
 import { canBotCreate, toPickerCreate } from "../services/bot-create-check.js";
-import { offersCreateChannel } from "./setting-create.js";
+import { offersCreateCategory, offersCreateChannel } from "./setting-create.js";
 import type { PickerCreate } from "./setting-pickers.js";
 
 /**
@@ -23,6 +23,23 @@ export async function loadCreateChannelAnswer(
     "channel",
     await canBotCreate(client, guildId, { kind: "channel" }),
     "text",
+  );
+}
+
+/**
+ * The page-wide answer for the category create row (#1664): the same check made
+ * for a category, asked once and only when a flagged category setting is on the
+ * page. Nothing when none is, or when the permissions could not be read.
+ */
+export async function loadCreateCategoryAnswer(
+  client: Client,
+  guildId: string,
+  keys: readonly string[],
+): Promise<PickerCreate | undefined> {
+  if (!keys.some(offersCreateCategory)) return undefined;
+  return toPickerCreate(
+    "category",
+    await canBotCreate(client, guildId, { kind: "category" }),
   );
 }
 

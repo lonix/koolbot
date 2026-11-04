@@ -125,3 +125,33 @@ describe("renderWizardConfirmPage, planned creations (#1661)", () => {
     expect(html).not.toContain("Nothing is created until you apply.");
   });
 });
+
+describe("the voice category's Review line (#1664)", () => {
+  it("adds the note under a category, and only when given", () => {
+    const withNote = renderCreateReview([
+      {
+        kind: "category",
+        name: "Gaming",
+        settingLabel: "Managed category",
+        note: "The lobby is created in it by the voice feature, not by this step.",
+      },
+    ]);
+    expect(plain(withNote)).toContain(
+      "Visible to everyone who can see the server. The lobby is created in it by the voice feature, not by this step.",
+    );
+    expect(plain(renderCreateReview([category]))).not.toContain("lobby");
+  });
+
+  it("escapes the note", () => {
+    const html = renderCreateReview([
+      {
+        kind: "category",
+        name: "x",
+        settingLabel: "y",
+        note: "<b>hi</b>",
+      },
+    ]);
+    expect(html).not.toContain("<b>hi</b>");
+    expect(html).toContain("&lt;b&gt;hi&lt;/b&gt;");
+  });
+});
