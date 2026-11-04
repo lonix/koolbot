@@ -1,7 +1,8 @@
 name: UI Preview
 
 # Screenshots of the Web UI pages a PR changes (#1327, #1341), so a reviewer can
-# see the change without running the bot. A review aid, never a gate.
+# see the change without running the bot. A review aid, not a required check;
+# its last step does fail the run when an admin page scrolls sideways (#1739).
 #
 # Every page renderer is a pure function and the a11y fixtures hold one per
 # page, so `scripts/render-ui-preview.mjs` writes the pages to static HTML with
@@ -34,6 +35,7 @@ on:
       - __tests__/web/a11y-pages.ts
       - scripts/render-ui-preview.mjs
       - scripts/screenshot-ui-preview.mjs
+      - scripts/measure-ui-widths.mjs
       - scripts/ui-preview-plan.mjs
       - scripts/ui-preview-comment.mjs
       - .github/workflows/ui-preview.yml
@@ -119,6 +121,36 @@ jobs:
           cat ui-preview/summary.md >> "$GITHUB_STEP_SUMMARY"
           echo "body=$(base64 -w0 ui-preview/comment.md)" >> "$GITHUB_OUTPUT"
 
+      # The one rule a layout check can hold without depending on fonts or fixture
+      # data: no admin page scrolls sideways as a whole (#855, #1739). It measures
+      # the head render at two wide screens in Chrome and fails this step when a
+      # page does. A single table overflowing its own scroll container is only
+      # listed in the job summary (the full report is in the job log). It runs last so the screenshots, the artifact
+      # and the comment text exist even when it fails, and it is no required check.
+      - name: Check that no page scrolls sideways
+        run: |
+          status=0
+          node scripts/measure-ui-widths.mjs --html ui-preview/head --widths 1280,1920 --strict > ui-preview/widths.md || status=$?
+          {
+            echo "### Page width at 1280 and 1920 px"
+            echo
+            if [ "$status" -eq 0 ]; then
+              echo "No page scrolls sideways as a whole."
+            else
+              echo "A page scrolls sideways as a whole (rows marked \`page (documentElement)\`), or the check could not run."
+            fi
+            echo
+            echo "Overflow inside a table or panel is informational. Rows for a whole page come first; of the rest only the first 60 are shown. The job log has the full report."
+            echo
+            head -n 2 ui-preview/widths.md
+            grep -F 'page (documentElement)' ui-preview/widths.md || true
+            tail -n +3 ui-preview/widths.md | grep -vF 'page (documentElement)' | head -n 60 || true
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::group::Full width report"
+          cat ui-preview/widths.md
+          echo "::endgroup::"
+          exit "$status"
+
   # Same-repo PRs only: a fork's token cannot write, and this must NOT move to
   # `pull_request_target` to work around that. No checkout, no repository code:
   # it posts the text the read-only job built, as data. Never a blocking check.
@@ -127,8 +159,9 @@ jobs:
     needs: preview
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # A failed width check still leaves the comment text (it is written before that step).
     if: >-
-      !cancelled() && needs.preview.result == 'success' &&
+      !cancelled() && contains(fromJSON('["success","failure"]'), needs.preview.result) &&
       github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       # Create or update the sticky preview comment on the PR.

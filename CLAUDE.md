@@ -205,6 +205,8 @@ CI runs on PRs to `main` and pushes to `main`. The relevant workflows in `.githu
   stylesheet changed, every page changed or more than 12 pages changed through a shared change (#1351), or nothing. The
   `preview` job is read-only (fork PRs work, no `pull_request_target`) and builds the comment text with `ui-preview-comment.mjs`; a separate
   `comment` job (same-repo PRs only, `pull-requests: write` only, no checkout) posts it as the sticky `<!-- ui-preview -->` comment.
+  The last `preview` step runs `scripts/measure-ui-widths.mjs --strict` on the head render at 1280 and 1920px: a page that scrolls sideways as a whole
+  fails the run (#855, #1739); per-table overflow is only listed in the job summary.
   **Not a required check**; the path filter is only safe for that reason, so never add it to branch protection.
 - **`actionlint.yml`** / **`zizmor`** — lint + security-audit workflow YAML when `.github/workflows/**`
   changes.
