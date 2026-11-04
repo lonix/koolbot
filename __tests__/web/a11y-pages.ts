@@ -5912,6 +5912,129 @@ export function adminPages(): A11yPage[] {
       }),
     },
     {
+      // Set up but the message is not posted: the verdict asks for the post, and
+      // the rollout form offers to create the role (#1731).
+      name: "Rules acceptance (message not posted, rollout with a ticked channel)",
+      html: renderRulesPage({
+        ...COMMON,
+        enabled: true,
+        channelId: "100000000000000010",
+        roleId: "",
+        messagePosted: false,
+        messageId: "",
+        accepted: 0,
+        native: { screening: true, community: true },
+        intentMissing: false,
+        plan: null,
+        channels: [
+          {
+            id: "100000000000000010",
+            name: "rules",
+            type: ChannelType.GuildText,
+          },
+          {
+            id: "100000000000000012",
+            name: "general",
+            type: ChannelType.GuildText,
+          },
+        ],
+        roleName: null,
+        unavailable: "The server couldn't be read from Discord.",
+        options: {
+          createRole: true,
+          grantExisting: true,
+          gateChannelIds: ["100000000000000012"],
+        },
+        jobId: null,
+      }),
+    },
+    {
+      // The rollout when the server already matches and no channel can be read:
+      // the empty states of the Preview and of the channel list (#1731).
+      name: "Rules acceptance (rollout previewed, nothing to change, no channels)",
+      html: renderRulesPage({
+        ...COMMON,
+        enabled: true,
+        channelId: "100000000000000010",
+        roleId: "100000000000000011",
+        messagePosted: true,
+        messageId: "900000000000000003",
+        accepted: 1,
+        native: { screening: false, community: false },
+        intentMissing: false,
+        plan: {
+          plan: {
+            id: "plan-2",
+            guildId: "g",
+            plannedBy: "a",
+            operations: [],
+            warnings: [],
+            errors: [],
+          } as never,
+          extraErrors: [],
+          preview: { totalMembers: null, holders: null, lockedOut: null },
+          roleId: "100000000000000011",
+          roleName: "Accepted",
+          channels: [],
+          options: {
+            createRole: false,
+            grantExisting: false,
+            gateChannelIds: [],
+          },
+          membersUnavailable: true,
+        },
+        channels: [],
+        roleName: "Accepted",
+        unavailable: null,
+        options: {
+          createRole: false,
+          grantExisting: false,
+          gateChannelIds: [],
+        },
+        jobId: null,
+      } as never),
+    },
+    {
+      // A previewed rollout the engine refuses, while an apply job runs (#1731).
+      name: "Rules acceptance (rollout blocked, apply running)",
+      html: renderRulesPage({
+        ...COMMON,
+        enabled: true,
+        channelId: "100000000000000010",
+        roleId: "100000000000000011",
+        messagePosted: true,
+        messageId: "900000000000000003",
+        accepted: 12,
+        native: { screening: false, community: false },
+        intentMissing: false,
+        plan: {
+          plan: (CLAIMS_DESTRUCTIVE_PLAN as { plan: never }).plan,
+          extraErrors: [
+            { code: "admin-lockout", message: "Your own access would end." },
+          ],
+          preview: { totalMembers: 10, holders: 2, lockedOut: 1 },
+          roleId: "100000000000000011",
+          roleName: "Accepted",
+          channels: [],
+          options: {
+            createRole: false,
+            grantExisting: false,
+            gateChannelIds: [],
+          },
+          membersUnavailable: false,
+        },
+        channels: [],
+        roleName: "Accepted",
+        unavailable: null,
+        options: {
+          createRole: false,
+          grantExisting: false,
+          gateChannelIds: [],
+        },
+        jobId: "job-1",
+      } as never),
+    },
+    {
       // The Re-post cards with the button off and the reason shown (#1428).
       name: "Quotes (header switched off, re-post blocked)",
       html: renderQuotesPage({
