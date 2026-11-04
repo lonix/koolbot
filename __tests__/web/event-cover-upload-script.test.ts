@@ -15,6 +15,7 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { EVENT_COVER_UPLOAD_SCRIPT } from "../../src/web/event-cover-upload.js";
 import { renderEventEditBody } from "../../src/web/event-edit-view.js";
+import { renderEventsPage } from "../../src/web/admin-views.js";
 
 type Reply = { type: string; text: string; reload?: string };
 
@@ -154,5 +155,50 @@ describe("cover upload script", () => {
     const { remove } = mount(true);
     expect(submit(remove as HTMLFormElement)).toBe(true);
     expect(confirmFn).not.toHaveBeenCalled();
+  });
+});
+
+describe("cover upload script on the admin Events page", () => {
+  it("shows a rejected upload's message in the row's own message line", async () => {
+    document.body.innerHTML = renderEventsPage({
+      csrfToken: "tok",
+      remainingMs: 60_000,
+      enabled: true,
+      categoryConfigured: true,
+      announcementConfigured: true,
+      timezone: "UTC",
+      settingRows: [],
+      rows: [
+        {
+          id: "e1",
+          title: "Quiz",
+          when: "2099-06-01 20:00",
+          state: "scheduled",
+          channelId: null,
+          cover: { kind: "editable", hasCover: false, series: false },
+        },
+      ],
+    });
+    document.querySelectorAll("script").forEach((el) => el.remove());
+    const upload = document.querySelector(
+      "form[data-cover-upload]",
+    ) as HTMLFormElement;
+    const file = upload.querySelector("input[type=file]") as HTMLInputElement;
+    Object.defineProperty(file, "files", {
+      value: [{ size: 10, name: "a.png" }],
+      configurable: true,
+    });
+    new Function("window", "fetch", "document", EVENT_COVER_UPLOAD_SCRIPT)(
+      { confirm: confirmFn, location: { assign } },
+      fetchFn,
+      document,
+    );
+    reply({ type: "err", text: "Cover image rejected: not an image" });
+    submit(upload);
+    await settle();
+    expect(upload.querySelector("[data-cover-msg]")?.textContent).toBe(
+      "Cover image rejected: not an image",
+    );
+    expect(assign).not.toHaveBeenCalled();
   });
 });

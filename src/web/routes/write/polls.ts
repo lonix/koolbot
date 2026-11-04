@@ -34,6 +34,13 @@ import {
   type FormValues,
 } from "../../form-errors.js";
 import {
+  CREATE_NOT_OFFERED_MESSAGE,
+  formChannelNote,
+  isCreateValue,
+  readPostedChannel,
+} from "../../form-channel-create.js";
+import { createPendingChannel } from "./form-channel.js";
+import {
   POLL_ITEM_CREATE_FORM,
   POLL_ANSWER_MAX,
   POLL_SCHEDULE_CREATE_FORM,
@@ -66,19 +73,34 @@ async function isGone(exists: () => Promise<boolean>): Promise<boolean> {
 export function checkPollScheduleForm(req: Req): {
   errors: FormErrors;
   values: FormValues;
+  /** The posted channel id; empty while the form asks for a new channel. */
   channelId: string;
+  /** The name typed in the Picker's create row, to be created once the rest passed (#1665). */
+  pendingChannel: string | null;
   cron: string;
   duration: number;
   pingRoleId: string;
 } {
-  const channelId = getString(req, "channelId");
+  // The create value is read before the channel is used as an id (#1665).
+  const postedChannel = getString(req, "channelId");
+  const channelRead = readPostedChannel(postedChannel);
+  const channelId = channelRead.kind === "id" ? channelRead.id : "";
   const cronField = readCronField(req, "cron");
   const cron = normalizeCron(cronField.raw);
   const durationRaw = getString(req, "durationHours");
   const pingRoleId = getString(req, "pingRoleId");
 
   const errors: FormErrors = {};
-  if (!channelId) addFieldError(errors, "channelId", "Pick a channel.");
+  if (channelRead.kind === "refused") {
+    addFieldError(errors, "channelId", channelRead.error);
+  } else if (!channelId && channelRead.kind === "id") {
+    addFieldError(errors, "channelId", "Pick a channel.");
+  }
+  // The ping role is a plain select of existing roles: a `create:` value is not
+  // an id and must never be stored as one (#1665).
+  if (isCreateValue(pingRoleId)) {
+    addFieldError(errors, "pingRoleId", CREATE_NOT_OFFERED_MESSAGE);
+  }
   if (cronField.problem) {
     addFieldError(errors, "cron", cronField.problem);
   } else if (!cron) {
@@ -107,12 +129,14 @@ export function checkPollScheduleForm(req: Req): {
   return {
     errors,
     values: {
-      channelId,
+      // As posted, so a refused form draws a pending creation again.
+      channelId: postedChannel,
       cron: cronField.raw,
       durationHours: getRawString(req, "durationHours"),
       pingRoleId,
     },
     channelId,
+    pendingChannel: channelRead.kind === "create" ? channelRead.name : null,
     cron,
     duration,
     pingRoleId,
@@ -210,7 +234,23 @@ export function createPollsRouter(client: Client): Router {
       ) {
         return;
       }
-      const { channelId, cron, duration, pingRoleId } = form;
+      const { cron, duration, pingRoleId } = form;
+      // A pending channel is created last, after every other field passed, and
+      // the schedule is stored only once the channel exists (#1665).
+      const made = await createPendingChannel(
+        client,
+        req,
+        res,
+        PAGE,
+        POLL_SCHEDULE_CREATE_FORM,
+        "poll-schedule.create",
+        session,
+        form,
+      );
+      if (made === null) return;
+      const { channelId, channel } = made;
+      const note = formChannelNote(channel);
+      const channelAudit = channel ? { channel } : {};
 
       const service = PollService.getInstance(client);
       try {
@@ -231,24 +271,25 @@ export function createPollsRouter(client: Client): Router {
             cron,
             durationHours: duration,
             pingRoleId: pingRoleId || null,
+            ...channelAudit,
           },
           result: "success",
         });
         flashRedirect(res, "/admin/polls", {
           type: "ok",
-          text: `Created poll schedule ${schedule._id}.`,
+          text: `Created poll schedule ${schedule._id}.${note}`,
         });
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
         await recordAudit(session, {
           action: "poll-schedule.create",
-          details: { channelId, cron },
+          details: { channelId, cron, ...channelAudit },
           result: "failure",
           errorMessage: text,
         });
         flashRedirect(res, "/admin/polls", {
           type: "err",
-          text: `Failed to create schedule: ${text}`,
+          text: `Failed to create schedule: ${text}${note}`,
         });
       }
     }),
@@ -285,7 +326,53 @@ export function createPollsRouter(client: Client): Router {
       ) {
         return;
       }
-      const { channelId, cron, duration, pingRoleId } = form;
+      const { cron, duration, pingRoleId } = form;
+      // A channel is created only for a schedule that is confirmed to exist in
+      // this guild: a row deleted in another tab leaves no channel behind, and
+      // a failed lookup is a retryable refusal, not a reason to create (#1665).
+      if (form.pendingChannel !== null) {
+        let exists: boolean;
+        try {
+          const current = await PollService.getInstance(client).getSchedule(id);
+          exists = !!current && current.guildId === session.guildId;
+        } catch (err) {
+          logger.warn(
+            "Poll schedule lookup before a channel create failed",
+            err,
+          );
+          await refuseForm(req, res, {
+            page: PAGE,
+            formId: pollScheduleEditForm(id),
+            errors: {
+              channelId:
+                "KoolBot couldn't check the schedule, so no channel was created. Try again.",
+            },
+            values: form.values,
+          });
+          return;
+        }
+        if (!exists) {
+          flashRedirect(res, PAGE, {
+            type: "err",
+            text: `Schedule ${id} not found.`,
+          });
+          return;
+        }
+      }
+      const made = await createPendingChannel(
+        client,
+        req,
+        res,
+        PAGE,
+        pollScheduleEditForm(id),
+        "poll-schedule.edit",
+        session,
+        form,
+      );
+      if (made === null) return;
+      const { channelId, channel } = made;
+      const note = formChannelNote(channel);
+      const channelAudit = channel ? { channel } : {};
 
       const service = PollService.getInstance(client);
       try {
@@ -303,12 +390,13 @@ export function createPollsRouter(client: Client): Router {
           await recordAudit(session, {
             action: "poll-schedule.edit",
             targetId: id,
+            details: { channelId, ...channelAudit },
             result: "failure",
             errorMessage: "not found or wrong guild",
           });
           flashRedirect(res, "/admin/polls", {
             type: "err",
-            text: `Schedule ${id} not found.`,
+            text: `Schedule ${id} not found.${note}`,
           });
           return;
         }
@@ -320,25 +408,26 @@ export function createPollsRouter(client: Client): Router {
             cron,
             durationHours: duration,
             pingRoleId: pingRoleId || null,
+            ...channelAudit,
           },
           result: "success",
         });
         flashRedirect(res, "/admin/polls", {
           type: "ok",
-          text: `Updated poll schedule ${id}.`,
+          text: `Updated poll schedule ${id}.${note}`,
         });
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
         await recordAudit(session, {
           action: "poll-schedule.edit",
           targetId: id,
-          details: { channelId, cron },
+          details: { channelId, cron, ...channelAudit },
           result: "failure",
           errorMessage: text,
         });
         flashRedirect(res, "/admin/polls", {
           type: "err",
-          text: `Failed to update schedule ${id}: ${text}`,
+          text: `Failed to update schedule ${id}: ${text}${note}`,
         });
       }
     }),

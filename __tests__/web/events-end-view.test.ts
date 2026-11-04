@@ -43,7 +43,7 @@ describe("renderEventsPage: End now (#1193)", () => {
     expect(form).toContain(
       `<input type="checkbox" name="${END_CONFIRM_FIELD}" value="1" required>`,
     );
-    expect(html).toContain('<details class="end-now">');
+    expect(html).toContain('<details class="kb-disclosure" data-end-now>');
     // No pull-back option, ever (#1441).
     expect(form).not.toContain("pullBack");
   });

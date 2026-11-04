@@ -59,3 +59,14 @@ export function planned(
     ...over,
   };
 }
+
+/** A plan with a blocking error: it is shown, and cannot be applied. */
+export function blockedPlanned(): EventAdoptionPlan {
+  const p = planned();
+  p.plan.errors.push({
+    code: "events-disabled",
+    message:
+      "The Events feature is off. Turn on events.enabled in Settings first: adopted events are run by it.",
+  });
+  return p;
+}
