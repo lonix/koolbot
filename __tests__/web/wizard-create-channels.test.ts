@@ -928,6 +928,63 @@ describe("applying planned creations (#1662)", () => {
   });
 });
 
+describe("a failed create with a very long error and many stuck channels (#1662)", () => {
+  it("keeps the outcome sentence, the first ids with 'and N more' and the recovery instruction; only the cause is shortened", async () => {
+    const features = [
+      "quotes",
+      "notices",
+      "lfg",
+      "birthdays",
+      "welcome",
+      "rules",
+    ];
+    const keys = [
+      "quotes.channel_id",
+      "notices.channel_id",
+      "lfg.channel_id",
+      "birthdays.channel_id",
+      "welcome.channel_id",
+      "rules.channel_id",
+    ];
+    start(features);
+    keys.forEach((k, i) =>
+      wizard().setCreation(session.discordUserId, session.guildId, k, {
+        name: `chan-${i}`,
+        kind: "text",
+      }),
+    );
+    const html = await (await harness.get("/wizard?step=confirm")).text();
+    const planId = planIdOf(html);
+    expect(planId).not.toBe("");
+    // Five channels are made, the sixth fails with a huge error, and none can be removed.
+    let calls = 0;
+    mockPost.mockImplementation(async (_r: string, o: any) => {
+      calls += 1;
+      if (calls === 6) throw new Error("cause ".repeat(300));
+      return { id: `1000000000000001${calls}0`, name: o.body.name };
+    });
+    mockDelete.mockRejectedValue(new Error("Discord is down"));
+    const res = await apply(planId);
+    const msg = String(
+      parseFlashRedirect(res.headers.get("location") ?? "").msg,
+    );
+    expect(msg.length).toBeLessThanOrEqual(500);
+    expect(
+      msg.startsWith("The settings were not applied. Discord refused: cause"),
+    ).toBe(true);
+    // Only the cause is cut, with an ellipsis, before the outcome sentence.
+    expect(msg).toMatch(/…\s+May still exist/);
+    // Newest first, two ids, then how many more.
+    expect(msg).toContain(
+      "May still exist (not removed or checked): 100000000000000150, 100000000000000140 and 3 more.",
+    );
+    expect(msg.endsWith("Check them in Discord before applying again.")).toBe(
+      true,
+    );
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+});
+
 describe("the flash keeps its tail (#1662)", () => {
   it("shortens only the head, never the tail, and stays within the flash limit", () => {
     const out = flashKeepingTail(

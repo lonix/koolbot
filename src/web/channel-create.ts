@@ -281,6 +281,12 @@ export type ChannelApplyResult =
       removed: string[];
       /** Channels this call created and could not delete: they still exist. */
       stuck: string[];
+      /**
+       * Why the failed create failed, without the account of the channels
+       * (`error` is this plus that). Set only for a failed create; a caller
+       * that wants to word the outcome itself shortens only this.
+       */
+      cause?: string;
     };
 
 /**
@@ -377,6 +383,7 @@ async function applyLocked(
         error: failureMessage(error, createdIds.length, removed, stuck),
         removed,
         stuck,
+        cause: failureCause(error, createdIds.length),
       };
     }
   }
@@ -415,18 +422,22 @@ export function unwrapWriteError(error: unknown): unknown {
  * retry. It never says "nothing was changed" or offers a retry while a
  * channel this call created still exists.
  */
+function failureCause(error: unknown, createdBefore: number): string {
+  const root = unwrapWriteError(error);
+  if (createdBefore === 0) return describeWriteFailure(root);
+  return root instanceof RateLimitError
+    ? "Discord is limiting changes right now, so the request to create the next channel was cancelled."
+    : describeWriteFailure(root);
+}
+
 function failureMessage(
   error: unknown,
   createdBefore: number,
   removed: readonly string[],
   stuck: readonly string[],
 ): string {
-  const root = unwrapWriteError(error);
-  if (createdBefore === 0) return describeWriteFailure(root);
-  const cause =
-    root instanceof RateLimitError
-      ? "Discord is limiting changes right now, so the request to create the next channel was cancelled."
-      : describeWriteFailure(root);
+  const cause = failureCause(error, createdBefore);
+  if (createdBefore === 0) return cause;
   if (stuck.length > 0) {
     return `${cause} These channels were created earlier in this request and could not be removed again, so they still exist: ${stuck.join(", ")}. Check them in Discord before trying again.`;
   }

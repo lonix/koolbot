@@ -268,7 +268,16 @@ export type WizardCreateApply =
        */
       cleanup: () => Promise<ChannelCleanup>;
     }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      /** The helper's whole message. */
+      error: string;
+      /** Only why a create failed; absent when no create was attempted (a refusal). */
+      cause?: string;
+      /** Channels this call created and removed again, and ones it could not remove. */
+      removed?: string[];
+      stuck?: string[];
+    };
 
 /** The ids a stored setting value names: the value itself, or the entries of a comma list or array. */
 function idsIn(value: unknown): string[] {
@@ -328,7 +337,15 @@ export async function applyWizardCreations(
       planned.entries,
       reviewedPlanId,
     );
-    if (!applied.ok) return { ok: false, error: applied.error };
+    if (!applied.ok) {
+      return {
+        ok: false,
+        error: applied.error,
+        cause: applied.cause,
+        removed: applied.removed,
+        stuck: applied.stuck,
+      };
+    }
     const channels: CreatedForSetting[] = [];
     planned.groups.forEach((group, i) => {
       const made = applied.channels[i];

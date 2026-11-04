@@ -1400,12 +1400,28 @@ export function createWizardRouter(client: Client): Router {
             result: "failure",
             errorMessage: made.error,
           });
-          // The helper says what happened to the channels; "nothing was
-          // applied" would not be true when one could not be removed again.
-          // The helper's account of the channels (with any ids) is kept whole.
+          // "Nothing was applied" would not be true when a channel could not
+          // be removed again, so the outcome is worded here from the helper's
+          // structured result. Only the cause (which can be long) is shortened
+          // to fit the flash; the outcome sentence, the first ids and the
+          // recovery instruction are kept whole.
+          const stuck = made.stuck ?? [];
+          const removed = made.removed ?? [];
+          if (stuck.length > 0 || removed.length > 0) {
+            logger.warn("wizard: channels after a failed create", {
+              removed,
+              stuck,
+            });
+          }
+          const outcome =
+            stuck.length > 0
+              ? ` May still exist (not removed or checked): ${idList(stuck)}. Check them in Discord before applying again.`
+              : removed.length > 0
+                ? ` The ${removed.length === 1 ? "channel" : "channels"} created for this apply ${removed.length === 1 ? "was" : "were"} removed again.`
+                : "";
           confirmFailure(
-            "The settings were not applied.",
-            ` ${made.error}${await undoAccess()}`,
+            `The settings were not applied. ${made.cause ?? made.error}`,
+            `${outcome}${await undoAccess()}`,
           );
           return;
         }
