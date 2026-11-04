@@ -1,4 +1,4 @@
-/* global Document, HTMLButtonElement, HTMLFormElement, HTMLInputElement */
+/* global Document, DocumentFragment, ParentNode, HTMLButtonElement, HTMLFormElement, HTMLInputElement */
 import { describe, it, expect } from "@jest/globals";
 import { JSDOM } from "jsdom";
 import {
@@ -282,30 +282,52 @@ const render = (s: State): string =>
     ...s.props,
   });
 
-/** The page's own content: the `<main>` element, without the layout around it. */
-const mainOf = (html: string): string =>
-  /<main[^>]*>([\s\S]*)<\/main>/.exec(html)?.[1] ?? "";
-
-const stripScripts = (html: string): string =>
-  html.replace(/<script[\s\S]*?<\/script>/g, "");
-
 /** `is-done` and `is-not` are the state hooks of the Steps bar and the AccessCard list. */
 const STATE_HOOKS = new Set(["is-done", "is-not"]);
 
-const nonKbClasses = (html: string): string[] => [
-  ...[...html.matchAll(/class="([^"]*)"/g)]
-    .flatMap((m) => m[1].split(/\s+/))
-    .filter((t) => t && !t.startsWith("kb-") && !STATE_HOOKS.has(t)),
-  ...[...html.matchAll(/<table(?![^>]*class="kb-table")/g)].map((m) => m[0]),
-  ...[...html.matchAll(/ style="/g)].map((m) => m[0]),
-];
+/**
+ * Every class that is not a kb- class (bar the state hooks), every table that
+ * is not a `kb-table`, and every inline style, found on the parsed DOM.
+ */
+const nonKbClasses = (root: ParentNode): string[] => {
+  const found: string[] = [];
+  for (const el of root.querySelectorAll("*")) {
+    for (const t of el.classList) {
+      if (!t.startsWith("kb-") && !STATE_HOOKS.has(t)) found.push(t);
+    }
+    if (el.tagName === "TABLE" && !el.classList.contains("kb-table")) {
+      found.push("<table>");
+    }
+    if (el.hasAttribute("style")) found.push("style");
+  }
+  return found;
+};
 
-const docOf = (html: string): Document =>
-  new JSDOM(`<body>${stripScripts(mainOf(html))}</body>`).window.document;
+/**
+ * The page's own content: the page parsed with jsdom (which runs no script),
+ * reduced to its `<main>` element, with every `script` element removed.
+ */
+const docOf = (html: string): Document => {
+  const doc = new JSDOM(html).window.document;
+  const main = doc.querySelector("main");
+  if (!main) throw new Error("the page has no <main>");
+  for (const script of main.querySelectorAll("script")) script.remove();
+  doc.body.replaceChildren(main);
+  return doc;
+};
+
+describe("the class scan (#1752)", () => {
+  it("finds an old class, a bare table and an inline style, and ignores the state hooks", () => {
+    const old = JSDOM.fragment(
+      '<div class="card kb-panel is-done"><table style="x"><tr><td class="muted">a</td></tr></table></div>',
+    );
+    expect(nonKbClasses(old)).toEqual(["card", "<table>", "style", "muted"]);
+  });
+});
 
 describe("Review page markup (#1752)", () => {
   it.each(STATES)("$name: only kb- classes and no bare table", (s) => {
-    expect(nonKbClasses(stripScripts(mainOf(render(s))))).toEqual([]);
+    expect(nonKbClasses(docOf(render(s)))).toEqual([]);
   });
 
   it.each(STATES)(
@@ -500,14 +522,12 @@ describe("Review page markup (#1752)", () => {
 });
 
 describe("renderAccessReview (#1752)", () => {
-  const roleBlock = (html: string): Document =>
-    new JSDOM(`<body><div class="kb-stack">${html}</div></body>`).window
-      .document;
+  const roleBlock = (html: string): DocumentFragment => JSDOM.fragment(html);
 
   it("draws Role access as a Panel with a scrolling DataTable", () => {
     const html = renderAccessReview([change("Moderator")], null, []);
-    expect(nonKbClasses(html)).toEqual([]);
     const doc = roleBlock(html);
+    expect(nonKbClasses(doc)).toEqual([]);
     const panel = doc.getElementById("wizard-access-review")!;
     expect(panel.tagName).toBe("SECTION");
     expect(panel.getAttribute("aria-labelledby")).toBe(
@@ -537,8 +557,8 @@ describe("renderAccessReview (#1752)", () => {
 
   it("draws the empty mapping as an EmptyState in a Panel", () => {
     const html = renderAccessReview([], null, []);
-    expect(nonKbClasses(html)).toEqual([]);
     const doc = roleBlock(html);
+    expect(nonKbClasses(doc)).toEqual([]);
     const panel = doc.getElementById("wizard-access-review")!;
     expect(panel.querySelector("table")).toBeNull();
     expect(panel.querySelector(".kb-empty__title")?.textContent).toBe(
@@ -571,7 +591,7 @@ describe("the Access step's action row (#1752)", () => {
     "is a kb-row of kb- buttons (options %j)",
     (o) => {
       const doc = docOf(page(o));
-      expect(nonKbClasses(stripScripts(mainOf(page(o))))).toEqual([]);
+      expect(nonKbClasses(doc)).toEqual([]);
       const row = doc.querySelector(
         "form[action='/admin/wizard/access'] .kb-row",
       )!;
