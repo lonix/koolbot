@@ -132,6 +132,14 @@ describe("renderChannelClaimsPage (#1022)", () => {
     expect(html).not.toContain("Apply plan");
   });
 
+  it("takes the wide column for the table, and keeps the reading column for a failed scan (#1736)", () => {
+    const main = (html: string) => /<main [^>]*>/.exec(html)?.[0] ?? "";
+    expect(main(renderChannelClaimsPage(empty))).toContain("kb-main--wide");
+    expect(
+      main(renderChannelClaimsPage({ ...empty, scan: null, error: "x" })),
+    ).not.toContain("kb-main--wide");
+  });
+
   it("only offers features that fit the channel kind, and sync only with a category", () => {
     const html = renderChannelClaimsPage(empty);
     const row = (id: string): string =>

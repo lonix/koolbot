@@ -537,6 +537,8 @@ ${props.jobId ? `${scriptTag(JOB_SCRIPT(props.jobId))}` : ""}
   return renderAdminPage({
     title: "Channel Claims",
     active: "/admin/adopt/claims",
+    // The claims table is the page; a failed scan is only a message, so it keeps the reading column (#1734).
+    wide: props.scan !== null,
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,

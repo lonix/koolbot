@@ -1194,6 +1194,145 @@ const NESTED_GROUPS: Array<{ category: string; rows: SettingRow[] }> = [
   },
 ];
 
+/**
+ * A server the size an admin really has for the Channel Claims page (#1736): four
+ * categories, twelve channels with names as long as Discord communities use,
+ * five groups and a dozen roles. Channel kinds follow `channelKindOf` (forum is
+ * "other", stage is "voice", announcement is "text"), and the webhook feeds channel 201. The small `claimsProps()` scan fits at any width;
+ * this one is what exposes a table whose controls have a minimum width.
+ */
+function realisticClaimsProps(): Parameters<typeof renderChannelClaimsPage>[0] {
+  const base = claimsProps();
+  const cat = (id: string, name: string, position: number) =>
+    scanChannel({
+      id,
+      name,
+      kind: "category",
+      typeName: "GuildCategory",
+      position,
+    });
+  const chan = (
+    id: string,
+    name: string,
+    parentId: string,
+    position: number,
+    over: Partial<Parameters<typeof scanChannel>[0]> = {},
+  ) =>
+    scanChannel({
+      id,
+      name,
+      parentId,
+      position,
+      syncedToParent: true,
+      ...over,
+    });
+  const roleNames = [
+    "Server owner",
+    "Community moderators",
+    "Event hosts and organisers",
+    "Counter-Strike 2 players",
+    "Valorant ranked grinders",
+    "Minecraft survival crew",
+    "Rocket League league night",
+    "Stream notifications",
+    "Verified members",
+    "Supporters and boosters",
+    "Late-night voice regulars",
+    "New here: say hello",
+  ];
+  const groupNames = [
+    "Admins",
+    "Moderators",
+    "Event hosts",
+    "Regular members",
+    "Verified newcomers",
+  ];
+  return {
+    ...base,
+    groups: groupNames.map((name, i) => ({
+      id: `g${i}`,
+      name,
+      roleId: `r${i + 1}`,
+      rank: 5 - i,
+      permissions: "0",
+      capabilities: [],
+      colour: null,
+      hoist: false,
+      createdByKoolbot: false,
+      gateOnly: false,
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+      roleName: roleNames[i] ?? name,
+      unlinked: false,
+      lostRoleId: null,
+      recreateRequestedAt: null,
+      syncPolicy: null,
+      driftSignature: null,
+    })) as never,
+    scan: {
+      ...(base.scan as object),
+      webhooks: {
+        known: true,
+        unavailable: null,
+        list: [
+          {
+            id: "w1",
+            name: "server-status",
+            channelId: "201",
+            kind: "incoming",
+          },
+        ],
+      },
+      roles: roleNames.map((name, i) => ({
+        id: `r${i + 1}`,
+        name,
+        position: 20 - i,
+        managed: i === 7,
+        isEveryone: false,
+        botId: null,
+        usedBy: [],
+      })),
+      channels: [
+        cat("100", "Counter-Strike 2 and tactical shooters", 0),
+        chan("101", "counter-strike-2-lobby-finder", "100", 1),
+        chan("102", "valorant-ranked-premier-scrims", "100", 2),
+        chan("103", "tactical-shooters-clips-and-highlights", "100", 3, {
+          kind: "other",
+          typeName: "GuildForum",
+          flags: { forum: true },
+        }),
+        cat("200", "Minecraft survival server", 4),
+        chan("201", "minecraft-server-status-and-whitelist", "200", 5, {
+          flags: { webhookFed: true },
+        }),
+        chan("202", "minecraft-build-showcase-screenshots", "200", 6),
+        chan("203", "Survival world voice (whitelisted)", "200", 7, {
+          kind: "voice",
+          typeName: "GuildVoice",
+        }),
+        cat("300", "Community events and announcements", 8),
+        chan("301", "weekly-community-game-night-signups", "300", 9),
+        chan("302", "town-hall-and-live-q-and-a-stage", "300", 10, {
+          kind: "voice",
+          typeName: "GuildStageVoice",
+          flags: { stage: true },
+        }),
+        chan("303", "server-news-and-release-announcements", "300", 11, {
+          kind: "text",
+          typeName: "GuildAnnouncement",
+          flags: { announcement: true },
+        }),
+        cat("400", "Off topic and lounge", 12),
+        chan("401", "off-topic-memes-and-random-chatter", "400", 13),
+        chan("402", "late-night-lounge-voice-chat", "400", 14, {
+          kind: "voice",
+          typeName: "GuildVoice",
+        }),
+        chan("403", "introductions-say-hello-to-the-community", "400", 15),
+      ],
+    } as never,
+  };
+}
+
 /** Props for the Channel Claims page; `over` swaps in a previewed plan. */
 function claimsProps(
   over: Partial<Parameters<typeof renderChannelClaimsPage>[0]> = {},
@@ -2033,6 +2172,12 @@ export function adminPages(): A11yPage[] {
       // webhook-fed channel: the Suggestions panel with both of its groups.
       name: "Channel claims",
       html: renderChannelClaimsPage(claimsProps()),
+    },
+    {
+      // A server of realistic size: four categories, long channel names and five
+      // groups. The table must fit the column with every Options open (#1736).
+      name: "Channel claims on a realistic server",
+      html: renderChannelClaimsPage(realisticClaimsProps()),
     },
     {
       // Nothing to suggest: no game-role category and no fed channel (#1730).
