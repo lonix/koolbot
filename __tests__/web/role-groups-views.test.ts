@@ -193,7 +193,7 @@ describe("renderRoleGroupsPage", () => {
     expect(html).not.toContain("/admin/role-groups/reorder");
   });
 
-  it("puts the row actions in a nowrap kb-actions cell (#1616)", () => {
+  it("puts the row actions in a kb-actions cell (#1616)", () => {
     const html = renderRoleGroupsPage(
       props({ groups: [row({ id: "a" }), row({ id: "b", name: "B" })] }),
     );
@@ -261,16 +261,14 @@ describe("renderRoleGroupsPage", () => {
     }
   });
 
-  it("keeps the actions on one line and the capability badges wrapping (#1616)", () => {
+  it("lets the row actions wrap, so the Actions column never outgrows its panel (#1737)", () => {
     const html = renderRoleGroupsPage(
       props({ groups: [row({ capabilities: ["admin", "staff"] })] }),
     );
-    // Actions: non-wrapping, end-justified. Capabilities: the wrapping row.
-    expect(html).toContain(
-      '<td class="kb-actions"><div class="kb-row kb-row--nowrap">',
-    );
+    // Actions and capabilities both wrap: a non-wrapping row of the disclosure and buttons was wider than the panel.
+    expect(html).toContain('<td class="kb-actions"><div class="kb-row">');
     expect(html).toMatch(/<td><span class="kb-row"><span class="kb-badge/);
-    expect(html).not.toContain('<td class="kb-actions"><div class="kb-row">');
+    expect(html).not.toContain("kb-row--nowrap");
   });
 
   it("lays the capability badges out as one wrapping row (#1616)", () => {

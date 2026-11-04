@@ -610,7 +610,7 @@ function renderGroups(props: RoleGroupsPageProps, csrf: string): string {
 <td>${roleCell(g)}${driftCell(g)}${g.unlinked || g.roleMissing ? relinkForm(g, csrf, props.roleOptions) : ""}</td>
 <td class="kb-num">${g.memberCount === null ? `<span class="kb-muted">?</span>` : g.memberCount}</td>
 <td>${caps}</td>
-<td class="kb-actions"><div class="kb-row kb-row--nowrap">${editForm(g, csrf, props.globalPolicy, props.refusedForm)}${deleteForm(g, csrf)}${deleteRoleLink(g)}</div></td>
+<td class="kb-actions"><div class="kb-row">${editForm(g, csrf, props.globalPolicy, props.refusedForm)}${deleteForm(g, csrf)}${deleteRoleLink(g)}</div></td>
 </tr>`;
     })
     .join("");
