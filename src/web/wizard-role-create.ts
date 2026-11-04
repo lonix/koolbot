@@ -349,8 +349,26 @@ export type WizardRoleApply =
       /** Only why a create failed; absent when none was attempted (a refusal). */
       cause?: string;
       removed?: string[];
+      /** Created, then kept: a role group or a saved setting points at them. */
+      kept?: string[];
       stuck?: string[];
     };
+
+/**
+ * The ids a role group or a stored setting points at, read fresh and bounded
+ * (each read goes through `readWithin`). Throws when either cannot be read.
+ * Call it inside the role lock.
+ */
+async function readReferenced(guildId: string): Promise<Set<string>> {
+  const [rows, groups] = await Promise.all([
+    readWithin(() => ConfigService.getInstance().getAll()),
+    readWithin(() => RoleGroupService.getInstance().list(guildId)),
+  ]);
+  return new Set([
+    ...rows.flatMap((r) => idsIn(r.value)),
+    ...groups.flatMap((g) => (g.roleId ? [g.roleId] : [])),
+  ]);
+}
 
 /**
  * Creates the planned roles in one go, for the plan Review showed. The
@@ -393,6 +411,8 @@ export async function applyWizardRoles(
           : null,
       reason: `KoolBot web UI, setup wizard, by ${actorId}`,
       signal,
+      // A partial failure keeps a created role something now points at.
+      referenced: (): Promise<Set<string>> => readReferenced(guildId),
     };
     const applied = await applyRolePlan(
       deps,
@@ -405,6 +425,7 @@ export async function applyWizardRoles(
         error: applied.error,
         cause: applied.cause,
         removed: applied.removed,
+        kept: applied.kept,
         stuck: applied.stuck,
       };
     }
@@ -429,14 +450,7 @@ export async function applyWizardRoles(
         const held = await withRoleLock(guildId, async () => {
           let referenced: Set<string>;
           try {
-            const [rows, groups] = await Promise.all([
-              readWithin(() => ConfigService.getInstance().getAll()),
-              readWithin(() => RoleGroupService.getInstance().list(guildId)),
-            ]);
-            referenced = new Set([
-              ...rows.flatMap((r) => idsIn(r.value)),
-              ...groups.flatMap((g) => (g.roleId ? [g.roleId] : [])),
-            ]);
+            referenced = await readReferenced(guildId);
           } catch (error) {
             logger.warn("wizard: role cleanup could not read", error);
             return everyStuck();

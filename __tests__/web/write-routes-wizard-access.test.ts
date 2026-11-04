@@ -142,7 +142,7 @@ type AccessSelection =
   import("../../src/services/wizard-access.js").AccessSelection;
 const { RoleGroupService } =
   await import("../../src/services/role-group-service.js");
-const { createWizardRouter } =
+const { createWizardRouter, fitRecovery } =
   await import("../../src/web/routes/write/wizard.js");
 const { reviewWizardCreations } =
   await import("../../src/web/wizard-create.js");
@@ -1706,6 +1706,128 @@ describe("roles created from the Access step's Picker (#1618)", () => {
       expect(flash.msg).not.toContain("removed again");
     });
 
+    it("keeps a created role that something saved a reference to while a later create was pending", async () => {
+      const A = { name: "Alpha", scopes: ["staff"] };
+      const B = { name: "Beta", scopes: ["host"] };
+      mockGetSession.mockReturnValue(
+        wizardState(access, ["quotes"], {}, [A, B]),
+      );
+      const shown = review(access, [A, B]);
+      let n = 0;
+      mockPost.mockImplementation(async (_route: unknown, opts: any) => {
+        n += 1;
+        if (n === 2) {
+          // Another admin maps the first role while this create is pending.
+          stored.push(
+            group({
+              id: "g-other",
+              name: "Other",
+              roleId: "40000000000000001",
+              capabilities: ["staff"],
+            }),
+          );
+          throw new Error("Missing Permissions");
+        }
+        const id = `4000000000000000${n}`;
+        roles.set(id, role(id, opts.body.name, 1));
+        return { id, name: opts.body.name, position: 1 };
+      });
+      const res = await harness.post("/wizard/apply", shown);
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(roles.has("40000000000000001")).toBe(true);
+      expect(flash.msg).toContain(
+        "Kept, because a role group or a saved setting points at it: 40000000000000001",
+      );
+      expect(flash.msg).not.toContain("removed again");
+      expect(flash.msg).not.toContain("Nothing was applied");
+      expect(createSpy).not.toHaveBeenCalled();
+    });
+
+    it("writes nothing and cleans the new role up when the role groups changed while it was created", async () => {
+      const picks = { ...none, staff: [MOD] };
+      mockGetSession.mockReturnValue(
+        wizardState(picks, ["quotes"], {}, [CREW]),
+      );
+      const shown = review(picks, [CREW]);
+      mockPost.mockImplementation(async (_route: unknown, opts: any) => {
+        // Another admin maps the Moderator role during the creation.
+        stored.push(
+          group({
+            id: "g-ext",
+            name: "Mods",
+            roleId: MOD,
+            capabilities: ["staff"],
+          }),
+        );
+        const id = "40000000000000001";
+        roles.set(id, role(id, opts.body.name, 1));
+        return { id, name: opts.body.name, position: 1 };
+      });
+      const res = await harness.post("/wizard/apply", shown);
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.msg).toContain("changed since you opened Review");
+      expect(flash.msg).toContain("created for this apply was removed again");
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(updateSpy).not.toHaveBeenCalled();
+      expect(mockApplyConfiguration).not.toHaveBeenCalled();
+      expect(roles.has("40000000000000001")).toBe(false);
+    });
+
+    it("writes what it validated when the session's picks change during the role creation", async () => {
+      const live = wizardState(access, ["quotes"], {}, [CREW]);
+      mockGetSession.mockReturnValue(live);
+      const shown = review(access, [CREW]);
+      mockPost.mockImplementation(async (_route: unknown, opts: any) => {
+        // Access saved in another tab while the role request is pending.
+        live.access = { admin: [ADMIN], staff: [MOD], host: [HOST] };
+        live.roleCreations = [];
+        const id = "40000000000000001";
+        roles.set(id, role(id, opts.body.name, 1));
+        return { id, name: opts.body.name, position: 1 };
+      });
+      const res = await harness.post("/wizard/apply", shown);
+      expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+      expect(createSpy).toHaveBeenCalledTimes(1);
+      expect(createSpy).toHaveBeenCalledWith(
+        GUILD,
+        expect.objectContaining({ name: "Crew", capabilities: ["staff"] }),
+      );
+    });
+
+    it("keeps ids and the recovery sentence within 500 characters when the mapping, a role and a channel are all left behind", async () => {
+      const channels = { "quotes.channel_id": { name: "wall", kind: "text" } };
+      const chReview = await reviewWizardCreations(client, GUILD, channels);
+      mockGetSession.mockReturnValue({
+        ...wizardState(access, ["quotes"], {}, [CREW]),
+        creations: channels,
+      });
+      const shown = review(access, [CREW]);
+      mockApplyConfiguration.mockResolvedValue({
+        success: false,
+        appliedKeys: [],
+        failedKey: "quotes.enabled",
+        errorMessage: "x".repeat(900),
+        rolledBackKeys: [],
+        revertFailedKeys: [],
+      });
+      removeSpy.mockResolvedValue(false); // the mapping cannot be undone
+      mockDelete.mockRejectedValue(new Error("Discord down")); // channel stuck
+      const res = await harness.post("/wizard/apply", {
+        ...shown,
+        channelPlanId: chReview.planId as string,
+      });
+      const flash = parseFlashRedirect(res.headers.get("location"));
+      expect(flash.msg.length).toBeLessThanOrEqual(500);
+      expect(flash.msg).toContain("40000000000000001"); // the kept role
+      expect(flash.msg).toContain("500000000000000001"); // the channel
+      expect(flash.msg).toContain("Check Role groups.");
+      expect(flash.msg).toContain(
+        "Check them in Discord before applying again.",
+      );
+      expect(flash.msg).toContain("…"); // only the cause was shortened
+    });
+
     describe("a request that closes while queued", () => {
       /** Post Apply, close the request after `closeAfterMs`, and wait for the server to notice. */
       async function postAndClose(
@@ -1930,5 +2052,33 @@ describe("a planned channel after the role mapping (#1662)", () => {
       errorMessage: CHANNEL_LOCK_BUSY_MESSAGE,
       details: { stage: "channels" },
     });
+  });
+});
+
+describe("fitRecovery (#1618)", () => {
+  const ids = (n: number, p: string): string[] =>
+    Array.from({ length: n }, (_, i) => `${p}${String(i).padStart(17, "0")}`);
+
+  it("keeps the recovery sentences whole when they leave room for the cause", () => {
+    const long = " The role mapping was undone too. Short.";
+    expect(fitRecovery(long, { groups: [], roles: [], channels: [] })).toBe(
+      long,
+    );
+  });
+
+  it("replaces them with one short sentence that still names what is left, when they do not fit", () => {
+    const long = " x".repeat(300);
+    const out = fitRecovery(long, {
+      groups: [`A very long role group name that goes on`, "g2", "g3"],
+      roles: ids(5, "4"),
+      channels: ids(4, "5"),
+    });
+    expect(out.length).toBeLessThanOrEqual(350);
+    expect(out).toContain("Left behind, check before applying again");
+    expect(out).toContain("and 1 more"); // role groups capped
+    expect(out).toContain("and 3 more"); // roles capped
+    expect(out).toContain("and 2 more"); // channels capped
+    expect(out).toContain(ids(5, "4")[0]);
+    expect(out).toContain("removed again");
   });
 });

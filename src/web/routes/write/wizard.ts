@@ -13,6 +13,7 @@ import { ConfigService } from "../../../services/config-service.js";
 import {
   WizardService,
   type WizardRoleCreation,
+  type WizardState,
 } from "../../../services/wizard-service.js";
 import { RoleGroupService } from "../../../services/role-group-service.js";
 import {
@@ -163,12 +164,56 @@ export function flashKeepingTail(head: string, tail: string): string {
   return `${head.slice(0, room).trimEnd()}…${tail}`;
 }
 
+/**
+ * The recovery sentences of a failed apply, kept whole whenever they fit with
+ * room left for the cause. When what the mapping rollback, the channel cleanup
+ * and the role cleanup left behind does not fit in the 500-character flash,
+ * they are replaced by ONE short sentence that still names what is left (each
+ * list capped with "and N more", full lists are in the log) and says to check
+ * it. Only the cause is ever shortened (`flashKeepingTail`).
+ */
+const MIN_CAUSE_ROOM = 150;
+export function fitRecovery(
+  long: string,
+  left: { groups: string[]; roles: string[]; channels: string[] },
+): string {
+  if (long.length <= FLASH_MAX - MIN_CAUSE_ROOM) return long;
+  const short = (v: string): string =>
+    v.length > 24 ? `${v.slice(0, 23)}…` : v;
+  const parts = [
+    left.groups.length > 0
+      ? `role groups ${idList(left.groups.map(short))}`
+      : "",
+    left.roles.length > 0 ? `roles ${idList(left.roles)}` : "",
+    left.channels.length > 0 ? `channels ${idList(left.channels)}` : "",
+  ].filter(Boolean);
+  if (parts.length === 0) return long.slice(0, FLASH_MAX - MIN_CAUSE_ROOM);
+  return ` Left behind, check before applying again: ${parts.join("; ")}. Anything else this apply created was removed again.`;
+}
+
 /** At most `MAX_IDS_SHOWN` ids, then "and N more", so the cleanup text stays short enough to protect. */
 const MAX_IDS_SHOWN = 2;
 export function idList(ids: readonly string[]): string {
   const shown = ids.slice(0, MAX_IDS_SHOWN).join(", ");
   const more = ids.length - MAX_IDS_SHOWN;
   return more > 0 ? `${shown} and ${more} more` : shown;
+}
+
+/**
+ * What one Apply reads from the wizard session, copied at its start. The
+ * session object is the live one: a save in another tab changes it while this
+ * Apply waits on a lock or on Discord, and an Apply must write only what its
+ * own checks (and the fingerprint Review posted) saw.
+ */
+function snapshotState(live: WizardState): WizardState {
+  return {
+    ...live,
+    selectedFeatures: [...live.selectedFeatures],
+    configuration: { ...live.configuration },
+    access: live.access ? globalThis.structuredClone(live.access) : undefined,
+    roleCreations: globalThis.structuredClone(live.roleCreations ?? []),
+    creations: globalThis.structuredClone(live.creations ?? {}),
+  };
 }
 
 export function createWizardRouter(client: Client): Router {
@@ -1012,14 +1057,15 @@ export function createWizardRouter(client: Client): Router {
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const wizard = WizardService.getInstance();
-      const state = wizard.getSession(session.discordUserId, session.guildId);
-      if (!state) {
+      const live = wizard.getSession(session.discordUserId, session.guildId);
+      if (!live) {
         flashRedirect(res, "/admin/wizard", {
           type: "warn",
           text: "Wizard session expired. Please start again.",
         });
         return;
       }
+      const state = snapshotState(live);
 
       // A step is checked when it is saved, but the wizard can stay open
       // while another admin links one of the chosen roles to a role group
@@ -1287,6 +1333,15 @@ export function createWizardRouter(client: Client): Router {
       // role groups map their ids; `undoRoles` removes them again.
       const plannedRoles = state.access ? (state.roleCreations ?? []) : [];
       let rolesMade: Extract<WizardRoleApply, { ok: true }> | null = null;
+      // What a failed apply left behind, for `fitRecovery`.
+      let leftGroups: string[] = [];
+      let leftRoles: string[] = [];
+      let leftChannels: string[] = [];
+      const leftover = (): {
+        groups: string[];
+        roles: string[];
+        channels: string[];
+      } => ({ groups: leftGroups, roles: leftRoles, channels: leftChannels });
       // What became of the roles this apply created, decided once however many
       // failure paths ask. Decided from a fresh read inside the role lock.
       let roleBack: Promise<{ note: string; leftover: boolean }> | null = null;
@@ -1305,6 +1360,7 @@ export function createWizardRouter(client: Client): Router {
             });
           }
           const many = (n: number): boolean => n !== 1;
+          leftRoles = [...back.kept, ...back.stuck];
           const note = [
             back.removed.length > 0
               ? ` The ${many(back.removed.length) ? "roles" : "role"} created for this apply ${many(back.removed.length) ? "were" : "was"} removed again.`
@@ -1426,7 +1482,8 @@ export function createWizardRouter(client: Client): Router {
         }
         // From here on writes are made. The role creation comes first; the
         // groups are then diffed again with the real ids standing where the
-        // placeholders were (not compared with the fingerprint again).
+        // placeholders were, from a re-read made after the creation (which is
+        // checked against the Review fingerprint again).
         let writeCtx = ctx;
         let writeChanges = changes;
         if (plannedRoles.length > 0) {
@@ -1452,29 +1509,83 @@ export function createWizardRouter(client: Client): Router {
               errorMessage: made.error,
             });
             const stuck = made.stuck ?? [];
+            const keptRoles = made.kept ?? [];
             const removed = made.removed ?? [];
-            const outcome =
+            leftRoles = [...keptRoles, ...stuck];
+            const outcome = [
+              removed.length > 0
+                ? ` The ${removed.length === 1 ? "role" : "roles"} created for this apply ${removed.length === 1 ? "was" : "were"} removed again.`
+                : "",
+              keptRoles.length > 0
+                ? ` Kept, because a role group or a saved setting points at ${keptRoles.length === 1 ? "it" : "them"}: ${idList(keptRoles)}.`
+                : "",
               stuck.length > 0
                 ? ` May still exist (not removed or checked): ${idList(stuck)}. Check them in Discord before applying again.`
-                : removed.length > 0
-                  ? ` The ${removed.length === 1 ? "role" : "roles"} created for this apply ${removed.length === 1 ? "was" : "were"} removed again.`
-                  : "";
+                : "",
+            ].join("");
             // A refusal (no create was tried) changed nothing; a failed create
             // may have left a role, so it does not say that.
             confirmFailure(
               `${made.cause ? "The settings were not applied." : "Nothing was applied."} ${made.cause ?? made.error}`,
-              outcome,
+              fitRecovery(outcome, leftover()),
             );
             return;
           }
           rolesMade = made;
+          // The role groups and the roles were read before the lock wait and
+          // the Discord requests. Read them again NOW, check the same things
+          // and compare the fingerprint Review showed, so a change made
+          // meanwhile (a capability another admin set, an admin promotion) is
+          // never overwritten, and a rollback never restores stale values.
+          const madeIds = new Set(made.created.map((c) => c.id));
+          let fresh: AccessContext | null = null;
+          let staleWhy: string | null = null;
+          try {
+            const again = await readAccess(session);
+            fresh = {
+              ...again,
+              roles: again.roles.filter((r) => !madeIds.has(r.id)),
+            };
+            const problemNow = validateSelection(fresh, state.access);
+            const fingerprintNow = accessFingerprint(
+              diffAccess(
+                fresh.groups,
+                contextWithNew(fresh, plannedRoles).roles,
+                selectionWithNew(state.access, plannedRoles),
+              ),
+            );
+            if (problemNow) staleWhy = problemNow;
+            else if (fingerprintNow !== shown) {
+              staleWhy =
+                "The role groups changed since you opened Review. Look at the updated list and apply again.";
+            }
+          } catch (err) {
+            logger.warn("wizard: apply could not re-read the access", err);
+            staleWhy =
+              "Discord or the role groups could not be read again, so nothing was written.";
+          }
+          if (staleWhy || !fresh) {
+            await recordAudit(session, {
+              action: "wizard.apply",
+              details: { stage: "access", reason: "changed-during-roles" },
+              result: "failure",
+              errorMessage: staleWhy ?? "unreadable",
+            });
+            const note = await undoRoles();
+            confirmFailure(
+              `The settings were not applied. ${staleWhy}`,
+              fitRecovery(note, leftover()),
+            );
+            return;
+          }
+          const writeBase = fresh;
           const byPlaceholder = new Map(
             made.created.map((c) => [c.placeholder, c.id]),
           );
           writeCtx = {
-            ...ctx,
+            ...writeBase,
             roles: [
-              ...ctx.roles,
+              ...writeBase.roles,
               ...made.created.map((c) => ({
                 id: c.id,
                 name: c.name,
@@ -1484,7 +1595,7 @@ export function createWizardRouter(client: Client): Router {
             ],
           };
           writeChanges = diffAccess(
-            ctx.groups,
+            writeBase.groups,
             writeCtx.roles,
             swapPlaceholders(
               selectionWithNew(state.access, plannedRoles),
@@ -1511,6 +1622,7 @@ export function createWizardRouter(client: Client): Router {
             });
             // The roles this apply created go too (a role a stuck group still
             // points at is kept and reported). Only the cause is shortened.
+            leftGroups = written.stuck;
             const roleNote = await undoRoles();
             // With roles made, "nothing was applied" may not be true (a role
             // can be kept or stuck), so that head is only for no roles.
@@ -1520,15 +1632,18 @@ export function createWizardRouter(client: Client): Router {
                 : written.stuck.length > 0
                   ? `Nothing else was applied. ${written.error}`
                   : `Nothing was applied. ${written.error}`,
-              `${
-                written.stuck.length > 0
-                  ? ` These could not be undone and are live: ${written.stuck.join(", ")}. Check Role groups.`
-                  : ` ${
-                      written.rolledBack > 0
-                        ? "The role groups written before it were undone."
-                        : "No role group was written."
-                    }`
-              }${roleNote}`,
+              fitRecovery(
+                `${
+                  written.stuck.length > 0
+                    ? ` These could not be undone and are live: ${idList(written.stuck)}. Check Role groups.`
+                    : ` ${
+                        written.rolledBack > 0
+                          ? "The role groups written before it were undone."
+                          : "No role group was written."
+                      }`
+                }${roleNote}`,
+                leftover(),
+              ),
             );
             return;
           }
@@ -1543,8 +1658,14 @@ export function createWizardRouter(client: Client): Router {
           accessGuildId,
           accessUndo,
         );
+        if (back.stuck.length > 0) {
+          leftGroups = back.stuck;
+          logger.warn("wizard: role groups left after a failed apply", {
+            stuck: back.stuck,
+          });
+        }
         return back.stuck.length > 0
-          ? ` The role mapping could not be fully undone and is live for: ${back.stuck.join(", ")}. Check Role groups.`
+          ? ` The role mapping could not be fully undone and is live for: ${idList(back.stuck)}. Check Role groups.`
           : " The role mapping was undone too.";
       };
       // The mapping first, then the roles it pointed at.
@@ -1600,9 +1721,11 @@ export function createWizardRouter(client: Client): Router {
               : removed.length > 0
                 ? ` The ${removed.length === 1 ? "channel" : "channels"} created for this apply ${removed.length === 1 ? "was" : "were"} removed again.`
                 : "";
+          leftChannels = stuck;
+          const undone = await undoAll();
           confirmFailure(
             `The settings were not applied. ${made.cause ?? made.error}`,
-            `${outcome}${await undoAll()}`,
+            fitRecovery(`${outcome}${undone}`, leftover()),
           );
           return;
         }
@@ -1619,6 +1742,7 @@ export function createWizardRouter(client: Client): Router {
               stuck: back.stuck,
             });
           }
+          leftChannels = [...back.kept, ...back.stuck];
           const list = idList;
           const note = [
             back.removed.length > 0
@@ -1649,6 +1773,7 @@ export function createWizardRouter(client: Client): Router {
           session.discordUserId,
           session.guildId,
           derived,
+          state.configuration,
         );
         await recordAudit(session, {
           action: "wizard.apply",
@@ -1727,7 +1852,10 @@ export function createWizardRouter(client: Client): Router {
         // channels' outcome and the role mapping's are kept whole.
         const failureMsg = flashKeepingTail(
           base,
-          channelBack.note + accessNote + rolesBack.note,
+          fitRecovery(
+            channelBack.note + accessNote + rolesBack.note,
+            leftover(),
+          ),
         );
         const qs = new globalThis.URLSearchParams({
           step: "confirm",
@@ -1754,7 +1882,7 @@ export function createWizardRouter(client: Client): Router {
         // apply: they go back to Review with the reason and can retry.
         confirmFailure(
           `The settings could not be applied. ${text}`,
-          `${channelNote}${accessNote}`,
+          fitRecovery(`${channelNote}${accessNote}`, leftover()),
         );
       }
     }),

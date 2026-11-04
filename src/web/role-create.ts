@@ -158,6 +158,15 @@ export interface RoleCreateDeps {
    */
   busyReason?: () => Promise<string | null>;
   /**
+   * The ids anything now points at (role groups, stored settings), read fresh.
+   * After a failed create, a role this call made that is in this set is KEPT
+   * and reported, not deleted: another save may have adopted it while a later
+   * create was pending. Read inside the lock, bounded. When it cannot be read,
+   * nothing is deleted and every created role is reported as possibly still
+   * there. Absent: every created role is removed.
+   */
+  referenced?: () => Promise<ReadonlySet<string>>;
+  /**
    * Abandons the apply while it still waits for the lock (a closed request).
    * An apply that has started is never cut off by it.
    */
@@ -180,6 +189,8 @@ export type RoleApplyResult =
       error: string;
       /** Roles this call created and deleted again. */
       removed: string[];
+      /** Roles this call created and kept, because something now points at them. */
+      kept?: string[];
       /** Roles this call created and could not delete: they still exist. */
       stuck: string[];
       /** Why the failed create failed, without the account of the roles. */
@@ -267,11 +278,12 @@ async function applyLocked(
         created: true,
       });
     } catch (error) {
-      const { removed, stuck } = await removeAgain(deps, createdIds);
+      const { removed, kept, stuck } = await cleanUp(deps, createdIds);
       return {
         ok: false,
-        error: failureMessage(error, createdIds.length, removed, stuck),
+        error: failureMessage(error, createdIds.length, removed, kept, stuck),
         removed,
+        kept,
         stuck,
         cause: failureCause(error, createdIds.length),
       };
@@ -292,14 +304,49 @@ function failureMessage(
   error: unknown,
   createdBefore: number,
   removed: readonly string[],
+  kept: readonly string[],
   stuck: readonly string[],
 ): string {
   const cause = failureCause(error, createdBefore);
   if (createdBefore === 0) return cause;
-  if (stuck.length > 0) {
-    return `${cause} These roles were created earlier in this request and could not be removed again, so they still exist: ${stuck.join(", ")}. Check them in Discord before trying again.`;
+  if (kept.length > 0 || stuck.length > 0) {
+    const keptText =
+      kept.length > 0
+        ? ` Kept, because a role group or a saved setting now points at ${kept.length === 1 ? "it" : "them"}: ${kept.join(", ")}.`
+        : "";
+    const stuckText =
+      stuck.length > 0
+        ? ` These roles were created earlier in this request and could not be removed again or checked, so they may still exist: ${stuck.join(", ")}. Check them in Discord before trying again.`
+        : "";
+    return `${cause}${keptText}${stuckText}`;
   }
   return `${cause} The ${removed.length === 1 ? "role" : "roles"} created earlier in this request ${removed.length === 1 ? "was" : "were"} removed again.`;
+}
+
+/**
+ * What a failed create does with the roles the same call made earlier: delete
+ * those nothing points at (`deps.referenced`), keep the rest.
+ */
+async function cleanUp(
+  deps: RoleCreateDeps,
+  ids: readonly string[],
+): Promise<{ removed: string[]; kept: string[]; stuck: string[] }> {
+  if (ids.length === 0 || !deps.referenced) {
+    return { ...(await removeAgain(deps, ids)), kept: [] };
+  }
+  let referenced: ReadonlySet<string>;
+  try {
+    referenced = await readWithin(() => deps.referenced!());
+  } catch (error) {
+    logger.warn("role create: could not read the references", error);
+    return { removed: [], kept: [], stuck: [...ids] };
+  }
+  const kept = ids.filter((id) => referenced.has(id));
+  const gone = await removeAgain(
+    deps,
+    ids.filter((id) => !referenced.has(id)),
+  );
+  return { ...gone, kept };
 }
 
 /**

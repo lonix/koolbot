@@ -192,6 +192,53 @@ describe("applyRolePlan", () => {
     ]);
   });
 
+  it("keeps a created role that something now points at, and deletes only the rest", async () => {
+    const { deps, post, del } = setup();
+    const entries = [{ name: "A" }, { name: "B" }, { name: "C" }];
+    const plan = planRoles(entries, live);
+    if (!plan.ok) throw new Error("plan");
+    post
+      .mockResolvedValueOnce({ id: "901", name: "A", position: 1 })
+      .mockResolvedValueOnce({ id: "902", name: "B", position: 1 })
+      .mockRejectedValueOnce(apiError());
+    const res = await applyRolePlan(
+      { ...deps, referenced: async () => new Set(["901"]) },
+      entries,
+      plan.planId,
+    );
+    expect(res).toMatchObject({
+      ok: false,
+      removed: ["902"],
+      kept: ["901"],
+      stuck: [],
+    });
+    expect(res.ok === false && res.error).toContain("Kept, because");
+    expect(del).toHaveBeenCalledTimes(1);
+    expect(del.mock.calls[0][0]).toBe(Routes.guildRole("1", "902"));
+  });
+
+  it("deletes nothing and names every created role when the references cannot be read", async () => {
+    const { deps, post, del } = setup();
+    const entries = [{ name: "A" }, { name: "B" }];
+    const plan = planRoles(entries, live);
+    if (!plan.ok) throw new Error("plan");
+    post
+      .mockResolvedValueOnce({ id: "901", name: "A", position: 1 })
+      .mockRejectedValueOnce(apiError());
+    const res = await applyRolePlan(
+      {
+        ...deps,
+        referenced: async () => {
+          throw new Error("db down");
+        },
+      },
+      entries,
+      plan.planId,
+    );
+    expect(res).toMatchObject({ ok: false, removed: [], stuck: ["901"] });
+    expect(del).not.toHaveBeenCalled();
+  });
+
   it("names a role it could not remove and never says nothing changed", async () => {
     const { deps, post, del } = setup();
     const entries = [{ name: "A" }, { name: "B" }];

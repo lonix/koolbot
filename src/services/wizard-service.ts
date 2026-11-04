@@ -398,6 +398,11 @@ export class WizardService {
     userId: string,
     guildId: string,
     derived: Record<string, unknown> = {},
+    /**
+     * The choices as the caller validated them (a copy taken at the start of
+     * its apply). Absent: the session's own, as they are now.
+     */
+    configuration?: WizardConfiguration,
   ): Promise<WizardApplyResult> {
     const state = this.getSession(userId, guildId);
     if (!state) {
@@ -416,7 +421,7 @@ export class WizardService {
     // dependents a confirmed cascade turns off, #1622). They are never saved
     // into the session, so a failed attempt leaves the choices as they were.
     const batch: Record<string, unknown> = {
-      ...state.configuration,
+      ...(configuration ?? state.configuration),
       ...derived,
     };
 

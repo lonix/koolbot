@@ -1646,6 +1646,12 @@ That fits the refusal of powerful roles as follows: the wizard still refuses a m
 wherever it did (the feature steps and Apply), and a role selected by name goes through those checks like any picked role; a role the wizard created
 has none of those bits, so there is nothing to refuse.
 
+Apply works from a copy of the wizard session taken at its start, so a save made in another tab while it runs changes nothing it writes. After the
+roles are created it reads the role groups and roles again, checks them and compares the Review fingerprint once more; if the mapping changed meanwhile
+nothing is written and the new roles are cleaned up as below. If a later role create fails, the roles made before it go through the same
+reference-aware cleanup (a role something now points at is kept and named). A flash that would not fit 500 characters shortens only the cause; the
+recovery sentences become one short sentence naming what is left (lists capped with "and N more", full lists in the log).
+
 If anything after the roles fails (a role group write, the channels, the settings), the role groups are put back first, and then each role this apply
 created is decided on its own, inside the role lock and from a fresh read of the role groups and the stored settings: one that is still pointed at is
 kept and named, the rest are removed again, and any that could not be removed or checked are named as possibly still there. The message keeps that
