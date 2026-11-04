@@ -465,6 +465,9 @@ const STYLE = [
   ".shell{display:flex;min-height:calc(100vh - var(--topbar-height))}",
   // The side nav is the shared kb-sidenav (kb.css, #1296): group headings, the folded "N turned off" list and the
   // count badge all come from there.
+  // Every scroll container below is also `position:relative`: a `position:absolute` visually hidden label
+  // is clipped only by a scroll container that is its containing block, and otherwise widens the whole
+  // page (#1735). `main.has-savebar` and `.card.card--savebar` (clip) inherit it from `main` and `.card`.
   // `min-width:0` lets the flex child shrink below its content width so a
   // wide table scrolls inside `main` / its card instead of forcing the whole
   // page to scroll sideways (WCAG 1.4.10 reflow, #855).
@@ -472,7 +475,7 @@ const STYLE = [
   // on `kb-main__inner` (#1734). A page whose main content is a table or a board passes `wide` to
   // `renderAdminPage`, which adds `kb-main--wide`: the same sum with `content-max-wide`. kb.css holds the class
   // and the text caps (descriptions, help text and callouts stay at `content-max`).
-  "main{flex:1;padding:1.5rem 2rem;max-width:calc(var(--content-max) + 2 * var(--space-8));min-width:0;overflow-x:auto}",
+  "main{flex:1;padding:1.5rem 2rem;max-width:calc(var(--content-max) + 2 * var(--space-8));min-width:0;overflow-x:auto;position:relative}",
   "main.kb-main--wide{max-width:calc(var(--content-max-wide) + 2 * var(--space-8))}",
   // Legacy text blocks keep their line length on a wide page too (#1734): the intro `.subtitle`, the `.notice` bar and a
   // `p.muted` paragraph on pages not yet on the kb- components. These class names belong to the old sheet, so the rule
@@ -485,20 +488,20 @@ const STYLE = [
   // sideways page scroll without creating a scroll container.
   "main.has-savebar{overflow-x:clip}",
   // A long unbroken value (a role name to retype) scrolls in its own block.
-  "main pre{overflow-x:auto}",
+  "main pre{overflow-x:auto;position:relative}",
   // The skip-link target itself shouldn't draw a ring around the whole column.
   "#main:focus-visible{outline:none}",
   "h1{margin:0 0 .25rem;font-size:1.5rem}",
   "h2{margin:1.5rem 0 .5rem;font-size:1.15rem;color:var(--text-secondary)}",
   ".subtitle{color:var(--muted);margin:0 0 1rem}",
-  ".card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin:0 0 1rem;overflow-x:auto}",
+  ".card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin:0 0 1rem;overflow-x:auto;position:relative}",
   // A card holding a sticky save bar (settings forms) must not be a scroll container either,
   // or the bar sticks inside the card and sits at the end of a long form.
   ".card.card--savebar{overflow-x:clip}",
   // The rows scroll sideways instead: `.kb-settings` is a sibling of the save bar, not an
   // ancestor, so scrolling here leaves the bar's sticky container alone. Wide pickers and
   // their reset buttons stay reachable on narrow screens.
-  ".kb-settings{overflow-x:auto}",
+  ".kb-settings{overflow-x:auto;position:relative}",
   ".card h2{margin-top:0}",
   "table{width:100%;border-collapse:collapse;font-size:.9rem}",
   "th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--border);vertical-align:top}",

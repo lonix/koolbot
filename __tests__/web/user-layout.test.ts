@@ -98,7 +98,9 @@ describe("renderUserPage accessibility (#855)", () => {
     expect(html).not.toContain("@media (max-width:760px)");
     expect(html).not.toContain("main{padding");
     // The reflow guarantee of #855 stays: wide content scrolls inside the column.
-    expect(html).toContain("#main{min-width:0;overflow-x:auto}");
+    expect(html).toContain(
+      "#main{min-width:0;overflow-x:auto;position:relative}",
+    );
     // The old cap sat on the padded (border-box) `main`: content was 64rem minus its two
     // `space-8` gutters. The cap on the unpadded inner div keeps that content width exactly.
     expect(html).toContain(
