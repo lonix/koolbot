@@ -2981,7 +2981,7 @@ describe("import keeps a stored value that fails its check (#1437)", () => {
     });
     const html = await res.text();
     expect(html).toContain("no change");
-    expect(html).not.toContain("tag tag-diff-change");
+    expect(html).not.toContain("kb-badge--warn");
   });
 
   it("previews a key whose stored value cannot be read as rejected", async () => {
