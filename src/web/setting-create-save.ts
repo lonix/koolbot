@@ -32,7 +32,7 @@ import { cancellableCall, createWriteRest } from "./channel-write-rest.js";
 
 /** One write-REST client per bot token, built when first needed. */
 const restByToken = new Map<string, REST>();
-function writeRestFor(token: string): REST {
+export function writeRestFor(token: string): REST {
   let rest = restByToken.get(token);
   if (!rest) {
     rest = createWriteRest(token);
@@ -134,7 +134,7 @@ function matchesOf(
   );
 }
 
-function resolveExisting(
+export function resolveExisting(
   pending: readonly PendingCreate[],
   live: readonly ManagedChannelView[],
 ): { ok: true; entries: ChannelPlanEntry[] } | { ok: false; error: string } {
@@ -152,7 +152,7 @@ function resolveExisting(
 }
 
 /** The ids matching each pending name, in order: what the entries were decided from. */
-function matchSignature(
+export function matchSignature(
   pending: readonly PendingCreate[],
   live: readonly ManagedChannelView[],
 ): string {

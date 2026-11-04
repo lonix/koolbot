@@ -100,10 +100,14 @@ export function firstLengthError(
  * Pure and exported so each wording branch — full rollback, keys left in
  * effect, reload failure — can be unit-tested without Express or Mongo.
  */
-export function wizardApplyFailureMessage(result: WizardApplyResult): string {
-  const reason = result.failedKey
+export function wizardApplyFailureReason(result: WizardApplyResult): string {
+  return result.failedKey
     ? `${result.failedKey} failed (${result.errorMessage ?? "unknown error"})`
     : (result.errorMessage ?? "unknown error");
+}
+
+export function wizardApplyFailureMessage(result: WizardApplyResult): string {
+  const reason = wizardApplyFailureReason(result);
   if (result.revertFailedKeys.length > 0) {
     const kept = `Wizard apply failed: ${reason}. Could not roll back ${result.revertFailedKeys.join(", ")} — these settings are saved`;
     // When the follow-up reload also failed, the persisted keys have NOT

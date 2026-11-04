@@ -1,6 +1,7 @@
 import { channelMention } from "./discord-labels.js";
 import { escapeHtml } from "./html.js";
 import { ChannelType } from "discord.js";
+import { toneIcon } from "./icons.js";
 
 /**
  * The Review entry for a channel or category the wizard will create (#1661).
@@ -10,8 +11,8 @@ import { ChannelType } from "discord.js";
  * Plain text only: nothing here uses markdown characters. The wording is a
  * PROPOSAL for the owner; it is not in `docs/design` until approved.
  *
- * Rendering only. The plan comes from the server helper (#1659) and the
- * wizard wiring is a separate issue.
+ * Rendering only. The plan comes from the server helper (#1659); the wizard
+ * wires it in `wizard-create.ts` (#1662).
  */
 
 /** One channel or category that Apply would create. */
@@ -77,4 +78,16 @@ export function renderCreateReview(
   </div>
   <footer class="kb-panel__foot"><p class="kb-help">Nothing is created until you apply. If applying fails, nothing it created is left behind.</p></footer>
 </section>`;
+}
+
+/**
+ * Why Apply is blocked for the planned creations (#1662): the bot cannot
+ * create, a name matches two channels, the server could not be read. An error
+ * Callout in the style of the dependency review's; empty when there is nothing
+ * to say. The wording is a PROPOSAL for the owner.
+ */
+export function renderCreateProblems(problems: readonly string[]): string {
+  if (problems.length === 0) return "";
+  const items = problems.map((p) => `<li>${escapeHtml(p)}</li>`).join("");
+  return `<div class="kb-callout kb-callout--err" role="alert" id="wizard-create-problems">${toneIcon("err")}<div class="kb-callout__body"><p class="kb-callout__title">The channels can't be created</p><ul>${items}</ul><p class="kb-callout__text">Nothing is changed until this is fixed. Go back to the step that plans the channel, or fix it in Discord and open Review again.</p></div></div>`;
 }

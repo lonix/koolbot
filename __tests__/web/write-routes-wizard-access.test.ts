@@ -19,6 +19,7 @@ import {
 } from "@jest/globals";
 import type { Client } from "discord.js";
 import {
+  TEST_CSRF_TOKEN,
   startAdminHarness,
   stubRequireSession,
   createTestSession,
@@ -54,6 +55,38 @@ jest.unstable_mockModule(
     },
   }),
 );
+
+// Channel creation (#1662): the permission check, the live channel list and
+// the Discord write client are faked; the planner and the helper are real.
+type CreateAnswer = { ok: true } | { ok: false; reason: string };
+let createAnswer: CreateAnswer = { ok: true };
+const mockCanBotCreate = jest.fn<(...a: unknown[]) => Promise<CreateAnswer>>();
+jest.unstable_mockModule("../../src/services/bot-create-check.js", () => ({
+  canBotCreate: mockCanBotCreate,
+  toPickerCreate: jest.fn(),
+}));
+const mockFetchViews = jest.fn<(...a: unknown[]) => Promise<unknown[]>>();
+jest.unstable_mockModule("../../src/web/channel-manager-data.js", () => ({
+  fetchChannelViews: mockFetchViews,
+  maxBitrateOf: () => 96000,
+  botCanManageChannels: async () => true,
+}));
+const mockPost = jest.fn<(...a: any[]) => Promise<any>>();
+const mockDelete = jest.fn<(...a: any[]) => Promise<any>>();
+jest.unstable_mockModule("../../src/web/channel-write-rest.js", () => ({
+  createWriteRest: () => ({ post: mockPost, delete: mockDelete }),
+  createFailFastRest: () => ({ post: mockPost, delete: mockDelete }),
+  rateLimitWaitMs: () => 0,
+  rateLimitMessage: () => "rate limited",
+  RATE_LIMIT_FAST_FAIL_MS: 20000,
+  WRITE_TIMEOUT_MS: 30000,
+  cancellableCall: async (
+    _m: unknown,
+    fn: (s: AbortSignal) => Promise<unknown>,
+  ) => fn(new AbortController().signal),
+  describeWriteFailure: (e: unknown) =>
+    e instanceof Error ? `Discord refused: ${e.message}` : "Discord refused.",
+}));
 
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: {
@@ -101,6 +134,10 @@ const { RoleGroupService } =
   await import("../../src/services/role-group-service.js");
 const { createWizardRouter } =
   await import("../../src/web/routes/write/wizard.js");
+const { reviewWizardCreations } =
+  await import("../../src/web/wizard-create.js");
+const { withChannelLock, CHANNEL_LOCK_BUSY_MESSAGE } =
+  await import("../../src/web/channel-write-lock.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
 const { requireAdminRoleMiddleware } = await import("../../src/web/session.js");
 
@@ -139,6 +176,7 @@ let rolesFetchError: Error | null;
 let botCanManageRoles = true;
 
 const client = {
+  token: "bot-token",
   user: { id: "bot" },
   guilds: {
     fetch: async (): Promise<unknown> => ({
@@ -1316,5 +1354,108 @@ describe("Create @Event host (#1365)", () => {
     const html = await (await harness.get("/wizard?step=access")).text();
     expect(html).not.toMatch(/<option[^>]*selected/);
     expect(html).toContain("waiting for its role");
+  });
+});
+
+describe("a planned channel after the role mapping (#1662)", () => {
+  const picks = { admin: [], staff: [MOD], host: [HOST] };
+  const creations = { "quotes.channel_id": { name: "wall", kind: "text" } };
+
+  async function stateWithChannels(): Promise<{
+    state: Record<string, unknown>;
+    fingerprint: string;
+    planId: string;
+  }> {
+    const review = await reviewWizardCreations(client, GUILD, creations);
+    expect(review.problems).toEqual([]);
+    return {
+      state: { ...wizardState(picks), creations },
+      fingerprint: accessFingerprint(
+        diffAccess(stored, [...roles.values()], picks),
+      ),
+      planId: review.planId as string,
+    };
+  }
+
+  beforeEach(() => {
+    createAnswer = { ok: true };
+    mockCanBotCreate.mockImplementation(async () => createAnswer);
+    mockFetchViews.mockImplementation(async () => []);
+    mockPost.mockReset();
+    mockDelete.mockReset();
+    mockDelete.mockResolvedValue({});
+    mockApplyConfiguration.mockResolvedValue(okConfig);
+  });
+
+  it("undoes the role mapping and stores no setting when creating the channel fails", async () => {
+    const { state, fingerprint, planId } = await stateWithChannels();
+    mockGetSession.mockReturnValue(state);
+    mockPost.mockRejectedValue(new Error("Missing Permissions"));
+    const res = await harness.post("/wizard/apply", {
+      accessFingerprint: fingerprint,
+      channelPlanId: planId,
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("The settings were not applied.");
+    expect(flash.msg).toContain("Missing Permissions");
+    expect(flash.msg).toContain("role mapping was undone");
+    // The mapping was written first (both groups), then put back.
+    expect(createSpy).toHaveBeenCalledTimes(2);
+    expect(removeSpy).toHaveBeenCalledTimes(2);
+    for (const call of createSpy.mock.results) {
+      const made = (await call.value) as { group: { id: string } };
+      expect(removeSpy).toHaveBeenCalledWith(GUILD, made.group.id);
+    }
+    expect(stored).toHaveLength(0);
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    expect(mockEndSession).not.toHaveBeenCalled();
+    expect(lastAuditFor("wizard.apply")).toMatchObject({
+      result: "failure",
+      details: { stage: "channels" },
+    });
+  });
+
+  it("undoes the role mapping and creates nothing when the browser leaves while the apply waits for the lock", async () => {
+    const { state, fingerprint, planId } = await stateWithChannels();
+    mockGetSession.mockReturnValue(state);
+    let release: () => void = () => undefined;
+    const holding = withChannelLock(
+      GUILD,
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    const gone = new AbortController();
+    const sent = fetch(`${harness.baseUrl}/admin/wizard/apply`, {
+      method: "POST",
+      redirect: "manual",
+      signal: gone.signal,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `koolbot_csrf=${encodeURIComponent(TEST_CSRF_TOKEN)}`,
+      },
+      body: new globalThis.URLSearchParams({
+        _csrf: TEST_CSRF_TOKEN,
+        accessFingerprint: fingerprint,
+        channelPlanId: planId,
+      }).toString(),
+    }).catch(() => null);
+    // The mapping is written, then the channel apply waits for the lock.
+    await new Promise((r) => setTimeout(r, 400));
+    gone.abort();
+    await sent;
+    await new Promise((r) => setTimeout(r, 100));
+    release();
+    await holding;
+    await new Promise((r) => setTimeout(r, 300));
+    expect(createSpy).toHaveBeenCalledTimes(2);
+    expect(removeSpy).toHaveBeenCalledTimes(2);
+    expect(stored).toHaveLength(0);
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockApplyConfiguration).not.toHaveBeenCalled();
+    expect(lastAuditFor("wizard.apply")).toMatchObject({
+      result: "failure",
+      errorMessage: CHANNEL_LOCK_BUSY_MESSAGE,
+      details: { stage: "channels" },
+    });
   });
 });
