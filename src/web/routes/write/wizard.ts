@@ -95,8 +95,13 @@ import {
   findGroupRoleReuseForSetting,
   guardedRoleIds,
   findPowerfulRoleForSetting,
-  truncateFlash,
+  flashKeepingTail,
+  idList,
 } from "./helpers.js";
+
+// Moved to helpers.ts so other routes keep a flash within its cap too; kept
+// exported here for the code and tests that import them from this module.
+export { flashKeepingTail, idList };
 import {
   planWizardDependencies,
   type WizardDependencyPlan,
@@ -160,19 +165,6 @@ function tickedFeatures(raw: unknown): string[] {
 const GAP_FEATURES = ["events", "moderation"] as const;
 
 /**
- * A flash that is cut to the mechanism's length (the text travels in the
- * redirect's query string, hence `FLASH_MAX`) without ever cutting `tail`.
- * Only `head` (the underlying error) is shortened, with an ellipsis, so what
- * became of the created channels, and their ids, always reaches the admin.
- */
-export function flashKeepingTail(head: string, tail: string): string {
-  if (head.length + tail.length <= FLASH_MAX) return head + tail;
-  const room = FLASH_MAX - tail.length - 1;
-  if (room <= 0) return truncateFlash(tail.trimStart());
-  return `${head.slice(0, room).trimEnd()}…${tail}`;
-}
-
-/**
  * The recovery sentences of a failed apply, kept whole whenever they fit with
  * room left for the cause. When what the mapping rollback, the channel cleanup
  * and the role cleanup left behind does not fit in the 500-character flash,
@@ -197,14 +189,6 @@ export function fitRecovery(
   ].filter(Boolean);
   if (parts.length === 0) return long.slice(0, FLASH_MAX - MIN_CAUSE_ROOM);
   return ` Left behind, check before applying again: ${parts.join("; ")}. Anything else this apply created was removed again.`;
-}
-
-/** At most `MAX_IDS_SHOWN` ids, then "and N more", so the cleanup text stays short enough to protect. */
-const MAX_IDS_SHOWN = 2;
-export function idList(ids: readonly string[]): string {
-  const shown = ids.slice(0, MAX_IDS_SHOWN).join(", ");
-  const more = ids.length - MAX_IDS_SHOWN;
-  return more > 0 ? `${shown} and ${more} more` : shown;
 }
 
 /**

@@ -1616,6 +1616,13 @@ waiting (after a refused save, or when a wizard step is opened again) is still d
   new category (any case) create ONE category and both point at it. A name that matches exactly one existing category (any case) selects it ("Used the
   existing category ..."); two or more categories with the name refuse the save; a name that appears on the server between the plan and the apply refuses it
   with "changed since Review" and nothing is selected.
+- **Command permissions.** A `create:<Name>` value posted to `/admin/permissions/set` is read before the role ids and group references, and is never stored
+  as posted. The save checks the bot permission (Manage Roles, only when a role has to be created), creates the role under the role lock with no Discord
+  permissions, then stores its id together with the other roles and the `group:` references. A name that matches an existing role (any case) selects it and
+  creates nothing; two roles with the name, a blank or over-long name, a missing permission or a refused create store nothing. When the save fails after
+  a create, the roles this request created are removed again unless something now points at them; the flash names any it kept or could not remove. The
+  audit entry (`permissions.set`) lists the created roles under `created`, and its `after` holds their ids. Each command's picker on the page offers the
+  create row when the bot has Manage Roles (one permission check per page load).
 - **Wizard.** The step records the name and the kind in `WizardState.creations`; Review plans from a fresh read and lists the category in _Channels and
   categories to create_ ("Create the category Support for Ticket channel category"); the settings table shows _📁 Name (will be created)_ or _(existing
   category)_. A text channel and a category with the same name are two entries. Apply keeps the order (role access, then channels and categories, then

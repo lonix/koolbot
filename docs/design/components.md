@@ -393,16 +393,17 @@ _WizardFeatureStep and Review_ and _Settings pages and forms_.
 - Voice channels: a voice setting never shows the row.
 - Log channels (the `core.*` ones, `moderation.raid.alert_channel_id`): a created channel has no permission overwrites, so everyone who can see the server could
   read a log in it. Making a log channel private is open (see _Still a proposal_).
-- Roles anywhere else: only the Access step offers the row, and no role with Discord permissions is ever created (a created role has none). Other role
-  fields list existing roles only, and what a posted `create:` value does there depends on the field:
+- Roles anywhere else: only the Access step and Command permissions offer the row, and no role with Discord permissions is ever created (a created role
+  has none). Other role fields list existing roles only, and what a posted `create:` value does there depends on the field:
   - Refused as a create value: the Polls _Role to ping_ field ("Pick one from the list; a new one cannot be created from here.") and every role setting saved
     through the Settings pages, the wizard steps or an import (the tickets staff role, the birthdays, rules and quarantine roles, the roles that delete
     quotes): "this setting cannot create a new one from here".
   - Refused because it is not a role: linking a role to a role group ("That role couldn't be read from Discord. Reload and try again."), binding a reaction
     role ("Role `create:Helpers` was not found in this server.") and a leaderboard tier ("Pick a role from the list."). There is no check for a create value
     there, only the check that the role exists.
-  - Not refused: Command permissions. A `create:Helpers` posted to it is stored as a role id (a crafted post only; the page's own Picker cannot send it).
-    This is a known gap, listed below.
+  - Handled, not refused: Command permissions. A `create:Helpers` posted to it creates the role first (no Discord permissions, under the role lock) and stores
+    its id with the other roles and groups; a name that matches an existing role selects it, and a save that fails afterwards removes the role again
+    (#1760). Every command's picker on that page offers the create row (one permission answer per page).
 - Anything the bot cannot create: with the permission missing there is no row (see the states below).
 - Without JavaScript there is no row. The native select is as before, and a form that is shown again after a refusal keeps a name already chosen to be
   created as a selected "(will be created)" option.
@@ -484,7 +485,7 @@ Undo is: choose another row (single), Backspace or the chip's remove button (mul
 - Creating log channels privately (staff only), so that the log channels can offer the row.
 - A parent category for a created channel, picked with the name.
 - Selecting, rather than refusing, a name another admin created while a save was waiting (#1714).
-- Known gap: Command permissions does not refuse a `create:` value posted to it (see _Not offered_).
+- Command permissions has no help line under its pickers for the create row (the Access step has one): the reason for a missing Manage Roles is not shown there.
 - Offering the row for other role settings (leaderboard tiers, the host and staff roles, the roles that delete quotes) and for Role groups.
 
 ### DiscordEmbed

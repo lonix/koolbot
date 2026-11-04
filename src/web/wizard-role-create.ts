@@ -60,6 +60,7 @@ import { readWithin, ChannelReadTimeoutError } from "./channel-write-lock.js";
 import { cancellableCall } from "./channel-write-rest.js";
 import {
   applyRolePlan,
+  type RoleCreateDeps,
   cleanRoleName,
   planRoles,
   removeCreatedRoles,
@@ -408,7 +409,7 @@ export type WizardRoleApply =
  * (each read goes through `readWithin`). Throws when either cannot be read.
  * Call it inside the role lock.
  */
-async function readReferenced(guildId: string): Promise<Set<string>> {
+export async function readReferenced(guildId: string): Promise<Set<string>> {
   const service = RoleGroupService.getInstance();
   // `featureRoleUses` is the list of every role a feature hands out or binds
   // (role-grants.ts, leaderboard tiers, reaction-role bindings), used as it is;
@@ -444,6 +445,86 @@ async function readReferenced(guildId: string): Promise<Set<string>> {
  * the same call had created. `signal` abandons the apply while it still waits
  * for the lock (a closed request).
  */
+/**
+ * The REST, read and reference dependencies `applyRolePlan` and
+ * `removeCreatedRoles` need, for one guild. `reason` is the audit-log reason
+ * Discord records. Shared by the wizard's Apply and the Command permissions
+ * save, so every role create has the same reads, bounds and cleanup.
+ */
+export function roleCreateDeps(
+  client: Client,
+  guild: { roles: { fetch: () => Promise<Map<string, RoleView>> } },
+  guildId: string,
+  reason: string,
+  signal?: AbortSignal,
+): RoleCreateDeps {
+  const manager = CommandManager.getInstance(client);
+  return {
+    guildId,
+    rest: writeRestFor(client.token as string),
+    call: <T>(
+      fn: (signal: AbortSignal) => Promise<T>,
+      opName: string,
+      retryOnTimeout: boolean,
+    ): Promise<T> => cancellableCall(manager, fn, opName, retryOnTimeout),
+    listRoles: async (): Promise<RoleView[]> =>
+      [...(await guild.roles.fetch()).values()].map((r) => ({
+        id: r.id,
+        name: r.name,
+      })),
+    busyReason: async (): Promise<string | null> =>
+      // Active only while it shows life: the adoption engine's own rule
+      // (`ADOPTION_STALE_AFTER_MS`, no heartbeat for that long means dead,
+      // not slow). It clears a dead one only when the next apply starts, so
+      // a crashed run must not block roles until then.
+      (await AdoptionSnapshot.exists({
+        guildId,
+        active: true,
+        heartbeatAt: { $gte: new Date(Date.now() - ADOPTION_STALE_AFTER_MS) },
+      }))
+        ? ADOPTION_BUSY
+        : null,
+    reason,
+    signal,
+    // A partial failure keeps a created role something now points at.
+    referenced: (): Promise<Set<string>> => readReferenced(guildId),
+  };
+}
+
+/**
+ * Removes the roles one request created once something after the creation
+ * failed: inside the role lock, from a fresh read of what points at them. A
+ * role that anything points at is kept and reported; a read that fails keeps
+ * every role and says so. No signal: a cleanup that has started is never cut
+ * short by a closed request.
+ */
+export async function cleanupCreatedRoles(
+  deps: Pick<RoleCreateDeps, "guildId" | "rest" | "call" | "reason">,
+  createdIds: readonly string[],
+): Promise<RoleCleanup> {
+  const everyStuck = (): RoleCleanup => ({
+    removed: [],
+    kept: [],
+    stuck: [...createdIds],
+  });
+  const held = await withRoleLock(deps.guildId, async () => {
+    let referenced: Set<string>;
+    try {
+      referenced = await readReferenced(deps.guildId);
+    } catch (error) {
+      logger.warn("role cleanup could not read", error);
+      return everyStuck();
+    }
+    const kept = createdIds.filter((id) => referenced.has(id));
+    const gone = await removeCreatedRoles(
+      deps,
+      createdIds.filter((id) => !referenced.has(id)),
+    );
+    return { removed: gone.removed, kept, stuck: gone.stuck };
+  });
+  return held.ok ? held.value : everyStuck();
+}
+
 export async function applyWizardRoles(
   client: Client,
   guildId: string,
@@ -458,37 +539,13 @@ export async function applyWizardRoles(
   if (!client.token) return { ok: false, error: NOT_SIGNED_IN };
   try {
     const guild = await readWithin(() => client.guilds.fetch(guildId));
-    const manager = CommandManager.getInstance(client);
-    const deps = {
+    const deps = roleCreateDeps(
+      client,
+      guild,
       guildId,
-      rest: writeRestFor(client.token),
-      call: <T>(
-        fn: (signal: AbortSignal) => Promise<T>,
-        opName: string,
-        retryOnTimeout: boolean,
-      ): Promise<T> => cancellableCall(manager, fn, opName, retryOnTimeout),
-      listRoles: async (): Promise<RoleView[]> =>
-        [...(await guild.roles.fetch()).values()].map((r) => ({
-          id: r.id,
-          name: r.name,
-        })),
-      busyReason: async (): Promise<string | null> =>
-        // Active only while it shows life: the adoption engine's own rule
-        // (`ADOPTION_STALE_AFTER_MS`, no heartbeat for that long means dead,
-        // not slow). It clears a dead one only when the next apply starts, so
-        // a crashed run must not block roles until then.
-        (await AdoptionSnapshot.exists({
-          guildId,
-          active: true,
-          heartbeatAt: { $gte: new Date(Date.now() - ADOPTION_STALE_AFTER_MS) },
-        }))
-          ? ADOPTION_BUSY
-          : null,
-      reason: `KoolBot web UI, setup wizard, by ${actorId}`,
+      `KoolBot web UI, setup wizard, by ${actorId}`,
       signal,
-      // A partial failure keeps a created role something now points at.
-      referenced: (): Promise<Set<string>> => readReferenced(guildId),
-    };
+    );
     const applied = await applyRolePlan(
       deps,
       creations.map((c) => ({ name: c.name })),
@@ -514,31 +571,8 @@ export async function applyWizardRoles(
     return {
       ok: true,
       created,
-      cleanup: async (): Promise<RoleCleanup> => {
-        const everyStuck = (): RoleCleanup => ({
-          removed: [],
-          kept: [],
-          stuck: [...createdIds],
-        });
-        // No signal: a cleanup that has started is never cut short by the
-        // closed request. The reads and the deletes sit inside the lock.
-        const held = await withRoleLock(guildId, async () => {
-          let referenced: Set<string>;
-          try {
-            referenced = await readReferenced(guildId);
-          } catch (error) {
-            logger.warn("wizard: role cleanup could not read", error);
-            return everyStuck();
-          }
-          const kept = createdIds.filter((id) => referenced.has(id));
-          const gone = await removeCreatedRoles(
-            deps,
-            createdIds.filter((id) => !referenced.has(id)),
-          );
-          return { removed: gone.removed, kept, stuck: gone.stuck };
-        });
-        return held.ok ? held.value : everyStuck();
-      },
+      cleanup: (): Promise<RoleCleanup> =>
+        cleanupCreatedRoles(deps, createdIds),
     };
   } catch (error) {
     logger.warn("wizard: creating roles failed", error);
