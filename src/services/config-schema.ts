@@ -840,6 +840,13 @@ export interface SettingMetadata {
    */
   createChannel?: boolean;
   /**
+   * The category twin of `createChannel` (#1664): the Settings pages and the
+   * wizard may offer "Create new category" on this `category` setting. A created
+   * category has no parent and no permission overwrites (#1659). Set it only on
+   * a `category` setting; ignored for any other type.
+   */
+  createCategory?: boolean;
+  /**
    * Hard dependencies: this key may only be enabled when every listed key
    * is also enabled (truthy). Used by write-time validation and the Settings
    * UI to block/grey a toggle until its requirements are met. Only declare
@@ -1355,6 +1362,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Discord category that contains the bot-managed voice channels (lobby + per-user spawns).",
     category: "voicechannels",
     type: "category",
+    createCategory: true,
   },
   "voicechannels.lobby.channel_id": {
     label: "Lobby channel",
@@ -2068,6 +2076,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Category under which temporary event voice channels are created. Required for channels to spin up.",
     category: "events",
     type: "category",
+    createCategory: true,
   },
   "events.announcement_channel_id": {
     label: "Event announcement channel",
@@ -2275,6 +2284,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Discord category new ticket channels are created under. Leave empty to create them at the top level of the server.",
     category: "tickets",
     type: "category",
+    createCategory: true,
   },
   "tickets.staff_role_id": {
     label: "Ticket staff role",

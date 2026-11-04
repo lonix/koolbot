@@ -680,3 +680,436 @@ describe("a create value is never stored as a setting value (defect on main)", (
     ).toEqual({ ok: true, value: "123456789012345678" });
   });
 });
+
+// ---------------------------------------------------------------------------
+// The category kind (#1664): voicechannels.category_id, events.category_id and
+// tickets.category_id create a category through the same save and helper.
+// ---------------------------------------------------------------------------
+
+const VOICE_CAT = "voicechannels.category_id";
+const EVENTS_CAT = "events.category_id";
+const TICKETS_CAT = "tickets.category_id";
+const EVENTS_CH = "events.announcement_channel_id";
+const CATEGORY_TYPE = 4;
+
+describe("a pending category saved from a section (#1664)", () => {
+  it("creates a category with no parent and no overwrites, stores its id and keeps the typed name", async () => {
+    const res = await save({
+      category: "voicechannels",
+      keys: [VOICE_CAT],
+      [`value_${VOICE_CAT}`]: "create:Gaming Voice",
+    });
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.type).toBe("ok");
+    expect(mockPost).toHaveBeenCalledTimes(1);
+    // The stored name is exactly what was typed (the Mention shows it in capitals).
+    expect(mockPost.mock.calls[0][1].body).toEqual({
+      name: "Gaming Voice",
+      type: CATEGORY_TYPE,
+    });
+    expect(body.created).toEqual([
+      { key: VOICE_CAT, id: "100000000000000100", name: "Gaming Voice" },
+    ]);
+    expect(body.text).toContain("Created category");
+    expect(body.text).toContain("Gaming Voice for Managed category");
+    expect(body.reload).toBeUndefined();
+    expect(setWrites()).toEqual([[VOICE_CAT, "100000000000000100"]]);
+    expect(lastAudit()).toMatchObject({
+      result: "success",
+      details: {
+        channels: [
+          {
+            key: VOICE_CAT,
+            id: "100000000000000100",
+            name: "Gaming Voice",
+            created: true,
+            kind: "category",
+          },
+        ],
+      },
+    });
+  });
+
+  it("works for the events and tickets categories too", async () => {
+    await save({
+      category: "events",
+      keys: [EVENTS_CAT],
+      [`value_${EVENTS_CAT}`]: "create:Events",
+    });
+    await save({
+      category: "tickets",
+      keys: [TICKETS_CAT],
+      [`value_${TICKETS_CAT}`]: "create:Support",
+    });
+    expect(mockPost.mock.calls.map((c) => c[1].body)).toEqual([
+      { name: "Events", type: CATEGORY_TYPE },
+      { name: "Support", type: CATEGORY_TYPE },
+    ]);
+    expect(setWrites()).toEqual([
+      [EVENTS_CAT, "100000000000000100"],
+      [TICKETS_CAT, "100000000000000101"],
+    ]);
+  });
+
+  it("asks the permission for a category, not for a channel", async () => {
+    await save({
+      category: "tickets",
+      keys: [TICKETS_CAT],
+      [`value_${TICKETS_CAT}`]: "create:Support",
+    });
+    expect(mockCanBotCreate).toHaveBeenCalledWith(client, expect.anything(), {
+      kind: "category",
+    });
+    expect(mockCanBotCreate).not.toHaveBeenCalledWith(
+      client,
+      expect.anything(),
+      { kind: "channel" },
+    );
+  });
+
+  it("creates ONE category when two settings type the same new name, and points both at it", async () => {
+    const res = await save({
+      category: "x",
+      keys: [VOICE_CAT, TICKETS_CAT],
+      [`value_${VOICE_CAT}`]: "create:Community",
+      [`value_${TICKETS_CAT}`]: "create:  community ",
+    });
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.type).toBe("ok");
+    expect(mockPost).toHaveBeenCalledTimes(1);
+    expect(setWrites()).toEqual(
+      expect.arrayContaining([
+        [VOICE_CAT, "100000000000000100"],
+        [TICKETS_CAT, "100000000000000100"],
+      ]),
+    );
+    expect(body.created).toHaveLength(2);
+  });
+
+  it("says so once in the flash, naming both settings, and the audit lists each setting", async () => {
+    const res = await save({
+      category: "x",
+      keys: [VOICE_CAT, TICKETS_CAT],
+      [`value_${VOICE_CAT}`]: "create:Community",
+      [`value_${TICKETS_CAT}`]: "create:community",
+    });
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.text).toContain(
+      "Created category 📁 Community for Managed category and Ticket channel category.",
+    );
+    expect(body.text).not.toContain("existing");
+    expect(
+      (lastAudit().details.channels as Array<{ key: string }>).map(
+        (c) => c.key,
+      ),
+    ).toEqual([VOICE_CAT, TICKETS_CAT]);
+  });
+
+  it("selects an existing category of that name, in any case, and says so", async () => {
+    live = [view("100000000000000050", { name: "Support", kind: "category" })];
+    const res = await save({
+      category: "tickets",
+      keys: [TICKETS_CAT],
+      [`value_${TICKETS_CAT}`]: "create:support",
+    });
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.text).toContain("Used the existing category");
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(setWrites()).toEqual([[TICKETS_CAT, "100000000000000050"]]);
+  });
+
+  it("does not take a text channel of the same name for the category", async () => {
+    live = [view("100000000000000050", { name: "support" })];
+    await save({
+      category: "tickets",
+      keys: [TICKETS_CAT],
+      [`value_${TICKETS_CAT}`]: "create:Support",
+    });
+    expect(mockPost).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses when two categories have the name, naming categories", async () => {
+    live = [
+      view("100000000000000050", { name: "Support", kind: "category" }),
+      view("100000000000000051", { name: "SUPPORT", kind: "category" }),
+    ];
+    const res = await save({
+      category: "tickets",
+      keys: [TICKETS_CAT],
+      [`value_${TICKETS_CAT}`]: "create:support",
+    });
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.type).toBe("err");
+    expect(body.invalidReasons[TICKETS_CAT]).toContain(
+      "More than one category",
+    );
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("refuses, creating nothing, when the name appeared after the plan (no silent select)", async () => {
+    mockFetchViews
+      .mockResolvedValueOnce([view("1", { name: "general" })])
+      .mockResolvedValue([
+        view("1", { name: "general" }),
+        view("2", { name: "Support", kind: "category" }),
+      ]);
+    const res = await save({
+      category: "tickets",
+      keys: [TICKETS_CAT],
+      [`value_${TICKETS_CAT}`]: "create:Support",
+    });
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.type).toBe("err");
+    expect(body.invalidReasons[TICKETS_CAT]).toContain("changed since Review");
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("refuses a blank or over-long category name without creating", async () => {
+    const blank = await save({
+      category: "tickets",
+      keys: [TICKETS_CAT],
+      [`value_${TICKETS_CAT}`]: "create:   ",
+    });
+    expect(((await blank.json()) as any).invalidReasons[TICKETS_CAT]).toBe(
+      "The name cannot be blank.",
+    );
+    const long = await save({
+      category: "tickets",
+      keys: [TICKETS_CAT],
+      [`value_${TICKETS_CAT}`]: `create:${"x".repeat(101)}`,
+    });
+    expect(((await long.json()) as any).invalidReasons[TICKETS_CAT]).toContain(
+      "at most 100",
+    );
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it("creates nothing when another value of the section is refused", async () => {
+    const res = await save({
+      category: "tickets",
+      keys: [TICKETS_CAT, "tickets.max_open_per_member"],
+      [`value_${TICKETS_CAT}`]: "create:Support",
+      "value_tickets.max_open_per_member": "not a number",
+    });
+    expect(((await res.json()) as any).type).toBe("err");
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+});
+
+describe("a category and a channel in one save (#1664)", () => {
+  it("creates both in one request and stores both ids", async () => {
+    const res = await save({
+      category: "events",
+      keys: [EVENTS_CAT, EVENTS_CH],
+      [`value_${EVENTS_CAT}`]: "create:Events",
+      [`value_${EVENTS_CH}`]: "create:event-news",
+    });
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.type).toBe("ok");
+    expect(mockPost.mock.calls.map((c) => c[1].body)).toEqual([
+      { name: "Events", type: CATEGORY_TYPE },
+      { name: "event-news", type: 0 },
+    ]);
+    expect(setWrites()).toEqual(
+      expect.arrayContaining([
+        [EVENTS_CAT, "100000000000000100"],
+        [EVENTS_CH, "100000000000000101"],
+      ]),
+    );
+  });
+
+  it("removes the category again when the channel after it fails, and stores nothing", async () => {
+    mockPost
+      .mockResolvedValueOnce({ id: "100000000000000200", name: "Events" })
+      .mockRejectedValueOnce(new Error("boom"));
+    const res = await save({
+      category: "events",
+      keys: [EVENTS_CAT, EVENTS_CH],
+      [`value_${EVENTS_CAT}`]: "create:Events",
+      [`value_${EVENTS_CH}`]: "create:event-news",
+    });
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.type).toBe("err");
+    expect(body.invalidKeys.sort()).toEqual([EVENTS_CAT, EVENTS_CH].sort());
+    expect(mockDelete).toHaveBeenCalledTimes(1);
+    expect(String(mockDelete.mock.calls[0][0])).toContain("100000000000000200");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("removes the channel again when the category after it fails", async () => {
+    mockPost
+      .mockResolvedValueOnce({ id: "100000000000000200", name: "event-news" })
+      .mockRejectedValueOnce(new Error("boom"));
+    const res = await save({
+      category: "events",
+      keys: [EVENTS_CH, EVENTS_CAT],
+      [`value_${EVENTS_CH}`]: "create:event-news",
+      [`value_${EVENTS_CAT}`]: "create:Events",
+    });
+    expect(((await res.json()) as any).type).toBe("err");
+    expect(mockDelete).toHaveBeenCalledTimes(1);
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  afterEach(() => {
+    mockCanBotCreate.mockImplementation(async () => can);
+  });
+
+  it("asks both permissions, and refuses with the category's help line when only the category is refused", async () => {
+    mockCanBotCreate.mockImplementation(async (_c: any, _g: any, t: any) =>
+      t.kind === "category"
+        ? { ok: false, reason: "The bot needs Manage Channels (category)." }
+        : { ok: true },
+    );
+    const res = await save({
+      category: "events",
+      keys: [EVENTS_CAT, EVENTS_CH],
+      [`value_${EVENTS_CAT}`]: "create:Events",
+      [`value_${EVENTS_CH}`]: "create:event-news",
+    });
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.invalidReasons[EVENTS_CAT]).toBe(
+      "The bot needs Manage Channels (category).",
+    );
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+});
+
+describe("no permission, and the server never trusts the page, for a category (#1664)", () => {
+  it("refuses with the help line when the bot cannot create", async () => {
+    can = { ok: false, reason: "The bot needs Manage Channels." };
+    const res = await save({
+      category: "tickets",
+      keys: [TICKETS_CAT],
+      [`value_${TICKETS_CAT}`]: "create:Support",
+    });
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.type).toBe("err");
+    expect(body.invalidReasons[TICKETS_CAT]).toBe(
+      "The bot needs Manage Channels.",
+    );
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("refuses, with a category sentence, when the permission cannot be read", async () => {
+    can = { ok: "unknown" };
+    const res = await save({
+      category: "tickets",
+      keys: [TICKETS_CAT],
+      [`value_${TICKETS_CAT}`]: "create:Support",
+    });
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.invalidReasons[TICKETS_CAT]).toContain("create categories");
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it("a text channel setting never takes a category kind, and a category setting never takes a text kind", async () => {
+    await save({
+      category: "x",
+      keys: [QUOTES, TICKETS_CAT],
+      [`value_${QUOTES}`]: "create:wall",
+      [`value_${TICKETS_CAT}`]: "create:Support",
+    });
+    const bodies = mockPost.mock.calls.map((c) => c[1].body);
+    expect(bodies).toEqual([
+      { name: "wall", type: 0 },
+      { name: "Support", type: CATEGORY_TYPE },
+    ]);
+  });
+
+  it("refuses a create value for a category key written as a comma list", async () => {
+    const res = await save({
+      category: "tickets",
+      keys: [TICKETS_CAT],
+      [`value_${TICKETS_CAT}`]: "123456789012345678,create:Support",
+    });
+    expect(((await res.json()) as any).type).toBe("err");
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("refuses a category create value on /settings/set", async () => {
+    const res = await harness.post("/settings/set", {
+      key: TICKETS_CAT,
+      value: "create:Support",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the browser leaves while the save waits for the channel lock", async () => {
+    const { withChannelLock } =
+      await import("../../src/web/channel-write-lock.js");
+    const { TEST_CSRF_TOKEN } = await import("./admin-harness.js");
+    let release: () => void = () => undefined;
+    const holding = withChannelLock(
+      session.guildId,
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    const gone = new AbortController();
+    const sent = fetch(`${harness.baseUrl}/admin/settings/save-section`, {
+      method: "POST",
+      redirect: "manual",
+      signal: gone.signal,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        accept: "application/json",
+        "x-requested-with": "fetch",
+        cookie: `koolbot_csrf=${encodeURIComponent(TEST_CSRF_TOKEN)}`,
+      },
+      body: new globalThis.URLSearchParams({
+        _csrf: TEST_CSRF_TOKEN,
+        category: "tickets",
+        keys: TICKETS_CAT,
+        [`value_${TICKETS_CAT}`]: "create:Support",
+      }).toString(),
+    }).catch(() => null);
+    await new Promise((r) => setTimeout(r, 400));
+    gone.abort();
+    await sent;
+    await new Promise((r) => setTimeout(r, 100));
+    release();
+    await holding;
+    await new Promise((r) => setTimeout(r, 200));
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+});
+
+describe("the category schema flag (#1664)", () => {
+  const flaggedCategories = Object.entries(settingsMetadata)
+    .filter(([, m]) => (m as { createCategory?: boolean }).createCategory)
+    .map(([k]) => k)
+    .sort();
+
+  it("is set on exactly the three category settings", () => {
+    expect(flaggedCategories).toEqual(
+      [VOICE_CAT, EVENTS_CAT, TICKETS_CAT].sort(),
+    );
+  });
+
+  it("is only on category settings, and never next to the text channel flag", () => {
+    for (const k of flaggedCategories) {
+      const m = settingsMetadata[k as keyof typeof settingsMetadata] as {
+        type: string;
+        createChannel?: boolean;
+      };
+      expect(m.type).toBe("category");
+      expect(m.createChannel).toBeUndefined();
+    }
+  });
+
+  it("every category setting in the schema is flagged, so none is forgotten", () => {
+    const all = Object.entries(settingsMetadata)
+      .filter(([, m]) => m.type === "category")
+      .map(([k]) => k)
+      .sort();
+    expect(all).toEqual(flaggedCategories);
+  });
+});

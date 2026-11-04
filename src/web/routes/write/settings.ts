@@ -57,7 +57,7 @@ import {
 } from "./helpers.js";
 import { parsePickerCreateValue } from "../../setting-pickers.js";
 import {
-  offersCreateChannel,
+  createKindOf,
   createdNote,
   type CreatedForKey,
   type PendingCreate,
@@ -551,16 +551,18 @@ export function createSettingsRouter(client: Client): Router {
         if (seen.has(key)) continue;
         seen.add(key);
         if (masterOff && key !== masterKey) continue;
-        // A pending creation (#1663) is read before anything else touches the
-        // posted value: only a flagged channel setting takes one, and it is
+        // A pending creation (#1663, #1664) is read before anything else touches the
+        // posted value: only a flagged channel or category setting takes one, and it is
         // created after every other check has passed. Any other key posting
         // `create:` falls through and is refused as the invalid id it is.
         const posted = body[settingValueFieldName(key)];
-        if (offersCreateChannel(key) && typeof posted === "string") {
+        const createKind = createKindOf(key);
+        if (createKind && typeof posted === "string") {
           const named = parsePickerCreateValue(posted);
           if (named) {
-            if (named.ok) pendingCreates.push({ key, name: named.name });
-            else rejected.push({ key, reason: named.error });
+            if (named.ok) {
+              pendingCreates.push({ key, name: named.name, kind: createKind });
+            } else rejected.push({ key, reason: named.error });
             continue;
           }
         }

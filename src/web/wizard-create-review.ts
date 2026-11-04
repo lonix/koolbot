@@ -29,6 +29,12 @@ export type PlannedCreation =
       kind: "category";
       name: string;
       settingLabel: string;
+      /**
+       * A sentence for the detail line (#1664), plain text. Set for the managed
+       * voice category: the lobby is made in it by the voice feature, not by
+       * this step. The wording is a PROPOSAL for the owner.
+       */
+      note?: string;
     };
 
 const ACCESS_EVERYONE = "Visible to everyone who can see the server";
@@ -49,7 +55,7 @@ function entry(c: PlannedCreation): string {
   const sentence = `Create the ${what} ${channelMention({ name: c.name, type })} for ${escapeHtml(c.settingLabel)}`;
   let detail: string;
   if (c.kind === "category") {
-    detail = `${ACCESS_EVERYONE}.`;
+    detail = `${ACCESS_EVERYONE}.${c.note ? ` ${escapeHtml(c.note)}` : ""}`;
   } else if (c.parent) {
     const parent = channelMention({
       name: c.parent.name,

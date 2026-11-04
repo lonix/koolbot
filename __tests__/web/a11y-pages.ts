@@ -1024,6 +1024,10 @@ const PICKERS = {
   roles: ROLES,
 };
 
+/** The help line `canBotCreate` gives for a category when Manage Channels is missing (#1664). */
+const CATEGORY_NOT_POSSIBLE =
+  "The bot needs Manage Channels to create a category. Give the bot's role Manage Channels in Server Settings, Roles; the Bot permissions page shows what is missing.";
+
 const FLASH = { type: "ok" as const, text: "Saved 3 settings." };
 
 /**
@@ -2451,6 +2455,55 @@ export function adminPages(): A11yPage[] {
         guildName: "Test Guild",
       }),
     },
+    ...[
+      {
+        name: "Settings (category pickers offering to create a category)",
+        current: "",
+        answer: { kind: "category" as const, ok: true },
+      },
+      {
+        name: "Settings (category pickers, a category to be created)",
+        current: "create:Gaming Voice",
+        answer: { kind: "category" as const, ok: true },
+      },
+      {
+        name: "Settings (category pickers, creating a category is not possible)",
+        current: "",
+        answer: {
+          kind: "category" as const,
+          ok: false,
+          reason: CATEGORY_NOT_POSSIBLE,
+        },
+      },
+    ].map((c) => ({
+      name: c.name,
+      html: renderSettingsPage({
+        ...COMMON,
+        ...PICKERS,
+        pickerCreate: (r: { type: string }) =>
+          r.type === "category" ? c.answer : undefined,
+        groups: [
+          {
+            category: "x",
+            rows: [
+              ["voicechannels.category_id", "Managed category"],
+              ["events.category_id", "Event channel category"],
+              ["tickets.category_id", "Ticket channel category"],
+            ].map(([key, label]) => ({
+              key,
+              label,
+              current: c.current,
+              defaultValue: "",
+              type: "category" as const,
+              description: "Discord category the feature creates channels in.",
+              category: key.split(".")[0],
+            })),
+          },
+        ],
+        guildId: "g1",
+        guildName: "Test Guild",
+      }),
+    })),
     {
       // The welcome roles message picker (#1433): the bot's reaction-role
       // messages by label, and a stored id that is not among them.
@@ -2543,6 +2596,46 @@ export function adminPages(): A11yPage[] {
         defaultValues: { "quotes.enabled": false, "quotes.channel_id": "" },
         pickerCreate: c.pickerCreate,
         enabledByKey: { "quotes.enabled": true },
+      }),
+    })),
+    ...[
+      {
+        name: "Setup wizard step (category offered)",
+        current: "",
+        pickerCreateCategory: { kind: "category" as const, ok: true },
+      },
+      {
+        name: "Setup wizard step (category to be created)",
+        // The pending name, drawn again when the step is opened again (#1664).
+        current: "create:Support Desk",
+        pickerCreateCategory: { kind: "category" as const, ok: true },
+      },
+      {
+        name: "Setup wizard step (creating a category is not possible)",
+        current: "",
+        pickerCreateCategory: {
+          kind: "category" as const,
+          ok: false,
+          reason: CATEGORY_NOT_POSSIBLE,
+        },
+      },
+    ].map((c) => ({
+      name: c.name,
+      html: renderWizardStepPage({
+        ...COMMON,
+        ...PICKERS,
+        stepIndex: 0,
+        featureKeys: ["tickets"],
+        featureKey: "tickets",
+        settingKeys: ["tickets.enabled", "tickets.category_id"],
+        currentValues: {
+          "tickets.enabled": true,
+          "tickets.category_id": c.current,
+        },
+        metadata: settingsMetadata,
+        defaultValues: { "tickets.enabled": false, "tickets.category_id": "" },
+        pickerCreateCategory: c.pickerCreateCategory,
+        enabledByKey: { "tickets.enabled": true },
       }),
     })),
     {
@@ -3235,6 +3328,37 @@ export function adminPages(): A11yPage[] {
           },
         ],
         createPlanId: "0123456789abcdef",
+      }),
+    },
+    {
+      name: "Setup wizard confirm, the managed voice category to create",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [
+          ["voicechannels.enabled", true],
+          ["voicechannels.category_id", "📁 Gaming (will be created)"],
+        ],
+        metadata: settingsMetadata,
+        accessChanges: [],
+        creations: [
+          {
+            kind: "category",
+            name: "Gaming",
+            settingLabel: "Managed category",
+            note: "The lobby is created in it by the voice feature, not by this step.",
+          },
+        ],
+        createPlanId: "0123456789abcdef",
+      }),
+    },
+    {
+      name: "Setup wizard confirm, the category can't be created",
+      html: renderWizardConfirmPage({
+        ...COMMON,
+        pending: [["tickets.enabled", true]],
+        metadata: settingsMetadata,
+        accessChanges: [],
+        createProblems: [CATEGORY_NOT_POSSIBLE],
       }),
     },
     {
@@ -6780,6 +6904,57 @@ export function adminPages(): A11yPage[] {
         settingRows: [],
         pickers: PICKERS,
         permissionNotice: notice as PermissionNotice,
+      }),
+    })),
+    ...[
+      {
+        name: "Support tickets (settings card, category to be created)",
+        createCategory: { kind: "category" as const, ok: true },
+        // The posted pending value, drawn again after a refused save (#1664).
+        current: "create:Support Desk",
+      },
+      {
+        name: "Support tickets (settings card, a category can be created)",
+        createCategory: { kind: "category" as const, ok: true },
+        current: "",
+      },
+      {
+        name: "Support tickets (settings card, creating a category is not possible)",
+        createCategory: {
+          kind: "category" as const,
+          ok: false,
+          reason: CATEGORY_NOT_POSSIBLE,
+        },
+        current: "",
+      },
+    ].map((c) => ({
+      name: c.name,
+      html: renderTicketsPage({
+        ...COMMON,
+        guildId: "g1",
+        enabled: true,
+        statusFilter: "",
+        statusOptions: ["open", "claimed", "closed"],
+        total: 0,
+        page: 1,
+        pageSize: 50,
+        settingRows: [
+          {
+            key: "tickets.category_id",
+            label: "Ticket channel category",
+            current: c.current,
+            defaultValue: "",
+            type: "category",
+            description:
+              "Discord category new ticket channels are created under.",
+            category: "tickets",
+          },
+        ],
+        pickers: {
+          categoryChannels: CATEGORIES,
+          createCategory: c.createCategory,
+        },
+        rows: [],
       }),
     })),
     ...[true, false].map((enabled) => ({

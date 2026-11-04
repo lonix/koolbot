@@ -53,12 +53,19 @@ import {
   resolveExisting,
   writeRestFor,
 } from "./setting-create-save.js";
-import { offersCreateChannel } from "./setting-create.js";
+import { createKindOf } from "./setting-create.js";
+
+/** The managed voice category: the voice feature, not this step, creates the lobby in it. */
+const VOICE_CATEGORY_KEY = "voicechannels.category_id";
+export const VOICE_LOBBY_NOTE =
+  "The lobby is created in it by the voice feature, not by this step.";
 
 export type WizardCreations = Record<string, WizardCreation>;
 
 const NOT_CHECKED =
   "KoolBot could not check whether it may create channels, so nothing was created. Try again.";
+const NOT_CHECKED_CATEGORY =
+  "KoolBot could not check whether it may create categories, so nothing was created. Try again.";
 const NOT_READ =
   "KoolBot couldn't read the channels from Discord, so nothing was created. Try again.";
 const NOT_SIGNED_IN =
@@ -81,11 +88,40 @@ export function activeWizardCreations(
   );
   const out: WizardCreations = {};
   for (const key of Object.keys(state.creations ?? {}).sort()) {
-    if (allowed.has(key) && offersCreateChannel(key)) {
-      out[key] = (state.creations as WizardCreations)[key];
+    const planned = (state.creations as WizardCreations)[key];
+    // The kind a step staged must still be what the setting creates (#1664).
+    if (allowed.has(key) && createKindOf(key) === planned.kind) {
+      out[key] = planned;
     }
   }
   return out;
+}
+
+/**
+ * The permission, asked once for each kind the plan holds (#1664: a text
+ * channel and a category are both "Manage Channels", but the answer and its
+ * help line are per kind). The refusal to show, or null when every kind can be
+ * created.
+ */
+async function createRefusal(
+  client: Client,
+  guildId: string,
+  creations: WizardCreations,
+): Promise<string | null> {
+  const kinds = new Set(Object.values(creations).map((c) => c.kind));
+  for (const kind of ["text", "category"] as const) {
+    if (!kinds.has(kind)) continue;
+    const can = await canBotCreate(
+      client,
+      guildId,
+      kind === "category" ? { kind: "category" } : { kind: "channel" },
+    );
+    if (can.ok === false) return can.reason;
+    if (can.ok !== true) {
+      return kind === "category" ? NOT_CHECKED_CATEGORY : NOT_CHECKED;
+    }
+  }
+  return null;
 }
 
 /** The label of a setting as the pages show it. */
@@ -99,6 +135,8 @@ export function settingLabelOf(key: string): string {
 interface NameGroup {
   /** The name as first typed for this group. */
   name: string;
+  /** A text channel or a category: the same name in two kinds is two groups. */
+  kind: "text" | "category";
   /** The setting keys that point at the channel, sorted. */
   keys: string[];
 }
@@ -107,11 +145,11 @@ interface NameGroup {
 function groupByName(creations: WizardCreations): NameGroup[] {
   const groups = new Map<string, NameGroup>();
   for (const key of Object.keys(creations).sort()) {
-    const { name } = creations[key];
-    const id = normaliseChannelName("text", name).toLowerCase();
+    const { name, kind } = creations[key];
+    const id = `${kind}|${normaliseChannelName(kind, name).toLowerCase()}`;
     const group = groups.get(id);
     if (group) group.keys.push(key);
-    else groups.set(id, { name, keys: [key] });
+    else groups.set(id, { name, kind, keys: [key] });
   }
   return [...groups.values()];
 }
@@ -132,7 +170,11 @@ function planFromLive(
   live: readonly ManagedChannelView[],
 ): Planned {
   const groups = groupByName(creations);
-  const pending = groups.map((g) => ({ key: g.keys[0], name: g.name }));
+  const pending = groups.map((g) => ({
+    key: g.keys[0],
+    name: g.name,
+    kind: g.kind,
+  }));
   const resolved = resolveExisting(pending, live);
   if (!resolved.ok) return { ok: false, error: resolved.error };
   const plan = planChannels(resolved.entries, live);
@@ -193,9 +235,8 @@ export async function reviewWizardCreations(
     ...NONE,
     problems: [problem],
   });
-  const can = await canBotCreate(client, guildId, { kind: "channel" });
-  if (can.ok === false) return refuse(can.reason);
-  if (can.ok !== true) return refuse(NOT_CHECKED);
+  const denied = await createRefusal(client, guildId, creations);
+  if (denied) return refuse(denied);
   let live: ManagedChannelView[];
   try {
     live = await readLive(client, guildId);
@@ -211,19 +252,30 @@ export async function reviewWizardCreations(
   const rows: Array<[string, string]> = [];
   planned.groups.forEach((group, i) => {
     const entry = planned.plan.entries[i];
-    const text = channelText({ name: entry.name, type: ChannelType.GuildText });
+    const isCategory = group.kind === "category";
+    const text = channelText({
+      name: entry.name,
+      type: isCategory ? ChannelType.GuildCategory : ChannelType.GuildText,
+    });
     if (entry.action === "create") {
-      toCreate.push({
-        kind: "text",
-        name: entry.name,
-        settingLabel: joinLabels(group.keys.map(settingLabelOf)),
-        parent: null,
-      });
+      const settingLabel = joinLabels(group.keys.map(settingLabelOf));
+      toCreate.push(
+        isCategory
+          ? {
+              kind: "category",
+              name: entry.name,
+              settingLabel,
+              ...(group.keys.includes(VOICE_CATEGORY_KEY)
+                ? { note: VOICE_LOBBY_NOTE }
+                : {}),
+            }
+          : { kind: "text", name: entry.name, settingLabel, parent: null },
+      );
     }
     for (const key of group.keys) {
       rows.push([
         key,
-        `${text} (${entry.action === "create" ? "will be created" : "existing channel"})`,
+        `${text} (${entry.action === "create" ? "will be created" : isCategory ? "existing category" : "existing channel"})`,
       ]);
     }
   });
@@ -243,6 +295,8 @@ export interface CreatedForSetting {
   name: string;
   /** False when the name already existed and was selected. */
   created: boolean;
+  /** A text channel or a category (#1664). */
+  kind: "text" | "category";
 }
 
 /** What became of the channels one apply created, once something after the creation failed. */
@@ -303,9 +357,8 @@ export async function applyWizardCreations(
   reviewedPlanId: string,
   signal?: AbortSignal,
 ): Promise<WizardCreateApply> {
-  const can = await canBotCreate(client, guildId, { kind: "channel" });
-  if (can.ok === false) return { ok: false, error: can.reason };
-  if (can.ok !== true) return { ok: false, error: NOT_CHECKED };
+  const denied = await createRefusal(client, guildId, creations);
+  if (denied) return { ok: false, error: denied };
   if (!client.token) return { ok: false, error: NOT_SIGNED_IN };
   try {
     const guild = await readWithin(() => client.guilds.fetch(guildId));
@@ -355,6 +408,7 @@ export async function applyWizardCreations(
           id: made.id,
           name: made.name,
           created: made.created,
+          kind: group.kind,
         });
       }
     });

@@ -1,4 +1,4 @@
-import { describe, it, expect, jest } from "@jest/globals";
+import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { ChannelType } from "discord.js";
 import {
   buildSettingRows,
@@ -25,6 +25,20 @@ import {
 } from "../../src/web/read-only-routes.js";
 import { getFormPage } from "../../src/web/form-pages.js";
 import { createMockCollection } from "../test-utils.js";
+import { resetBotPermissionCache } from "../../src/services/bot-permission-check.js";
+import { CommandManager } from "../../src/services/command-manager.js";
+import { PermissionsService } from "../../src/services/permissions-service.js";
+
+// The create row's permission check keeps a snapshot of the server for a few
+// minutes (#1660) and reads through the CommandManager and its
+// PermissionsService, each bound to one client. Each test builds its own
+// client, so each starts without any of them, and the read counts below do not
+// depend on which test ran first.
+beforeEach(() => {
+  resetBotPermissionCache();
+  CommandManager.reset();
+  PermissionsService.reset();
+});
 import { ConfigService } from "../../src/services/config-service.js";
 import { RoleGroupService } from "../../src/services/role-group-service.js";
 import {
@@ -508,7 +522,11 @@ describe("loadFeatureSettings (#971)", () => {
       ["voicechannels.category_id"],
       [],
     );
-    expect(calls).toEqual({ channels: 1, roles: 0 });
+    // The page's own picker fetch is one channel read and no role read. The
+    // managed category is flagged (#1664), so the permission check for its
+    // create row (a snapshot cached for a few minutes and shared with Bot
+    // permissions) adds one channel and one role read.
+    expect(calls).toEqual({ channels: 2, roles: 1 });
     expect(data.pickers.categoryChannels).toEqual([
       {
         id: "c1",

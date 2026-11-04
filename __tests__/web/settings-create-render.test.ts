@@ -34,8 +34,15 @@ const {
 type SettingRow = import("../../src/web/admin-views.js").SettingRow;
 const { loadCreateChannelAnswer } =
   await import("../../src/web/setting-create-load.js");
-const { pickerCreateFor, offersCreateChannel } =
-  await import("../../src/web/setting-create.js");
+const {
+  pickerCreateFor,
+  offersCreateChannel,
+  offersCreateCategory,
+  createKindOf,
+  createdNote,
+} = await import("../../src/web/setting-create.js");
+const { loadCreateCategoryAnswer } =
+  await import("../../src/web/setting-create-load.js");
 
 const TEXT = [
   { id: "1", name: "general", type: ChannelType.GuildText, parentName: null },
@@ -249,4 +256,298 @@ describe("the Reaction roles and Notices pages forward the answer to their card"
       );
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// The category kind (#1664).
+// ---------------------------------------------------------------------------
+
+const CATS = [
+  {
+    id: "20",
+    name: "Staff",
+    type: ChannelType.GuildCategory,
+    parentName: null,
+  },
+];
+const catRow = (key: string, current = ""): SettingRow =>
+  ({
+    key,
+    label: key,
+    current,
+    defaultValue: "",
+    type: "category",
+    description: "d",
+    category: key.split(".")[0],
+  }) as SettingRow;
+const CAT_OK = { kind: "category" as const, ok: true };
+const CAT_NO = {
+  kind: "category" as const,
+  ok: false,
+  reason: "The bot needs Manage Channels to create a category.",
+};
+const CAT_KEYS = [
+  "voicechannels.category_id",
+  "events.category_id",
+  "tickets.category_id",
+];
+
+describe("which settings offer the category row (#1664)", () => {
+  it("only the three flagged category settings, from the schema", () => {
+    for (const k of CAT_KEYS) {
+      expect(offersCreateCategory(k)).toBe(true);
+      expect(createKindOf(k)).toBe("category");
+      // The text flag is separate: a category setting is never a text one.
+      expect(offersCreateChannel(k)).toBe(false);
+    }
+    expect(offersCreateCategory("quotes.channel_id")).toBe(false);
+    expect(createKindOf("quotes.channel_id")).toBe("text");
+    expect(createKindOf("voicechannels.lobby.channel_id")).toBeNull();
+    expect(createKindOf("quotes.max_length")).toBeNull();
+  });
+
+  it("pickerCreateFor gives each kind its own answer and a row of the other kind nothing", () => {
+    const f = pickerCreateFor(OK, CAT_OK) as (r: {
+      key: string;
+      type: string;
+    }) => unknown;
+    expect(f({ key: "quotes.channel_id", type: "channel" })).toEqual(OK);
+    expect(f({ key: "tickets.category_id", type: "category" })).toEqual(CAT_OK);
+    expect(
+      f({ key: "welcome.rules_channel_id", type: "channel" }),
+    ).toBeUndefined();
+    // Only the category answer: a text row gets nothing.
+    const g = pickerCreateFor(undefined, CAT_OK) as typeof f;
+    expect(g({ key: "quotes.channel_id", type: "channel" })).toBeUndefined();
+    expect(g({ key: "tickets.category_id", type: "category" })).toEqual(CAT_OK);
+    expect(pickerCreateFor(undefined, undefined)).toBeUndefined();
+  });
+});
+
+describe("the Settings page and the card draw the category row (#1664)", () => {
+  const page = (
+    answer: typeof CAT_OK | typeof CAT_NO | undefined,
+    current = "",
+  ): string =>
+    renderSettingsPage({
+      csrfToken: "t",
+      guildId: "g",
+      guildName: "G",
+      flash: null,
+      groups: [
+        { category: "x", rows: CAT_KEYS.map((k) => catRow(k, current)) },
+      ],
+      textChannels: TEXT,
+      voiceChannels: [],
+      categoryChannels: CATS,
+      roles: [],
+      pickerCreate: pickerCreateFor(undefined, answer),
+    } as unknown as Parameters<typeof renderSettingsPage>[0]);
+
+  it("flags every category setting with the category kind", () => {
+    const html = page(CAT_OK);
+    for (const k of CAT_KEYS) expect(createOf(html, k)).toEqual(CAT_OK);
+  });
+
+  it("carries the help line when the bot cannot create", () => {
+    const html = page(CAT_NO);
+    for (const k of CAT_KEYS) expect(createOf(html, k)).toEqual(CAT_NO);
+  });
+
+  it("is byte-identical to today when the answer is unknown (no row, no help line)", () => {
+    expect(page(undefined)).not.toContain("&quot;create&quot;");
+  });
+
+  it("draws a refused pending name again as a pending option, keeping the typed name", () => {
+    const html = page(CAT_OK, "create:Gaming Voice");
+    expect(html).toContain('value="create:Gaming Voice" data-create');
+    expect(html).toContain("Gaming Voice (will be created)");
+    expect(html).not.toContain("(unavailable)");
+  });
+
+  it("the card offers it for a category key, and not for a text key beside it", () => {
+    const html = renderFeatureSettingsCard({
+      category: "events",
+      returnTo: "/admin/events",
+      csrfToken: "t",
+      settingRows: [
+        catRow("events.category_id"),
+        row("events.announcement_channel_id"),
+      ],
+      pickers: {
+        textChannels: TEXT,
+        categoryChannels: CATS,
+        createChannel: OK,
+        createCategory: CAT_OK,
+      },
+    });
+    expect(createOf(html, "events.category_id")).toEqual(CAT_OK);
+    expect(createOf(html, "events.announcement_channel_id")).toEqual(OK);
+  });
+
+  it("the card without the category answer leaves the category picker plain", () => {
+    const html = renderFeatureSettingsCard({
+      category: "tickets",
+      returnTo: "/admin/tickets",
+      csrfToken: "t",
+      settingRows: [catRow("tickets.category_id")],
+      pickers: { categoryChannels: CATS, createChannel: OK },
+    });
+    expect(html).not.toContain("&quot;create&quot;");
+  });
+});
+
+describe("the page-wide category answer (#1664)", () => {
+  const client = {} as Client;
+  it("asks once for a category and maps the answer", async () => {
+    mockCanBotCreate.mockResolvedValueOnce({ ok: true });
+    expect(
+      await loadCreateCategoryAnswer(client, "g", [
+        "x.y",
+        "tickets.category_id",
+      ]),
+    ).toEqual(CAT_OK);
+    expect(mockCanBotCreate).toHaveBeenLastCalledWith(client, "g", {
+      kind: "category",
+    });
+  });
+
+  it("carries the help line, and nothing for an unreadable answer", async () => {
+    mockCanBotCreate.mockResolvedValueOnce({
+      ok: false,
+      reason: CAT_NO.reason,
+    });
+    expect(
+      await loadCreateCategoryAnswer(client, "g", ["tickets.category_id"]),
+    ).toEqual(CAT_NO);
+    mockCanBotCreate.mockResolvedValueOnce({ ok: "unknown" });
+    expect(
+      await loadCreateCategoryAnswer(client, "g", ["tickets.category_id"]),
+    ).toBeUndefined();
+  });
+
+  it("does not read the permissions for a page with no category setting", async () => {
+    mockCanBotCreate.mockClear();
+    expect(
+      await loadCreateCategoryAnswer(client, "g", ["quotes.channel_id"]),
+    ).toBeUndefined();
+    expect(mockCanBotCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("the flash names a category (#1664)", () => {
+  it("says category, with its glyph, for a created and for a selected one", () => {
+    const label = (k: string): string => k;
+    expect(
+      createdNote(
+        [
+          {
+            key: "tickets.category_id",
+            id: "1",
+            name: "Support",
+            created: true,
+            kind: "category",
+          },
+        ],
+        label,
+      ),
+    ).toBe(" Created category 📁 Support for tickets.category_id.");
+    expect(
+      createdNote(
+        [
+          {
+            key: "tickets.category_id",
+            id: "1",
+            name: "Support",
+            created: false,
+            kind: "category",
+          },
+        ],
+        label,
+      ),
+    ).toBe(" Used the existing category 📁 Support for tickets.category_id.");
+    // A text channel is worded as before.
+    expect(
+      createdNote([{ key: "a", id: "1", name: "wall", created: true }], label),
+    ).toBe(" Created # wall for a.");
+  });
+});
+
+describe("a pending category stays pending when the permission could not be read (#1664)", () => {
+  it("the Settings page draws the typed name as pending, with no row and no help line", () => {
+    const html = renderSettingsPage({
+      csrfToken: "t",
+      guildId: "g",
+      guildName: "G",
+      flash: null,
+      groups: [
+        {
+          category: "x",
+          rows: [catRow("tickets.category_id", "create:Support Desk")],
+        },
+      ],
+      textChannels: TEXT,
+      voiceChannels: [],
+      categoryChannels: CATS,
+      roles: [],
+      pickerCreate: pickerCreateFor(undefined, undefined),
+    } as unknown as Parameters<typeof renderSettingsPage>[0]);
+    expect(html).toContain('value="create:Support Desk" data-create');
+    expect(html).toContain("Support Desk (will be created)");
+    expect(html).not.toContain("(unavailable)");
+    // No row and no help line: the flag says only that this is a category.
+    expect(createOf(html, "tickets.category_id")).toEqual({
+      kind: "category",
+      ok: false,
+    });
+  });
+
+  it("the card does the same", () => {
+    const html = renderFeatureSettingsCard({
+      category: "tickets",
+      returnTo: "/admin/tickets",
+      csrfToken: "t",
+      settingRows: [catRow("tickets.category_id", "create:Support Desk")],
+      pickers: { categoryChannels: CATS },
+    });
+    expect(html).toContain("Support Desk (will be created)");
+    expect(createOf(html, "tickets.category_id")).toEqual({
+      kind: "category",
+      ok: false,
+    });
+  });
+
+  it("a category setting with no pending value and no answer stays as it was", () => {
+    const html = renderFeatureSettingsCard({
+      category: "tickets",
+      returnTo: "/admin/tickets",
+      csrfToken: "t",
+      settingRows: [catRow("tickets.category_id", "20")],
+      pickers: { categoryChannels: CATS },
+    });
+    expect(html).not.toContain("&quot;create&quot;");
+  });
+});
+
+describe("the flash for a category two settings share (#1664)", () => {
+  it("names both settings once, and does not call the new category existing", () => {
+    const label = (k: string): string => ({ a: "A", b: "B", c: "C" })[k] ?? k;
+    const made = (key: string, created: boolean) => ({
+      key,
+      id: "1",
+      name: "Community",
+      created,
+      kind: "category" as const,
+    });
+    expect(createdNote([made("a", true), made("b", false)], label)).toBe(
+      " Created category 📁 Community for A and B.",
+    );
+    expect(
+      createdNote([made("a", true), made("b", false), made("c", false)], label),
+    ).toBe(" Created category 📁 Community for A, B and C.");
+    // A selected existing category named by two settings.
+    expect(createdNote([made("a", false), made("b", false)], label)).toBe(
+      " Used the existing category 📁 Community for A and B.",
+    );
+  });
 });
