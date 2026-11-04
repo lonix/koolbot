@@ -261,9 +261,11 @@ describe("renderAdminPage", () => {
     );
     // Wide tables scroll inside their container, not the page.
     expect(html).toContain(
-      "main{flex:1;padding:1.5rem 2rem;max-width:1100px;min-width:0;overflow-x:auto}",
+      "main{flex:1;padding:1.5rem 2rem;max-width:1100px;min-width:0;overflow-x:auto;position:relative}",
     );
-    expect(html).toContain("margin:0 0 1rem;overflow-x:auto}");
+    expect(html).toContain(
+      "margin:0 0 1rem;overflow-x:auto;position:relative}",
+    );
   });
 
   it("keeps the sticky save bar's ancestors from being scroll containers", () => {
