@@ -248,9 +248,9 @@ create happen in the save.
 
 - **All settings and the feature pages.** The page asks the permission once and offers the row on every flagged setting. Saving a section reads the typed
   names first and creates them only when nothing else in the section was refused. One apply creates all of them: if the creation fails, what that save
-  created is removed again, nothing is stored, and the flash reads "No changes saved — N invalid values in <section>: <key> (<reason>), …", with the reason under
+  created is removed again, nothing is stored, and the flash reads `No changes saved — N invalid values in <section>: <key> (<reason>), …`, with the reason under
   every setting that asked. If the creation succeeds, the settings are then written one by one, and the save can be partial: a setting whose write fails is
-  reported ("Saved 2/3 in <section>. Failed: <key> (<reason>)."), the others stay saved, and the created channels stay, named in the flash. A section with a
+  reported (`Saved 2/3 in <section>. Failed: <key> (<reason>).`), the others stay saved, and the created channels stay, named in the flash. A section with a
   channel and a category (Events) checks the permission for each kind.
 - **A repeated name.** Two settings that type the same new category share one category. Two settings that type the same new text channel name are refused
   ("appears more than once"); the wizard, in contrast, makes one channel for both.
