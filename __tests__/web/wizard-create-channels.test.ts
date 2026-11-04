@@ -1091,6 +1091,20 @@ describe("the step page offers a category (#1664)", () => {
     expect(chPicker).toContain("&quot;kind&quot;:&quot;channel&quot;");
   });
 
+  it("draws a planned category as pending even when the permission cannot be read, with no row and no help line", async () => {
+    start(["tickets"]);
+    await harness.post("/wizard/step/0", ticketsStep("create:Support"));
+    can = { ok: "unknown" };
+    const html = await (await harness.get("/wizard?step=0")).text();
+    expect(html).toContain(
+      '<option value="create:Support" data-create data-name="Support" selected>Support (will be created)</option>',
+    );
+    expect(html).toContain(
+      "&quot;create&quot;:{&quot;kind&quot;:&quot;category&quot;,&quot;ok&quot;:false}",
+    );
+    expect(html).not.toContain("Manage Channels");
+  });
+
   it("draws a planned category again as a pending option when the step is revisited", async () => {
     start(["tickets"]);
     await harness.post("/wizard/step/0", ticketsStep("create:Support"));

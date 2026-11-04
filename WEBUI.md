@@ -1606,7 +1606,8 @@ category, `loadCreateCategoryAnswer`, once per page and only when a flagged cate
 `createChannel` (a separate flag, so no text channel setting can take a category and the other way round). A category setting takes only an existing
 category, so the flag is on all three and nothing else. A created category has no parent and no permission overwrites, so it is visible to everyone who can
 see the server and inherits nothing; the stored name is exactly what you typed, and the Mention shows it in capitals. Without Manage Channels the Picker shows
-the help line ("The bot needs Manage Channels to create a category ..."), and when the permissions cannot be read it shows nothing.
+the help line ("The bot needs Manage Channels to create a category ..."), and when the permissions cannot be read it shows nothing. A typed name that is
+waiting (after a refused save, or when a wizard step is opened again) is still drawn as "Name (will be created)" then, with no row and no help line.
 
 - **Settings save.** A `create:` value is read before anything is coerced and only for a setting that is flagged for its kind; any other key refuses it, a
   comma-joined list included. A save can hold both kinds (the events section has a channel and a category): the permission is checked for each kind
@@ -1620,12 +1621,15 @@ the help line ("The bot needs Manage Channels to create a category ..."), and wh
   settings), with the per-id cleanup and the closed-request handling of the channel kind.
 - **The managed voice category.** `voicechannels.category_id` takes a created category (a decision for the owner, recommended). This step only creates
   the empty category. The lobby and the rooms are made in it by the voice feature, not by this step, and the Review line says so: "The lobby is created in it
-  by the voice feature, not by this step." The voice feature reads the setting by id only (`resolveManagedCategory`), so the old name key
+  by the voice feature, not by this step." The voice feature makes the lobby when its health check next runs (every 15 minutes, while voice channels
+  are on) or when KoolBot restarts. The voice feature reads the setting by id only (`resolveManagedCategory`), so the old name key
   `voicechannels.category.name` plays no part here: the name-to-id migration skips a key whose id is already set and removes the stale name row.
-- **Known limits.** If the reply of a create is lost, whether the category exists is unknown and the error says to check Discord (#1714). A category the wizard
-  created can be deleted by its cleanup after another save adopted it in the meantime; the cleanup reads the stored settings inside the lock, but it cannot
-  see a save that arrives after that read (#1748, the reservation design is planned for a later release). Creating a category shares both limits with
-  creating a channel.
+- **Known limits.** If the reply of a create is lost or times out after Discord accepted it, whether the category exists is unknown and the error says to
+  check Discord (#1714). A category the wizard created can be deleted by its cleanup after another save selected it: the cleanup reads the stored settings
+  inside the lock, but the other save writes its setting after it released the lock, so a cleanup that runs in that gap does not see the reference and the
+  other setting is left pointing at a deleted category (#1748, a reservation planned for a later release). Creating a category shares both limits with
+  creating a channel. A created category has no overwrites, so the bot's rights in it are its server-wide ones; **Bot permissions** shows what the voice
+  feature (Manage Roles, Move Members, Connect) or tickets would still lack.
 
 The wizard runs **Choose features, Access, Features, Review** (#1321, renamed in #1620), with a step indicator on every page. **Features** is one
 page per feature you chose, with its settings (channel settings are ordinary settings on the page of the feature that owns them; the wizard has no step of its

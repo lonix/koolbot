@@ -79,22 +79,45 @@ export interface CreatedForKey {
 export type CreatePendingResult =
   { ok: true; channels: CreatedForKey[] } | { ok: false; error: string };
 
-/** The plain-text sentence for the flash: what was created and what was selected. */
+/** `A`, `A and B`, `A, B and C`. */
+function andList(items: readonly string[]): string {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/**
+ * The plain-text sentence for the flash: what was created and what was
+ * selected. Settings that point at one category (#1664) are named together
+ * after it ("Created category X for A and B"), so a category this same save
+ * created is never called an existing one.
+ */
 export function createdNote(
   channels: readonly CreatedForKey[],
   labelOf: (key: string) => string,
 ): string {
   if (channels.length === 0) return "";
-  const parts = channels.map((c) => {
+  const parts: Array<{ head: string; labels: string[] }> = [];
+  const byCategory = new Map<string, { head: string; labels: string[] }>();
+  for (const c of channels) {
     const isCategory = c.kind === "category";
+    const same = isCategory ? byCategory.get(c.id) : undefined;
+    if (same) {
+      same.labels.push(labelOf(c.key));
+      continue;
+    }
     const shown = `${isCategory ? "category " : ""}${channelText({
       name: c.name,
       type: isCategory ? ChannelType.GuildCategory : ChannelType.GuildText,
     })}`;
-    return c.created
-      ? `created ${shown} for ${labelOf(c.key)}`
-      : `used the existing ${shown} for ${labelOf(c.key)}`;
-  });
-  const text = parts.join("; ");
+    const part = {
+      head: c.created ? `created ${shown}` : `used the existing ${shown}`,
+      labels: [labelOf(c.key)],
+    };
+    if (isCategory) byCategory.set(c.id, part);
+    parts.push(part);
+  }
+  const text = parts
+    .map((p) => `${p.head} for ${andList(p.labels)}`)
+    .join("; ");
   return ` ${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
 }

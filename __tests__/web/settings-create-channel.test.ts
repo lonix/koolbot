@@ -786,6 +786,25 @@ describe("a pending category saved from a section (#1664)", () => {
     expect(body.created).toHaveLength(2);
   });
 
+  it("says so once in the flash, naming both settings, and the audit lists each setting", async () => {
+    const res = await save({
+      category: "x",
+      keys: [VOICE_CAT, TICKETS_CAT],
+      [`value_${VOICE_CAT}`]: "create:Community",
+      [`value_${TICKETS_CAT}`]: "create:community",
+    });
+    const body = (await res.json()) as Record<string, any>;
+    expect(body.text).toContain(
+      "Created category 📁 Community for Managed category and Ticket channel category.",
+    );
+    expect(body.text).not.toContain("existing");
+    expect(
+      (lastAudit().details.channels as Array<{ key: string }>).map(
+        (c) => c.key,
+      ),
+    ).toEqual([VOICE_CAT, TICKETS_CAT]);
+  });
+
   it("selects an existing category of that name, in any case, and says so", async () => {
     live = [view("100000000000000050", { name: "Support", kind: "category" })];
     const res = await save({

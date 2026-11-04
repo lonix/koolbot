@@ -480,10 +480,13 @@ export function createWizardRouter(client: Client): Router {
             // step shows the stored value and the admin chooses again.
             const planned = existing.creations?.[k];
             const kind = createKindOf(k);
+            // A planned category is drawn as pending even when the permission
+            // could not be read (the Picker then shows no row and no help line),
+            // so the step agrees with Review.
             if (
               planned &&
               planned.kind === kind &&
-              (kind === "category" ? pickerCreateCategory : pickerCreate)
+              (kind === "category" || pickerCreate)
             ) {
               currentValues[k] = pickerCreateValue(planned.name);
             }

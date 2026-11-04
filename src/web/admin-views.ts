@@ -57,7 +57,7 @@ import {
   parsePickerCreateValue,
   type PickerCreate,
 } from "./setting-pickers.js";
-import { pickerCreateFor } from "./setting-create.js";
+import { offersCreateCategory, pickerCreateFor } from "./setting-create.js";
 import type { ReactionRoleMessageOptions } from "./reaction-role-messages.js";
 import { getServerTimezone } from "../utils/timezone.js";
 import {
@@ -1543,7 +1543,16 @@ function renderControlInput(
     const meta: PickerMeta[] = [];
     // #1658: the create row, only when the caller says creation can work. A
     // channel setting carries its text or voice subtype with it.
-    const created = pickers.create?.(r);
+    // A posted category to be created, drawn again when the permission could
+    // not be read (no answer): still pending ("will be created"), with neither a
+    // create row nor a help line (ok false, no reason), as the Polls form does.
+    const created =
+      pickers.create?.(r) ??
+      (r.type === "category" &&
+      offersCreateCategory(r.key) &&
+      parsePickerCreateValue(currentStr)?.ok
+        ? ({ kind: "category", ok: false } satisfies PickerCreate)
+        : undefined);
     const createFor =
       created && r.type === "channel"
         ? {

@@ -472,3 +472,82 @@ describe("the flash names a category (#1664)", () => {
     ).toBe(" Created # wall for a.");
   });
 });
+
+describe("a pending category stays pending when the permission could not be read (#1664)", () => {
+  it("the Settings page draws the typed name as pending, with no row and no help line", () => {
+    const html = renderSettingsPage({
+      csrfToken: "t",
+      guildId: "g",
+      guildName: "G",
+      flash: null,
+      groups: [
+        {
+          category: "x",
+          rows: [catRow("tickets.category_id", "create:Support Desk")],
+        },
+      ],
+      textChannels: TEXT,
+      voiceChannels: [],
+      categoryChannels: CATS,
+      roles: [],
+      pickerCreate: pickerCreateFor(undefined, undefined),
+    } as unknown as Parameters<typeof renderSettingsPage>[0]);
+    expect(html).toContain('value="create:Support Desk" data-create');
+    expect(html).toContain("Support Desk (will be created)");
+    expect(html).not.toContain("(unavailable)");
+    // No row and no help line: the flag says only that this is a category.
+    expect(createOf(html, "tickets.category_id")).toEqual({
+      kind: "category",
+      ok: false,
+    });
+  });
+
+  it("the card does the same", () => {
+    const html = renderFeatureSettingsCard({
+      category: "tickets",
+      returnTo: "/admin/tickets",
+      csrfToken: "t",
+      settingRows: [catRow("tickets.category_id", "create:Support Desk")],
+      pickers: { categoryChannels: CATS },
+    });
+    expect(html).toContain("Support Desk (will be created)");
+    expect(createOf(html, "tickets.category_id")).toEqual({
+      kind: "category",
+      ok: false,
+    });
+  });
+
+  it("a category setting with no pending value and no answer stays as it was", () => {
+    const html = renderFeatureSettingsCard({
+      category: "tickets",
+      returnTo: "/admin/tickets",
+      csrfToken: "t",
+      settingRows: [catRow("tickets.category_id", "20")],
+      pickers: { categoryChannels: CATS },
+    });
+    expect(html).not.toContain("&quot;create&quot;");
+  });
+});
+
+describe("the flash for a category two settings share (#1664)", () => {
+  it("names both settings once, and does not call the new category existing", () => {
+    const label = (k: string): string => ({ a: "A", b: "B", c: "C" })[k] ?? k;
+    const made = (key: string, created: boolean) => ({
+      key,
+      id: "1",
+      name: "Community",
+      created,
+      kind: "category" as const,
+    });
+    expect(createdNote([made("a", true), made("b", false)], label)).toBe(
+      " Created category 📁 Community for A and B.",
+    );
+    expect(
+      createdNote([made("a", true), made("b", false), made("c", false)], label),
+    ).toBe(" Created category 📁 Community for A, B and C.");
+    // A selected existing category named by two settings.
+    expect(createdNote([made("a", false), made("b", false)], label)).toBe(
+      " Used the existing category 📁 Community for A and B.",
+    );
+  });
+});
