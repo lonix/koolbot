@@ -4504,6 +4504,24 @@ function pollEmptyState(title: string, text: string): string {
   return `<div class="kb-empty"><div class="kb-empty__icon">${icon("vote")}</div><p class="kb-empty__title">${escapeHtml(title)}</p><p class="kb-empty__text">${escapeHtml(text)}</p></div>`;
 }
 
+/**
+ * A row's inline Edit disclosure as its own full-width table row under the record (#1738). The form's controls
+ * (about 22rem) cannot fit in the narrow Actions cell of a 7 or 8 column table, so the cell keeps only its
+ * buttons and the disclosure spans every column of the row below.
+ */
+function rowEditRow(
+  columns: number,
+  open: string,
+  summary: string,
+  formHtml: string,
+): string {
+  return `<tr>
+<td colspan="${columns}"><details class="kb-disclosure"${open}><summary>${CHEVRON_ICON}${summary}</summary>
+  <div class="kb-disclosure__body">${formHtml}</div>
+</details></td>
+</tr>`;
+}
+
 export function renderPollsPage(props: PollsProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const newSchedule = formView(props.refusedForm, POLL_SCHEDULE_CREATE_FORM);
@@ -4525,20 +4543,22 @@ export function renderPollsPage(props: PollsProps): string {
 <td>${kbOnOff(s.enabled)}</td>
 <td class="kb-muted">${escapeHtml(s.lastRun)}</td>
 <td class="kb-actions"><div class="kb-row kb-row--nowrap">
-  <details class="kb-disclosure"${f.open()}><summary>${CHEVRON_ICON}Edit</summary>
-    <div class="kb-disclosure__body"><form method="POST" action="${base}/edit" class="kb-stack">${csrfInput}
+  ${rowAction(`${base}/toggle`, s.enabled ? "Disable" : "Enable")}
+  ${rowAction(`${base}/test`, "Test")}
+  <form method="POST" action="${base}/delete" data-confirm="Delete schedule ${escapeHtml(s.id)}?">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger">Delete</button></form>
+</div></td>
+</tr>${rowEditRow(
+        8,
+        f.open(),
+        `Edit<span class="kb-visually-hidden"> schedule ${escapeHtml(s.id)}</span>`,
+        `<form method="POST" action="${base}/edit" class="kb-stack">${csrfInput}
       ${pollChannelPicker(f, props.textChannels, f.selected("channelId", s.channelId), props.createChannel)}
       ${renderCronField(f, "cron", "Schedule", s.cron)}
       ${renderPollDurationField(f, String(s.durationHours))}
       ${pollSelect(f, "pingRoleId", "Ping role", roleOptionsHtml(props.roles, f.selected("pingRoleId", s.pingRoleId ?? "") || undefined))}
       <div class="kb-row"><button type="submit" class="kb-btn">Save changes</button></div>
-    </form></div>
-  </details>
-  ${rowAction(`${base}/toggle`, s.enabled ? "Disable" : "Enable")}
-  ${rowAction(`${base}/test`, "Test")}
-  <form method="POST" action="${base}/delete" data-confirm="Delete schedule ${escapeHtml(s.id)}?">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger">Delete</button></form>
-</div></td>
-</tr>`;
+    </form>`,
+      )}`;
     })
     .join("");
 
@@ -4554,19 +4574,21 @@ export function renderPollsPage(props: PollsProps): string {
 <td>${kbOnOff(it.enabled)}</td>
 <td class="kb-muted">${escapeHtml(it.source)}</td>
 <td class="kb-actions"><div class="kb-row kb-row--nowrap">
-  <details class="kb-disclosure"${f.open()}><summary>${CHEVRON_ICON}Edit</summary>
-    <div class="kb-disclosure__body"><form method="POST" action="${base}/edit" class="kb-stack">${csrfInput}
+  ${rowAction(`${base}/toggle`, it.enabled ? "Disable" : "Enable")}
+  <form method="POST" action="${base}/delete" data-confirm="Delete poll question?">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger">Delete</button></form>
+</div></td>
+</tr>${rowEditRow(
+        7,
+        f.open(),
+        `Edit<span class="kb-visually-hidden"> question ${escapeHtml(it.question)}</span>`,
+        `<form method="POST" action="${base}/edit" class="kb-stack">${csrfInput}
       ${pollField(f, "question", "Question", `<input type="text" class="kb-input" name="question" maxlength="300" value="${escapeHtml(f.value("question", it.question))}" required${fieldControlAttrs(f.control("question"))}>`)}
       ${renderPollAnswerRows(f, it.answers)}
       ${pollField(f, "tags", "Tags (comma-separated, optional)", `<input type="text" class="kb-input" name="tags" value="${escapeHtml(f.value("tags", it.tags.join(", ")))}"${fieldControlAttrs(f.control("tags"))}>`)}
       ${pollMultiSelectSwitch(f.checked("multiSelect", it.multiSelect))}
       <div class="kb-row"><button type="submit" class="kb-btn">Save changes</button></div>
-    </form></div>
-  </details>
-  ${rowAction(`${base}/toggle`, it.enabled ? "Disable" : "Enable")}
-  <form method="POST" action="${base}/delete" data-confirm="Delete poll question?">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger">Delete</button></form>
-</div></td>
-</tr>`;
+    </form>`,
+      )}`;
     })
     .join("");
 
@@ -5437,16 +5459,18 @@ export function renderQuotesPage(props: QuotesProps): string {
 <td>👍 ${q.likes} · 👎 ${q.dislikes}</td>
 <td class="kb-mono kb-muted">${escapeHtml(q.messageId)}</td>
 <td class="kb-actions"><div class="kb-row kb-row--nowrap">
-  <details class="kb-disclosure"${f.open()}><summary>${CHEVRON_ICON}Edit<span class="kb-visually-hidden"> quote ${escapeHtml(q.id)}</span></summary>
-    <div class="kb-disclosure__body"><form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/edit${escapeHtml(quotesQueryString(props.search, page))}" class="kb-stack">${csrfInput}
+  <form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/delete" data-confirm="Delete quote ${escapeHtml(q.id)}? Its channel post is removed too.">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger" aria-label="Delete quote ${escapeHtml(q.id)}">Delete</button></form>
+</div></td>
+</tr>${rowEditRow(
+        7,
+        f.open(),
+        `Edit<span class="kb-visually-hidden"> quote ${escapeHtml(q.id)}</span>`,
+        `<form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/edit${escapeHtml(quotesQueryString(props.search, page))}" class="kb-stack">${csrfInput}
       <div class="kb-field"><label class="kb-label" for="${escapeHtml(content.id)}">Quote</label><textarea class="kb-textarea" name="content" rows="4" maxlength="${props.maxLength}" required${fieldControlAttrs(content)}>${f.textareaContent("content", q.content)}</textarea>${f.error("content")}</div>
       <div class="kb-field"><label class="kb-label" for="${escapeHtml(author.id)}">Author (Discord user ID)</label><input class="kb-input" type="text" name="author_id" inputmode="numeric" pattern="\\d{17,20}" value="${escapeHtml(f.value("author_id", q.authorId))}" required${fieldControlAttrs(author)}>${f.error("author_id")}</div>
       <div class="kb-row"><button type="submit" class="kb-btn">Save changes</button></div>
-    </form></div>
-  </details>
-  <form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/delete" data-confirm="Delete quote ${escapeHtml(q.id)}? Its channel post is removed too.">${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger" aria-label="Delete quote ${escapeHtml(q.id)}">Delete</button></form>
-</div></td>
-</tr>`;
+    </form>`,
+      )}`;
     })
     .join("");
 
@@ -5704,16 +5728,6 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
 <td>${b.roleGranted ? '<span class="kb-badge kb-badge--on">granted</span>' : '<span class="kb-muted">—</span>'}</td>
 <td class="kb-muted">${b.lastAnnouncedYear ?? "—"}</td>
 <td class="kb-actions"><div class="kb-row kb-row--nowrap">
-  <details class="kb-disclosure"${f.open()}><summary>${CHEVRON_ICON}Edit<span class="kb-visually-hidden"> birthday of ${escapeHtml(b.userLabel)}</span></summary>
-    <div class="kb-disclosure__body"><form method="POST" action="/admin/birthdays/${id}/edit" class="kb-stack">${csrfInput}
-      <div class="kb-fields">
-        <div class="kb-field"><label class="kb-label" for="${escapeHtml(month.id)}">Month</label><select class="kb-select" name="month" required${fieldControlAttrs(month)}>${monthOptions(Number(f.selected("month", String(b.month))))}</select>${f.error("month")}</div>
-        <div class="kb-field"><label class="kb-label" for="${escapeHtml(day.id)}">Day</label><select class="kb-select" name="day" required${fieldControlAttrs(day)}>${dayOptions(Number(f.selected("day", String(b.day))))}</select>${f.error("day")}</div>
-      </div>
-      ${clearYear}
-      <div class="kb-row"><button type="submit" class="kb-btn">Save changes</button></div>
-    </form></div>
-  </details>
   <form method="POST" action="/admin/birthdays/${id}/remove" data-confirm="Remove the birthday for ${escapeHtml(b.userLabel)}? Any birthday role they hold is taken back and the bot's birthday posts about them are deleted."${confirmListAttr(
     [
       "The saved birthday is removed.",
@@ -5723,7 +5737,19 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
     ],
   )}>${csrfInput}<button type="submit" class="kb-btn kb-btn--sm kb-btn--danger" aria-label="Remove birthday for ${escapeHtml(b.userLabel)}">Remove</button></form>
 </div></td>
-</tr>`;
+</tr>${rowEditRow(
+        7,
+        f.open(),
+        `Edit<span class="kb-visually-hidden"> birthday of ${escapeHtml(b.userLabel)}</span>`,
+        `<form method="POST" action="/admin/birthdays/${id}/edit" class="kb-stack">${csrfInput}
+      <div class="kb-fields">
+        <div class="kb-field"><label class="kb-label" for="${escapeHtml(month.id)}">Month</label><select class="kb-select" name="month" required${fieldControlAttrs(month)}>${monthOptions(Number(f.selected("month", String(b.month))))}</select>${f.error("month")}</div>
+        <div class="kb-field"><label class="kb-label" for="${escapeHtml(day.id)}">Day</label><select class="kb-select" name="day" required${fieldControlAttrs(day)}>${dayOptions(Number(f.selected("day", String(b.day))))}</select>${f.error("day")}</div>
+      </div>
+      ${clearYear}
+      <div class="kb-row"><button type="submit" class="kb-btn">Save changes</button></div>
+    </form>`,
+      )}`;
     })
     .join("");
 

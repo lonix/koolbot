@@ -371,7 +371,7 @@ describe("POST /polls/schedules/:id/{edit,delete,toggle,test}", () => {
     // The details element holding the refused form is open, or the marked
     // field would be hidden and could not take focus.
     expect(r.html).toMatch(
-      /<details class="kb-disclosure" open><summary>[^]*?Edit<\/summary>/,
+      /<details class="kb-disclosure" open><summary>[^]*?Edit<span class="kb-visually-hidden"> schedule /,
     );
     const doc = new JSDOM(r.html).window.document;
     expect(
@@ -671,7 +671,7 @@ describe("POST /polls/items/:id/{edit,delete,toggle}", () => {
       "Give 2 to 10 answers, one in each box.",
     );
     expect(r.html).toMatch(
-      /<details class="kb-disclosure" open><summary>[^]*?Edit<\/summary>/,
+      /<details class="kb-disclosure" open><summary>[^]*?Edit<span class="kb-visually-hidden"> question /,
     );
     expect(r.html).toContain('value="only-one"');
     expect(mockUpdatePollItem).not.toHaveBeenCalled();

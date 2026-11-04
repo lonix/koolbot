@@ -270,10 +270,12 @@ describe("the per-row edit forms", () => {
         values: { content: "Edited", author_id: "bob" },
       }),
     );
+    // The Edit disclosure is a full-width row under the record, not in the Actions cell (#1738).
     const open = d.querySelectorAll(
-      "td.kb-actions details.kb-disclosure[open]",
+      "tbody td[colspan] details.kb-disclosure[open]",
     );
     expect(open).toHaveLength(1);
+    expect(d.querySelectorAll("td.kb-actions details")).toHaveLength(0);
     expect(
       open[0].querySelector<HTMLInputElement>("[name=author_id]")?.value,
     ).toBe("bob");
