@@ -230,6 +230,7 @@ import {
   type SettingRow,
   messageJumpUrl,
 } from "./admin-views.js";
+import { canBotCreate, toPickerCreate } from "../services/bot-create-check.js";
 import { pickerCreateFor } from "./setting-create.js";
 import {
   loadCreateCategoryAnswer,
@@ -1566,6 +1567,11 @@ export function createReadOnlyRouter(
           staffDefaultCommands: STAFF_DEFAULT_COMMANDS,
           staffDefaultActive: hasStaffGroup(groups),
           groupsUnavailable,
+          // The role Picker's create row (#1760): one permission answer for the page.
+          create: toPickerCreate(
+            "role",
+            await canBotCreate(client, common.guildId, { kind: "role" }),
+          ),
           flash: readFlash(req),
         }),
       );

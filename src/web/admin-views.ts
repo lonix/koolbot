@@ -2302,6 +2302,12 @@ export interface PermissionsProps extends CommonProps {
    * the page must not call them open.
    */
   groupsUnavailable?: boolean;
+  /**
+   * The role Picker's create row (#1658, #1760): `ok` offers "Create new role"
+   * in every command's picker, a refusal offers nothing. Absent when the
+   * permission could not be read: the pickers are as they always were.
+   */
+  create?: PickerCreate;
   flash?: FlashMessage | null;
 }
 
@@ -2434,6 +2440,7 @@ export function renderPermissionsPage(props: PermissionsProps): string {
               name: "roleIds",
               options,
               selected,
+              ...(props.create ? { create: props.create } : {}),
             });
       return `<tr>
 <th scope="row" class="kb-mono">/${escapedCmd}</th>

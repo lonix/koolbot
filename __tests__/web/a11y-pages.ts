@@ -3183,6 +3183,8 @@ export function adminPages(): A11yPage[] {
         // every row kind of the role Picker (#1547).
         groups: [{ id: "g1", name: "Mods" }],
         groupRefsPerCommand: new Map([["quote", ["group:g1+", "group:gone"]]]),
+        // The create row (#1760): the Picker is drawn flagged, as with the permission.
+        create: { kind: "role", ok: true },
         flash: FLASH,
       }),
     },

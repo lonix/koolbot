@@ -199,7 +199,7 @@ export type RoleApplyResult =
 
 const NOT_READ =
   "KoolBot couldn't read the roles from Discord, so nothing was created. Try again.";
-const CHANGED =
+export const ROLE_PLAN_CHANGED =
   "The roles on the server changed since Review, so nothing was created. Review the changes again.";
 
 export async function applyRolePlan(
@@ -244,7 +244,7 @@ async function applyLocked(
   if (busy) return nothing(`${busy} Nothing was created. Try again later.`);
   const plan = planRoles(entries, live);
   if (!plan.ok) return nothing(plan.errors.join(" "));
-  if (plan.planId !== reviewedPlanId) return nothing(CHANGED);
+  if (plan.planId !== reviewedPlanId) return nothing(ROLE_PLAN_CHANGED);
 
   const done: AppliedRole[] = [];
   const createdIds: string[] = [];
