@@ -48,7 +48,7 @@ jobs:
       pull-requests: read # list open PRs (head and base protection)
     steps:
       - name: Run cleanup
-        uses: cbrgm/cleanup-stale-branches-action@d38074fb45d1898a14c03e2bc32a05e9161a5823 # v1.2.14
+        uses: cbrgm/cleanup-stale-branches-action@60ee3b9bd65eb5007081916ddf1ac11e2211f7b4 # v1.2.15
         with:
           token: ${{ github.token }}
           repository: ${{ github.repository }}
