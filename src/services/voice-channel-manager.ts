@@ -2282,6 +2282,26 @@ export class VoiceChannelManager {
   }
 
   /**
+   * A human entering a managed room whose recorded owner is not in it (the
+   * earlier transfer found only bots and was dropped, #1778) schedules the
+   * normal grace-period transfer through handleChannelOwnershipChange, which
+   * itself skips a present owner and an already pending timer. Bots, rooms
+   * without a recorded owner and non-voice channels do nothing.
+   */
+  private async scheduleTransferForOwnerlessRoom(
+    channel: VoiceState["channel"],
+    member: GuildMember,
+  ): Promise<void> {
+    if (member.user?.bot) return;
+    if (!channel || channel.type !== ChannelType.GuildVoice) return;
+    const hasOwner = Array.from(this.userChannels.values()).some(
+      (userChannel) => userChannel.id === channel.id,
+    );
+    if (!hasOwner) return;
+    await this.handleChannelOwnershipChange(channel as VoiceChannel);
+  }
+
+  /**
    * Cancel a pending ownership transfer for a channel
    */
   private cancelOwnershipTransfer(channelId: string): void {
@@ -2504,6 +2524,8 @@ export class VoiceChannelManager {
             `Creating personal channel for ${member.displayName} who joined the new channel`,
           );
           await this.createUserChannel(member, newChannel);
+        } else {
+          await this.scheduleTransferForOwnerlessRoom(newChannel, member);
         }
       }
       // User left a channel
@@ -2591,6 +2613,13 @@ export class VoiceChannelManager {
           if (oldChannel.type === ChannelType.GuildVoice) {
             await this.cleanupEmptyChannel(oldChannel);
           }
+        }
+        // A human moving into a room whose owner is absent (#1778)
+        if (
+          !(await this.isLobbyChannel(newChannel)) &&
+          !isNewChannelTriggerName(newChannel.name)
+        ) {
+          await this.scheduleTransferForOwnerlessRoom(newChannel, member);
         }
       }
     } catch (error) {

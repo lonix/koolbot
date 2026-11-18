@@ -153,4 +153,102 @@ describe("VoiceChannelManager - ownership transfer skips bots (#1778)", () => {
     expect(result).toBe(true);
     expect(manager.isRoomOwner("human", "room")).toBe(true);
   });
+  describe("through handleVoiceStateUpdate", () => {
+    const state = (m: any, channel: any): any => ({
+      member: m,
+      channel,
+      guild: { id: "guild" },
+    });
+    const update = (m: any, from: any, to: any): Promise<void> =>
+      manager.handleVoiceStateUpdate(state(m, from), state(m, to));
+    const timers = (): Map<string, unknown> =>
+      (manager as any).ownershipTransferTimers;
+    const GRACE_MS = 31_000;
+
+    beforeEach(() => {
+      mockConfigService.getBoolean = jest
+        .fn<any>()
+        .mockImplementation((k: string, d?: boolean) =>
+          Promise.resolve(k === "voicechannels.enabled" ? true : (d ?? false)),
+        );
+      (manager as any).isLobbyChannel = jest.fn(async () => false);
+      (manager as any).cleanupUserChannel = jest.fn(async () => {});
+      (manager as any).cleanupEmptyChannel = jest.fn(async () => {});
+    });
+
+    it("hands the room to a human who joins after a bot-only transfer was dropped", async () => {
+      const owner = member("owner");
+      const music = member("music", true);
+      setMembers(music);
+
+      await update(owner, room, null);
+      expect(timers().has("room")).toBe(true);
+      await jest.advanceTimersByTimeAsync(GRACE_MS);
+      expect(manager.isRoomOwner("owner", "room")).toBe(true);
+      expect(timers().has("room")).toBe(false);
+
+      const human = member("human");
+      setMembers(music, human);
+      await update(human, null, room);
+      expect(timers().has("room")).toBe(true);
+      await jest.advanceTimersByTimeAsync(GRACE_MS);
+
+      expect(manager.isRoomOwner("human", "room")).toBe(true);
+      expect(manager.isRoomOwner("music", "room")).toBe(false);
+    });
+
+    it("also handles a human switching into the owner-less room", async () => {
+      const human = member("human");
+      setMembers(human);
+
+      await update(human, { id: "other", name: "Other", type: 2 }, room);
+      expect(timers().has("room")).toBe(true);
+      await jest.advanceTimersByTimeAsync(GRACE_MS);
+
+      expect(manager.isRoomOwner("human", "room")).toBe(true);
+    });
+
+    it("schedules nothing when a bot joins an owner-less room", async () => {
+      const music = member("music", true);
+      setMembers(music);
+
+      await update(music, null, room);
+
+      expect(timers().has("room")).toBe(false);
+    });
+
+    it("schedules nothing when the owner is present", async () => {
+      const owner = member("owner");
+      const human = member("human");
+      setMembers(owner, human);
+
+      await update(human, null, room);
+
+      expect(timers().has("room")).toBe(false);
+    });
+
+    it("does not duplicate a pending timer", async () => {
+      const human = member("human");
+      const second = member("second");
+      setMembers(human);
+      await update(human, null, room);
+      const first = timers().get("room");
+      expect(first).toBeDefined();
+
+      setMembers(human, second);
+      await update(second, null, room);
+
+      expect(timers().get("room")).toBe(first);
+    });
+
+    it("schedules nothing for a room with no recorded owner", async () => {
+      const human = member("human");
+      (manager as any).userChannels.clear();
+      setMembers(human);
+
+      await update(human, null, room);
+
+      expect(timers().size).toBe(0);
+    });
+  });
 });
