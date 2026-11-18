@@ -86,7 +86,9 @@ jobs:
   test:
     name: Test (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 25 gives headroom over the observed 10 to 15 minute Node 22 and Node 24 runs
+    # and still catches a hung run (#1772).
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
