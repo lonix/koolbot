@@ -102,6 +102,24 @@ describe("/ticket", () => {
     );
   });
 
+  it("says the ticket may exist when the create timed out (#1776)", async () => {
+    manager.openTicket.mockResolvedValue({
+      ok: false,
+      reason: "discord-error",
+      maybeCreated: true,
+    });
+    const { interaction, editReply } = makeInteraction("open", {
+      subject: "help",
+    });
+    await execute(interaction);
+    expect(editReply).toHaveBeenCalledWith(
+      errorEmbedPayload({
+        title: "Couldn't confirm your ticket",
+        description: expect.stringContaining("may still have been created"),
+      }),
+    );
+  });
+
   it("defines open, close and claim subcommands", () => {
     expect(data.toJSON().options?.map((o) => o.name)).toEqual([
       "open",
