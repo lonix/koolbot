@@ -2195,10 +2195,26 @@ export class VoiceChannelManager {
           }
 
           // Get members in the channel
-          const members = Array.from(channelNow.members.values());
-          if (members.length === 0) {
+          const allMembers = Array.from(channelNow.members.values());
+          if (allMembers.length === 0) {
             logger.info(
               `Channel ${channelNow.name} is now empty, no ownership transfer needed`,
+            );
+            this.ownershipTransferTimers.delete(channel.id);
+            return;
+          }
+
+          // Only humans can own a room: a bot (e.g. a music bot the owner
+          // summoned) would get the owner overwrite while the people in the
+          // room lose the controls (#1778).
+          const members = allMembers.filter((m) => !m.user?.bot);
+          if (members.length === 0) {
+            // Same outcome as the empty branch: no transfer, timer cleared.
+            // The room keeps its (absent) owner and is cleaned up by the
+            // normal empty-room sweep once the bots leave; a human who joins
+            // later schedules a fresh transfer on the next change.
+            logger.info(
+              `Channel ${sanitizeForLog(channelNow.name)} only has bots left, no ownership transfer`,
             );
             this.ownershipTransferTimers.delete(channel.id);
             return;
@@ -4410,6 +4426,14 @@ export class VoiceChannelManager {
     channel: VoiceChannel,
     newOwner: GuildMember,
   ): Promise<boolean> {
+    // Backstop (#1778): the automatic transfer filters bots before ranking,
+    // but no path may make a bot the owner of a room.
+    if (newOwner.user?.bot) {
+      logger.warn(
+        `[Ownership Transfer] Refusing to make bot ${newOwner.id} the owner of channel ${channel.id}`,
+      );
+      return false;
+    }
     try {
       // Get current owner ID
       const currentOwnerId = Array.from(this.userChannels.entries()).find(
