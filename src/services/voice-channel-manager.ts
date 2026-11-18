@@ -2614,13 +2614,11 @@ export class VoiceChannelManager {
             await this.cleanupEmptyChannel(oldChannel);
           }
         }
-        // A human moving into a room whose owner is absent (#1778)
-        if (
-          !(await this.isLobbyChannel(newChannel)) &&
-          !isNewChannelTriggerName(newChannel.name)
-        ) {
-          await this.scheduleTransferForOwnerlessRoom(newChannel, member);
-        }
+        // A human moving into a room whose owner is absent (#1778). No lobby
+        // or trigger-name test here: the helper matches the room by its
+        // recorded owner (channel id), so a managed room renamed to a lobby
+        // or "New Channel" name still counts and a real lobby never does.
+        await this.scheduleTransferForOwnerlessRoom(newChannel, member);
       }
     } catch (error) {
       logger.error("Error handling voice state update:", error);

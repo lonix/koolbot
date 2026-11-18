@@ -208,6 +208,44 @@ describe("VoiceChannelManager - ownership transfer skips bots (#1778)", () => {
       expect(manager.isRoomOwner("human", "room")).toBe(true);
     });
 
+    it("schedules a transfer for a managed room renamed to the New Channel name when a human switches in", async () => {
+      room.name = "➕ New Channel";
+      const human = member("human");
+      setMembers(human);
+
+      await update(human, { id: "other", name: "Other", type: 2 }, room);
+      expect(timers().has("room")).toBe(true);
+      await jest.advanceTimersByTimeAsync(GRACE_MS);
+
+      expect(manager.isRoomOwner("human", "room")).toBe(true);
+    });
+
+    it("schedules a transfer for a managed room renamed to the New Channel name when a human joins", async () => {
+      room.name = "➕ New Channel";
+      const human = member("human");
+      setMembers(human);
+
+      await update(human, null, room);
+
+      expect(timers().has("room")).toBe(true);
+    });
+
+    it("schedules nothing for an untracked channel with the New Channel name", async () => {
+      const stray: any = {
+        ...room,
+        id: "stray",
+        name: "➕ New Channel",
+        members: new Collection<string, any>(),
+      };
+      const human = member("human");
+      stray.members.set("human", human);
+      (manager as any).createUserChannel = jest.fn(async () => {});
+
+      await update(human, { id: "other", name: "Other", type: 2 }, stray);
+
+      expect(timers().size).toBe(0);
+    });
+
     it("schedules nothing when a bot joins an owner-less room", async () => {
       const music = member("music", true);
       setMembers(music);
