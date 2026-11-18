@@ -16,8 +16,13 @@ import { DigestService } from "../../../services/digest-service.js";
 import { EventService } from "../../../services/event-service.js";
 import { LeaderboardRoleService } from "../../../services/leaderboard-role-service.js";
 import { LfgService } from "../../../services/lfg-service.js";
+import { MessageActivityCleanupService } from "../../../services/message-activity-cleanup.js";
+import { ModerationCaseReviewService } from "../../../services/moderation-case-review-service.js";
+import { NameHistoryCleanupService } from "../../../services/name-history-cleanup.js";
 import { ReminderService } from "../../../services/reminder-service.js";
 import { RewindNudgeService } from "../../../services/rewind-nudge-service.js";
+import { RoleGroupSyncService } from "../../../services/role-group-sync-service.js";
+import { VoiceChannelTruncationService } from "../../../services/voice-channel-truncation.js";
 import { defaultConfig } from "../../../services/config-schema.js";
 
 interface ScheduleRearm {
@@ -69,6 +74,49 @@ const SCHEDULE_REARMS: readonly ScheduleRearm[] = [
     label: "LFG",
     keys: ["lfg.enabled"],
     reload: (client) => LfgService.getInstance(client).reload(),
+  },
+  // Retention and housekeeping jobs (#1775). Recording reads its flag live, so
+  // a feature switched on from Settings stores data at once; without a re-arm
+  // the job that enforces the chosen retention stays unarmed until a restart.
+  {
+    label: "name history cleanup",
+    // Fixed daily tick: only the enable flag matters.
+    keys: ["namehistory.enabled"],
+    reload: (client) => NameHistoryCleanupService.getInstance(client).reload(),
+  },
+  {
+    label: "message activity cleanup",
+    keys: [
+      "messagetracking.cleanup.enabled",
+      "messagetracking.cleanup.schedule",
+    ],
+    reload: (client) =>
+      MessageActivityCleanupService.getInstance(client).reload(),
+  },
+  {
+    label: "voice channel cleanup",
+    keys: ["voicetracking.cleanup.enabled", "voicetracking.cleanup.schedule"],
+    reload: (client) =>
+      VoiceChannelTruncationService.getInstance(client).reload(),
+  },
+  {
+    label: "moderation case reviews",
+    // `ModerationCaseService.isEnabled()` needs both flags.
+    keys: [
+      "moderation.enabled",
+      "moderation.cases.enabled",
+      "moderation.cases.review_cron",
+    ],
+    reload: (client) =>
+      ModerationCaseReviewService.getInstance(client).reload(),
+  },
+  {
+    label: "role group sync",
+    keys: [
+      "adoption.role_groups.reconcile_enabled",
+      "adoption.role_groups.reconcile_cron",
+    ],
+    reload: (client) => RoleGroupSyncService.getInstance(client).reload(),
   },
 ];
 

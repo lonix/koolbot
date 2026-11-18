@@ -81,6 +81,11 @@ const mockRewindNudgeReload = jest.fn<() => Promise<void>>();
 const mockEventReload = jest.fn<() => Promise<void>>();
 const mockReminderReload = jest.fn<() => Promise<void>>();
 const mockLfgReload = jest.fn<() => Promise<void>>();
+const mockNameHistoryCleanupReload = jest.fn<() => Promise<void>>();
+const mockMessageCleanupReload = jest.fn<() => Promise<void>>();
+const mockVoiceTruncationReload = jest.fn<() => Promise<void>>();
+const mockCaseReviewReload = jest.fn<() => Promise<void>>();
+const mockRoleGroupSyncReload = jest.fn<() => Promise<void>>();
 
 const mockGroupBackedRoles =
   jest.fn<
@@ -191,6 +196,45 @@ jest.unstable_mockModule("../../src/services/lfg-service.js", () => ({
   },
 }));
 
+// The cleanup, case-review and role-group jobs (#1775).
+jest.unstable_mockModule("../../src/services/name-history-cleanup.js", () => ({
+  NameHistoryCleanupService: {
+    getInstance: (): unknown => ({ reload: mockNameHistoryCleanupReload }),
+  },
+}));
+jest.unstable_mockModule(
+  "../../src/services/message-activity-cleanup.js",
+  () => ({
+    MessageActivityCleanupService: {
+      getInstance: (): unknown => ({ reload: mockMessageCleanupReload }),
+    },
+  }),
+);
+jest.unstable_mockModule(
+  "../../src/services/voice-channel-truncation.js",
+  () => ({
+    VoiceChannelTruncationService: {
+      getInstance: (): unknown => ({ reload: mockVoiceTruncationReload }),
+    },
+  }),
+);
+jest.unstable_mockModule(
+  "../../src/services/moderation-case-review-service.js",
+  () => ({
+    ModerationCaseReviewService: {
+      getInstance: (): unknown => ({ reload: mockCaseReviewReload }),
+    },
+  }),
+);
+jest.unstable_mockModule(
+  "../../src/services/role-group-sync-service.js",
+  () => ({
+    RoleGroupSyncService: {
+      getInstance: (): unknown => ({ reload: mockRoleGroupSyncReload }),
+    },
+  }),
+);
+
 const { createSettingsRouter } =
   await import("../../src/web/routes/write/settings.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
@@ -230,6 +274,11 @@ beforeEach(async () => {
   mockEventReload.mockResolvedValue(undefined);
   mockReminderReload.mockResolvedValue(undefined);
   mockLfgReload.mockResolvedValue(undefined);
+  mockNameHistoryCleanupReload.mockResolvedValue(undefined);
+  mockMessageCleanupReload.mockResolvedValue(undefined);
+  mockVoiceTruncationReload.mockResolvedValue(undefined);
+  mockCaseReviewReload.mockResolvedValue(undefined);
+  mockRoleGroupSyncReload.mockResolvedValue(undefined);
   harness = await startAdminHarness([
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
@@ -386,6 +435,11 @@ describe("POST /settings/set", () => {
     mockEventReload,
     mockReminderReload,
     mockLfgReload,
+    mockNameHistoryCleanupReload,
+    mockMessageCleanupReload,
+    mockVoiceTruncationReload,
+    mockCaseReviewReload,
+    mockRoleGroupSyncReload,
   ];
   it.each([
     ["birthdays.cron", "0 8 * * *", () => mockBirthdayReload],
@@ -396,6 +450,33 @@ describe("POST /settings/set", () => {
     ["events.enabled", "true", () => mockEventReload],
     ["reminders.enabled", "true", () => mockReminderReload],
     ["lfg.enabled", "true", () => mockLfgReload],
+    // The retention and housekeeping jobs (#1775).
+    ["namehistory.enabled", "true", () => mockNameHistoryCleanupReload],
+    ["messagetracking.cleanup.enabled", "true", () => mockMessageCleanupReload],
+    [
+      "messagetracking.cleanup.schedule",
+      "0 5 * * *",
+      () => mockMessageCleanupReload,
+    ],
+    ["voicetracking.cleanup.enabled", "true", () => mockVoiceTruncationReload],
+    [
+      "voicetracking.cleanup.schedule",
+      "0 4 * * *",
+      () => mockVoiceTruncationReload,
+    ],
+    ["moderation.enabled", "true", () => mockCaseReviewReload],
+    ["moderation.cases.enabled", "true", () => mockCaseReviewReload],
+    ["moderation.cases.review_cron", "0 7 * * *", () => mockCaseReviewReload],
+    [
+      "adoption.role_groups.reconcile_enabled",
+      "false",
+      () => mockRoleGroupSyncReload,
+    ],
+    [
+      "adoption.role_groups.reconcile_cron",
+      "*/10 * * * *",
+      () => mockRoleGroupSyncReload,
+    ],
   ])(
     "re-arms only its own job when %s changes (#1013)",
     async (key, value, reload) => {
@@ -971,6 +1052,11 @@ describe("POST /settings/reset-defaults", () => {
       mockEventReload,
       mockReminderReload,
       mockLfgReload,
+      mockNameHistoryCleanupReload,
+      mockMessageCleanupReload,
+      mockVoiceTruncationReload,
+      mockCaseReviewReload,
+      mockRoleGroupSyncReload,
     ]) {
       expect(reload).toHaveBeenCalledTimes(1);
     }
@@ -1303,6 +1389,25 @@ describe("POST /settings/save-section", () => {
     expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
     expect(mockConfigSet).toHaveBeenCalledTimes(5);
     expect(mockDigestReload).not.toHaveBeenCalled();
+  });
+
+  it("leaves the cleanup job alone when a card re-posts its unchanged enable flag and schedule (#1775)", async () => {
+    const stored: Record<string, unknown> = {
+      "voicetracking.cleanup.enabled": true,
+      "voicetracking.cleanup.schedule": "0 4 * * *",
+      "voicetracking.cleanup.retention.detailed_sessions_days": 30,
+    };
+    mockConfigGet.mockImplementation(async (key) => stored[key] ?? null);
+    const res = await harness.post("/settings/save-section", {
+      category: "voicetracking",
+      keys: Object.keys(stored),
+      "value_voicetracking.cleanup.enabled": "true",
+      "value_voicetracking.cleanup.schedule": "0 4 * * *",
+      "value_voicetracking.cleanup.retention.detailed_sessions_days": "45",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalledTimes(3);
+    expect(mockVoiceTruncationReload).not.toHaveBeenCalled();
   });
 
   it("re-arms the digest job when only the cron changes in a full card save (#976)", async () => {

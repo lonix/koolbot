@@ -74,6 +74,11 @@ for (const [file, name] of [
   ["birthday-service", "BirthdayService"],
   ["event-service", "EventService"],
   ["lfg-service", "LfgService"],
+  ["name-history-cleanup", "NameHistoryCleanupService"],
+  ["message-activity-cleanup", "MessageActivityCleanupService"],
+  ["voice-channel-truncation", "VoiceChannelTruncationService"],
+  ["moderation-case-review-service", "ModerationCaseReviewService"],
+  ["role-group-sync-service", "RoleGroupSyncService"],
 ] as const) {
   jest.unstable_mockModule(`../../src/services/${file}.js`, () => ({
     [name]: { getInstance: (): unknown => ({ reload: async () => undefined }) },
