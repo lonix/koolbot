@@ -77,6 +77,11 @@ export type TicketResult<T = ITicket> =
       retryAfterSeconds?: number;
       /** For `too-many-open`: the configured cap the member reached. */
       maxOpen?: number;
+      /**
+       * For a `discord-error` on open: Discord did not answer in time, so the
+       * channel may still have been created. Not retried (#1776).
+       */
+      maybeCreated?: boolean;
     };
 
 export interface TicketSettings {
@@ -335,7 +340,7 @@ export class TicketChannelManager {
       });
     }
 
-    let channelId: string;
+    let channelId: string | undefined;
     try {
       const channel = await manager.makeDiscordApiCall(
         () =>
@@ -354,6 +359,11 @@ export class TicketChannelManager {
             reason: `Support ticket opened by ${input.authorId}`,
           }),
         "create ticket channel",
+        30000,
+        3,
+        // Non-idempotent: the timeout race does not cancel the request, so a
+        // retry could create a second channel with no row (#1776).
+        false,
       );
       channelId = channel.id;
 
@@ -385,6 +395,16 @@ export class TicketChannelManager {
       logger.error(
         `Failed to open ticket: ${sanitizeForLog(getErrorMessage(error))}`,
       );
+      // A timeout may still complete: the member is told to check before
+      // trying again. No row exists, so the cap and cooldown are not touched.
+      // Only the create call itself can leave an unknown channel behind: once
+      // `channelId` is set the channel is known and the cleanup above ran.
+      if (
+        channelId === undefined &&
+        getErrorMessage(error).toLowerCase().includes("timeout")
+      ) {
+        return { ok: false, reason: "discord-error", maybeCreated: true };
+      }
       return { ok: false, reason: "discord-error" };
     }
   }

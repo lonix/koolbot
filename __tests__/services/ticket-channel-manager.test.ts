@@ -18,11 +18,15 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   },
 }));
 
-// Pass-through so the manager's REST calls run directly.
+// Pass-through so the manager's REST calls run directly; the spy records the
+// retry arguments each call site passes.
+const mockMakeDiscordApiCall = jest.fn<
+  (fn: () => Promise<unknown>, ...rest: unknown[]) => Promise<unknown>
+>((fn) => fn());
 jest.unstable_mockModule("../../src/services/command-manager.js", () => ({
   CommandManager: {
     getInstance: jest.fn(() => ({
-      makeDiscordApiCall: (fn: () => Promise<unknown>) => fn(),
+      makeDiscordApiCall: mockMakeDiscordApiCall,
     })),
   },
 }));
@@ -234,6 +238,83 @@ describe("TicketChannelManager.openTicket", () => {
     expect(welcome.footer.text).toBe("KoolBot · Tickets");
     expect(welcome.description).toContain("`/ticket close`");
     expect(welcome.fields).toEqual([{ name: "Subject", value: "help" }]);
+  });
+
+  it("never retries a timed-out channel create (#1776)", async () => {
+    const guild = guildWith(jest.fn());
+    mockCreate.mockResolvedValue({ _id: "t1", subject: "help" });
+    const { client } = makeClient();
+
+    await TicketChannelManager.getInstance(client).openTicket({
+      guild,
+      authorId: "u1",
+      authorName: "ola",
+      subject: "help",
+    });
+
+    const call = mockMakeDiscordApiCall.mock.calls.find(
+      (c) => c[1] === "create ticket channel",
+    );
+    expect(call).toBeDefined();
+    // (fn, name, timeoutMs, maxRetries, retryOnTimeout)
+    expect(call![4]).toBe(false);
+  });
+
+  it("reports a create timeout as possibly created, without a row or cooldown (#1776)", async () => {
+    mockCreate.mockResolvedValue({ _id: "t1", subject: "help" });
+    mockMakeDiscordApiCall.mockImplementationOnce(async () => {
+      throw new Error(
+        "Discord API timeout for create ticket channel; not retried because it may still complete",
+      );
+    });
+    const { client } = makeClient();
+    const manager = TicketChannelManager.getInstance(client);
+    const input = {
+      guild: guildWith(jest.fn()),
+      authorId: "u1",
+      authorName: "ola",
+      subject: "help",
+    };
+
+    const result = await manager.openTicket(input);
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "discord-error",
+      maybeCreated: true,
+    });
+    expect(mockCreate).not.toHaveBeenCalled();
+    // No cooldown started: the member may check and try again straight away.
+    const retry = await manager.openTicket(input);
+    expect(retry.ok).toBe(true);
+  });
+
+  it("does not claim a possible channel when only the row save timed out", async () => {
+    const del = jest.fn(async () => undefined);
+    mockCreate.mockRejectedValue(new Error("Mongo timeout"));
+    const { client } = makeClient();
+    const result = await TicketChannelManager.getInstance(client).openTicket({
+      guild: guildWith(jest.fn(), del),
+      authorId: "u1",
+      authorName: "ola",
+      subject: "help",
+    });
+    expect(result).toEqual({ ok: false, reason: "discord-error" });
+    expect(del).toHaveBeenCalled();
+  });
+
+  it("does not flag a non-timeout create failure as possibly created", async () => {
+    mockMakeDiscordApiCall.mockImplementationOnce(async () => {
+      throw new Error("Missing Permissions");
+    });
+    const { client } = makeClient();
+    const result = await TicketChannelManager.getInstance(client).openTicket({
+      guild: guildWith(jest.fn()),
+      authorId: "u1",
+      authorName: "ola",
+      subject: "help",
+    });
+    expect(result).toEqual({ ok: false, reason: "discord-error" });
   });
 
   it("deletes the channel again when the record cannot be saved", async () => {

@@ -158,17 +158,22 @@ async function handleOpen(
   if (!result.ok) {
     await replyWithError(
       interaction,
-      result.reason === "cooldown" && result.retryAfterSeconds
+      result.maybeCreated
         ? {
-            title: "Couldn't open a ticket",
-            next: `You opened a ticket a moment ago. Please wait ${waitText(result.retryAfterSeconds)} before opening another.`,
+            title: "Couldn't confirm your ticket",
+            next: "Discord did not answer in time. Your ticket may still have been created: check the ticket channels for a new one before trying again. If you find one you cannot use, ask a moderator to remove it.",
           }
-        : result.reason === "too-many-open" && result.maxOpen
+        : result.reason === "cooldown" && result.retryAfterSeconds
           ? {
               title: "Couldn't open a ticket",
-              next: `You already have ${result.maxOpen} open ticket${result.maxOpen === 1 ? "" : "s"}, the most allowed. Please use ${result.maxOpen === 1 ? "it" : "one of them"}, or close ${result.maxOpen === 1 ? "it" : "one"} first.`,
+              next: `You opened a ticket a moment ago. Please wait ${waitText(result.retryAfterSeconds)} before opening another.`,
             }
-          : FAILURE_TEXT[result.reason],
+          : result.reason === "too-many-open" && result.maxOpen
+            ? {
+                title: "Couldn't open a ticket",
+                next: `You already have ${result.maxOpen} open ticket${result.maxOpen === 1 ? "" : "s"}, the most allowed. Please use ${result.maxOpen === 1 ? "it" : "one of them"}, or close ${result.maxOpen === 1 ? "it" : "one"} first.`,
+              }
+            : FAILURE_TEXT[result.reason],
     );
     return;
   }
