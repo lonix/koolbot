@@ -309,7 +309,9 @@ import, not an atomic failure.
 Any Web UI write that changes a scheduled feature's enable flag or cron — a
 Settings or feature-card save, the Enable banner, a per-key Reset, a YAML
 import or Reset to defaults — re-arms that feature's job immediately (digest,
-leaderboard roles, birthdays, rewind nudge, events, reminders, LFG). A single
+leaderboard roles, birthdays, rewind nudge, events, reminders, LFG, name history
+cleanup, message activity cleanup, voice channel cleanup, moderation case
+reviews, role group sync). A single
 save that re-posts the same value leaves the running job alone; a YAML import
 re-arms every job whose keys it wrote, and Reset to defaults re-arms them all.
 
